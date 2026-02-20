@@ -25,15 +25,6 @@ type WsMessage =
   | { type: "webrtc_ice_candidate"; data: { candidate: string; sdpMid?: string; sdpMLineIndex?: number } };
 
 const storageKey = "intercom-token";
-type UIVariant = "1" | "2" | "3" | "4" | "5";
-
-const variantMeta: Record<UIVariant, { name: string; subtitle: string }> = {
-  "1": { name: "Mission Control", subtitle: "Dense operator dashboard for power users and producers." },
-  "2": { name: "Talk Focus", subtitle: "PTT-first operating mode designed for speed under pressure." },
-  "3": { name: "Timeline Desk", subtitle: "Event-feed workflow optimized for cue-heavy productions." },
-  "4": { name: "Room Theater", subtitle: "Stage-like room cards with live occupancy and room actions." },
-  "5": { name: "Station Deck", subtitle: "Broadcast console style inspired by live intercom stations." }
-};
 
 export function App() {
   const [publicData, setPublicData] = useState<PublicBootstrap | null>(null);
@@ -106,10 +97,6 @@ export function App() {
     const value = params.get("debug");
     return value === "1" || value === "true";
   })();
-  const uiVariant = useMemo<UIVariant>(() => {
-    const match = window.location.pathname.match(/^\/([1-5])\/?$/);
-    return (match?.[1] as UIVariant) || "1";
-  }, []);
 
   useEffect(() => {
     voiceModeRef.current = voiceMode;
@@ -901,18 +888,9 @@ export function App() {
   if (!publicData) return <div className="root">Loading configuration…</div>;
   if (!token || !appData) {
     return (
-      <div className={`root login variant-${uiVariant}`}>
-        <div className="variant-switcher">
-          <a href="/1" className={uiVariant === "1" ? "active" : ""}>/1</a>
-          <a href="/2" className={uiVariant === "2" ? "active" : ""}>/2</a>
-          <a href="/3" className={uiVariant === "3" ? "active" : ""}>/3</a>
-          <a href="/4" className={uiVariant === "4" ? "active" : ""}>/4</a>
-          <a href="/5" className={uiVariant === "5" ? "active" : ""}>/5</a>
-        </div>
+      <div className="root login">
         <h1>Live Production Intercom</h1>
-        <p className="variant-subtitle">
-          <strong>{variantMeta[uiVariant].name}</strong> · {variantMeta[uiVariant].subtitle}
-        </p>
+        <p className="variant-subtitle">Station Deck</p>
         <label>
           Display name
           <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. Tim FOH" />
@@ -951,49 +929,6 @@ export function App() {
     );
   }
 
-  const variantSwitcher = (
-    <div className="variant-switcher">
-      <a href="/1" className={uiVariant === "1" ? "active" : ""}>/1</a>
-      <a href="/2" className={uiVariant === "2" ? "active" : ""}>/2</a>
-      <a href="/3" className={uiVariant === "3" ? "active" : ""}>/3</a>
-      <a href="/4" className={uiVariant === "4" ? "active" : ""}>/4</a>
-      <a href="/5" className={uiVariant === "5" ? "active" : ""}>/5</a>
-    </div>
-  );
-
-  const roomMatrixBlock = (
-    <>
-      <h3>Room matrix</h3>
-      <div className="room-matrix">
-        {appData.rooms.map((room) => {
-          const listening = listenRoomIds.includes(room.id);
-          const talking = talkRoomIds.includes(room.id);
-          return (
-            <div key={`matrix-${room.id}`} className="matrix-card">
-              <div className="matrix-room-name">{room.name}</div>
-              <div className="matrix-actions">
-                <button
-                  className={`matrix-action listen ${listening ? "on" : ""}`}
-                  onClick={() => toggleListenRoom(room.id)}
-                  title="Toggle listening for this room"
-                >
-                  Listen
-                </button>
-                <button
-                  className={`matrix-action talk ${talking ? "on" : ""}`}
-                  onClick={() => toggleTalkRoom(room.id)}
-                  title="Set default talk room"
-                >
-                  Talk
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <small>Listen: {listenRoomIds.length} · Talk: {talkRoomIds.length}</small>
-    </>
-  );
 
   const micBlock = (
     <>
@@ -1036,75 +971,6 @@ export function App() {
     </>
   );
 
-  const onlineBlock = (
-    <>
-      <h3>Online</h3>
-      <div className="online-rooms">
-        {appData.roles.map((role) => {
-          const users = presence.filter((p) => p.roleId === role.id);
-          if (users.length === 0) return null;
-          return (
-            <div key={`online-role-${role.id}`} className="online-room">
-              <div className="online-room-title">{role.name}</div>
-              <ul>
-                {users.map((p) => (
-                  <li key={`${p.userId}-${role.id}`}>
-                    <div className="online-user-row">
-                      <span>
-                        {p.username} — {p.micEnabled ? "mic on" : "mic off"}
-                        {p.broadcastActive ? <span className="online-broadcast">broadcasting</span> : null}
-                      </span>
-                      {p.userId !== appData.self.id ? (
-                        <button
-                          className={`direct-ptt-button ${directPttPressedUserId === p.userId ? "active" : ""}`}
-                          onPointerDown={() => startDirectPtt(p.userId)}
-                          onPointerUp={() => stopDirectPtt(p.userId)}
-                          onPointerLeave={() => stopDirectPtt(p.userId)}
-                          onPointerCancel={() => stopDirectPtt(p.userId)}
-                        >
-                          Talk
-                        </button>
-                      ) : null}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })}
-        {presence.some((p) => !p.roleId || !roleNameById.has(p.roleId)) ? (
-          <div className="online-room">
-            <div className="online-room-title">Unknown role</div>
-            <ul>
-              {presence
-                .filter((p) => !p.roleId || !roleNameById.has(p.roleId))
-                .map((p) => (
-                  <li key={`${p.userId}-unknown-role`}>
-                    <div className="online-user-row">
-                      <span>
-                        {p.username} — {p.micEnabled ? "mic on" : "mic off"}
-                        {p.broadcastActive ? <span className="online-broadcast">broadcasting</span> : null}
-                      </span>
-                      {p.userId !== appData.self.id ? (
-                        <button
-                          className={`direct-ptt-button ${directPttPressedUserId === p.userId ? "active" : ""}`}
-                          onPointerDown={() => startDirectPtt(p.userId)}
-                          onPointerUp={() => stopDirectPtt(p.userId)}
-                          onPointerLeave={() => stopDirectPtt(p.userId)}
-                          onPointerCancel={() => stopDirectPtt(p.userId)}
-                        >
-                          Talk
-                        </button>
-                      ) : null}
-                    </div>
-                  </li>
-                ))}
-            </ul>
-          </div>
-        ) : null}
-      </div>
-    </>
-  );
 
   const chatAndSignalBlock = (
     <>
@@ -1124,45 +990,6 @@ export function App() {
       </div>
     </>
   );
-
-  const voiceBlock = (
-    <div className="voice">
-      <button
-        className={`voice-ptt ${pttPressed ? "active" : ""}`}
-        onPointerDown={startPtt}
-        onPointerUp={stopPtt}
-        onPointerLeave={stopPtt}
-        onPointerCancel={stopPtt}
-      >
-        PTT
-      </button>
-      <label className="voice-toggle">
-        <input type="checkbox" checked={voiceMode === "always_on"} onChange={(e) => setAlwaysOn(e.target.checked)} />
-        <span>Always on</span>
-      </label>
-    </div>
-  );
-
-  const broadcastBlock =
-    appData.broadcastGroups.length > 0 ? (
-      <div className="broadcast-ptt">
-        <div className="broadcast-ptt-title">Broadcast PTT</div>
-        <div className="broadcast-ptt-buttons">
-          {appData.broadcastGroups.map((group) => (
-            <button
-              key={group.id}
-              className={`broadcast-ptt-button ${broadcastPttPressed === group.id ? "active" : ""}`}
-              onPointerDown={() => startBroadcastPtt(group.id)}
-              onPointerUp={() => stopBroadcastPtt(group.id)}
-              onPointerLeave={() => stopBroadcastPtt(group.id)}
-              onPointerCancel={() => stopBroadcastPtt(group.id)}
-            >
-              {group.name}
-            </button>
-          ))}
-        </div>
-      </div>
-    ) : null;
 
   const adminPanel = isAdmin ? (
     <div className="admin-panel">
@@ -1396,289 +1223,147 @@ export function App() {
       </ul>
     </>
   ) : null;
-
-  const globalHeader = (
-    <header>
-      <div>
-        <h1>Live Production Intercom</h1>
-        <p className="variant-subtitle">
-          <strong>{variantMeta[uiVariant].name}</strong> · {variantMeta[uiVariant].subtitle}
-        </p>
-        <p>
-          Signed in as <strong>{appData.self.username}</strong> ({appData.self.roleId}) · connection:{" "}
-          <strong>{connectionState}</strong>
-        </p>
-        {showDebug ? (
-          <>
-            <p style={{ margin: "0.2rem 0 0 0" }}>
-              webrtc: <strong>{webrtcState}</strong>
-            </p>
-            <p style={{ margin: "0.2rem 0 0 0" }}>
-              audio rtp: <strong>in {rtpStats.inKbps} kbps</strong> / <strong>out {rtpStats.outKbps} kbps</strong>
-            </p>
-          </>
-        ) : null}
-        {audioError ? <p style={{ color: "#ffb4b4", margin: "0.35rem 0 0 0" }}>{audioError}</p> : null}
-      </div>
-      <div className="header-actions">
-        {variantSwitcher}
-        <button onClick={doLogout}>Logout</button>
-      </div>
-    </header>
-  );
-
-  const timelineItems =
-    events.length > 0
-      ? events.slice(0, 80)
-      : [{ at: "now", label: "No events yet — waiting for activity." }];
-
-  const directTargets = appData.users.filter((u) => u.id !== appData.self.id);
-  const replyTarget = presence.find((p) => p.userId !== appData.self.id) || null;
-
-  const coreMain =
-    uiVariant === "1" ? (
-      <main className="variant-layout mission-layout">
-        <aside className="panel panel-sidebar">
-          {roomMatrixBlock}
-          {micBlock}
-          {onlineBlock}
-        </aside>
-        <section className="panel panel-main">
-          {chatAndSignalBlock}
-          {voiceBlock}
-          {broadcastBlock}
-          {adminPanel}
-          {realtimeDebugBlock}
-        </section>
-      </main>
-    ) : uiVariant === "2" ? (
-      <main className="variant-layout focus-layout">
-        <section className="panel focus-hero">
-          <h2>Push-to-talk first</h2>
-          <button
-            className={`focus-ptt ${pttPressed ? "active" : ""}`}
-            onPointerDown={startPtt}
-            onPointerUp={stopPtt}
-            onPointerLeave={stopPtt}
-            onPointerCancel={stopPtt}
-          >
-            HOLD TO TALK
-          </button>
-          {voiceBlock}
-          {broadcastBlock}
-        </section>
-        <section className="panel focus-rooms">{roomMatrixBlock}</section>
-        <section className="panel focus-chat">{chatAndSignalBlock}</section>
-        <section className="panel focus-presence">
-          {micBlock}
-          {onlineBlock}
-        </section>
-        {adminPanel}
-        {showDebug ? <section className="panel">{realtimeDebugBlock}</section> : null}
-      </main>
-    ) : uiVariant === "3" ? (
-      <main className="variant-layout timeline-layout">
-        <section className="panel timeline-feed">
-          <h3>Comms timeline</h3>
-          <ul className="events timeline-events">
-            {timelineItems.map((e, i) => (
-              <li key={`timeline-${e.at}-${i}`}>
-                <span>{e.at}</span>
-                <span>{e.label}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-        <section className="panel timeline-command">
-          {chatAndSignalBlock}
-          {voiceBlock}
-          {broadcastBlock}
-          {roomMatrixBlock}
-        </section>
-        <section className="panel timeline-side">
-          {micBlock}
-          {onlineBlock}
-        </section>
-        {adminPanel}
-      </main>
-    ) : uiVariant === "4" ? (
-      <main className="variant-layout theater-layout">
-        <section className="panel theater-rooms">
-          <h3>Room theater</h3>
-          <div className="theater-room-grid">
-            {appData.rooms.map((room) => {
-              const roomUsers = presence.filter((p) => p.listenRooms.includes(room.id));
-              const listening = listenRoomIds.includes(room.id);
-              const talking = talkRoomIds.includes(room.id);
-              return (
-                <article key={`theater-room-${room.id}`} className="theater-room-card">
-                  <header>
-                    <strong>{room.name}</strong>
-                    <small>{roomUsers.length} online</small>
-                  </header>
-                  <div className="theater-room-actions">
-                    <button className={listening ? "active" : ""} onClick={() => toggleListenRoom(room.id)}>
-                      Listen
-                    </button>
-                    <button className={talking ? "active" : ""} onClick={() => toggleTalkRoom(room.id)}>
-                      Default Talk
-                    </button>
-                    <button
-                      className={roomPttPressedRoomId === room.id ? "active" : ""}
-                      onPointerDown={() => startRoomPtt(room.id)}
-                      onPointerUp={() => stopRoomPtt(room.id)}
-                      onPointerLeave={() => stopRoomPtt(room.id)}
-                      onPointerCancel={() => stopRoomPtt(room.id)}
-                    >
-                      Hold to Talk
-                    </button>
-                  </div>
-                  <ul>
-                    {roomUsers.length === 0 ? (
-                      <li className="theater-empty">No listeners</li>
-                    ) : (
-                      roomUsers.map((u) => <li key={`room-user-${room.id}-${u.userId}`}>{u.username}</li>)
-                    )}
-                  </ul>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-        <section className="panel theater-command">
-          {voiceBlock}
-          {broadcastBlock}
-          {chatAndSignalBlock}
-        </section>
-        <section className="panel theater-side">
-          {micBlock}
-          {onlineBlock}
-        </section>
-        {adminPanel}
-        {showDebug ? <section className="panel">{realtimeDebugBlock}</section> : null}
-      </main>
+  const stationBroadcastBlock =
+    appData.broadcastGroups.length > 0 ? (
+      <section className="station-block">
+        <h3>Broadcast channels</h3>
+        <div className="station-broadcast-grid">
+          {appData.broadcastGroups.map((group) => (
+            <button
+              key={group.id}
+              className={`station-broadcast-button ${broadcastPttPressed === group.id ? "active" : ""}`}
+              onPointerDown={() => startBroadcastPtt(group.id)}
+              onPointerUp={() => stopBroadcastPtt(group.id)}
+              onPointerLeave={() => stopBroadcastPtt(group.id)}
+              onPointerCancel={() => stopBroadcastPtt(group.id)}
+            >
+              {group.name}
+            </button>
+          ))}
+        </div>
+      </section>
     ) : null;
 
-  if (uiVariant === "5") {
-    return (
-      <div className={`root app variant-${uiVariant} station-shell`}>
-        <div className="station-topbar">
-          <div className="station-live">
-            <span className="station-live-dot" />
-            Live: {appData.self.username.toUpperCase()}
-          </div>
-          <div className="station-top-actions">
-            {variantSwitcher}
-            <a className="station-modify" href="#station-admin">
-              Modify station
-            </a>
-          </div>
+  const directOnlineTargets = presence.filter((p) => p.userId !== appData.self.id);
+  const replyTarget = directOnlineTargets[0] || null;
+
+  return (
+    <div className="root app station-shell">
+      <div className="station-topbar">
+        <div className="station-live">
+          <span className="station-live-dot" />
+          Live: {appData.self.username.toUpperCase()}
         </div>
+        <div className="station-top-actions">
+          <button className="station-top-logout" onClick={doLogout}>
+            Logout / Lock
+          </button>
+        </div>
+      </div>
 
-        <section className="station-block">
-          <h3>Talk channels</h3>
-          <div className="station-talk-grid">
-            {appData.rooms.map((room) => {
-              const listening = listenRoomIds.includes(room.id);
-              const talking = talkRoomIds.includes(room.id);
-              return (
-                <article key={`station-room-${room.id}`} className="station-card">
-                  <div className="station-card-head">
-                    <small>Talk</small>
-                    <strong>{room.name}</strong>
-                  </div>
-                  <div className="station-card-actions">
-                    <button className={listening ? "on listen" : "listen"} onClick={() => toggleListenRoom(room.id)}>
-                      Listen
-                    </button>
-                    <button
-                      className={roomPttPressedRoomId === room.id || talking ? "on call" : "call"}
-                      onClick={() => toggleTalkRoom(room.id)}
-                      onPointerDown={() => startRoomPtt(room.id)}
-                      onPointerUp={() => stopRoomPtt(room.id)}
-                      onPointerLeave={() => stopRoomPtt(room.id)}
-                      onPointerCancel={() => stopRoomPtt(room.id)}
-                    >
-                      Call
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="station-block">
-          <h3>Direct communication</h3>
-          <div className="station-direct-grid">
-            {directTargets.map((user) => (
-              <article key={`station-direct-${user.id}`} className="station-card station-direct-card">
-                <div className="station-card-head">
-                  <small>Direct</small>
-                  <strong>{user.username}</strong>
-                </div>
+      <section className="station-block">
+        <h3>Talk channels</h3>
+        <div className="station-talk-grid">
+          {appData.rooms.map((room) => {
+            const listening = listenRoomIds.includes(room.id);
+            const talking = talkRoomIds.includes(room.id);
+            return (
+              <article key={`station-room-${room.id}`} className="station-card">
+                <button className={`station-card-head ${talking ? "selected" : ""}`} onClick={() => toggleTalkRoom(room.id)}>
+                  <small>Talk</small>
+                  <strong>{room.name}</strong>
+                </button>
                 <div className="station-card-actions">
-                  <button className="signal" onClick={() => sendScopedSignal("direct", user.id, "attention")}>
-                    Signal
+                  <button className={listening ? "on listen" : "listen"} onClick={() => toggleListenRoom(room.id)}>
+                    Listen
                   </button>
-                  <button
-                    className={directPttPressedUserId === user.id ? "on call" : "call"}
-                    onPointerDown={() => startDirectPtt(user.id)}
-                    onPointerUp={() => stopDirectPtt(user.id)}
-                    onPointerLeave={() => stopDirectPtt(user.id)}
-                    onPointerCancel={() => stopDirectPtt(user.id)}
-                  >
+                  <button className="call placeholder" disabled title="Reserved for upcoming feature">
                     Call
                   </button>
                 </div>
               </article>
-            ))}
-          </div>
-        </section>
-
-        <div className="station-dock">
-          <button
-            className={`station-dock-main ${replyTarget ? "" : "disabled"}`}
-            disabled={!replyTarget}
-            onPointerDown={() => (replyTarget ? startDirectPtt(replyTarget.userId) : undefined)}
-            onPointerUp={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
-            onPointerLeave={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
-            onPointerCancel={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
-          >
-            Reply to caller
-            <small>{replyTarget ? replyTarget.username : "No active caller"}</small>
-          </button>
-          <button
-            className="station-dock-signal"
-            onClick={() => {
-              for (const room of appData.rooms) sendScopedSignal("room", room.id, "attention");
-            }}
-          >
-            Signal all
-          </button>
-          <button className="station-dock-danger" onClick={doLogout}>
-            Logout / Lock
-          </button>
+            );
+          })}
         </div>
+      </section>
 
-        <section className="station-utility">
-          <div className="panel">{micBlock}</div>
-          <div className="panel">{chatAndSignalBlock}</div>
-        </section>
-        {adminPanel ? (
-          <section id="station-admin" className="panel station-admin">
-            {adminPanel}
-          </section>
-        ) : null}
-        {showDebug ? <section className="panel">{realtimeDebugBlock}</section> : null}
+      <section className="station-block">
+        <h3>Direct communication</h3>
+        <div className="station-direct-grid">
+          {directOnlineTargets.map((p) => (
+            <article key={`station-direct-${p.userId}`} className="station-card station-direct-card">
+              <button className="station-card-head">
+                <small>Direct</small>
+                <strong>{p.username}</strong>
+                <em>{roleNameById.get(p.roleId) || p.roleId || "Unknown role"}</em>
+              </button>
+              <div className="station-card-actions">
+                <button className="signal" onClick={() => sendScopedSignal("direct", p.userId, "attention")}>
+                  Signal
+                </button>
+                <button className="call placeholder" disabled title="Reserved for upcoming feature">
+                  Call
+                </button>
+              </div>
+            </article>
+          ))}
+          {directOnlineTargets.length === 0 ? <p className="station-empty">No other users online.</p> : null}
+        </div>
+      </section>
+
+      <section className="station-controls">
+        <button
+          className={`station-ptt ${pttPressed ? "active" : ""}`}
+          onPointerDown={startPtt}
+          onPointerUp={stopPtt}
+          onPointerLeave={stopPtt}
+          onPointerCancel={stopPtt}
+        >
+          Hold to talk
+        </button>
+        <label className="station-always-on">
+          <input type="checkbox" checked={voiceMode === "always_on"} onChange={(e) => setAlwaysOn(e.target.checked)} />
+          <span>Always on</span>
+        </label>
+      </section>
+
+      {stationBroadcastBlock}
+
+      <div className="station-dock">
+        <button
+          className={`station-dock-main ${replyTarget ? "" : "disabled"}`}
+          disabled={!replyTarget}
+          onPointerDown={() => (replyTarget ? startDirectPtt(replyTarget.userId) : undefined)}
+          onPointerUp={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
+          onPointerLeave={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
+          onPointerCancel={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
+        >
+          Reply to caller
+          <small>{replyTarget ? replyTarget.username : "No active caller"}</small>
+        </button>
+        <button
+          className="station-dock-signal"
+          onClick={() => {
+            for (const room of appData.rooms) sendScopedSignal("room", room.id, "attention");
+          }}
+        >
+          Signal all
+        </button>
+        <button className="station-dock-danger" onClick={doLogout}>
+          Logout / Lock
+        </button>
       </div>
-    );
-  }
 
-  return (
-    <div className={`root app variant-${uiVariant}`}>
-      {globalHeader}
-      {coreMain}
+      <section className="station-utility">
+        <div className="panel">{micBlock}</div>
+        <div className="panel">{chatAndSignalBlock}</div>
+      </section>
+      {adminPanel ? (
+        <section id="station-admin" className="panel station-admin">
+          {adminPanel}
+        </section>
+      ) : null}
+      {showDebug ? <section className="panel">{realtimeDebugBlock}</section> : null}
     </div>
   );
 }
