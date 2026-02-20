@@ -1348,13 +1348,8 @@ export function App() {
           <input type="checkbox" checked={voiceMode === "always_on"} onChange={(e) => setAlwaysOn(e.target.checked)} />
           <span>Always on</span>
         </label>
-      </section>
-
-      {stationBroadcastBlock}
-
-      <div className="station-dock">
         <button
-          className={`station-dock-main ${replyTarget ? "" : "disabled"}`}
+          className={`station-reply ${replyTarget ? "" : "disabled"}`}
           disabled={!replyTarget}
           onPointerDown={() => (replyTarget ? startDirectPtt(replyTarget.userId) : undefined)}
           onPointerUp={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
@@ -1364,7 +1359,9 @@ export function App() {
           Reply to caller
           <small>{replyTarget ? replyTarget.username : "No active caller"}</small>
         </button>
-      </div>
+      </section>
+
+      {stationBroadcastBlock}
 
       <section className="station-utility">
         <div className="panel">{micBlock}</div>
