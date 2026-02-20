@@ -213,7 +213,10 @@ export function App() {
   }
 
   function toggleTalkRoom(roomId: string) {
-    toggleRoomSelection(roomId, setTalkRoomIds);
+    setTalkRoomIds((prev) => {
+      if (prev[0] === roomId && prev.length === 1) return prev;
+      return [roomId];
+    });
   }
 
   function clearRoomSwitchTimer() {
