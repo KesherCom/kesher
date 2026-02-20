@@ -592,6 +592,11 @@ export function App() {
     return inputDevices.find((d) => d.deviceId === selectedInputDeviceId)?.label || "Select microphone";
   }, [inputDevices, selectedInputDeviceId]);
   const isAdmin = appData?.self.roleId === "producer";
+  const roleNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const role of appData?.roles || []) map.set(role.id, role.name);
+    return map;
+  }, [appData]);
 
   useEffect(() => {
     if (currentTargets[0]) setTargetId(currentTargets[0].id);
@@ -1006,15 +1011,15 @@ export function App() {
           <small>Input level</small>
           <h3>Online</h3>
           <div className="online-rooms">
-            {appData.rooms.map((room) => {
-              const users = presence.filter((p) => p.activeRoom === room.id);
+            {appData.roles.map((role) => {
+              const users = presence.filter((p) => p.roleId === role.id);
               if (users.length === 0) return null;
               return (
-                <div key={`online-room-${room.id}`} className="online-room">
-                  <div className="online-room-title">{room.name}</div>
+                <div key={`online-role-${role.id}`} className="online-room">
+                  <div className="online-room-title">{role.name}</div>
                   <ul>
                     {users.map((p) => (
-                      <li key={`${p.userId}-${room.id}`}>
+                      <li key={`${p.userId}-${role.id}`}>
                         <div className="online-user-row">
                           <span>
                             {p.username} — {p.micEnabled ? "mic on" : "mic off"}
@@ -1038,14 +1043,14 @@ export function App() {
                 </div>
               );
             })}
-            {presence.some((p) => !p.activeRoom) ? (
+            {presence.some((p) => !p.roleId || !roleNameById.has(p.roleId)) ? (
               <div className="online-room">
-                <div className="online-room-title">No room</div>
+                <div className="online-room-title">Unknown role</div>
                 <ul>
                   {presence
-                    .filter((p) => !p.activeRoom)
+                    .filter((p) => !p.roleId || !roleNameById.has(p.roleId))
                     .map((p) => (
-                      <li key={`${p.userId}-noroom`}>
+                      <li key={`${p.userId}-unknown-role`}>
                         <div className="online-user-row">
                           <span>
                             {p.username} — {p.micEnabled ? "mic on" : "mic off"}
