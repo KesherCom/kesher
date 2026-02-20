@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   bootstrap,
   createBroadcastGroup,
@@ -64,8 +64,12 @@ export function App() {
   const [roleEditDefaultSimpleView, setRoleEditDefaultSimpleView] = useState(false);
   const [roomCreateId, setRoomCreateId] = useState("");
   const [roomCreateName, setRoomCreateName] = useState("");
+  const [roomCreateSenderRoleIds, setRoomCreateSenderRoleIds] = useState<string[]>([]);
+  const [roomCreateReceiverRoleIds, setRoomCreateReceiverRoleIds] = useState<string[]>([]);
   const [roomEditId, setRoomEditId] = useState<string | null>(null);
   const [roomEditName, setRoomEditName] = useState("");
+  const [roomEditSenderRoleIds, setRoomEditSenderRoleIds] = useState<string[]>([]);
+  const [roomEditReceiverRoleIds, setRoomEditReceiverRoleIds] = useState<string[]>([]);
   const [groupCreateId, setGroupCreateId] = useState("");
   const [groupCreateName, setGroupCreateName] = useState("");
   const [groupCreateRoomIds, setGroupCreateRoomIds] = useState<string[]>([]);
@@ -142,12 +146,17 @@ export function App() {
         let initialRoom = "";
         if (roleDefaults?.defaultRoomId) {
           initialRoom = roleDefaults.defaultRoomId;
-        } else if (data.rooms[0]) {
-          initialRoom = data.rooms[0].id;
+        } else {
+          const firstAllowedTalkRoom = data.rooms.find((room) => roleAllowed(room.senderRoleIds, data.self.roleId));
+          const firstAllowedListenRoom = data.rooms.find((room) => roleAllowed(room.receiverRoleIds, data.self.roleId));
+          initialRoom = firstAllowedTalkRoom?.id || firstAllowedListenRoom?.id || "";
         }
         if (initialRoom) {
-          setListenRoomIds([initialRoom]);
-          setTalkRoomIds([initialRoom]);
+          const initialRoomConfig = data.rooms.find((room) => room.id === initialRoom);
+          const initialCanListen = roleAllowed(initialRoomConfig?.receiverRoleIds, data.self.roleId);
+          const initialCanTalk = roleAllowed(initialRoomConfig?.senderRoleIds, data.self.roleId);
+          setListenRoomIds(initialCanListen ? [initialRoom] : []);
+          setTalkRoomIds(initialCanTalk ? [initialRoom] : []);
         }
         if (roleDefaults?.defaultVoiceMode) {
           const nextMode = roleDefaults.defaultVoiceMode as "always_on" | "ptt";
@@ -305,6 +314,23 @@ export function App() {
     return talkIds[0] || listenIds[0] || "";
   }
 
+  function roleAllowed(roleIDs: string[] | undefined, currentRoleId: string) {
+    if (!roleIDs || roleIDs.length === 0) return true;
+    return roleIDs.includes(currentRoleId);
+  }
+
+  function canRoleSendToRoom(roomId: string, currentRoleId: string) {
+    const room = appData?.rooms.find((entry) => entry.id === roomId);
+    if (!room) return false;
+    return roleAllowed(room.senderRoleIds, currentRoleId);
+  }
+
+  function canRoleReceiveFromRoom(roomId: string, currentRoleId: string) {
+    const room = appData?.rooms.find((entry) => entry.id === roomId);
+    if (!room) return false;
+    return roleAllowed(room.receiverRoleIds, currentRoleId);
+  }
+
   function toggleRoomSelection(
     roomId: string,
     setState: (value: string[] | ((prev: string[]) => string[])) => void
@@ -319,10 +345,12 @@ export function App() {
   }
 
   function toggleListenRoom(roomId: string) {
+    if (!appData || !canRoleReceiveFromRoom(roomId, appData.self.roleId)) return;
     toggleRoomSelection(roomId, setListenRoomIds);
   }
 
   function toggleTalkRoom(roomId: string) {
+    if (!appData || !canRoleSendToRoom(roomId, appData.self.roleId)) return;
     setTalkRoomIds((prev) => {
       if (prev[0] === roomId && prev.length === 1) return prev;
       return [roomId];
@@ -736,7 +764,11 @@ export function App() {
   const currentTargets = useMemo(() => {
     if (!appData) return [];
     if (scope === "direct") return appData.users.map((u) => ({ id: u.id, label: `${u.username} (${u.roleId})` }));
-    if (scope === "room") return appData.rooms.map((r) => ({ id: r.id, label: r.name }));
+    if (scope === "room") {
+      return appData.rooms
+        .filter((room) => roleAllowed(room.senderRoleIds, appData.self.roleId))
+        .map((r) => ({ id: r.id, label: r.name }));
+    }
     return appData.broadcastGroups.map((b) => ({ id: b.id, label: b.name }));
   }, [scope, appData]);
 
@@ -748,6 +780,54 @@ export function App() {
     for (const role of appData?.roles || []) map.set(role.id, role.name);
     return map;
   }, [appData]);
+
+  function toggleRoleInSelection(
+    roleValue: string,
+    setState: Dispatch<SetStateAction<string[]>>
+  ) {
+    setState((prev) => (prev.includes(roleValue) ? prev.filter((entry) => entry !== roleValue) : [...prev, roleValue]));
+  }
+
+  function renderRoleMultiSelect(
+    label: string,
+    selectedRoleIds: string[],
+    setState: Dispatch<SetStateAction<string[]>>,
+    keyPrefix: string
+  ) {
+    return (
+      <div className="role-multiselect">
+        <details className="role-multiselect-details">
+          <summary className="role-multiselect-summary">
+            <span className="role-multiselect-label">{label}</span>
+            <span className="role-multiselect-value">
+              {selectedRoleIds.length === 0
+                ? "All roles"
+                : selectedRoleIds
+                    .map((roleEntryId) => appData?.roles.find((role) => role.id === roleEntryId)?.name || roleEntryId)
+                    .join(", ")}
+            </span>
+          </summary>
+          <div className="role-multiselect-menu">
+            <button type="button" className="secondary role-multiselect-reset" onClick={() => setState([])}>
+              Clear (allow all)
+            </button>
+            <div className="role-multiselect-options">
+              {appData?.roles.map((role) => (
+                <label key={`${keyPrefix}-${role.id}`} className="role-multiselect-option">
+                  <input
+                    type="checkbox"
+                    checked={selectedRoleIds.includes(role.id)}
+                    onChange={() => toggleRoleInSelection(role.id, setState)}
+                  />
+                  <span>{role.name}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </details>
+      </div>
+    );
+  }
 
   useEffect(() => {
     if (currentTargets[0]) setTargetId(currentTargets[0].id);
@@ -788,14 +868,22 @@ export function App() {
       broadcastGroups: data.broadcastGroups
     });
     setListenRoomIds((prev) => {
-      const next = prev.filter((roomId) => data.rooms.some((room) => room.id === roomId));
+      const next = prev.filter((roomId) => {
+        const room = data.rooms.find((entry) => entry.id === roomId);
+        return !!room && roleAllowed(room.receiverRoleIds, data.self.roleId);
+      });
       if (next.length > 0) return next;
-      return data.rooms[0] ? [data.rooms[0].id] : [];
+      const firstAllowed = data.rooms.find((room) => roleAllowed(room.receiverRoleIds, data.self.roleId));
+      return firstAllowed ? [firstAllowed.id] : [];
     });
     setTalkRoomIds((prev) => {
-      const next = prev.filter((roomId) => data.rooms.some((room) => room.id === roomId));
+      const next = prev.filter((roomId) => {
+        const room = data.rooms.find((entry) => entry.id === roomId);
+        return !!room && roleAllowed(room.senderRoleIds, data.self.roleId);
+      });
       if (next.length > 0) return next;
-      return data.rooms[0] ? [data.rooms[0].id] : [];
+      const firstAllowed = data.rooms.find((room) => roleAllowed(room.senderRoleIds, data.self.roleId));
+      return firstAllowed ? [firstAllowed.id] : [];
     });
   }
 
@@ -829,6 +917,8 @@ export function App() {
   function resetRoomEditForm() {
     setRoomEditId(null);
     setRoomEditName("");
+    setRoomEditSenderRoleIds([]);
+    setRoomEditReceiverRoleIds([]);
   }
 
   function resetGroupEditForm() {
@@ -883,9 +973,16 @@ export function App() {
     const name = roomCreateName.trim();
     if (!id || !name) return;
     void runAdminAction(async () => {
-      await createRoom(token, { id, name });
+      await createRoom(token, {
+        id,
+        name,
+        senderRoleIds: roomCreateSenderRoleIds,
+        receiverRoleIds: roomCreateReceiverRoleIds
+      });
       setRoomCreateId("");
       setRoomCreateName("");
+      setRoomCreateSenderRoleIds([]);
+      setRoomCreateReceiverRoleIds([]);
     });
   }
 
@@ -894,7 +991,11 @@ export function App() {
     const name = roomEditName.trim();
     if (!name) return;
     void runAdminAction(async () => {
-      await updateRoom(token, roomEditId, { name });
+      await updateRoom(token, roomEditId, {
+        name,
+        senderRoleIds: roomEditSenderRoleIds,
+        receiverRoleIds: roomEditReceiverRoleIds
+      });
       resetRoomEditForm();
     });
   }
@@ -1257,6 +1358,15 @@ export function App() {
             Create room
           </button>
         </div>
+        <div className="admin-grid admin-grid-roles">
+          {renderRoleMultiSelect("Allowed senders", roomCreateSenderRoleIds, setRoomCreateSenderRoleIds, "room-create-sender")}
+          {renderRoleMultiSelect(
+            "Allowed receivers",
+            roomCreateReceiverRoleIds,
+            setRoomCreateReceiverRoleIds,
+            "room-create-receiver"
+          )}
+        </div>
         {roomEditId ? (
           <div className="admin-edit-panel">
             <div className="admin-edit-title">Editing room: {roomEditId}</div>
@@ -1269,6 +1379,15 @@ export function App() {
                 Cancel
               </button>
             </div>
+            <div className="admin-grid admin-grid-roles">
+              {renderRoleMultiSelect("Allowed senders", roomEditSenderRoleIds, setRoomEditSenderRoleIds, "room-edit-sender")}
+              {renderRoleMultiSelect(
+                "Allowed receivers",
+                roomEditReceiverRoleIds,
+                setRoomEditReceiverRoleIds,
+                "room-edit-receiver"
+              )}
+            </div>
           </div>
         ) : null}
         <ul className="admin-list">
@@ -1278,6 +1397,8 @@ export function App() {
                 onClick={() => {
                   setRoomEditId(room.id);
                   setRoomEditName(room.name);
+                  setRoomEditSenderRoleIds(room.senderRoleIds || []);
+                  setRoomEditReceiverRoleIds(room.receiverRoleIds || []);
                 }}
               >
                 Edit
@@ -1523,15 +1644,27 @@ export function App() {
           {appData.rooms.map((room) => {
             const listening = listenRoomIds.includes(room.id);
             const talking = talkRoomIds.includes(room.id);
+            const canTalk = canRoleSendToRoom(room.id, appData.self.roleId);
+            const canListen = canRoleReceiveFromRoom(room.id, appData.self.roleId);
             return (
               <article key={`station-room-${room.id}`} className="station-card">
-                <button className={`station-card-head ${talking ? "selected" : ""}`} onClick={() => toggleTalkRoom(room.id)}>
+                <button
+                  className={`station-card-head ${talking ? "selected" : ""}`}
+                  onClick={() => toggleTalkRoom(room.id)}
+                  disabled={!canTalk}
+                  title={canTalk ? "" : "Your role is not allowed to send to this room"}
+                >
                   {isReceivingRoom(room.id) ? <span className="station-receiving-badge">🔊</span> : null}
                   <small>Talk</small>
                   <strong>{room.name}</strong>
                 </button>
                 <div className="station-card-actions">
-                  <button className={listening ? "on listen" : "listen"} onClick={() => toggleListenRoom(room.id)}>
+                  <button
+                    className={listening ? "on listen" : "listen"}
+                    onClick={() => toggleListenRoom(room.id)}
+                    disabled={!canListen}
+                    title={canListen ? "" : "Your role is not allowed to receive from this room"}
+                  >
                     Listen
                   </button>
                   <button className="call placeholder" disabled title="Reserved for upcoming feature">

@@ -61,11 +61,17 @@ export async function deleteRole(token: string, roleId: string): Promise<void> {
   await apiMutation(`/api/admin/roles/${encodeURIComponent(roleId)}`, token, "DELETE");
 }
 
-export async function createRoom(token: string, payload: { id: string; name: string }): Promise<void> {
+export async function createRoom(
+  token: string,
+  payload: { id: string; name: string; senderRoleIds?: string[]; receiverRoleIds?: string[] }
+): Promise<void> {
   await apiMutation("/api/admin/rooms", token, "POST", payload);
 }
-
-export async function updateRoom(token: string, roomId: string, payload: { name: string }): Promise<void> {
+export async function updateRoom(
+  token: string,
+  roomId: string,
+  payload: { name: string; senderRoleIds?: string[]; receiverRoleIds?: string[] }
+): Promise<void> {
   await apiMutation(`/api/admin/rooms/${encodeURIComponent(roomId)}`, token, "PUT", payload);
 }
 

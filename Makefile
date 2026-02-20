@@ -1,6 +1,7 @@
 SHELL := /bin/bash
+LAN_IP ?= 127.0.0.1
 
-.PHONY: help deps dev-backend dev-web run-backend run-web build-backend build-web build test docker-build docker-up docker-down clean
+.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-web build-backend build-web build test docker-build docker-up docker-down clean
 
 help:
 	@echo "Available targets:"
@@ -8,6 +9,7 @@ help:
 	@echo "  make dev-backend   - run Go backend in dev mode"
 	@echo "  make dev-web       - run React frontend dev server"
 	@echo "  make run-backend   - run backend serving built frontend assets"
+	@echo "  make run-backend-https - run backend with HTTPS; auto-generate self-signed certs if missing (LAN_IP=... optional)"
 	@echo "  make run-web       - alias for dev-web"
 	@echo "  make build-backend - build backend binary"
 	@echo "  make build-web     - build frontend bundle"
@@ -32,6 +34,17 @@ run-web: dev-web
 
 run-backend: build-web
 	@cd backend && STATIC_DIR=../web/dist go run ./cmd/server
+run-backend-https: build-web
+	@mkdir -p backend/certs
+	@if [[ ! -f backend/certs/lan-cert.pem || ! -f backend/certs/lan-key.pem ]]; then \
+		echo "Generating self-signed certs for LAN_IP=$(LAN_IP)"; \
+		openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
+			-keyout backend/certs/lan-key.pem \
+			-out backend/certs/lan-cert.pem \
+			-subj "/CN=$(LAN_IP)" \
+			-addext "subjectAltName=IP:$(LAN_IP),DNS:localhost"; \
+	fi
+	@cd backend && STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false TLS_CERT_FILE=./certs/lan-cert.pem TLS_KEY_FILE=./certs/lan-key.pem go run ./cmd/server
 
 build-backend:
 	@mkdir -p backend/bin

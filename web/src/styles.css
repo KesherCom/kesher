@@ -103,6 +103,7 @@ button { cursor: pointer; }
 .admin-error { color: #ffb3b3; margin: 0.25rem 0 0.75rem; }
 .admin-block { margin-bottom: 0.95rem; }
 .admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.5rem; margin-bottom: 0.45rem; }
+.admin-grid-roles { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 .admin-list { list-style: none; margin: 0; padding: 0; }
 .admin-list li {
   display: grid;
@@ -116,6 +117,59 @@ button { cursor: pointer; }
 .admin-room-picker { display: flex; flex-wrap: wrap; gap: 0.45rem 0.65rem; }
 .admin-checkbox { display: inline-flex; gap: 0.3rem; align-items: center; }
 .admin-checkbox-wide { grid-column: 1 / -1; }
+.role-multiselect { min-width: 0; }
+.role-multiselect-details {
+  border: 1px solid #334865;
+  border-radius: 10px;
+  background: #121d2d;
+}
+.role-multiselect-summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.5rem 0.62rem;
+  display: grid;
+  gap: 0.2rem;
+}
+.role-multiselect-summary::-webkit-details-marker { display: none; }
+.role-multiselect-label {
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-size: 0.66rem;
+  color: #91a5c4;
+}
+.role-multiselect-value {
+  color: #dce7f8;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.role-multiselect-menu {
+  border-top: 1px solid #2f425f;
+  padding: 0.45rem 0.5rem 0.5rem;
+}
+.role-multiselect-reset {
+  min-height: 30px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.7rem;
+  margin-bottom: 0.4rem;
+}
+.role-multiselect-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 0.32rem;
+}
+.role-multiselect-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 7px;
+  border: 1px solid #2e415d;
+  background: #101a29;
+  font-size: 0.78rem;
+}
+.role-multiselect-option:hover { border-color: #476286; }
 button.secondary { background: transparent; }
 
 .simple-shell {

@@ -5,7 +5,7 @@ export type Role = {
   defaultVoiceMode?: "always_on" | "ptt";
   defaultSimpleView?: boolean;
 };
-export type Room = { id: string; name: string };
+export type Room = { id: string; name: string; senderRoleIds: string[]; receiverRoleIds: string[] };
 export type BroadcastGroup = { id: string; name: string; roomIds: string[] };
 export type User = { id: string; username: string; roleId: string };
 export type Presence = {

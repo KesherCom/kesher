@@ -46,6 +46,10 @@ Or build the frontend and serve everything from the backend:
 ```sh
 make run-backend   # builds web/, then starts backend with STATIC_DIR=../web/dist
 ```
+Run backend over HTTPS with self-signed certs (auto-generated if missing):
+```sh
+make run-backend-https LAN_IP=192.168.1.50
+```
 
 ## Production (Docker Compose)
 ```sh
@@ -63,7 +67,25 @@ The Compose setup uses a named volume (`intercom_data`) for the SQLite database.
 | `DB_PATH` | `intercom.db` | SQLite database file path |
 | `ALLOW_CORS` | `true` | Enable CORS headers (disable in production behind same origin) |
 | `SESSION_TTL_MINUTES` | `720` | Session lifetime in minutes |
-| `TRUSTED_LAN_HTTP` | `true` | Run plain HTTP (set to `false` for HTTPS with local certs) |
+| `TRUSTED_LAN_HTTP` | `true` | Run plain HTTP (`true`) or HTTPS (`false`) |
+| `TLS_CERT_FILE` | _(empty)_ | TLS certificate path (required when `TRUSTED_LAN_HTTP=false`) |
+| `TLS_KEY_FILE` | _(empty)_ | TLS private key path (required when `TRUSTED_LAN_HTTP=false`) |
+
+## HTTPS with a self-signed certificate
+Generate a self-signed cert/key for your LAN IP (replace `192.168.1.50`):
+```sh
+mkdir -p backend/certs
+openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
+  -keyout backend/certs/lan-key.pem \
+  -out backend/certs/lan-cert.pem \
+  -subj "/CN=192.168.1.50" \
+  -addext "subjectAltName=IP:192.168.1.50,DNS:localhost"
+```
+Run backend with HTTPS:
+```sh
+cd backend && TRUSTED_LAN_HTTP=false TLS_CERT_FILE=./certs/lan-cert.pem TLS_KEY_FILE=./certs/lan-key.pem go run ./cmd/server
+```
+Then open `https://<host>:8080`.
 
 ## Tests
 ```sh
@@ -78,5 +100,5 @@ bash scripts/soak/session_soak.sh http://localhost:8080 30 20
 
 ## All Makefile targets
 Run `make help` to see available targets:
-`deps`, `dev-backend`, `dev-web`, `run-backend`, `build`, `test`, `docker-build`, `docker-up`, `docker-down`, `clean`.
+`deps`, `dev-backend`, `dev-web`, `run-backend`, `run-backend-https`, `build`, `test`, `docker-build`, `docker-up`, `docker-down`, `clean`.
 
