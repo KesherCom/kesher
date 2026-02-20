@@ -310,17 +310,23 @@ func (m *MediaManager) recomputeBroadcastForSourceLocked(sourceToken string) {
 		return
 	}
 	rooms := m.broadcastRoomsForSourceLocked(sourceToken)
+	broadcastActive := len(rooms) > 0
 	for _, p := range m.peers {
 		if p.token == sourceToken {
 			continue
 		}
-		if _, ok := rooms[p.roomID]; ok {
-			m.attachSourceToPeerLocked(sourceToken, src, p)
+		if broadcastActive {
+			if _, ok := rooms[p.roomID]; ok {
+				m.attachSourceToPeerLocked(sourceToken, src, p)
+				m.renegotiateLocked(p)
+				continue
+			}
+			m.removeSenderLocked(p, sourceToken)
 			m.renegotiateLocked(p)
 			continue
 		}
-		if p.roomID != sourceRoom {
-			m.removeSenderLocked(p, sourceToken)
+		if p.roomID == sourceRoom {
+			m.attachSourceToPeerLocked(sourceToken, src, p)
 			m.renegotiateLocked(p)
 		}
 	}
@@ -345,6 +351,11 @@ func (m *MediaManager) broadcastRoomsForSourceLocked(sourceToken string) map[str
 	return rooms
 }
 
+func (m *MediaManager) isBroadcastActiveForSourceLocked(sourceToken string) bool {
+	groups := m.broadcastActive[sourceToken]
+	return len(groups) > 0
+}
+
 func (m *MediaManager) findSourceTrackLocked(sourceToken string) (*mediaSourceTrack, string) {
 	for roomID, sources := range m.sources {
 		if src, ok := sources[sourceToken]; ok {
@@ -366,6 +377,12 @@ func (m *MediaManager) attachRoomSourcesLocked(peer *mediaPeer) {
 	for srcToken, src := range roomSources {
 		if srcToken == peer.token {
 			continue
+		}
+		if m.isBroadcastActiveForSourceLocked(srcToken) {
+			rooms := m.broadcastRoomsForSourceLocked(srcToken)
+			if _, ok := rooms[peer.roomID]; !ok {
+				continue
+			}
 		}
 		m.attachSourceToPeerLocked(srcToken, src, peer)
 	}
