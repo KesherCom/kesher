@@ -161,6 +161,23 @@ button.secondary { background: transparent; }
   letter-spacing: 0.18em;
   font-size: 0.64rem;
 }
+.station-receiving-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.station-receiving-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid #35527e;
+  background: #13233b;
+  color: #d7e7ff;
+  padding: 0.28rem 0.58rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
 .station-talk-grid, .station-direct-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 230px));
@@ -181,6 +198,7 @@ button.secondary { background: transparent; }
   gap: 0.15rem;
   background: rgba(255, 255, 255, 0.02);
   text-align: center;
+  position: relative;
 }
 .station-card-head small {
   text-transform: uppercase;
@@ -341,6 +359,14 @@ button.secondary { background: transparent; }
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+.station-receiving-badge {
+  position: absolute;
+  right: 0.45rem;
+  top: 0.38rem;
+  font-size: 0.78rem;
+  line-height: 1;
+  filter: drop-shadow(0 0 6px rgba(131, 187, 255, 0.55));
+}
 .station-broadcast-button {
   min-width: 140px;
   background: #1a2231;
@@ -349,11 +375,20 @@ button.secondary { background: transparent; }
   letter-spacing: 0.07em;
   font-size: 0.65rem;
   font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
 }
 .station-broadcast-button.active {
   background: #f3c337;
   border-color: #f3c337;
   color: #1a1a1a;
+}
+.station-broadcast-receiving {
+  font-size: 0.78rem;
+  line-height: 1;
+  filter: drop-shadow(0 0 6px rgba(131, 187, 255, 0.55));
 }
 .station-dock {
   display: grid;
