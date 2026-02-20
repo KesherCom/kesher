@@ -50,13 +50,13 @@ func (h *Hub) SetVoiceState(token, state string) {
 		case "always_on":
 			c.voiceMode = "always_on"
 			c.micEnabled = true
-		case "listen_only":
-			c.voiceMode = "listen_only"
-			c.micEnabled = false
 		case "ptt_start":
 			c.voiceMode = "ptt"
 			c.micEnabled = true
 		case "ptt_stop":
+			c.voiceMode = "ptt"
+			c.micEnabled = false
+		case "listen_only":
 			c.voiceMode = "ptt"
 			c.micEnabled = false
 		}

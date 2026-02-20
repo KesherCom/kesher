@@ -83,6 +83,30 @@ aside li,
   margin-bottom: 0.8rem;
   flex-wrap: wrap;
 }
+.voice {
+  align-items: center;
+}
+.voice-ptt {
+  min-width: 110px;
+  font-weight: 600;
+}
+.voice-ptt.active {
+  background: #2d7cf6;
+  border-color: #2d7cf6;
+  color: #fff;
+}
+.voice-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid #2f3542;
+  background: #1b2029;
+}
+.voice-toggle input {
+  margin: 0;
+}
 
 .chat input {
   flex: 1;

@@ -62,7 +62,7 @@ func (s *Store) validateRoleDefaults(ctx context.Context, defaultRoomID, default
 
 func isAllowedVoiceMode(mode string) bool {
 	switch mode {
-	case "always_on", "ptt", "listen_only":
+	case "always_on", "ptt":
 		return true
 	default:
 		return false
@@ -129,6 +129,9 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "roles", "default_voice_mode", "TEXT"); err != nil {
 		return err
 	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE roles SET default_voice_mode = 'ptt' WHERE default_voice_mode = 'listen_only'`); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -139,7 +142,7 @@ func (s *Store) seed(ctx context.Context) error {
 		{ID: "lighting", Name: "Lighting", DefaultRoomID: "lighting-booth", DefaultVoiceMode: "ptt"},
 		{ID: "broadcast", Name: "Broadcast", DefaultRoomID: "livestream", DefaultVoiceMode: "always_on"},
 		{ID: "camera", Name: "Camera", DefaultRoomID: "stage", DefaultVoiceMode: "ptt"},
-		{ID: "pastor", Name: "Pastor", DefaultRoomID: "stage", DefaultVoiceMode: "listen_only"},
+		{ID: "pastor", Name: "Pastor", DefaultRoomID: "stage", DefaultVoiceMode: "ptt"},
 		{ID: "producer", Name: "Producer", DefaultRoomID: "foh", DefaultVoiceMode: "always_on"},
 	}
 	for _, role := range roles {
@@ -228,7 +231,11 @@ func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
 			r.DefaultRoomID = defaultRoomID.String
 		}
 		if defaultVoiceMode.Valid {
-			r.DefaultVoiceMode = defaultVoiceMode.String
+			if defaultVoiceMode.String == "listen_only" {
+				r.DefaultVoiceMode = "ptt"
+			} else {
+				r.DefaultVoiceMode = defaultVoiceMode.String
+			}
 		}
 		roles = append(roles, r)
 	}

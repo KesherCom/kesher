@@ -38,7 +38,7 @@ export function App() {
   const [targetId, setTargetId] = useState("");
   const [message, setMessage] = useState("");
   const [events, setEvents] = useState<Array<{ label: string; at: string }>>([]);
-  const [voiceMode, setVoiceMode] = useState<"always_on" | "ptt" | "listen_only">("always_on");
+  const [voiceMode, setVoiceMode] = useState<"always_on" | "ptt">("always_on");
   const [connectionState, setConnectionState] = useState<"connecting" | "connected" | "reconnecting" | "offline">("offline");
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedInputDeviceId, setSelectedInputDeviceId] = useState("");
@@ -52,14 +52,13 @@ export function App() {
   const [adminRoleId, setAdminRoleId] = useState("");
   const [adminRoleName, setAdminRoleName] = useState("");
   const [adminRoleDefaultRoomId, setAdminRoleDefaultRoomId] = useState("");
-  const [adminRoleDefaultVoiceMode, setAdminRoleDefaultVoiceMode] = useState<"always_on" | "ptt" | "listen_only" | "">(
-    ""
-  );
+  const [adminRoleDefaultVoiceMode, setAdminRoleDefaultVoiceMode] = useState<"always_on" | "ptt" | "">("");
   const [adminRoomId, setAdminRoomId] = useState("");
   const [adminRoomName, setAdminRoomName] = useState("");
   const [adminGroupId, setAdminGroupId] = useState("");
   const [adminGroupName, setAdminGroupName] = useState("");
   const [adminGroupRoomIds, setAdminGroupRoomIds] = useState<string[]>([]);
+  const [pttPressed, setPttPressed] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -117,7 +116,7 @@ export function App() {
           setActiveRoom(data.rooms[0].id);
         }
         if (roleDefaults?.defaultVoiceMode) {
-          const nextMode = roleDefaults.defaultVoiceMode as "always_on" | "ptt" | "listen_only";
+          const nextMode = roleDefaults.defaultVoiceMode as "always_on" | "ptt";
           setVoiceMode(nextMode);
           voiceModeRef.current = nextMode;
         }
@@ -135,7 +134,7 @@ export function App() {
       setAdminRoleId(appData.roles[0].id);
       setAdminRoleName(appData.roles[0].name);
       setAdminRoleDefaultRoomId(appData.roles[0].defaultRoomId || "");
-      setAdminRoleDefaultVoiceMode((appData.roles[0].defaultVoiceMode as "always_on" | "ptt" | "listen_only") || "");
+      setAdminRoleDefaultVoiceMode((appData.roles[0].defaultVoiceMode as "always_on" | "ptt") || "");
     }
     if (!adminRoomId && appData.rooms[0]) {
       setAdminRoomId(appData.rooms[0].id);
@@ -273,10 +272,10 @@ export function App() {
     meterRafRef.current = requestAnimationFrame(tick);
   }
 
-  function applyVoiceModeToLocalTracks(mode: "always_on" | "ptt" | "listen_only") {
+  function applyVoiceModeToLocalTracks(mode: "always_on" | "ptt") {
     const stream = localStreamRef.current;
     if (!stream) return;
-    const enabled = mode !== "listen_only" && mode !== "ptt";
+    const enabled = mode === "always_on";
     for (const track of stream.getAudioTracks()) {
       track.enabled = enabled;
     }
@@ -394,8 +393,7 @@ export function App() {
         ws.send(JSON.stringify({ type: "webrtc_ready", data: {} }));
         ws.send(JSON.stringify({ type: "set_active_room", data: { roomId: activeRoomRef.current } }));
         const initialVoiceMode = voiceModeRef.current;
-        const voiceState =
-          initialVoiceMode === "always_on" ? "always_on" : initialVoiceMode === "listen_only" ? "listen_only" : "ptt_stop";
+        const voiceState = initialVoiceMode === "always_on" ? "always_on" : "ptt_stop";
         ws.send(
           JSON.stringify({
             type: "voice_state",
@@ -693,17 +691,35 @@ export function App() {
     const stream = localStreamRef.current;
     if (stream) {
       const enable = state === "ptt_start" || state === "always_on";
-      const disable = state === "ptt_stop" || state === "listen_only";
+      const disable = state === "ptt_stop";
       if (enable || disable) {
         for (const track of stream.getAudioTracks()) track.enabled = enable;
       }
     }
     if (state === "always_on") setVoiceMode("always_on");
-    if (state === "listen_only") setVoiceMode("listen_only");
     if (state === "ptt_start" || state === "ptt_stop") setVoiceMode("ptt");
     const voiceTargetId = targetId || activeRoom;
     const voiceScope = targetId ? scope : "room";
     wsRef.current.send(JSON.stringify({ type: "voice_state", data: { scope: voiceScope, targetId: voiceTargetId, body: state } }));
+  }
+
+  function setAlwaysOn(enabled: boolean) {
+    if (enabled) {
+      sendVoiceState("always_on");
+    } else {
+      sendVoiceState("ptt_stop");
+    }
+  }
+
+
+  function startPtt() {
+    setPttPressed(true);
+    sendVoiceState("ptt_start");
+  }
+
+  function stopPtt() {
+    setPttPressed(false);
+    sendVoiceState("ptt_stop");
   }
 
   if (!publicData) return <div className="root">Loading configuration…</div>;
@@ -727,7 +743,7 @@ export function App() {
                 setActiveRoom(selectedRole.defaultRoomId);
               }
               if (selectedRole?.defaultVoiceMode) {
-                const nextMode = selectedRole.defaultVoiceMode as "always_on" | "ptt" | "listen_only";
+                const nextMode = selectedRole.defaultVoiceMode as "always_on" | "ptt";
                 setVoiceMode(nextMode);
                 voiceModeRef.current = nextMode;
               }
@@ -856,10 +872,19 @@ export function App() {
             <button onClick={() => sendSignal("go")}>Go</button>
           </div>
           <div className="voice">
-            <button onClick={() => sendVoiceState("ptt_start")}>PTT Start</button>
-            <button onClick={() => sendVoiceState("ptt_stop")}>PTT Stop</button>
-            <button onClick={() => sendVoiceState("always_on")}>Always On</button>
-            <button onClick={() => sendVoiceState("listen_only")}>Listen Only</button>
+            <button
+              className={`voice-ptt ${pttPressed ? "active" : ""}`}
+              onPointerDown={startPtt}
+              onPointerUp={stopPtt}
+              onPointerLeave={stopPtt}
+              onPointerCancel={stopPtt}
+            >
+              PTT
+            </button>
+            <label className="voice-toggle">
+              <input type="checkbox" checked={voiceMode === "always_on"} onChange={(e) => setAlwaysOn(e.target.checked)} />
+              <span>Always on</span>
+            </label>
           </div>
           {isAdmin ? (
             <div className="admin-panel">
@@ -884,13 +909,12 @@ export function App() {
                   </select>
                   <select
                     value={adminRoleDefaultVoiceMode}
-                    onChange={(e) => setAdminRoleDefaultVoiceMode(e.target.value as "always_on" | "ptt" | "listen_only" | "")}
+                    onChange={(e) => setAdminRoleDefaultVoiceMode(e.target.value as "always_on" | "ptt" | "")}
                     aria-label="Default audio mode"
                   >
                     <option value="">Default audio mode…</option>
                     <option value="always_on">Always on</option>
                     <option value="ptt">PTT</option>
-                    <option value="listen_only">Listen only</option>
                   </select>
                   <button onClick={saveRoleConfig} disabled={adminBusy || !adminRoleId.trim() || !adminRoleName.trim()}>
                     Save role
@@ -904,7 +928,7 @@ export function App() {
                           setAdminRoleId(role.id);
                           setAdminRoleName(role.name);
                           setAdminRoleDefaultRoomId(role.defaultRoomId || "");
-                          setAdminRoleDefaultVoiceMode((role.defaultVoiceMode as "always_on" | "ptt" | "listen_only") || "");
+                          setAdminRoleDefaultVoiceMode((role.defaultVoiceMode as "always_on" | "ptt") || "");
                         }}
                       >
                         Edit
