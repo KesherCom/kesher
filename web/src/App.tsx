@@ -48,16 +48,20 @@ export function App() {
   const [webrtcState, setWebrtcState] = useState<string>("new");
   const [rtpStats, setRtpStats] = useState<{ inKbps: number; outKbps: number }>({ inKbps: 0, outKbps: 0 });
   const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"station" | "simple">("station");
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminError, setAdminError] = useState("");
   const [roleCreateId, setRoleCreateId] = useState("");
   const [roleCreateName, setRoleCreateName] = useState("");
   const [roleCreateDefaultRoomId, setRoleCreateDefaultRoomId] = useState("");
   const [roleCreateDefaultVoiceMode, setRoleCreateDefaultVoiceMode] = useState<"always_on" | "ptt" | "">("");
+  const [roleCreateDefaultSimpleView, setRoleCreateDefaultSimpleView] = useState(false);
   const [roleEditId, setRoleEditId] = useState<string | null>(null);
   const [roleEditName, setRoleEditName] = useState("");
   const [roleEditDefaultRoomId, setRoleEditDefaultRoomId] = useState("");
   const [roleEditDefaultVoiceMode, setRoleEditDefaultVoiceMode] = useState<"always_on" | "ptt" | "">("");
+  const [roleEditDefaultSimpleView, setRoleEditDefaultSimpleView] = useState(false);
   const [roomCreateId, setRoomCreateId] = useState("");
   const [roomCreateName, setRoomCreateName] = useState("");
   const [roomEditId, setRoomEditId] = useState<string | null>(null);
@@ -150,6 +154,7 @@ export function App() {
           setVoiceMode(nextMode);
           voiceModeRef.current = nextMode;
         }
+        setViewMode(roleDefaults?.defaultSimpleView ? "simple" : "station");
       })
       .catch(() => {
         sessionStorage.removeItem(storageKey);
@@ -196,6 +201,17 @@ export function App() {
     window.addEventListener("pointerdown", onPointerDown);
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, []);
+
+  useEffect(() => {
+    if (!isAdminModalOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsAdminModalOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isAdminModalOpen]);
 
   function clearReconnectTimer() {
     if (reconnectTimeoutRef.current !== null) {
@@ -727,7 +743,6 @@ export function App() {
   const selectedMicLabel = useMemo(() => {
     return inputDevices.find((d) => d.deviceId === selectedInputDeviceId)?.label || "Select microphone";
   }, [inputDevices, selectedInputDeviceId]);
-  const isAdmin = appData?.self.roleId === "producer";
   const roleNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const role of appData?.roles || []) map.set(role.id, role.name);
@@ -754,6 +769,7 @@ export function App() {
       setAppData(null);
       setPresence([]);
       setLastDirectCallerUserId(null);
+      setViewMode("station");
       clearReconnectTimer();
       cleanupRealtimeResources();
       setConnectionState("offline");
@@ -764,6 +780,8 @@ export function App() {
     if (!token) return;
     const data = await bootstrap(token);
     setAppData(data);
+    const roleDefaults = data.roles.find((role) => role.id === data.self.roleId);
+    setViewMode(roleDefaults?.defaultSimpleView ? "simple" : "station");
     setPublicData({
       roles: data.roles,
       rooms: data.rooms,
@@ -805,6 +823,7 @@ export function App() {
     setRoleEditName("");
     setRoleEditDefaultRoomId("");
     setRoleEditDefaultVoiceMode("");
+    setRoleEditDefaultSimpleView(false);
   }
 
   function resetRoomEditForm() {
@@ -828,11 +847,13 @@ export function App() {
         id,
         name,
         defaultRoomId: roleCreateDefaultRoomId.trim() || undefined,
-        defaultVoiceMode: roleCreateDefaultVoiceMode || undefined
+        defaultVoiceMode: roleCreateDefaultVoiceMode || undefined,
+        defaultSimpleView: roleCreateDefaultSimpleView
       });
       setRoleCreateId("");
       setRoleCreateName("");
       setRoleCreateDefaultVoiceMode("");
+      setRoleCreateDefaultSimpleView(false);
     });
   }
 
@@ -844,7 +865,8 @@ export function App() {
       await updateRole(token, roleEditId, {
         name,
         defaultRoomId: roleEditDefaultRoomId.trim() || undefined,
-        defaultVoiceMode: roleEditDefaultVoiceMode || undefined
+        defaultVoiceMode: roleEditDefaultVoiceMode || undefined,
+        defaultSimpleView: roleEditDefaultSimpleView
       });
       resetRoleEditForm();
     });
@@ -945,10 +967,9 @@ export function App() {
 
   function sendVoiceState(state: string) {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    const voiceTargetId = targetId || matrixAnchorRoomId(listenRoomIdsRef.current, talkRoomIdsRef.current);
+    const voiceTargetId = matrixAnchorRoomId(listenRoomIdsRef.current, talkRoomIdsRef.current);
     if (!voiceTargetId) return;
-    const voiceScope = targetId ? scope : "room";
-    sendScopedVoiceState(voiceScope, voiceTargetId, state);
+    sendScopedVoiceState("room", voiceTargetId, state);
   }
 
   function setAlwaysOn(enabled: boolean) {
@@ -1118,7 +1139,7 @@ export function App() {
     </>
   );
 
-  const adminPanel = isAdmin ? (
+  const adminPanel = (
     <div className="admin-panel">
       <h3>Admin · configuration</h3>
       {adminError ? <p className="admin-error">{adminError}</p> : null}
@@ -1148,6 +1169,14 @@ export function App() {
             <option value="always_on">Always on</option>
             <option value="ptt">PTT</option>
           </select>
+          <label className="admin-checkbox admin-checkbox-wide">
+            <input
+              type="checkbox"
+              checked={roleCreateDefaultSimpleView}
+              onChange={(e) => setRoleCreateDefaultSimpleView(e.target.checked)}
+            />
+            <span>Default to simple mobile view</span>
+          </label>
           <button onClick={createRoleConfig} disabled={adminBusy || !roleCreateId.trim() || !roleCreateName.trim()}>
             Create role
           </button>
@@ -1178,6 +1207,14 @@ export function App() {
                 <option value="always_on">Always on</option>
                 <option value="ptt">PTT</option>
               </select>
+              <label className="admin-checkbox admin-checkbox-wide">
+                <input
+                  type="checkbox"
+                  checked={roleEditDefaultSimpleView}
+                  onChange={(e) => setRoleEditDefaultSimpleView(e.target.checked)}
+                />
+                <span>Default to simple mobile view</span>
+              </label>
               <button onClick={saveRoleEdit} disabled={adminBusy || !roleEditName.trim()}>
                 Save changes
               </button>
@@ -1196,6 +1233,7 @@ export function App() {
                   setRoleEditName(role.name);
                   setRoleEditDefaultRoomId(role.defaultRoomId || "");
                   setRoleEditDefaultVoiceMode((role.defaultVoiceMode as "always_on" | "ptt") || "");
+                  setRoleEditDefaultSimpleView(!!role.defaultSimpleView);
                 }}
               >
                 Edit
@@ -1335,7 +1373,7 @@ export function App() {
         </ul>
       </div>
     </div>
-  ) : null;
+  );
 
   const realtimeDebugBlock = showDebug ? (
     <>
@@ -1412,6 +1450,55 @@ export function App() {
       return a.username.localeCompare(b.username, undefined, { sensitivity: "base" });
     });
   const replyTarget = directOnlineTargets.find((p) => p.userId === lastDirectCallerUserId) || null;
+  const simpleVoiceTargetId = matrixAnchorRoomId(listenRoomIds, talkRoomIds);
+  const simplePttTargetLabel = appData.rooms.find((room) => room.id === simpleVoiceTargetId)?.name || "No room selected";
+
+  if (viewMode === "simple") {
+    return (
+      <div className="root app simple-shell">
+        <section className="simple-controls">
+          <button
+            className={`simple-ptt ${pttPressed ? "active" : ""}`}
+            onPointerDown={startPtt}
+            onPointerUp={stopPtt}
+            onPointerLeave={stopPtt}
+            onPointerCancel={stopPtt}
+          >
+            Hold to talk
+            <small>{simplePttTargetLabel}</small>
+          </button>
+          <button
+            className={`simple-reply ${replyTarget ? "" : "disabled"} ${
+              replyTarget && directPttPressedUserId === replyTarget.userId ? "active" : ""
+            }`}
+            disabled={!replyTarget}
+            onPointerDown={() => (replyTarget ? startDirectPtt(replyTarget.userId) : undefined)}
+            onPointerUp={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
+            onPointerLeave={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
+            onPointerCancel={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
+          >
+            Reply to caller
+            <small>{replyTarget ? replyTarget.username : "No active caller"}</small>
+          </button>
+          <label className="simple-mic">
+            <span>Microphone</span>
+            <select
+              value={selectedInputDeviceId}
+              onChange={(e) => setSelectedInputDeviceId(e.target.value)}
+              disabled={inputDevices.length === 0}
+            >
+              {inputDevices.length === 0 ? <option value="">No input devices</option> : null}
+              {inputDevices.map((d) => (
+                <option key={`simple-mic-${d.deviceId}`} value={d.deviceId}>
+                  {d.label || `Mic ${d.deviceId.slice(0, 6)}`}
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="root app station-shell">
@@ -1421,6 +1508,9 @@ export function App() {
           Live: {appData.self.username.toUpperCase()}
         </div>
         <div className="station-top-actions">
+          <button className="station-top-admin" onClick={() => setIsAdminModalOpen(true)}>
+            Configuration
+          </button>
           <button className="station-top-logout" onClick={doLogout}>
             Logout / Lock
           </button>
@@ -1497,7 +1587,9 @@ export function App() {
           <span>Always on</span>
         </label>
         <button
-          className={`station-reply ${replyTarget ? "" : "disabled"}`}
+          className={`station-reply ${replyTarget ? "" : "disabled"} ${
+            replyTarget && directPttPressedUserId === replyTarget.userId ? "active" : ""
+          }`}
           disabled={!replyTarget}
           onPointerDown={() => (replyTarget ? startDirectPtt(replyTarget.userId) : undefined)}
           onPointerUp={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
@@ -1515,10 +1607,18 @@ export function App() {
         <div className="panel">{micBlock}</div>
         <div className="panel">{chatAndSignalBlock}</div>
       </section>
-      {adminPanel ? (
-        <section id="station-admin" className="panel station-admin">
-          {adminPanel}
-        </section>
+      {isAdminModalOpen ? (
+        <div className="station-modal-backdrop" onClick={() => setIsAdminModalOpen(false)}>
+          <section className="station-modal panel" onClick={(event) => event.stopPropagation()}>
+            <div className="station-modal-header">
+              <h3>Configuration</h3>
+              <button className="station-modal-close" onClick={() => setIsAdminModalOpen(false)}>
+                Close
+              </button>
+            </div>
+            {adminPanel}
+          </section>
+        </div>
       ) : null}
       {showDebug ? <section className="panel">{realtimeDebugBlock}</section> : null}
     </div>

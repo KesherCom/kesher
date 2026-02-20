@@ -129,6 +129,9 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "roles", "default_voice_mode", "TEXT"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn(ctx, "roles", "default_simple_view", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	if _, err := s.db.ExecContext(ctx, `UPDATE roles SET default_voice_mode = 'ptt' WHERE default_voice_mode = 'listen_only'`); err != nil {
 		return err
 	}
@@ -141,13 +144,17 @@ func (s *Store) seed(ctx context.Context) error {
 		{ID: "video", Name: "Video", DefaultRoomID: "video-control", DefaultVoiceMode: "ptt"},
 		{ID: "lighting", Name: "Lighting", DefaultRoomID: "lighting-booth", DefaultVoiceMode: "ptt"},
 		{ID: "broadcast", Name: "Broadcast", DefaultRoomID: "livestream", DefaultVoiceMode: "always_on"},
-		{ID: "camera", Name: "Camera", DefaultRoomID: "stage", DefaultVoiceMode: "ptt"},
+		{ID: "camera", Name: "Camera", DefaultRoomID: "stage", DefaultVoiceMode: "ptt", DefaultSimpleView: true},
 		{ID: "pastor", Name: "Pastor", DefaultRoomID: "stage", DefaultVoiceMode: "ptt"},
 		{ID: "producer", Name: "Producer", DefaultRoomID: "foh", DefaultVoiceMode: "always_on"},
 	}
 	for _, role := range roles {
-		if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO roles (id, name, default_room_id, default_voice_mode) VALUES (?, ?, ?, ?)`,
-			role.ID, role.Name, nullableString(role.DefaultRoomID), nullableString(role.DefaultVoiceMode)); err != nil {
+		defaultSimpleView := 0
+		if role.DefaultSimpleView {
+			defaultSimpleView = 1
+		}
+		if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO roles (id, name, default_room_id, default_voice_mode, default_simple_view) VALUES (?, ?, ?, ?, ?)`,
+			role.ID, role.Name, nullableString(role.DefaultRoomID), nullableString(role.DefaultVoiceMode), defaultSimpleView); err != nil {
 			return err
 		}
 	}
@@ -220,7 +227,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 }
 
 func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, default_room_id, default_voice_mode FROM roles ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, default_room_id, default_voice_mode, default_simple_view FROM roles ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +237,8 @@ func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
 		var r Role
 		var defaultRoomID sql.NullString
 		var defaultVoiceMode sql.NullString
-		if err := rows.Scan(&r.ID, &r.Name, &defaultRoomID, &defaultVoiceMode); err != nil {
+		var defaultSimpleView int
+		if err := rows.Scan(&r.ID, &r.Name, &defaultRoomID, &defaultVoiceMode, &defaultSimpleView); err != nil {
 			return nil, err
 		}
 		if defaultRoomID.Valid {
@@ -243,6 +251,7 @@ func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
 				r.DefaultVoiceMode = defaultVoiceMode.String
 			}
 		}
+		r.DefaultSimpleView = defaultSimpleView != 0
 		roles = append(roles, r)
 	}
 	return roles, nil
@@ -315,7 +324,7 @@ func (s *Store) BroadcastGroupRoomSet(ctx context.Context, groupID string) (map[
 	return out, nil
 }
 
-func (s *Store) CreateRole(ctx context.Context, id, name, defaultRoomID, defaultVoiceMode string) error {
+func (s *Store) CreateRole(ctx context.Context, id, name, defaultRoomID, defaultVoiceMode string, defaultSimpleView bool) error {
 	id = strings.TrimSpace(id)
 	name = strings.TrimSpace(name)
 	if id == "" || name == "" {
@@ -324,8 +333,12 @@ func (s *Store) CreateRole(ctx context.Context, id, name, defaultRoomID, default
 	if err := s.validateRoleDefaults(ctx, defaultRoomID, defaultVoiceMode); err != nil {
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO roles (id, name, default_room_id, default_voice_mode) VALUES (?, ?, ?, ?)`,
-		id, name, nullableString(defaultRoomID), nullableString(defaultVoiceMode)); err != nil {
+	defaultSimpleViewInt := 0
+	if defaultSimpleView {
+		defaultSimpleViewInt = 1
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO roles (id, name, default_room_id, default_voice_mode, default_simple_view) VALUES (?, ?, ?, ?, ?)`,
+		id, name, nullableString(defaultRoomID), nullableString(defaultVoiceMode), defaultSimpleViewInt); err != nil {
 		if isUniqueConstraintErr(err) {
 			return ErrConflict
 		}
@@ -333,7 +346,7 @@ func (s *Store) CreateRole(ctx context.Context, id, name, defaultRoomID, default
 	}
 	return nil
 }
-func (s *Store) UpdateRole(ctx context.Context, id, name, defaultRoomID, defaultVoiceMode string) error {
+func (s *Store) UpdateRole(ctx context.Context, id, name, defaultRoomID, defaultVoiceMode string, defaultSimpleView bool) error {
 	id = strings.TrimSpace(id)
 	name = strings.TrimSpace(name)
 	if id == "" || name == "" {
@@ -342,8 +355,12 @@ func (s *Store) UpdateRole(ctx context.Context, id, name, defaultRoomID, default
 	if err := s.validateRoleDefaults(ctx, defaultRoomID, defaultVoiceMode); err != nil {
 		return err
 	}
-	res, err := s.db.ExecContext(ctx, `UPDATE roles SET name = ?, default_room_id = ?, default_voice_mode = ? WHERE id = ?`,
-		name, nullableString(defaultRoomID), nullableString(defaultVoiceMode), id)
+	defaultSimpleViewInt := 0
+	if defaultSimpleView {
+		defaultSimpleViewInt = 1
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE roles SET name = ?, default_room_id = ?, default_voice_mode = ?, default_simple_view = ? WHERE id = ?`,
+		name, nullableString(defaultRoomID), nullableString(defaultVoiceMode), defaultSimpleViewInt, id)
 	if err != nil {
 		if isUniqueConstraintErr(err) {
 			return ErrConflict

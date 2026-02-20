@@ -1,4 +1,10 @@
-export type Role = { id: string; name: string; defaultRoomId?: string; defaultVoiceMode?: "always_on" | "ptt" };
+export type Role = {
+  id: string;
+  name: string;
+  defaultRoomId?: string;
+  defaultVoiceMode?: "always_on" | "ptt";
+  defaultSimpleView?: boolean;
+};
 export type Room = { id: string; name: string };
 export type BroadcastGroup = { id: string; name: string; roomIds: string[] };
 export type User = { id: string; username: string; roleId: string };
