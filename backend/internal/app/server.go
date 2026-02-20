@@ -477,12 +477,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	c := &client{
-		session:    session,
-		user:       user,
-		activeRoom: "foh",
-		voiceMode:  "always_on",
-		micEnabled: true,
-		send:       make(chan WSOutbound, 32),
+		session:         session,
+		user:            user,
+		activeRoom:      "foh",
+		voiceMode:       "always_on",
+		micEnabled:      true,
+		broadcastGroups: make(map[string]struct{}),
+		send:            make(chan WSOutbound, 32),
 	}
 	s.hub.Add(c)
 	if err := s.media.EnsurePeer(session.Token, user); err != nil {
@@ -526,6 +527,16 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			var e RoutedEvent
 			_ = json.Unmarshal(raw, &e)
 			s.hub.SetVoiceState(session.Token, e.Body)
+			if e.Scope == "broadcast" {
+				if e.Body == "ptt_start" {
+					s.hub.SetBroadcastActive(session.Token, e.TargetID, true)
+					s.media.SetBroadcastGroupActive(session.Token, e.TargetID, true)
+				}
+				if e.Body == "ptt_stop" {
+					s.hub.SetBroadcastActive(session.Token, e.TargetID, false)
+					s.media.SetBroadcastGroupActive(session.Token, e.TargetID, false)
+				}
+			}
 			s.routeInbound(session.Token, in, "voice_state")
 		case "webrtc_answer":
 			raw, _ := json.Marshal(in.Data)
