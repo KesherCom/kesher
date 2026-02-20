@@ -876,6 +876,7 @@ export function App() {
                     {users.map((p) => (
                       <li key={`${p.userId}-${room.id}`}>
                         {p.username} — {p.micEnabled ? "mic on" : "mic off"}
+                        {p.broadcastActive ? <span className="online-broadcast">broadcasting</span> : null}
                       </li>
                     ))}
                   </ul>
@@ -891,6 +892,7 @@ export function App() {
                     .map((p) => (
                       <li key={`${p.userId}-noroom`}>
                         {p.username} — {p.micEnabled ? "mic on" : "mic off"}
+                        {p.broadcastActive ? <span className="online-broadcast">broadcasting</span> : null}
                       </li>
                     ))}
                 </ul>

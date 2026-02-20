@@ -9,6 +9,7 @@ export type Presence = {
   activeRoom: string;
   voiceMode: string;
   micEnabled: boolean;
+  broadcastActive: boolean;
 };
 
 export type PublicBootstrap = {

@@ -8,12 +8,13 @@ import (
 )
 
 type client struct {
-	session    Session
-	user       User
-	activeRoom string
-	voiceMode  string
-	micEnabled bool
-	send       chan WSOutbound
+	session         Session
+	user            User
+	activeRoom      string
+	voiceMode       string
+	micEnabled      bool
+	broadcastGroups map[string]struct{}
+	send            chan WSOutbound
 }
 
 type Hub struct {
@@ -38,7 +39,26 @@ func (h *Hub) SetMediaManager(m *MediaManager) {
 
 func (h *Hub) Add(c *client) {
 	h.mu.Lock()
+	if c.broadcastGroups == nil {
+		c.broadcastGroups = make(map[string]struct{})
+	}
 	h.clients[c.session.Token] = c
+	h.mu.Unlock()
+	h.broadcastPresence()
+}
+
+func (h *Hub) SetBroadcastActive(token, groupID string, enabled bool) {
+	h.mu.Lock()
+	if c, ok := h.clients[token]; ok {
+		if c.broadcastGroups == nil {
+			c.broadcastGroups = make(map[string]struct{})
+		}
+		if enabled {
+			c.broadcastGroups[groupID] = struct{}{}
+		} else {
+			delete(c.broadcastGroups, groupID)
+		}
+	}
 	h.mu.Unlock()
 	h.broadcastPresence()
 }
@@ -173,12 +193,13 @@ func (h *Hub) broadcastPresence() {
 	var list []PresenceState
 	for _, c := range h.clients {
 		list = append(list, PresenceState{
-			UserID:     c.user.ID,
-			Username:   c.user.Username,
-			RoleID:     c.user.RoleID,
-			ActiveRoom: c.activeRoom,
-			VoiceMode:  c.voiceMode,
-			MicEnabled: c.micEnabled,
+			UserID:          c.user.ID,
+			Username:        c.user.Username,
+			RoleID:          c.user.RoleID,
+			ActiveRoom:      c.activeRoom,
+			VoiceMode:       c.voiceMode,
+			MicEnabled:      c.micEnabled,
+			BroadcastActive: len(c.broadcastGroups) > 0,
 		})
 	}
 	msg := WSOutbound{Type: "presence", Data: list}

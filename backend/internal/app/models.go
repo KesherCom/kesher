@@ -72,12 +72,13 @@ type ActiveRoomEvent struct {
 	RoomID string `json:"roomId"`
 }
 type PresenceState struct {
-	UserID     string `json:"userId"`
-	Username   string `json:"username"`
-	RoleID     string `json:"roleId"`
-	ActiveRoom string `json:"activeRoom"`
-	VoiceMode  string `json:"voiceMode"`
-	MicEnabled bool   `json:"micEnabled"`
+	UserID          string `json:"userId"`
+	Username        string `json:"username"`
+	RoleID          string `json:"roleId"`
+	ActiveRoom      string `json:"activeRoom"`
+	VoiceMode       string `json:"voiceMode"`
+	MicEnabled      bool   `json:"micEnabled"`
+	BroadcastActive bool   `json:"broadcastActive"`
 }
 
 type RoutedEvent struct {

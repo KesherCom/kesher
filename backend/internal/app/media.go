@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -24,19 +25,21 @@ type mediaPeer struct {
 }
 
 type MediaManager struct {
-	mu      sync.Mutex
-	logger  *slog.Logger
-	hub     *Hub
-	peers   map[string]*mediaPeer
-	sources map[string]map[string]*mediaSourceTrack // room -> sourceToken -> track
+	mu              sync.Mutex
+	logger          *slog.Logger
+	hub             *Hub
+	peers           map[string]*mediaPeer
+	sources         map[string]map[string]*mediaSourceTrack // room -> sourceToken -> track
+	broadcastActive map[string]map[string]struct{}          // sourceToken -> broadcastGroupID set
 }
 
 func NewMediaManager(hub *Hub, logger *slog.Logger) *MediaManager {
 	return &MediaManager{
-		logger:  logger,
-		hub:     hub,
-		peers:   make(map[string]*mediaPeer),
-		sources: make(map[string]map[string]*mediaSourceTrack),
+		logger:          logger,
+		hub:             hub,
+		peers:           make(map[string]*mediaPeer),
+		sources:         make(map[string]map[string]*mediaSourceTrack),
+		broadcastActive: make(map[string]map[string]struct{}),
 	}
 }
 
@@ -125,6 +128,7 @@ func (m *MediaManager) SwitchRoom(token, roomID string) {
 	}
 	m.detachAllIncomingLocked(peer)
 	m.attachRoomSourcesLocked(peer)
+	m.attachBroadcastSourcesToPeerLocked(peer)
 	m.renegotiateLocked(peer)
 	if oldRoom != "" {
 		for _, p := range m.peers {
@@ -143,6 +147,7 @@ func (m *MediaManager) SwitchRoom(token, roomID string) {
 			m.renegotiateLocked(p)
 		}
 	}
+	m.recomputeBroadcastForSourceLocked(token)
 }
 
 func (m *MediaManager) HandleAnswer(token string, sdp string) error {
@@ -206,6 +211,7 @@ func (m *MediaManager) RemovePeer(token string) {
 	roomID := peer.roomID
 	_ = peer.pc.Close()
 	delete(m.peers, token)
+	delete(m.broadcastActive, token)
 	if roomID != "" {
 		if _, ok := m.sources[roomID]; ok {
 			delete(m.sources[roomID], token)
@@ -238,6 +244,7 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 		m.attachSourceToPeerLocked(sourcePeer.token, m.sources[sourcePeer.roomID][sourcePeer.token], p)
 		m.renegotiateLocked(p)
 	}
+	m.recomputeBroadcastForSourceLocked(sourcePeer.token)
 	m.mu.Unlock()
 
 	for {
@@ -262,6 +269,89 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 		m.renegotiateLocked(p)
 	}
 	m.mu.Unlock()
+}
+
+func (m *MediaManager) SetBroadcastGroupActive(sourceToken, groupID string, enabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if enabled {
+		if _, ok := m.broadcastActive[sourceToken]; !ok {
+			m.broadcastActive[sourceToken] = make(map[string]struct{})
+		}
+		m.broadcastActive[sourceToken][groupID] = struct{}{}
+	} else {
+		if groups, ok := m.broadcastActive[sourceToken]; ok {
+			delete(groups, groupID)
+			if len(groups) == 0 {
+				delete(m.broadcastActive, sourceToken)
+			}
+		}
+	}
+	m.recomputeBroadcastForSourceLocked(sourceToken)
+}
+
+func (m *MediaManager) attachBroadcastSourcesToPeerLocked(peer *mediaPeer) {
+	for sourceToken := range m.broadcastActive {
+		rooms := m.broadcastRoomsForSourceLocked(sourceToken)
+		if _, ok := rooms[peer.roomID]; !ok {
+			continue
+		}
+		src, _ := m.findSourceTrackLocked(sourceToken)
+		if src == nil || sourceToken == peer.token {
+			continue
+		}
+		m.attachSourceToPeerLocked(sourceToken, src, peer)
+	}
+}
+
+func (m *MediaManager) recomputeBroadcastForSourceLocked(sourceToken string) {
+	src, sourceRoom := m.findSourceTrackLocked(sourceToken)
+	if src == nil {
+		return
+	}
+	rooms := m.broadcastRoomsForSourceLocked(sourceToken)
+	for _, p := range m.peers {
+		if p.token == sourceToken {
+			continue
+		}
+		if _, ok := rooms[p.roomID]; ok {
+			m.attachSourceToPeerLocked(sourceToken, src, p)
+			m.renegotiateLocked(p)
+			continue
+		}
+		if p.roomID != sourceRoom {
+			m.removeSenderLocked(p, sourceToken)
+			m.renegotiateLocked(p)
+		}
+	}
+}
+
+func (m *MediaManager) broadcastRoomsForSourceLocked(sourceToken string) map[string]struct{} {
+	groups := m.broadcastActive[sourceToken]
+	if len(groups) == 0 {
+		return map[string]struct{}{}
+	}
+	rooms := make(map[string]struct{})
+	for groupID := range groups {
+		set, err := m.hub.store.BroadcastGroupRoomSet(context.Background(), groupID)
+		if err != nil {
+			m.logger.Warn("broadcast group room lookup failed", "groupId", groupID, "error", err)
+			continue
+		}
+		for roomID := range set {
+			rooms[roomID] = struct{}{}
+		}
+	}
+	return rooms
+}
+
+func (m *MediaManager) findSourceTrackLocked(sourceToken string) (*mediaSourceTrack, string) {
+	for roomID, sources := range m.sources {
+		if src, ok := sources[sourceToken]; ok {
+			return src, roomID
+		}
+	}
+	return nil, ""
 }
 
 func (m *MediaManager) detachAllIncomingLocked(peer *mediaPeer) {
