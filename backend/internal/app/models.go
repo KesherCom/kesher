@@ -71,14 +71,22 @@ type WSOutbound struct {
 type ActiveRoomEvent struct {
 	RoomID string `json:"roomId"`
 }
+
+type RoomMatrixEvent struct {
+	ActiveRoomID  string   `json:"activeRoomId,omitempty"`
+	ListenRoomIDs []string `json:"listenRoomIds"`
+	TalkRoomIDs   []string `json:"talkRoomIds"`
+}
 type PresenceState struct {
-	UserID          string `json:"userId"`
-	Username        string `json:"username"`
-	RoleID          string `json:"roleId"`
-	ActiveRoom      string `json:"activeRoom"`
-	VoiceMode       string `json:"voiceMode"`
-	MicEnabled      bool   `json:"micEnabled"`
-	BroadcastActive bool   `json:"broadcastActive"`
+	UserID          string   `json:"userId"`
+	Username        string   `json:"username"`
+	RoleID          string   `json:"roleId"`
+	ActiveRoom      string   `json:"activeRoom"`
+	ListenRooms     []string `json:"listenRooms"`
+	TalkRooms       []string `json:"talkRooms"`
+	VoiceMode       string   `json:"voiceMode"`
+	MicEnabled      bool     `json:"micEnabled"`
+	BroadcastActive bool     `json:"broadcastActive"`
 }
 
 type RoutedEvent struct {

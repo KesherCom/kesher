@@ -7,6 +7,8 @@ export type Presence = {
   username: string;
   roleId: string;
   activeRoom: string;
+  listenRooms: string[];
+  talkRooms: string[];
   voiceMode: string;
   micEnabled: boolean;
   broadcastActive: boolean;

@@ -77,6 +77,49 @@ aside li,
   display: grid;
   gap: 0.5rem;
 }
+.room-matrix {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 0.4rem;
+}
+.matrix-card {
+  border: 1px solid #2b3341;
+  border-radius: 10px;
+  padding: 0.45rem;
+  background: #151b24;
+}
+.matrix-card.active {
+  border-color: #3f4c63;
+  box-shadow: inset 0 0 0 1px #3f4c63;
+}
+.matrix-room-name {
+  width: 100%;
+  text-align: left;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+.matrix-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+}
+.matrix-action {
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  padding: 0.4rem 0.5rem;
+}
+.matrix-action.listen.on {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
+.matrix-action.talk.on {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
 .online-room-title {
   font-weight: 600;
   font-size: 0.9rem;
