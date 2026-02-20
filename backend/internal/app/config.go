@@ -13,6 +13,8 @@ type Config struct {
 	AllowCORS      bool
 	SessionTTL     time.Duration
 	TrustedLANHTTP bool
+	TLSCertFile    string
+	TLSKeyFile     string
 }
 
 func LoadConfig() Config {
@@ -23,6 +25,8 @@ func LoadConfig() Config {
 		AllowCORS:      getEnv("ALLOW_CORS", "true") == "true",
 		SessionTTL:     time.Duration(getEnvInt("SESSION_TTL_MINUTES", 720)) * time.Minute,
 		TrustedLANHTTP: getEnv("TRUSTED_LAN_HTTP", "true") == "true",
+		TLSCertFile:    getEnv("TLS_CERT_FILE", ""),
+		TLSKeyFile:     getEnv("TLS_KEY_FILE", ""),
 	}
 }
 

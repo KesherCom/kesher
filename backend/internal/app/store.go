@@ -20,6 +20,68 @@ type Store struct {
 	db *sql.DB
 }
 
+func (s *Store) validateRolesExistWithTx(ctx context.Context, tx *sql.Tx, roleIDs []string) error {
+	for _, roleID := range roleIDs {
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM roles WHERE id = ?`, roleID).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrInvalidInput
+		}
+	}
+	return nil
+}
+
+func (s *Store) replaceRoomRoleMappingsWithTx(ctx context.Context, tx *sql.Tx, table, roomID string, roleIDs []string) error {
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE room_id = ?`, table), roomID); err != nil {
+		return err
+	}
+	for _, roleID := range roleIDs {
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`INSERT INTO %s (room_id, role_id) VALUES (?, ?)`, table), roomID, roleID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) roomRoleIDs(ctx context.Context, table, roomID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`SELECT role_id FROM %s WHERE room_id = ? ORDER BY role_id`, table), roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var roleIDs []string
+	for rows.Next() {
+		var roleID string
+		if err := rows.Scan(&roleID); err != nil {
+			return nil, err
+		}
+		roleIDs = append(roleIDs, roleID)
+	}
+	return roleIDs, nil
+}
+
+func (s *Store) RoomRolePolicies(ctx context.Context, roomID string) (map[string]struct{}, map[string]struct{}, error) {
+	senderRoleIDs, err := s.roomRoleIDs(ctx, "room_sender_roles", roomID)
+	if err != nil {
+		return nil, nil, err
+	}
+	receiverRoleIDs, err := s.roomRoleIDs(ctx, "room_receiver_roles", roomID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return toStringSet(senderRoleIDs), toStringSet(receiverRoleIDs), nil
+}
+
+func toStringSet(values []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		out[value] = struct{}{}
+	}
+	return out
+}
+
 func (s *Store) ensureColumn(ctx context.Context, table, column, columnType string) error {
 	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, table))
 	if err != nil {
@@ -102,6 +164,16 @@ func (s *Store) migrate(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS rooms (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL UNIQUE
+		);`,
+		`CREATE TABLE IF NOT EXISTS room_sender_roles (
+			room_id TEXT NOT NULL,
+			role_id TEXT NOT NULL,
+			PRIMARY KEY (room_id, role_id)
+		);`,
+		`CREATE TABLE IF NOT EXISTS room_receiver_roles (
+			room_id TEXT NOT NULL,
+			role_id TEXT NOT NULL,
+			PRIMARY KEY (room_id, role_id)
 		);`,
 		`CREATE TABLE IF NOT EXISTS broadcast_groups (
 			id TEXT PRIMARY KEY,
@@ -269,6 +341,16 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 		if err := rows.Scan(&r.ID, &r.Name); err != nil {
 			return nil, err
 		}
+		senderRoleIDs, err := s.roomRoleIDs(ctx, "room_sender_roles", r.ID)
+		if err != nil {
+			return nil, err
+		}
+		receiverRoleIDs, err := s.roomRoleIDs(ctx, "room_receiver_roles", r.ID)
+		if err != nil {
+			return nil, err
+		}
+		r.SenderRoleIDs = senderRoleIDs
+		r.ReceiverRoleIDs = receiverRoleIDs
 		rooms = append(rooms, r)
 	}
 	return rooms, nil
@@ -389,43 +471,102 @@ func (s *Store) DeleteRole(ctx context.Context, id string) error {
 	if usersWithRole > 0 {
 		return ErrConflict
 	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM roles WHERE id = ?`, id)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM room_sender_roles WHERE role_id = ?`, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM room_receiver_roles WHERE role_id = ?`, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM roles WHERE id = ?`, id)
+	if err != nil {
+		_ = tx.Rollback()
 		return err
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
+		_ = tx.Rollback()
 		return err
 	}
 	if rows == 0 {
+		_ = tx.Rollback()
 		return ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 	return nil
 }
 
-func (s *Store) CreateRoom(ctx context.Context, id, name string) error {
+func (s *Store) CreateRoom(ctx context.Context, id, name string, senderRoleIDs, receiverRoleIDs []string) error {
 	id = strings.TrimSpace(id)
 	name = strings.TrimSpace(name)
+	senderRoleIDs = normalizeIDs(senderRoleIDs)
+	receiverRoleIDs = normalizeIDs(receiverRoleIDs)
 	if id == "" || name == "" {
 		return ErrInvalidInput
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO rooms (id, name) VALUES (?, ?)`, id, name); err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := s.validateRolesExistWithTx(ctx, tx, senderRoleIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := s.validateRolesExistWithTx(ctx, tx, receiverRoleIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO rooms (id, name) VALUES (?, ?)`, id, name); err != nil {
+		_ = tx.Rollback()
 		if isUniqueConstraintErr(err) {
 			return ErrConflict
 		}
 		return err
 	}
+	if err := s.replaceRoomRoleMappingsWithTx(ctx, tx, "room_sender_roles", id, senderRoleIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := s.replaceRoomRoleMappingsWithTx(ctx, tx, "room_receiver_roles", id, receiverRoleIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (s *Store) UpdateRoom(ctx context.Context, id, name string) error {
+func (s *Store) UpdateRoom(ctx context.Context, id, name string, senderRoleIDs, receiverRoleIDs []string) error {
 	id = strings.TrimSpace(id)
 	name = strings.TrimSpace(name)
+	senderRoleIDs = normalizeIDs(senderRoleIDs)
+	receiverRoleIDs = normalizeIDs(receiverRoleIDs)
 	if id == "" || name == "" {
 		return ErrInvalidInput
 	}
-	res, err := s.db.ExecContext(ctx, `UPDATE rooms SET name = ? WHERE id = ?`, name, id)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return err
+	}
+	if err := s.validateRolesExistWithTx(ctx, tx, senderRoleIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := s.validateRolesExistWithTx(ctx, tx, receiverRoleIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE rooms SET name = ? WHERE id = ?`, name, id)
+	if err != nil {
+		_ = tx.Rollback()
 		if isUniqueConstraintErr(err) {
 			return ErrConflict
 		}
@@ -433,10 +574,23 @@ func (s *Store) UpdateRoom(ctx context.Context, id, name string) error {
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
+		_ = tx.Rollback()
 		return err
 	}
 	if rows == 0 {
+		_ = tx.Rollback()
 		return ErrNotFound
+	}
+	if err := s.replaceRoomRoleMappingsWithTx(ctx, tx, "room_sender_roles", id, senderRoleIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := s.replaceRoomRoleMappingsWithTx(ctx, tx, "room_receiver_roles", id, receiverRoleIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -451,6 +605,14 @@ func (s *Store) DeleteRoom(ctx context.Context, id string) error {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM broadcast_group_rooms WHERE room_id = ?`, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM room_sender_roles WHERE room_id = ?`, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM room_receiver_roles WHERE room_id = ?`, id); err != nil {
 		_ = tx.Rollback()
 		return err
 	}

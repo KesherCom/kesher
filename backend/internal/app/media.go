@@ -313,6 +313,13 @@ func (m *MediaManager) talkRoomsForSourceLocked(sourceToken string) map[string]s
 	}
 	rooms := make(map[string]struct{}, len(c.talkRooms))
 	for roomID := range c.talkRooms {
+		senderRoles, _, err := m.hub.store.RoomRolePolicies(context.Background(), roomID)
+		if err != nil {
+			continue
+		}
+		if !isRoleAllowed(senderRoles, c.session.RoleID) {
+			continue
+		}
 		rooms[roomID] = struct{}{}
 	}
 	return rooms
@@ -328,12 +335,30 @@ func (m *MediaManager) peerListensToAnyRoomLocked(peerToken string, roomSet map[
 	if !ok {
 		return false
 	}
-	return intersectsRoomSet(c.listenRooms, roomSet)
+	for roomID := range c.listenRooms {
+		if _, ok := roomSet[roomID]; !ok {
+			continue
+		}
+		_, receiverRoles, err := m.hub.store.RoomRolePolicies(context.Background(), roomID)
+		if err != nil {
+			continue
+		}
+		if isRoleAllowed(receiverRoles, c.session.RoleID) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *MediaManager) broadcastRoomsForSourceLocked(sourceToken string) map[string]struct{} {
 	groups := m.broadcastActive[sourceToken]
 	if len(groups) == 0 {
+		return map[string]struct{}{}
+	}
+	m.hub.mu.RLock()
+	sourceClient, ok := m.hub.clients[sourceToken]
+	m.hub.mu.RUnlock()
+	if !ok {
 		return map[string]struct{}{}
 	}
 	rooms := make(map[string]struct{})
@@ -344,6 +369,13 @@ func (m *MediaManager) broadcastRoomsForSourceLocked(sourceToken string) map[str
 			continue
 		}
 		for roomID := range set {
+			senderRoles, _, err := m.hub.store.RoomRolePolicies(context.Background(), roomID)
+			if err != nil {
+				continue
+			}
+			if !isRoleAllowed(senderRoles, sourceClient.session.RoleID) {
+				continue
+			}
 			rooms[roomID] = struct{}{}
 		}
 	}

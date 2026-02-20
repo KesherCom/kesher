@@ -158,14 +158,32 @@ func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
 		h.sendToUser(e.TargetID, out)
 		h.sendToToken(senderToken, out)
 	case "room":
-		h.sendToRoom(e.TargetID, out)
+		_, receiverRoles, err := h.store.RoomRolePolicies(context.Background(), e.TargetID)
+		if err != nil {
+			h.logger.Warn("room routing failed", "targetId", e.TargetID, "error", err)
+			return
+		}
+		h.sendToRoom(e.TargetID, receiverRoles, out)
 	case "broadcast":
 		rooms, err := h.store.BroadcastGroupRoomSet(context.Background(), e.TargetID)
 		if err != nil {
 			h.logger.Warn("broadcast group routing failed", "targetId", e.TargetID, "error", err)
 			return
 		}
-		h.sendToRooms(rooms, out)
+		allowedRooms := make(map[string]struct{}, len(rooms))
+		receiverRolesByRoom := make(map[string]map[string]struct{}, len(rooms))
+		for roomID := range rooms {
+			senderRoles, receiverRoles, err := h.store.RoomRolePolicies(context.Background(), roomID)
+			if err != nil {
+				continue
+			}
+			if !isRoleAllowed(senderRoles, sender.session.RoleID) {
+				continue
+			}
+			allowedRooms[roomID] = struct{}{}
+			receiverRolesByRoom[roomID] = receiverRoles
+		}
+		h.sendToRooms(allowedRooms, receiverRolesByRoom, out)
 	default:
 		h.logger.Warn("unsupported routing scope", "scope", e.Scope)
 	}
@@ -197,11 +215,14 @@ func (h *Hub) sendToToken(token string, msg WSOutbound) {
 	}
 }
 
-func (h *Hub) sendToRoom(roomID string, msg WSOutbound) {
+func (h *Hub) sendToRoom(roomID string, receiverRoles map[string]struct{}, msg WSOutbound) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for _, c := range h.clients {
 		if _, ok := c.listenRooms[roomID]; ok {
+			if !isRoleAllowed(receiverRoles, c.session.RoleID) {
+				continue
+			}
 			select {
 			case c.send <- msg:
 			default:
@@ -210,15 +231,22 @@ func (h *Hub) sendToRoom(roomID string, msg WSOutbound) {
 	}
 }
 
-func (h *Hub) sendToRooms(roomSet map[string]struct{}, msg WSOutbound) {
+func (h *Hub) sendToRooms(roomSet map[string]struct{}, receiverRolesByRoom map[string]map[string]struct{}, msg WSOutbound) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for _, c := range h.clients {
-		if intersectsRoomSet(c.listenRooms, roomSet) {
+		for roomID := range c.listenRooms {
+			if _, ok := roomSet[roomID]; !ok {
+				continue
+			}
+			if !isRoleAllowed(receiverRolesByRoom[roomID], c.session.RoleID) {
+				continue
+			}
 			select {
 			case c.send <- msg:
 			default:
 			}
+			break
 		}
 	}
 }
