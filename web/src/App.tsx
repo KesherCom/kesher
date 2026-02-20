@@ -43,11 +43,14 @@ export function App() {
   const [connectionState, setConnectionState] = useState<"connecting" | "connected" | "reconnecting" | "offline">("offline");
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedInputDeviceId, setSelectedInputDeviceId] = useState("");
+  const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState("");
   const [inputLevel, setInputLevel] = useState(0);
   const [audioError, setAudioError] = useState<string>("");
   const [webrtcState, setWebrtcState] = useState<string>("new");
   const [rtpStats, setRtpStats] = useState<{ inKbps: number; outKbps: number }>({ inKbps: 0, outKbps: 0 });
   const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
+  const [isOutputMenuOpen, setIsOutputMenuOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"station" | "simple">("station");
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [adminBusy, setAdminBusy] = useState(false);
@@ -109,9 +112,11 @@ export function App() {
   const statsIntervalRef = useRef<number | null>(null);
   const lastStatsRef = useRef<{ ts: number; inBytes: number; outBytes: number } | null>(null);
   const selectedInputDeviceIdRef = useRef("");
+  const selectedOutputDeviceIdRef = useRef("");
   const listenRoomIdsRef = useRef<string[]>(listenRoomIds);
   const talkRoomIdsRef = useRef<string[]>(talkRoomIds);
   const micMenuRef = useRef<HTMLDivElement | null>(null);
+  const outputMenuRef = useRef<HTMLDivElement | null>(null);
   const showDebug = (() => {
     const params = new URLSearchParams(window.location.search);
     const value = params.get("debug");
@@ -124,6 +129,9 @@ export function App() {
   useEffect(() => {
     selectedInputDeviceIdRef.current = selectedInputDeviceId;
   }, [selectedInputDeviceId]);
+  useEffect(() => {
+    selectedOutputDeviceIdRef.current = selectedOutputDeviceId;
+  }, [selectedOutputDeviceId]);
   useEffect(() => {
     listenRoomIdsRef.current = listenRoomIds;
   }, [listenRoomIds]);
@@ -179,21 +187,27 @@ export function App() {
     }
   }, [appData, roleCreateDefaultRoomId]);
 
-  const refreshInputDevices = useCallback(async () => {
+  const refreshAudioDevices = useCallback(async () => {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const inputs = devices.filter((d) => d.kind === "audioinput");
+    const outputs = devices.filter((d) => d.kind === "audiooutput");
     setInputDevices(inputs);
+    setOutputDevices(outputs);
     setSelectedInputDeviceId((prev) => {
       if (prev && inputs.some((d) => d.deviceId === prev)) return prev;
       return inputs[0]?.deviceId || "";
     });
+    setSelectedOutputDeviceId((prev) => {
+      if (prev && outputs.some((d) => d.deviceId === prev)) return prev;
+      return outputs[0]?.deviceId || "";
+    });
   }, []);
 
   useEffect(() => {
-    void refreshInputDevices();
-    navigator.mediaDevices.addEventListener("devicechange", refreshInputDevices);
-    return () => navigator.mediaDevices.removeEventListener("devicechange", refreshInputDevices);
-  }, [refreshInputDevices]);
+    void refreshAudioDevices();
+    navigator.mediaDevices.addEventListener("devicechange", refreshAudioDevices);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", refreshAudioDevices);
+  }, [refreshAudioDevices]);
   useEffect(() => {
     if (!(window.isSecureContext || window.location.hostname === "localhost")) {
       setAudioError("Microphone capture needs HTTPS (or localhost). Open the app via HTTPS for remote devices.");
@@ -202,9 +216,11 @@ export function App() {
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
-      if (!micMenuRef.current) return;
-      if (event.target instanceof Node && !micMenuRef.current.contains(event.target)) {
+      if (micMenuRef.current && event.target instanceof Node && !micMenuRef.current.contains(event.target)) {
         setIsMicMenuOpen(false);
+      }
+      if (outputMenuRef.current && event.target instanceof Node && !outputMenuRef.current.contains(event.target)) {
+        setIsOutputMenuOpen(false);
       }
     };
     window.addEventListener("pointerdown", onPointerDown);
@@ -452,6 +468,18 @@ export function App() {
     }
   }
 
+  async function applyOutputDeviceToAudio(audio: HTMLAudioElement, outputDeviceId: string) {
+    type AudioWithSinkId = HTMLAudioElement & { setSinkId?: (sinkId: string) => Promise<void> };
+    const audioWithSink = audio as AudioWithSinkId;
+    if (typeof audioWithSink.setSinkId !== "function") return;
+    const sinkId = outputDeviceId || "default";
+    try {
+      await audioWithSink.setSinkId(sinkId);
+    } catch (err) {
+      setAudioError(`Failed to switch speaker output: ${err instanceof Error ? err.message : "unknown error"}`);
+    }
+  }
+
   async function getMicStream(deviceId: string): Promise<MediaStream> {
     const baseAudio = {
       echoCancellation: true,
@@ -542,6 +570,7 @@ export function App() {
             audio.volume = 1;
             remoteAudioRef.current.set(key, audio);
           }
+          void applyOutputDeviceToAudio(audio, selectedOutputDeviceIdRef.current);
           const stream = event.streams[0] ?? new MediaStream([event.track]);
           audio.srcObject = stream;
           if (!remoteAnalyserNodesRef.current.has(key)) {
@@ -566,7 +595,7 @@ export function App() {
           const stream = await getMicStream(selectedInputDeviceIdRef.current);
           localStreamRef.current = stream;
           startLevelMeter(stream);
-          void refreshInputDevices();
+          void refreshAudioDevices();
           const initialEnabled = voiceModeRef.current === "always_on";
           for (const track of stream.getAudioTracks()) {
             track.enabled = initialEnabled;
@@ -708,7 +737,7 @@ export function App() {
       cleanupRealtimeResources();
       setConnectionState("offline");
     };
-  }, [token, appData]);
+  }, [token, appData, refreshAudioDevices]);
 
   useEffect(() => {
     clearRoomSwitchTimer();
@@ -761,6 +790,12 @@ export function App() {
     })();
   }, [selectedInputDeviceId, token, appData]);
 
+  useEffect(() => {
+    for (const audio of remoteAudioRef.current.values()) {
+      void applyOutputDeviceToAudio(audio, selectedOutputDeviceId);
+    }
+  }, [selectedOutputDeviceId]);
+
   const currentTargets = useMemo(() => {
     if (!appData) return [];
     if (scope === "direct") return appData.users.map((u) => ({ id: u.id, label: `${u.username} (${u.roleId})` }));
@@ -775,6 +810,9 @@ export function App() {
   const selectedMicLabel = useMemo(() => {
     return inputDevices.find((d) => d.deviceId === selectedInputDeviceId)?.label || "Select microphone";
   }, [inputDevices, selectedInputDeviceId]);
+  const selectedOutputLabel = useMemo(() => {
+    return outputDevices.find((d) => d.deviceId === selectedOutputDeviceId)?.label || "Select speaker";
+  }, [outputDevices, selectedOutputDeviceId]);
   const roleNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const role of appData?.roles || []) map.set(role.id, role.name);
@@ -1217,6 +1255,38 @@ export function App() {
         <div className="meter-bar" style={{ width: `${inputLevel}%` }} />
       </div>
       <small>Input level</small>
+      <h3 style={{ marginTop: "1rem" }}>Speaker output</h3>
+      <div className="mic-dropdown" ref={outputMenuRef}>
+        <button
+          type="button"
+          className="mic-dropdown-trigger"
+          onClick={() => setIsOutputMenuOpen((v) => !v)}
+          disabled={outputDevices.length === 0}
+          aria-haspopup="listbox"
+          aria-expanded={isOutputMenuOpen}
+        >
+          <span>{selectedOutputLabel}</span>
+          <span>▾</span>
+        </button>
+        {isOutputMenuOpen ? (
+          <div className="mic-dropdown-menu" role="listbox">
+            {outputDevices.map((d) => (
+              <button
+                type="button"
+                key={d.deviceId}
+                className={`mic-dropdown-item ${d.deviceId === selectedOutputDeviceId ? "active" : ""}`}
+                onClick={() => {
+                  setSelectedOutputDeviceId(d.deviceId);
+                  setIsOutputMenuOpen(false);
+                }}
+                title={d.label || `Output ${d.deviceId.slice(0, 6)}`}
+              >
+                {d.label || `Output ${d.deviceId.slice(0, 6)}`}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
     </>
   );
 
@@ -1612,6 +1682,21 @@ export function App() {
               {inputDevices.map((d) => (
                 <option key={`simple-mic-${d.deviceId}`} value={d.deviceId}>
                   {d.label || `Mic ${d.deviceId.slice(0, 6)}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="simple-mic">
+            <span>Speaker output</span>
+            <select
+              value={selectedOutputDeviceId}
+              onChange={(e) => setSelectedOutputDeviceId(e.target.value)}
+              disabled={outputDevices.length === 0}
+            >
+              {outputDevices.length === 0 ? <option value="">No output devices</option> : null}
+              {outputDevices.map((d) => (
+                <option key={`simple-out-${d.deviceId}`} value={d.deviceId}>
+                  {d.label || `Output ${d.deviceId.slice(0, 6)}`}
                 </option>
               ))}
             </select>
