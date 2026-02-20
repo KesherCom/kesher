@@ -73,6 +73,10 @@ export function App() {
   const [directPttPressedUserId, setDirectPttPressedUserId] = useState<string | null>(null);
   const [roomPttPressedRoomId, setRoomPttPressedRoomId] = useState<string | null>(null);
   const [lastDirectCallerUserId, setLastDirectCallerUserId] = useState<string | null>(null);
+  const [incomingAudioActive, setIncomingAudioActive] = useState(false);
+  const [activeVoiceRoutes, setActiveVoiceRoutes] = useState<
+    Array<{ senderUserID: string; scope: "direct" | "room" | "broadcast"; targetID: string; label: string }>
+  >([]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -82,6 +86,13 @@ export function App() {
   const reconnectAttemptsRef = useRef(0);
   const shouldReconnectRef = useRef(false);
   const pendingICERef = useRef<Array<{ candidate: string; sdpMid?: string; sdpMLineIndex?: number }>>([]);
+  const activeVoiceRoutesRef = useRef<
+    Map<string, { senderUserID: string; scope: "direct" | "room" | "broadcast"; targetID: string; label: string }>
+  >(new Map());
+  const remoteAnalyserNodesRef = useRef<Map<string, { ctx: AudioContext; analyser: AnalyserNode; buf: Uint8Array }>>(new Map());
+  const remoteAudioMeterRafRef = useRef<number | null>(null);
+  const incomingAudioOffTimeoutRef = useRef<number | null>(null);
+  const incomingAudioActiveRef = useRef(false);
   const roomSwitchTimerRef = useRef<number | null>(null);
   const voiceModeRef = useRef(voiceMode);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -191,6 +202,87 @@ export function App() {
       window.clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
+  }
+
+  function stopRemoteAudioMeter() {
+    if (remoteAudioMeterRafRef.current !== null) {
+      cancelAnimationFrame(remoteAudioMeterRafRef.current);
+      remoteAudioMeterRafRef.current = null;
+    }
+    if (incomingAudioOffTimeoutRef.current !== null) {
+      window.clearTimeout(incomingAudioOffTimeoutRef.current);
+      incomingAudioOffTimeoutRef.current = null;
+    }
+    for (const { ctx } of remoteAnalyserNodesRef.current.values()) {
+      void ctx.close();
+    }
+    remoteAnalyserNodesRef.current.clear();
+    incomingAudioActiveRef.current = false;
+    setIncomingAudioActive(false);
+  }
+
+  function startRemoteAudioMeterLoop() {
+    if (remoteAudioMeterRafRef.current !== null) return;
+    const tick = () => {
+      let active = false;
+      for (const { analyser, buf } of remoteAnalyserNodesRef.current.values()) {
+        analyser.getByteTimeDomainData(buf as unknown as Uint8Array<ArrayBuffer>);
+        let sum = 0;
+        for (const v of buf) {
+          const centered = (v - 128) / 128;
+          sum += centered * centered;
+        }
+        const rms = Math.sqrt(sum / buf.length);
+        if (rms > 0.018) {
+          active = true;
+          break;
+        }
+      }
+      if (active) {
+        if (incomingAudioOffTimeoutRef.current !== null) {
+          window.clearTimeout(incomingAudioOffTimeoutRef.current);
+          incomingAudioOffTimeoutRef.current = null;
+        }
+        if (!incomingAudioActiveRef.current) {
+          incomingAudioActiveRef.current = true;
+          setIncomingAudioActive(true);
+        }
+      } else if (incomingAudioActiveRef.current && incomingAudioOffTimeoutRef.current === null) {
+        incomingAudioOffTimeoutRef.current = window.setTimeout(() => {
+          incomingAudioOffTimeoutRef.current = null;
+          incomingAudioActiveRef.current = false;
+          setIncomingAudioActive(false);
+        }, 1000);
+      }
+      remoteAudioMeterRafRef.current = requestAnimationFrame(tick);
+    };
+    remoteAudioMeterRafRef.current = requestAnimationFrame(tick);
+  }
+
+  function refreshActiveVoiceChannelState() {
+    setActiveVoiceRoutes(Array.from(activeVoiceRoutesRef.current.values()));
+  }
+
+  function updateVoiceRoute(
+    senderUserID: string,
+    scopeValue: "direct" | "room" | "broadcast",
+    targetID: string,
+    body: string,
+    fromUsername: string
+  ) {
+    const routeKey = `${senderUserID}:${scopeValue}:${targetID}`;
+    const label =
+      scopeValue === "room"
+        ? appData?.rooms.find((r) => r.id === targetID)?.name || targetID
+        : scopeValue === "broadcast"
+          ? appData?.broadcastGroups.find((g) => g.id === targetID)?.name || targetID
+          : `Direct · ${fromUsername}`;
+    if (body === "ptt_start" || body === "always_on") {
+      activeVoiceRoutesRef.current.set(routeKey, { senderUserID, scope: scopeValue, targetID, label });
+    } else if (body === "ptt_stop") {
+      activeVoiceRoutesRef.current.delete(routeKey);
+    }
+    refreshActiveVoiceChannelState();
   }
 
   function matrixAnchorRoomId(listenIds: string[], talkIds: string[]) {
@@ -349,6 +441,8 @@ export function App() {
       audio.srcObject = null;
     }
     remoteAudioRef.current.clear();
+    activeVoiceRoutesRef.current.clear();
+    setActiveVoiceRoutes([]);
     if (localStreamRef.current) {
       for (const track of localStreamRef.current.getTracks()) track.stop();
       localStreamRef.current = null;
@@ -356,6 +450,7 @@ export function App() {
     pendingICERef.current = [];
     stopStatsLoop();
     stopLevelMeter();
+    stopRemoteAudioMeter();
   }
 
   useEffect(() => {
@@ -405,6 +500,19 @@ export function App() {
           }
           const stream = event.streams[0] ?? new MediaStream([event.track]);
           audio.srcObject = stream;
+          if (!remoteAnalyserNodesRef.current.has(key)) {
+            const AudioCtx = window.AudioContext;
+            if (AudioCtx) {
+              const ctx = new AudioCtx();
+              const src = ctx.createMediaStreamSource(stream);
+              const analyser = ctx.createAnalyser();
+              analyser.fftSize = 256;
+              src.connect(analyser);
+              const analyserBuf = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
+              remoteAnalyserNodesRef.current.set(key, { ctx, analyser, buf: analyserBuf });
+              startRemoteAudioMeterLoop();
+            }
+          }
           void audio.play().catch((err) => {
             setAudioError(`Remote audio playback blocked: ${err instanceof Error ? err.message : "unknown error"}`);
           });
@@ -495,6 +603,20 @@ export function App() {
             void pc.addIceCandidate(candidate).catch(console.error);
           }
           return;
+        }
+        if (
+          msg.type === "voice_state" &&
+          msg.data.fromUser.id !== appData.self.id &&
+          msg.data.scope &&
+          msg.data.targetId
+        ) {
+          updateVoiceRoute(
+            msg.data.fromUser.id,
+            msg.data.scope,
+            msg.data.targetId,
+            (msg.data.body || "").toString(),
+            msg.data.fromUser.username
+          );
         }
         if (
           msg.type === "voice_state" &&
@@ -1228,6 +1350,18 @@ export function App() {
       </ul>
     </>
   ) : null;
+  function isReceivingRoom(roomId: string) {
+    if (!incomingAudioActive) return false;
+    return activeVoiceRoutes.some((route) => route.scope === "room" && route.targetID === roomId);
+  }
+  function isReceivingBroadcast(groupId: string) {
+    if (!incomingAudioActive) return false;
+    return activeVoiceRoutes.some((route) => route.scope === "broadcast" && route.targetID === groupId);
+  }
+  function isReceivingDirect(userId: string) {
+    if (!incomingAudioActive) return false;
+    return activeVoiceRoutes.some((route) => route.scope === "direct" && route.senderUserID === userId);
+  }
   const stationBroadcastBlock =
     appData.broadcastGroups.length > 0 ? (
       <section className="station-block">
@@ -1242,6 +1376,7 @@ export function App() {
               onPointerLeave={() => stopBroadcastPtt(group.id)}
               onPointerCancel={() => stopBroadcastPtt(group.id)}
             >
+              {isReceivingBroadcast(group.id) ? <span className="station-broadcast-receiving">🔊</span> : null}
               {group.name}
             </button>
           ))}
@@ -1284,6 +1419,7 @@ export function App() {
             return (
               <article key={`station-room-${room.id}`} className="station-card">
                 <button className={`station-card-head ${talking ? "selected" : ""}`} onClick={() => toggleTalkRoom(room.id)}>
+                  {isReceivingRoom(room.id) ? <span className="station-receiving-badge">🔊</span> : null}
                   <small>Talk</small>
                   <strong>{room.name}</strong>
                 </button>
@@ -1313,6 +1449,7 @@ export function App() {
                 onPointerLeave={() => stopDirectPtt(p.userId)}
                 onPointerCancel={() => stopDirectPtt(p.userId)}
               >
+                {isReceivingDirect(p.userId) ? <span className="station-receiving-badge">🔊</span> : null}
                 <small>Direct</small>
                 <strong>{p.username}</strong>
                 <em>{roleNameById.get(p.roleId) || p.roleId || "Unknown role"}</em>
