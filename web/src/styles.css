@@ -87,6 +87,51 @@ aside li,
 .chat input {
   flex: 1;
 }
+.mic-dropdown {
+  position: relative;
+  width: 100%;
+}
+.mic-dropdown-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.mic-dropdown-trigger span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mic-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 0.25rem;
+  border-radius: 10px;
+  border: 1px solid #2f3542;
+  background: #1b2029;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.mic-dropdown-item {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 0.45rem 0.5rem;
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mic-dropdown-item:hover,
+.mic-dropdown-item.active {
+  background: #2b3341;
+}
 .meter {
   height: 10px;
   width: 100%;

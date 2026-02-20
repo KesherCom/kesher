@@ -32,6 +32,7 @@ export function App() {
   const [audioError, setAudioError] = useState<string>("");
   const [webrtcState, setWebrtcState] = useState<string>("new");
   const [rtpStats, setRtpStats] = useState<{ inKbps: number; outKbps: number }>({ inKbps: 0, outKbps: 0 });
+  const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -50,6 +51,7 @@ export function App() {
   const lastStatsRef = useRef<{ ts: number; inBytes: number; outBytes: number } | null>(null);
   const selectedInputDeviceIdRef = useRef("");
   const activeRoomRef = useRef(activeRoom);
+  const micMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     voiceModeRef.current = voiceMode;
@@ -100,6 +102,17 @@ export function App() {
     if (!(window.isSecureContext || window.location.hostname === "localhost")) {
       setAudioError("Microphone capture needs HTTPS (or localhost). Open the app via HTTPS for remote devices.");
     }
+  }, []);
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!micMenuRef.current) return;
+      if (event.target instanceof Node && !micMenuRef.current.contains(event.target)) {
+        setIsMicMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
   }, []);
 
   function clearReconnectTimer() {
@@ -447,6 +460,10 @@ export function App() {
     return appData.broadcastGroups.map((b) => ({ id: b.id, label: b.name }));
   }, [scope, appData]);
 
+  const selectedMicLabel = useMemo(() => {
+    return inputDevices.find((d) => d.deviceId === selectedInputDeviceId)?.label || "Select microphone";
+  }, [inputDevices, selectedInputDeviceId]);
+
   useEffect(() => {
     if (currentTargets[0]) setTargetId(currentTargets[0].id);
   }, [scope, appData]);
@@ -555,13 +572,37 @@ export function App() {
             ))}
           </select>
           <h3>Microphone</h3>
-          <select value={selectedInputDeviceId} onChange={(e) => setSelectedInputDeviceId(e.target.value)} disabled={inputDevices.length === 0}>
-            {inputDevices.map((d) => (
-              <option key={d.deviceId} value={d.deviceId}>
-                {d.label || `Mic ${d.deviceId.slice(0, 6)}`}
-              </option>
-            ))}
-          </select>
+          <div className="mic-dropdown" ref={micMenuRef}>
+            <button
+              type="button"
+              className="mic-dropdown-trigger"
+              onClick={() => setIsMicMenuOpen((v) => !v)}
+              disabled={inputDevices.length === 0}
+              aria-haspopup="listbox"
+              aria-expanded={isMicMenuOpen}
+            >
+              <span>{selectedMicLabel}</span>
+              <span>▾</span>
+            </button>
+            {isMicMenuOpen ? (
+              <div className="mic-dropdown-menu" role="listbox">
+                {inputDevices.map((d) => (
+                  <button
+                    type="button"
+                    key={d.deviceId}
+                    className={`mic-dropdown-item ${d.deviceId === selectedInputDeviceId ? "active" : ""}`}
+                    onClick={() => {
+                      setSelectedInputDeviceId(d.deviceId);
+                      setIsMicMenuOpen(false);
+                    }}
+                    title={d.label || `Mic ${d.deviceId.slice(0, 6)}`}
+                  >
+                    {d.label || `Mic ${d.deviceId.slice(0, 6)}`}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <div className="meter">
             <div className="meter-bar" style={{ width: `${inputLevel}%` }} />
           </div>
