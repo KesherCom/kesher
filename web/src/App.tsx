@@ -49,15 +49,24 @@ export function App() {
   const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminError, setAdminError] = useState("");
-  const [adminRoleId, setAdminRoleId] = useState("");
-  const [adminRoleName, setAdminRoleName] = useState("");
-  const [adminRoleDefaultRoomId, setAdminRoleDefaultRoomId] = useState("");
-  const [adminRoleDefaultVoiceMode, setAdminRoleDefaultVoiceMode] = useState<"always_on" | "ptt" | "">("");
-  const [adminRoomId, setAdminRoomId] = useState("");
-  const [adminRoomName, setAdminRoomName] = useState("");
-  const [adminGroupId, setAdminGroupId] = useState("");
-  const [adminGroupName, setAdminGroupName] = useState("");
-  const [adminGroupRoomIds, setAdminGroupRoomIds] = useState<string[]>([]);
+  const [roleCreateId, setRoleCreateId] = useState("");
+  const [roleCreateName, setRoleCreateName] = useState("");
+  const [roleCreateDefaultRoomId, setRoleCreateDefaultRoomId] = useState("");
+  const [roleCreateDefaultVoiceMode, setRoleCreateDefaultVoiceMode] = useState<"always_on" | "ptt" | "">("");
+  const [roleEditId, setRoleEditId] = useState<string | null>(null);
+  const [roleEditName, setRoleEditName] = useState("");
+  const [roleEditDefaultRoomId, setRoleEditDefaultRoomId] = useState("");
+  const [roleEditDefaultVoiceMode, setRoleEditDefaultVoiceMode] = useState<"always_on" | "ptt" | "">("");
+  const [roomCreateId, setRoomCreateId] = useState("");
+  const [roomCreateName, setRoomCreateName] = useState("");
+  const [roomEditId, setRoomEditId] = useState<string | null>(null);
+  const [roomEditName, setRoomEditName] = useState("");
+  const [groupCreateId, setGroupCreateId] = useState("");
+  const [groupCreateName, setGroupCreateName] = useState("");
+  const [groupCreateRoomIds, setGroupCreateRoomIds] = useState<string[]>([]);
+  const [groupEditId, setGroupEditId] = useState<string | null>(null);
+  const [groupEditName, setGroupEditName] = useState("");
+  const [groupEditRoomIds, setGroupEditRoomIds] = useState<string[]>([]);
   const [pttPressed, setPttPressed] = useState(false);
   const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(null);
 
@@ -136,22 +145,10 @@ export function App() {
 
   useEffect(() => {
     if (!appData) return;
-    if (!adminRoleId && appData.roles[0]) {
-      setAdminRoleId(appData.roles[0].id);
-      setAdminRoleName(appData.roles[0].name);
-      setAdminRoleDefaultRoomId(appData.roles[0].defaultRoomId || "");
-      setAdminRoleDefaultVoiceMode((appData.roles[0].defaultVoiceMode as "always_on" | "ptt") || "");
+    if (roleCreateDefaultRoomId === "" && appData.rooms[0]) {
+      setRoleCreateDefaultRoomId(appData.rooms[0].id);
     }
-    if (!adminRoomId && appData.rooms[0]) {
-      setAdminRoomId(appData.rooms[0].id);
-      setAdminRoomName(appData.rooms[0].name);
-    }
-    if (!adminGroupId && appData.broadcastGroups[0]) {
-      setAdminGroupId(appData.broadcastGroups[0].id);
-      setAdminGroupName(appData.broadcastGroups[0].name);
-      setAdminGroupRoomIds(appData.broadcastGroups[0].roomIds);
-    }
-  }, [appData, adminRoleId, adminRoomId, adminGroupId]);
+  }, [appData, roleCreateDefaultRoomId]);
 
   const refreshInputDevices = useCallback(async () => {
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -600,33 +597,59 @@ export function App() {
     }
   }
 
-  function resetGroupForm() {
-    setAdminGroupId("");
-    setAdminGroupName("");
-    setAdminGroupRoomIds([]);
+  function resetGroupCreateForm() {
+    setGroupCreateId("");
+    setGroupCreateName("");
+    setGroupCreateRoomIds([]);
   }
 
-  function saveRoleConfig() {
-    if (!token || !appData) return;
-    const id = adminRoleId.trim();
-    const name = adminRoleName.trim();
+  function resetRoleEditForm() {
+    setRoleEditId(null);
+    setRoleEditName("");
+    setRoleEditDefaultRoomId("");
+    setRoleEditDefaultVoiceMode("");
+  }
+
+  function resetRoomEditForm() {
+    setRoomEditId(null);
+    setRoomEditName("");
+  }
+
+  function resetGroupEditForm() {
+    setGroupEditId(null);
+    setGroupEditName("");
+    setGroupEditRoomIds([]);
+  }
+
+  function createRoleConfig() {
+    if (!token) return;
+    const id = roleCreateId.trim();
+    const name = roleCreateName.trim();
     if (!id || !name) return;
-    const exists = appData.roles.some((role) => role.id === id);
     void runAdminAction(async () => {
-      if (exists) {
-        await updateRole(token, id, {
-          name,
-          defaultRoomId: adminRoleDefaultRoomId.trim() || undefined,
-          defaultVoiceMode: adminRoleDefaultVoiceMode || undefined
-        });
-      } else {
-        await createRole(token, {
-          id,
-          name,
-          defaultRoomId: adminRoleDefaultRoomId.trim() || undefined,
-          defaultVoiceMode: adminRoleDefaultVoiceMode || undefined
-        });
-      }
+      await createRole(token, {
+        id,
+        name,
+        defaultRoomId: roleCreateDefaultRoomId.trim() || undefined,
+        defaultVoiceMode: roleCreateDefaultVoiceMode || undefined
+      });
+      setRoleCreateId("");
+      setRoleCreateName("");
+      setRoleCreateDefaultVoiceMode("");
+    });
+  }
+
+  function saveRoleEdit() {
+    if (!token || !roleEditId) return;
+    const name = roleEditName.trim();
+    if (!name) return;
+    void runAdminAction(async () => {
+      await updateRole(token, roleEditId, {
+        name,
+        defaultRoomId: roleEditDefaultRoomId.trim() || undefined,
+        defaultVoiceMode: roleEditDefaultVoiceMode || undefined
+      });
+      resetRoleEditForm();
     });
   }
 
@@ -635,18 +658,25 @@ export function App() {
     void runAdminAction(() => deleteRole(token, id));
   }
 
-  function saveRoomConfig() {
-    if (!token || !appData) return;
-    const id = adminRoomId.trim();
-    const name = adminRoomName.trim();
+  function createRoomConfig() {
+    if (!token) return;
+    const id = roomCreateId.trim();
+    const name = roomCreateName.trim();
     if (!id || !name) return;
-    const exists = appData.rooms.some((room) => room.id === id);
     void runAdminAction(async () => {
-      if (exists) {
-        await updateRoom(token, id, { name });
-      } else {
-        await createRoom(token, { id, name });
-      }
+      await createRoom(token, { id, name });
+      setRoomCreateId("");
+      setRoomCreateName("");
+    });
+  }
+
+  function saveRoomEdit() {
+    if (!token || !roomEditId) return;
+    const name = roomEditName.trim();
+    if (!name) return;
+    void runAdminAction(async () => {
+      await updateRoom(token, roomEditId, { name });
+      resetRoomEditForm();
     });
   }
 
@@ -655,19 +685,24 @@ export function App() {
     void runAdminAction(() => deleteRoom(token, id));
   }
 
-  function saveBroadcastGroupConfig() {
-    if (!token || !appData) return;
-    const id = adminGroupId.trim();
-    const name = adminGroupName.trim();
-    if (!id || !name || adminGroupRoomIds.length === 0) return;
-    const exists = appData.broadcastGroups.some((group) => group.id === id);
+  function createBroadcastGroupConfig() {
+    if (!token) return;
+    const id = groupCreateId.trim();
+    const name = groupCreateName.trim();
+    if (!id || !name || groupCreateRoomIds.length === 0) return;
     void runAdminAction(async () => {
-      if (exists) {
-        await updateBroadcastGroup(token, id, { name, roomIds: adminGroupRoomIds });
-      } else {
-        await createBroadcastGroup(token, { id, name, roomIds: adminGroupRoomIds });
-      }
-      resetGroupForm();
+      await createBroadcastGroup(token, { id, name, roomIds: groupCreateRoomIds });
+      resetGroupCreateForm();
+    });
+  }
+
+  function saveGroupEdit() {
+    if (!token || !groupEditId) return;
+    const name = groupEditName.trim();
+    if (!name || groupEditRoomIds.length === 0) return;
+    void runAdminAction(async () => {
+      await updateBroadcastGroup(token, groupEditId, { name, roomIds: groupEditRoomIds });
+      resetGroupEditForm();
     });
   }
 
@@ -675,8 +710,8 @@ export function App() {
     if (!token) return;
     void runAdminAction(async () => {
       await deleteBroadcastGroup(token, id);
-      if (adminGroupId === id) {
-        resetGroupForm();
+      if (groupEditId === id) {
+        resetGroupEditForm();
       }
     });
   }
@@ -954,13 +989,13 @@ export function App() {
               <h3>Admin · configuration</h3>
               {adminError ? <p className="admin-error">{adminError}</p> : null}
               <div className="admin-block">
-                <h4>Roles</h4>
+                <h4>Create role</h4>
                 <div className="admin-grid">
-                  <input value={adminRoleId} onChange={(e) => setAdminRoleId(e.target.value)} placeholder="role-id" />
-                  <input value={adminRoleName} onChange={(e) => setAdminRoleName(e.target.value)} placeholder="Role name" />
+                  <input value={roleCreateId} onChange={(e) => setRoleCreateId(e.target.value)} placeholder="role-id" />
+                  <input value={roleCreateName} onChange={(e) => setRoleCreateName(e.target.value)} placeholder="Role name" />
                   <select
-                    value={adminRoleDefaultRoomId}
-                    onChange={(e) => setAdminRoleDefaultRoomId(e.target.value)}
+                    value={roleCreateDefaultRoomId}
+                    onChange={(e) => setRoleCreateDefaultRoomId(e.target.value)}
                     aria-label="Default room"
                   >
                     <option value="">Default room…</option>
@@ -971,27 +1006,62 @@ export function App() {
                     ))}
                   </select>
                   <select
-                    value={adminRoleDefaultVoiceMode}
-                    onChange={(e) => setAdminRoleDefaultVoiceMode(e.target.value as "always_on" | "ptt" | "")}
+                    value={roleCreateDefaultVoiceMode}
+                    onChange={(e) => setRoleCreateDefaultVoiceMode(e.target.value as "always_on" | "ptt" | "")}
                     aria-label="Default audio mode"
                   >
                     <option value="">Default audio mode…</option>
                     <option value="always_on">Always on</option>
                     <option value="ptt">PTT</option>
                   </select>
-                  <button onClick={saveRoleConfig} disabled={adminBusy || !adminRoleId.trim() || !adminRoleName.trim()}>
-                    Save role
+                  <button onClick={createRoleConfig} disabled={adminBusy || !roleCreateId.trim() || !roleCreateName.trim()}>
+                    Create role
                   </button>
                 </div>
+                {roleEditId ? (
+                  <div className="admin-edit-panel">
+                    <div className="admin-edit-title">Editing role: {roleEditId}</div>
+                    <div className="admin-grid">
+                      <input value={roleEditName} onChange={(e) => setRoleEditName(e.target.value)} placeholder="Role name" />
+                      <select
+                        value={roleEditDefaultRoomId}
+                        onChange={(e) => setRoleEditDefaultRoomId(e.target.value)}
+                        aria-label="Default room"
+                      >
+                        <option value="">Default room…</option>
+                        {appData.rooms.map((room) => (
+                          <option key={`role-edit-room-${room.id}`} value={room.id}>
+                            {room.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={roleEditDefaultVoiceMode}
+                        onChange={(e) => setRoleEditDefaultVoiceMode(e.target.value as "always_on" | "ptt" | "")}
+                        aria-label="Default audio mode"
+                      >
+                        <option value="">Default audio mode…</option>
+                        <option value="always_on">Always on</option>
+                        <option value="ptt">PTT</option>
+                      </select>
+                      <button onClick={saveRoleEdit} disabled={adminBusy || !roleEditName.trim()}>
+                        Save changes
+                      </button>
+                      <button onClick={resetRoleEditForm} disabled={adminBusy} className="secondary">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <ul className="admin-list">
                   {appData.roles.map((role) => (
                     <li key={role.id}>
                       <button
                         onClick={() => {
-                          setAdminRoleId(role.id);
-                          setAdminRoleName(role.name);
-                          setAdminRoleDefaultRoomId(role.defaultRoomId || "");
-                          setAdminRoleDefaultVoiceMode((role.defaultVoiceMode as "always_on" | "ptt") || "");
+                          setRoleEditId(role.id);
+                          setRoleEditName(role.name);
+                          setRoleEditDefaultRoomId(role.defaultRoomId || "");
+                          setRoleEditDefaultVoiceMode((role.defaultVoiceMode as "always_on" | "ptt") || "");
                         }}
                       >
                         Edit
@@ -1007,21 +1077,35 @@ export function App() {
                 </ul>
               </div>
               <div className="admin-block">
-                <h4>Rooms</h4>
+                <h4>Create room</h4>
                 <div className="admin-grid">
-                  <input value={adminRoomId} onChange={(e) => setAdminRoomId(e.target.value)} placeholder="room-id" />
-                  <input value={adminRoomName} onChange={(e) => setAdminRoomName(e.target.value)} placeholder="Room name" />
-                  <button onClick={saveRoomConfig} disabled={adminBusy || !adminRoomId.trim() || !adminRoomName.trim()}>
-                    Save room
+                  <input value={roomCreateId} onChange={(e) => setRoomCreateId(e.target.value)} placeholder="room-id" />
+                  <input value={roomCreateName} onChange={(e) => setRoomCreateName(e.target.value)} placeholder="Room name" />
+                  <button onClick={createRoomConfig} disabled={adminBusy || !roomCreateId.trim() || !roomCreateName.trim()}>
+                    Create room
                   </button>
                 </div>
+                {roomEditId ? (
+                  <div className="admin-edit-panel">
+                    <div className="admin-edit-title">Editing room: {roomEditId}</div>
+                    <div className="admin-grid">
+                      <input value={roomEditName} onChange={(e) => setRoomEditName(e.target.value)} placeholder="Room name" />
+                      <button onClick={saveRoomEdit} disabled={adminBusy || !roomEditName.trim()}>
+                        Save changes
+                      </button>
+                      <button onClick={resetRoomEditForm} disabled={adminBusy} className="secondary">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <ul className="admin-list">
                   {appData.rooms.map((room) => (
                     <li key={room.id}>
                       <button
                         onClick={() => {
-                          setAdminRoomId(room.id);
-                          setAdminRoomName(room.name);
+                          setRoomEditId(room.id);
+                          setRoomEditName(room.name);
                         }}
                       >
                         Edit
@@ -1037,33 +1121,33 @@ export function App() {
                 </ul>
               </div>
               <div className="admin-block">
-                <h4>Broadcast channels</h4>
+                <h4>Create broadcast channel</h4>
                 <div className="admin-grid">
                   <input
-                    value={adminGroupId}
-                    onChange={(e) => setAdminGroupId(e.target.value)}
+                    value={groupCreateId}
+                    onChange={(e) => setGroupCreateId(e.target.value)}
                     placeholder="broadcast-channel-id"
                   />
                   <input
-                    value={adminGroupName}
-                    onChange={(e) => setAdminGroupName(e.target.value)}
+                    value={groupCreateName}
+                    onChange={(e) => setGroupCreateName(e.target.value)}
                     placeholder="Broadcast channel name"
                   />
                   <button
-                    onClick={saveBroadcastGroupConfig}
-                    disabled={adminBusy || !adminGroupId.trim() || !adminGroupName.trim() || adminGroupRoomIds.length === 0}
+                    onClick={createBroadcastGroupConfig}
+                    disabled={adminBusy || !groupCreateId.trim() || !groupCreateName.trim() || groupCreateRoomIds.length === 0}
                   >
-                    Save channel
+                    Create channel
                   </button>
                 </div>
                 <div className="admin-room-picker">
                   {appData.rooms.map((room) => (
-                    <label key={`group-room-${room.id}`} className="admin-checkbox">
+                    <label key={`group-create-room-${room.id}`} className="admin-checkbox">
                       <input
                         type="checkbox"
-                        checked={adminGroupRoomIds.includes(room.id)}
+                        checked={groupCreateRoomIds.includes(room.id)}
                         onChange={() =>
-                          setAdminGroupRoomIds((prev) =>
+                          setGroupCreateRoomIds((prev) =>
                             prev.includes(room.id) ? prev.filter((id) => id !== room.id) : [...prev, room.id]
                           )
                         }
@@ -1072,14 +1156,44 @@ export function App() {
                     </label>
                   ))}
                 </div>
+                {groupEditId ? (
+                  <div className="admin-edit-panel">
+                    <div className="admin-edit-title">Editing channel: {groupEditId}</div>
+                    <div className="admin-grid">
+                      <input value={groupEditName} onChange={(e) => setGroupEditName(e.target.value)} placeholder="Channel name" />
+                      <button onClick={saveGroupEdit} disabled={adminBusy || !groupEditName.trim() || groupEditRoomIds.length === 0}>
+                        Save changes
+                      </button>
+                      <button onClick={resetGroupEditForm} disabled={adminBusy} className="secondary">
+                        Cancel
+                      </button>
+                    </div>
+                    <div className="admin-room-picker">
+                      {appData.rooms.map((room) => (
+                        <label key={`group-edit-room-${room.id}`} className="admin-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={groupEditRoomIds.includes(room.id)}
+                            onChange={() =>
+                              setGroupEditRoomIds((prev) =>
+                                prev.includes(room.id) ? prev.filter((id) => id !== room.id) : [...prev, room.id]
+                              )
+                            }
+                          />
+                          <span>{room.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 <ul className="admin-list">
                   {appData.broadcastGroups.map((group) => (
                     <li key={group.id}>
                       <button
                         onClick={() => {
-                          setAdminGroupId(group.id);
-                          setAdminGroupName(group.name);
-                          setAdminGroupRoomIds(group.roomIds);
+                          setGroupEditId(group.id);
+                          setGroupEditName(group.name);
+                          setGroupEditRoomIds(group.roomIds);
                         }}
                       >
                         Edit
