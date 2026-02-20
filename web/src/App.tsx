@@ -810,29 +810,19 @@ export function App() {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !scopedTargetId) return;
     const stream = localStreamRef.current;
     if (stream) {
-      const enable = state === "ptt_start" || state === "always_on";
-      const disable = state === "ptt_stop";
-      if (enable || disable) {
-        for (const track of stream.getAudioTracks()) track.enabled = enable;
+      for (const track of stream.getAudioTracks()) {
+        if (state === "always_on" || state === "ptt_start") {
+          track.enabled = true;
+        } else if (state === "ptt_stop") {
+          track.enabled = voiceModeRef.current === "always_on";
+        }
       }
     }
-    if (state === "always_on") setVoiceMode("always_on");
-    if (state === "ptt_start" || state === "ptt_stop") setVoiceMode("ptt");
     wsRef.current.send(JSON.stringify({ type: "voice_state", data: { scope: scopeValue, targetId: scopedTargetId, body: state } }));
   }
 
   function sendVoiceState(state: string) {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    const stream = localStreamRef.current;
-    if (stream) {
-      const enable = state === "ptt_start" || state === "always_on";
-      const disable = state === "ptt_stop";
-      if (enable || disable) {
-        for (const track of stream.getAudioTracks()) track.enabled = enable;
-      }
-    }
-    if (state === "always_on") setVoiceMode("always_on");
-    if (state === "ptt_start" || state === "ptt_stop") setVoiceMode("ptt");
     const voiceTargetId = targetId || matrixAnchorRoomId(listenRoomIdsRef.current, talkRoomIdsRef.current);
     if (!voiceTargetId) return;
     const voiceScope = targetId ? scope : "room";
@@ -841,8 +831,12 @@ export function App() {
 
   function setAlwaysOn(enabled: boolean) {
     if (enabled) {
+      setVoiceMode("always_on");
+      voiceModeRef.current = "always_on";
       sendVoiceState("always_on");
     } else {
+      setVoiceMode("ptt");
+      voiceModeRef.current = "ptt";
       sendVoiceState("ptt_stop");
     }
   }
@@ -1344,7 +1338,7 @@ export function App() {
         >
           Hold to talk
         </button>
-        <label className="station-always-on">
+        <label className={`station-always-on ${voiceMode === "always_on" ? "active" : ""}`}>
           <input type="checkbox" checked={voiceMode === "always_on"} onChange={(e) => setAlwaysOn(e.target.checked)} />
           <span>Always on</span>
         </label>
