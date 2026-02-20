@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -626,7 +627,13 @@ func (s *Server) staticHandler() http.Handler {
 			http.ServeFile(w, r, s.cfg.StaticDir+"/index.html")
 			return
 		}
-		fileServer.ServeHTTP(w, r)
+		requestedPath := filepath.Join(s.cfg.StaticDir, filepath.Clean(r.URL.Path))
+		if info, err := os.Stat(requestedPath); err == nil && !info.IsDir() {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		http.ServeFile(w, r, s.cfg.StaticDir+"/index.html")
+		return
 	})
 }
 
