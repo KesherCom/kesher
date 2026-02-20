@@ -1,0 +1,118 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #12151b;
+  color: #e9eef7;
+}
+
+.root {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.login {
+  max-width: 440px;
+  display: grid;
+  gap: 0.75rem;
+}
+
+label {
+  display: grid;
+  gap: 0.3rem;
+}
+
+input,
+select,
+button {
+  font: inherit;
+  border-radius: 8px;
+  border: 1px solid #2f3542;
+  padding: 0.6rem 0.7rem;
+  background: #1b2029;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.app header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.app main {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 1rem;
+}
+
+aside,
+section {
+  background: #171c25;
+  border: 1px solid #2b3341;
+  border-radius: 12px;
+  padding: 0.8rem;
+}
+
+aside ul,
+.events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+aside li,
+.events li {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid #232b37;
+}
+
+.controls,
+.chat,
+.signals,
+.voice {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.chat input {
+  flex: 1;
+}
+.meter {
+  height: 10px;
+  width: 100%;
+  background: #0d1117;
+  border: 1px solid #2f3542;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 0.4rem;
+  margin-bottom: 0.2rem;
+}
+.meter-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #2ecc71 0%, #f1c40f 60%, #e74c3c 100%);
+  width: 0%;
+  transition: width 80ms linear;
+}
+
+.events li {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 0.7rem;
+}
+
+@media (max-width: 900px) {
+  .app main {
+    grid-template-columns: 1fr;
+  }
+}
+

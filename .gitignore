@@ -1,0 +1,11 @@
+.DS_Store
+node_modules
+dist
+coverage
+.env
+.env.local
+tmp
+*.db
+*.db-*
+backend/bin
+
