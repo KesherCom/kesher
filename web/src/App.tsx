@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { bootstrap, getPublicBootstrap, login, logout } from "./api";
 import type { Bootstrap, Presence, PublicBootstrap, RoutedEvent } from "./types";
 
@@ -81,17 +81,21 @@ export function App() {
       });
   }, [token]);
 
+  const refreshInputDevices = useCallback(async () => {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const inputs = devices.filter((d) => d.kind === "audioinput");
+    setInputDevices(inputs);
+    setSelectedInputDeviceId((prev) => {
+      if (prev && inputs.some((d) => d.deviceId === prev)) return prev;
+      return inputs[0]?.deviceId || "";
+    });
+  }, []);
+
   useEffect(() => {
-    const refresh = async () => {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const inputs = devices.filter((d) => d.kind === "audioinput");
-      setInputDevices(inputs);
-      if (!selectedInputDeviceId && inputs[0]) setSelectedInputDeviceId(inputs[0].deviceId);
-    };
-    void refresh();
-    navigator.mediaDevices.addEventListener("devicechange", refresh);
-    return () => navigator.mediaDevices.removeEventListener("devicechange", refresh);
-  }, [selectedInputDeviceId]);
+    void refreshInputDevices();
+    navigator.mediaDevices.addEventListener("devicechange", refreshInputDevices);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", refreshInputDevices);
+  }, [refreshInputDevices]);
   useEffect(() => {
     if (!(window.isSecureContext || window.location.hostname === "localhost")) {
       setAudioError("Microphone capture needs HTTPS (or localhost). Open the app via HTTPS for remote devices.");
@@ -298,6 +302,7 @@ export function App() {
           const stream = await getMicStream(selectedInputDeviceIdRef.current);
           localStreamRef.current = stream;
           startLevelMeter(stream);
+          void refreshInputDevices();
           const initialEnabled = voiceModeRef.current === "always_on";
           for (const track of stream.getAudioTracks()) {
             track.enabled = initialEnabled;
