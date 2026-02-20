@@ -45,14 +45,14 @@ async function apiMutation(url: string, token: string, method: "POST" | "PUT" | 
 
 export async function createRole(
   token: string,
-  payload: { id: string; name: string; defaultRoomId?: string; defaultVoiceMode?: string }
+  payload: { id: string; name: string; defaultRoomId?: string; defaultVoiceMode?: string; defaultSimpleView?: boolean }
 ): Promise<void> {
   await apiMutation("/api/admin/roles", token, "POST", payload);
 }
 export async function updateRole(
   token: string,
   roleId: string,
-  payload: { name: string; defaultRoomId?: string; defaultVoiceMode?: string }
+  payload: { name: string; defaultRoomId?: string; defaultVoiceMode?: string; defaultSimpleView?: boolean }
 ): Promise<void> {
   await apiMutation(`/api/admin/roles/${encodeURIComponent(roleId)}`, token, "PUT", payload);
 }

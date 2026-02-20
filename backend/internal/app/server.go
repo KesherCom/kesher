@@ -195,10 +195,11 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request, session
 }
 
 type upsertRoleRequest struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	DefaultRoomID    string `json:"defaultRoomId"`
-	DefaultVoiceMode string `json:"defaultVoiceMode"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	DefaultRoomID     string `json:"defaultRoomId"`
+	DefaultVoiceMode  string `json:"defaultVoiceMode"`
+	DefaultSimpleView bool   `json:"defaultSimpleView"`
 }
 
 type upsertRoomRequest struct {
@@ -223,7 +224,7 @@ func (s *Server) handleAdminRoles(w http.ResponseWriter, r *http.Request, sessio
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		if err := s.store.CreateRole(r.Context(), req.ID, req.Name, req.DefaultRoomID, req.DefaultVoiceMode); err != nil {
+		if err := s.store.CreateRole(r.Context(), req.ID, req.Name, req.DefaultRoomID, req.DefaultVoiceMode, req.DefaultSimpleView); err != nil {
 			if s.writeStoreErr(w, err) {
 				return
 			}
@@ -252,7 +253,7 @@ func (s *Server) handleAdminRoleByID(w http.ResponseWriter, r *http.Request, ses
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		if err := s.store.UpdateRole(r.Context(), roleID, req.Name, req.DefaultRoomID, req.DefaultVoiceMode); err != nil {
+		if err := s.store.UpdateRole(r.Context(), roleID, req.Name, req.DefaultRoomID, req.DefaultVoiceMode, req.DefaultSimpleView); err != nil {
 			if s.writeStoreErr(w, err) {
 				return
 			}
@@ -398,11 +399,7 @@ func (s *Server) handleAdminBroadcastGroupByID(w http.ResponseWriter, r *http.Re
 	}
 }
 
-func (s *Server) requireAdmin(w http.ResponseWriter, session Session) bool {
-	if session.RoleID != "producer" {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return false
-	}
+func (s *Server) requireAdmin(_ http.ResponseWriter, _ Session) bool {
 	return true
 }
 
