@@ -1292,17 +1292,20 @@ export function App() {
         <div className="station-direct-grid">
           {directOnlineTargets.map((p) => (
             <article key={`station-direct-${p.userId}`} className="station-card station-direct-card">
-              <button className="station-card-head">
+              <button
+                className={`station-card-head direct-ptt ${directPttPressedUserId === p.userId ? "active" : ""}`}
+                onPointerDown={() => startDirectPtt(p.userId)}
+                onPointerUp={() => stopDirectPtt(p.userId)}
+                onPointerLeave={() => stopDirectPtt(p.userId)}
+                onPointerCancel={() => stopDirectPtt(p.userId)}
+              >
                 <small>Direct</small>
                 <strong>{p.username}</strong>
                 <em>{roleNameById.get(p.roleId) || p.roleId || "Unknown role"}</em>
               </button>
-              <div className="station-card-actions">
+              <div className="station-card-actions single">
                 <button className="signal" onClick={() => sendScopedSignal("direct", p.userId, "attention")}>
                   Signal
-                </button>
-                <button className="call placeholder" disabled title="Reserved for upcoming feature">
-                  Call
                 </button>
               </div>
             </article>
@@ -1340,17 +1343,6 @@ export function App() {
         >
           Reply to caller
           <small>{replyTarget ? replyTarget.username : "No active caller"}</small>
-        </button>
-        <button
-          className="station-dock-signal"
-          onClick={() => {
-            for (const room of appData.rooms) sendScopedSignal("room", room.id, "attention");
-          }}
-        >
-          Signal all
-        </button>
-        <button className="station-dock-danger" onClick={doLogout}>
-          Logout / Lock
         </button>
       </div>
 

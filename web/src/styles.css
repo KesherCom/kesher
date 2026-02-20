@@ -163,7 +163,7 @@ button.secondary { background: transparent; }
 }
 .station-talk-grid, .station-direct-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(230px, 230px));
   gap: 0.65rem;
 }
 .station-card {
@@ -204,7 +204,14 @@ button.secondary { background: transparent; }
 }
 .station-card-head.selected small,
 .station-card-head.selected em { color: #ffe7e7; }
+.station-card-head.direct-ptt.active {
+  background: #e3222a;
+  color: #fff;
+}
+.station-card-head.direct-ptt.active small,
+.station-card-head.direct-ptt.active em { color: #ffe7e7; }
 .station-card-actions { display: grid; grid-template-columns: 1fr 1fr; }
+.station-card-actions.single { grid-template-columns: 1fr; }
 .station-card-actions button {
   border-radius: 0;
   border: 0;
@@ -278,7 +285,7 @@ button.secondary { background: transparent; }
 }
 .station-dock {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr;
+  grid-template-columns: minmax(260px, 1fr);
   gap: 0.8rem;
   margin: 2rem 0 1rem;
 }
@@ -299,8 +306,6 @@ button.secondary { background: transparent; }
 }
 .station-dock-main small { margin-top: 0.25rem; letter-spacing: 0.06em; color: #95a5c0; }
 .station-dock-main.disabled { opacity: 0.5; }
-.station-dock-signal { background: #1b2230; border: 1px solid #2e3e5c; color: #f4c743; }
-.station-dock-danger { background: #221218; border: 1px solid #4a2632; color: #ff5f5f; }
 .station-utility {
   display: grid;
   grid-template-columns: 1fr 1fr;
