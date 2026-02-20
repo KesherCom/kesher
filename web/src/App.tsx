@@ -1350,17 +1350,34 @@ export function App() {
       </ul>
     </>
   ) : null;
+  const receivingRoutes = incomingAudioActive ? activeVoiceRoutes : [];
+  const hasExplicitReceivingRoutes = receivingRoutes.length > 0;
+  const alwaysOnFallbackRoomIds = new Set(
+    !incomingAudioActive || hasExplicitReceivingRoutes
+      ? []
+      : presence
+          .filter(
+            (p) =>
+              p.userId !== appData.self.id &&
+              p.voiceMode === "always_on" &&
+              p.micEnabled &&
+              Array.isArray(p.talkRooms) &&
+              p.talkRooms.length > 0
+          )
+          .flatMap((p) => p.talkRooms.filter((roomId) => listenRoomIds.includes(roomId)))
+  );
   function isReceivingRoom(roomId: string) {
     if (!incomingAudioActive) return false;
-    return activeVoiceRoutes.some((route) => route.scope === "room" && route.targetID === roomId);
+    if (receivingRoutes.some((route) => route.scope === "room" && route.targetID === roomId)) return true;
+    return alwaysOnFallbackRoomIds.has(roomId);
   }
   function isReceivingBroadcast(groupId: string) {
     if (!incomingAudioActive) return false;
-    return activeVoiceRoutes.some((route) => route.scope === "broadcast" && route.targetID === groupId);
+    return receivingRoutes.some((route) => route.scope === "broadcast" && route.targetID === groupId);
   }
   function isReceivingDirect(userId: string) {
     if (!incomingAudioActive) return false;
-    return activeVoiceRoutes.some((route) => route.scope === "direct" && route.senderUserID === userId);
+    return receivingRoutes.some((route) => route.scope === "direct" && route.senderUserID === userId);
   }
   const stationBroadcastBlock =
     appData.broadcastGroups.length > 0 ? (
