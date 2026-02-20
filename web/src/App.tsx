@@ -69,6 +69,7 @@ export function App() {
   const [groupEditRoomIds, setGroupEditRoomIds] = useState<string[]>([]);
   const [pttPressed, setPttPressed] = useState(false);
   const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(null);
+  const [directPttPressedUserId, setDirectPttPressedUserId] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -788,6 +789,31 @@ export function App() {
     sendBroadcastVoiceState(groupId, "ptt_stop");
   }
 
+  function sendDirectVoiceState(userId: string, state: string) {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const stream = localStreamRef.current;
+    if (stream) {
+      const enable = state === "ptt_start" || state === "always_on";
+      const disable = state === "ptt_stop";
+      if (enable || disable) {
+        for (const track of stream.getAudioTracks()) track.enabled = enable;
+      }
+    }
+    if (state === "always_on") setVoiceMode("always_on");
+    if (state === "ptt_start" || state === "ptt_stop") setVoiceMode("ptt");
+    wsRef.current.send(JSON.stringify({ type: "voice_state", data: { scope: "direct", targetId: userId, body: state } }));
+  }
+
+  function startDirectPtt(userId: string) {
+    setDirectPttPressedUserId(userId);
+    sendDirectVoiceState(userId, "ptt_start");
+  }
+
+  function stopDirectPtt(userId: string) {
+    setDirectPttPressedUserId((current) => (current === userId ? null : current));
+    sendDirectVoiceState(userId, "ptt_stop");
+  }
+
   if (!publicData) return <div className="root">Loading configuration…</div>;
   if (!token || !appData) {
     return (
@@ -910,8 +936,23 @@ export function App() {
                   <ul>
                     {users.map((p) => (
                       <li key={`${p.userId}-${room.id}`}>
-                        {p.username} — {p.micEnabled ? "mic on" : "mic off"}
-                        {p.broadcastActive ? <span className="online-broadcast">broadcasting</span> : null}
+                        <div className="online-user-row">
+                          <span>
+                            {p.username} — {p.micEnabled ? "mic on" : "mic off"}
+                            {p.broadcastActive ? <span className="online-broadcast">broadcasting</span> : null}
+                          </span>
+                          {p.userId !== appData.self.id ? (
+                            <button
+                              className={`direct-ptt-button ${directPttPressedUserId === p.userId ? "active" : ""}`}
+                              onPointerDown={() => startDirectPtt(p.userId)}
+                              onPointerUp={() => stopDirectPtt(p.userId)}
+                              onPointerLeave={() => stopDirectPtt(p.userId)}
+                              onPointerCancel={() => stopDirectPtt(p.userId)}
+                            >
+                              Talk
+                            </button>
+                          ) : null}
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -926,8 +967,23 @@ export function App() {
                     .filter((p) => !p.activeRoom)
                     .map((p) => (
                       <li key={`${p.userId}-noroom`}>
-                        {p.username} — {p.micEnabled ? "mic on" : "mic off"}
-                        {p.broadcastActive ? <span className="online-broadcast">broadcasting</span> : null}
+                        <div className="online-user-row">
+                          <span>
+                            {p.username} — {p.micEnabled ? "mic on" : "mic off"}
+                            {p.broadcastActive ? <span className="online-broadcast">broadcasting</span> : null}
+                          </span>
+                          {p.userId !== appData.self.id ? (
+                            <button
+                              className={`direct-ptt-button ${directPttPressedUserId === p.userId ? "active" : ""}`}
+                              onPointerDown={() => startDirectPtt(p.userId)}
+                              onPointerUp={() => stopDirectPtt(p.userId)}
+                              onPointerLeave={() => stopDirectPtt(p.userId)}
+                              onPointerCancel={() => stopDirectPtt(p.userId)}
+                            >
+                              Talk
+                            </button>
+                          ) : null}
+                        </div>
                       </li>
                     ))}
                 </ul>

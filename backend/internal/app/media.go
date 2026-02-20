@@ -31,6 +31,7 @@ type MediaManager struct {
 	peers           map[string]*mediaPeer
 	sources         map[string]map[string]*mediaSourceTrack // room -> sourceToken -> track
 	broadcastActive map[string]map[string]struct{}          // sourceToken -> broadcastGroupID set
+	directActive    map[string]string                       // sourceToken -> targetUserID
 }
 
 func NewMediaManager(hub *Hub, logger *slog.Logger) *MediaManager {
@@ -40,6 +41,7 @@ func NewMediaManager(hub *Hub, logger *slog.Logger) *MediaManager {
 		peers:           make(map[string]*mediaPeer),
 		sources:         make(map[string]map[string]*mediaSourceTrack),
 		broadcastActive: make(map[string]map[string]struct{}),
+		directActive:    make(map[string]string),
 	}
 }
 
@@ -126,15 +128,19 @@ func (m *MediaManager) SwitchRoom(token, roomID string) {
 		}
 		m.sources[roomID][token] = movedSource
 	}
+
 	m.detachAllIncomingLocked(peer)
 	m.attachRoomSourcesLocked(peer)
 	m.attachBroadcastSourcesToPeerLocked(peer)
+	m.attachDirectSourcesToPeerLocked(peer)
 	m.renegotiateLocked(peer)
+
 	if oldRoom != "" {
 		for _, p := range m.peers {
 			if p.roomID == oldRoom {
-				m.removeSenderLocked(p, token)
-				m.renegotiateLocked(p)
+				if m.removeSenderLocked(p, token) {
+					m.renegotiateLocked(p)
+				}
 			}
 		}
 	}
@@ -143,11 +149,12 @@ func (m *MediaManager) SwitchRoom(token, roomID string) {
 			if p.token == token || p.roomID != roomID {
 				continue
 			}
-			m.attachSourceToPeerLocked(token, movedSource, p)
-			m.renegotiateLocked(p)
+			if m.attachSourceToPeerLocked(token, movedSource, p) {
+				m.renegotiateLocked(p)
+			}
 		}
 	}
-	m.recomputeBroadcastForSourceLocked(token)
+	m.recomputeSourceRoutingLocked(token)
 }
 
 func (m *MediaManager) HandleAnswer(token string, sdp string) error {
@@ -212,6 +219,16 @@ func (m *MediaManager) RemovePeer(token string) {
 	_ = peer.pc.Close()
 	delete(m.peers, token)
 	delete(m.broadcastActive, token)
+	delete(m.directActive, token)
+
+	var affectedSources []string
+	for sourceToken, targetUserID := range m.directActive {
+		if targetUserID == peer.userID {
+			delete(m.directActive, sourceToken)
+			affectedSources = append(affectedSources, sourceToken)
+		}
+	}
+
 	if roomID != "" {
 		if _, ok := m.sources[roomID]; ok {
 			delete(m.sources[roomID], token)
@@ -220,9 +237,13 @@ func (m *MediaManager) RemovePeer(token string) {
 			if p.roomID != roomID {
 				continue
 			}
-			m.removeSenderLocked(p, token)
-			m.renegotiateLocked(p)
+			if m.removeSenderLocked(p, token) {
+				m.renegotiateLocked(p)
+			}
 		}
+	}
+	for _, sourceToken := range affectedSources {
+		m.recomputeSourceRoutingLocked(sourceToken)
 	}
 }
 
@@ -241,10 +262,11 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 		if p.roomID != sourcePeer.roomID || p.token == sourcePeer.token {
 			continue
 		}
-		m.attachSourceToPeerLocked(sourcePeer.token, m.sources[sourcePeer.roomID][sourcePeer.token], p)
-		m.renegotiateLocked(p)
+		if m.attachSourceToPeerLocked(sourcePeer.token, m.sources[sourcePeer.roomID][sourcePeer.token], p) {
+			m.renegotiateLocked(p)
+		}
 	}
-	m.recomputeBroadcastForSourceLocked(sourcePeer.token)
+	m.recomputeSourceRoutingLocked(sourcePeer.token)
 	m.mu.Unlock()
 
 	for {
@@ -265,8 +287,9 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 		if p.roomID != sourcePeer.roomID {
 			continue
 		}
-		m.removeSenderLocked(p, sourcePeer.token)
-		m.renegotiateLocked(p)
+		if m.removeSenderLocked(p, sourcePeer.token) {
+			m.renegotiateLocked(p)
+		}
 	}
 	m.mu.Unlock()
 }
@@ -287,11 +310,27 @@ func (m *MediaManager) SetBroadcastGroupActive(sourceToken, groupID string, enab
 			}
 		}
 	}
-	m.recomputeBroadcastForSourceLocked(sourceToken)
+	m.recomputeSourceRoutingLocked(sourceToken)
+}
+
+func (m *MediaManager) SetDirectTargetActive(sourceToken, targetUserID string, enabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if enabled {
+		m.directActive[sourceToken] = targetUserID
+	} else if currentTarget, ok := m.directActive[sourceToken]; ok {
+		if currentTarget == targetUserID || targetUserID == "" {
+			delete(m.directActive, sourceToken)
+		}
+	}
+	m.recomputeSourceRoutingLocked(sourceToken)
 }
 
 func (m *MediaManager) attachBroadcastSourcesToPeerLocked(peer *mediaPeer) {
 	for sourceToken := range m.broadcastActive {
+		if m.isDirectActiveForSourceLocked(sourceToken) {
+			continue
+		}
 		rooms := m.broadcastRoomsForSourceLocked(sourceToken)
 		if _, ok := rooms[peer.roomID]; !ok {
 			continue
@@ -304,29 +343,57 @@ func (m *MediaManager) attachBroadcastSourcesToPeerLocked(peer *mediaPeer) {
 	}
 }
 
-func (m *MediaManager) recomputeBroadcastForSourceLocked(sourceToken string) {
+func (m *MediaManager) attachDirectSourcesToPeerLocked(peer *mediaPeer) {
+	for sourceToken, targetUserID := range m.directActive {
+		if targetUserID != peer.userID {
+			continue
+		}
+		src, _ := m.findSourceTrackLocked(sourceToken)
+		if src == nil || sourceToken == peer.token {
+			continue
+		}
+		m.attachSourceToPeerLocked(sourceToken, src, peer)
+	}
+}
+
+func (m *MediaManager) recomputeSourceRoutingLocked(sourceToken string) {
 	src, sourceRoom := m.findSourceTrackLocked(sourceToken)
 	if src == nil {
 		return
 	}
+	directTargetUserID := m.directActive[sourceToken]
+	var directTargetPeerToken string
+	if directTargetUserID != "" {
+		for _, p := range m.peers {
+			if p.userID == directTargetUserID {
+				directTargetPeerToken = p.token
+				break
+			}
+		}
+	}
 	rooms := m.broadcastRoomsForSourceLocked(sourceToken)
 	broadcastActive := len(rooms) > 0
+
 	for _, p := range m.peers {
 		if p.token == sourceToken {
 			continue
 		}
-		if broadcastActive {
-			if _, ok := rooms[p.roomID]; ok {
-				m.attachSourceToPeerLocked(sourceToken, src, p)
+		shouldReceive := false
+		if directTargetPeerToken != "" {
+			shouldReceive = p.token == directTargetPeerToken
+		} else if broadcastActive {
+			_, shouldReceive = rooms[p.roomID]
+		} else {
+			shouldReceive = p.roomID == sourceRoom
+		}
+
+		if shouldReceive {
+			if m.attachSourceToPeerLocked(sourceToken, src, p) {
 				m.renegotiateLocked(p)
-				continue
 			}
-			m.removeSenderLocked(p, sourceToken)
-			m.renegotiateLocked(p)
 			continue
 		}
-		if p.roomID == sourceRoom {
-			m.attachSourceToPeerLocked(sourceToken, src, p)
+		if m.removeSenderLocked(p, sourceToken) {
 			m.renegotiateLocked(p)
 		}
 	}
@@ -349,6 +416,11 @@ func (m *MediaManager) broadcastRoomsForSourceLocked(sourceToken string) map[str
 		}
 	}
 	return rooms
+}
+
+func (m *MediaManager) isDirectActiveForSourceLocked(sourceToken string) bool {
+	_, ok := m.directActive[sourceToken]
+	return ok
 }
 
 func (m *MediaManager) isBroadcastActiveForSourceLocked(sourceToken string) bool {
@@ -378,6 +450,12 @@ func (m *MediaManager) attachRoomSourcesLocked(peer *mediaPeer) {
 		if srcToken == peer.token {
 			continue
 		}
+		if m.isDirectActiveForSourceLocked(srcToken) {
+			targetUserID := m.directActive[srcToken]
+			if targetUserID != peer.userID {
+				continue
+			}
+		}
 		if m.isBroadcastActiveForSourceLocked(srcToken) {
 			rooms := m.broadcastRoomsForSourceLocked(srcToken)
 			if _, ok := rooms[peer.roomID]; !ok {
@@ -388,25 +466,27 @@ func (m *MediaManager) attachRoomSourcesLocked(peer *mediaPeer) {
 	}
 }
 
-func (m *MediaManager) attachSourceToPeerLocked(srcToken string, src *mediaSourceTrack, peer *mediaPeer) {
+func (m *MediaManager) attachSourceToPeerLocked(srcToken string, src *mediaSourceTrack, peer *mediaPeer) bool {
 	if _, exists := peer.senders[srcToken]; exists {
-		return
+		return false
 	}
 	sender, err := peer.pc.AddTrack(src.track)
 	if err != nil {
 		m.logger.Warn("add track failed", "peerToken", peer.token, "sourceToken", srcToken, "error", err)
-		return
+		return false
 	}
 	peer.senders[srcToken] = sender
+	return true
 }
 
-func (m *MediaManager) removeSenderLocked(peer *mediaPeer, srcToken string) {
+func (m *MediaManager) removeSenderLocked(peer *mediaPeer, srcToken string) bool {
 	sender, ok := peer.senders[srcToken]
 	if !ok {
-		return
+		return false
 	}
 	_ = peer.pc.RemoveTrack(sender)
 	delete(peer.senders, srcToken)
+	return true
 }
 
 func (m *MediaManager) renegotiateLocked(peer *mediaPeer) {

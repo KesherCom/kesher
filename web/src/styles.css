@@ -94,6 +94,23 @@ aside li,
   color: #f6c26b;
   border: 1px solid rgba(243, 156, 18, 0.4);
 }
+.online-user-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.direct-ptt-button {
+  min-width: 66px;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.direct-ptt-button.active {
+  background: #2d7cf6;
+  border-color: #2d7cf6;
+  color: #fff;
+}
 
 .controls,
 .chat,
