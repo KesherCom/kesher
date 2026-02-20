@@ -1,4 +1,4 @@
-export type Role = { id: string; name: string };
+export type Role = { id: string; name: string; defaultRoomId?: string; defaultVoiceMode?: string };
 export type Room = { id: string; name: string };
 export type BroadcastGroup = { id: string; name: string; roomIds: string[] };
 export type User = { id: string; username: string; roleId: string };

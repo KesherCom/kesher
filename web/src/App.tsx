@@ -1,5 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { bootstrap, getPublicBootstrap, login, logout } from "./api";
+import {
+  bootstrap,
+  createBroadcastGroup,
+  createRole,
+  createRoom,
+  deleteBroadcastGroup,
+  deleteRole,
+  deleteRoom,
+  getPublicBootstrap,
+  login,
+  logout,
+  updateBroadcastGroup,
+  updateRole,
+  updateRoom
+} from "./api";
 import type { Bootstrap, Presence, PublicBootstrap, RoutedEvent } from "./types";
 
 type WsMessage =
@@ -33,6 +47,19 @@ export function App() {
   const [webrtcState, setWebrtcState] = useState<string>("new");
   const [rtpStats, setRtpStats] = useState<{ inKbps: number; outKbps: number }>({ inKbps: 0, outKbps: 0 });
   const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
+  const [adminBusy, setAdminBusy] = useState(false);
+  const [adminError, setAdminError] = useState("");
+  const [adminRoleId, setAdminRoleId] = useState("");
+  const [adminRoleName, setAdminRoleName] = useState("");
+  const [adminRoleDefaultRoomId, setAdminRoleDefaultRoomId] = useState("");
+  const [adminRoleDefaultVoiceMode, setAdminRoleDefaultVoiceMode] = useState<"always_on" | "ptt" | "listen_only" | "">(
+    ""
+  );
+  const [adminRoomId, setAdminRoomId] = useState("");
+  const [adminRoomName, setAdminRoomName] = useState("");
+  const [adminGroupId, setAdminGroupId] = useState("");
+  const [adminGroupName, setAdminGroupName] = useState("");
+  const [adminGroupRoomIds, setAdminGroupRoomIds] = useState<string[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -52,6 +79,12 @@ export function App() {
   const selectedInputDeviceIdRef = useRef("");
   const activeRoomRef = useRef(activeRoom);
   const micMenuRef = useRef<HTMLDivElement | null>(null);
+  const initialRoomFromUrl = (() => {
+    const params = new URLSearchParams(window.location.search);
+    const room = params.get("room");
+    return room && room.trim() ? room : null;
+  })();
+  const initialRoomFromUrlRef = useRef<string | null>(initialRoomFromUrl);
 
   useEffect(() => {
     voiceModeRef.current = voiceMode;
@@ -74,7 +107,20 @@ export function App() {
       .then((data) => {
         setAppData(data);
         setRoleID(data.self.roleId);
-        if (data.rooms[0]) setActiveRoom(data.rooms[0].id);
+        const roleDefaults = data.roles.find((role) => role.id === data.self.roleId);
+        const urlRoom = initialRoomFromUrlRef.current;
+        if (urlRoom && data.rooms.some((room) => room.id === urlRoom)) {
+          setActiveRoom(urlRoom);
+        } else if (roleDefaults?.defaultRoomId) {
+          setActiveRoom(roleDefaults.defaultRoomId);
+        } else if (data.rooms[0]) {
+          setActiveRoom(data.rooms[0].id);
+        }
+        if (roleDefaults?.defaultVoiceMode) {
+          const nextMode = roleDefaults.defaultVoiceMode as "always_on" | "ptt" | "listen_only";
+          setVoiceMode(nextMode);
+          voiceModeRef.current = nextMode;
+        }
       })
       .catch(() => {
         sessionStorage.removeItem(storageKey);
@@ -82,6 +128,25 @@ export function App() {
         setToken(null);
       });
   }, [token]);
+
+  useEffect(() => {
+    if (!appData) return;
+    if (!adminRoleId && appData.roles[0]) {
+      setAdminRoleId(appData.roles[0].id);
+      setAdminRoleName(appData.roles[0].name);
+      setAdminRoleDefaultRoomId(appData.roles[0].defaultRoomId || "");
+      setAdminRoleDefaultVoiceMode((appData.roles[0].defaultVoiceMode as "always_on" | "ptt" | "listen_only") || "");
+    }
+    if (!adminRoomId && appData.rooms[0]) {
+      setAdminRoomId(appData.rooms[0].id);
+      setAdminRoomName(appData.rooms[0].name);
+    }
+    if (!adminGroupId && appData.broadcastGroups[0]) {
+      setAdminGroupId(appData.broadcastGroups[0].id);
+      setAdminGroupName(appData.broadcastGroups[0].name);
+      setAdminGroupRoomIds(appData.broadcastGroups[0].roomIds);
+    }
+  }, [appData, adminRoleId, adminRoomId, adminGroupId]);
 
   const refreshInputDevices = useCallback(async () => {
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -321,12 +386,22 @@ export function App() {
             track.enabled = initialEnabled;
             pc.addTrack(track, stream);
           }
+          applyVoiceModeToLocalTracks(voiceModeRef.current);
         } catch (e) {
           setAudioError(`Failed to access microphone: ${e instanceof Error ? e.message : "unknown error"}`);
           setEvents((old) => [{ label: "system · local/mic · capture failed (receive-only)", at: new Date().toLocaleTimeString() }, ...old].slice(0, 200));
         }
         ws.send(JSON.stringify({ type: "webrtc_ready", data: {} }));
         ws.send(JSON.stringify({ type: "set_active_room", data: { roomId: activeRoomRef.current } }));
+        const initialVoiceMode = voiceModeRef.current;
+        const voiceState =
+          initialVoiceMode === "always_on" ? "always_on" : initialVoiceMode === "listen_only" ? "listen_only" : "ptt_stop";
+        ws.send(
+          JSON.stringify({
+            type: "voice_state",
+            data: { scope: "room", targetId: activeRoomRef.current, body: voiceState }
+          })
+        );
       };
 
       ws.onmessage = (ev) => {
@@ -420,6 +495,10 @@ export function App() {
     roomSwitchTimerRef.current = window.setTimeout(() => {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
       wsRef.current.send(JSON.stringify({ type: "set_active_room", data: { roomId: activeRoom } }));
+      const params = new URLSearchParams(window.location.search);
+      params.set("room", activeRoom);
+      const nextUrl = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
+      window.history.replaceState(null, "", nextUrl);
       setEvents((old) => [{ label: `system · room switch requested · ${activeRoom}`, at: new Date().toLocaleTimeString() }, ...old].slice(0, 200));
     }, 120);
     return () => clearRoomSwitchTimer();
@@ -463,6 +542,7 @@ export function App() {
   const selectedMicLabel = useMemo(() => {
     return inputDevices.find((d) => d.deviceId === selectedInputDeviceId)?.label || "Select microphone";
   }, [inputDevices, selectedInputDeviceId]);
+  const isAdmin = appData?.self.roleId === "producer";
 
   useEffect(() => {
     if (currentTargets[0]) setTargetId(currentTargets[0].id);
@@ -487,6 +567,114 @@ export function App() {
       cleanupRealtimeResources();
       setConnectionState("offline");
     }
+  }
+
+  async function refreshBootstrapData() {
+    if (!token) return;
+    const data = await bootstrap(token);
+    setAppData(data);
+    setPublicData({
+      roles: data.roles,
+      rooms: data.rooms,
+      broadcastGroups: data.broadcastGroups
+    });
+    if (data.rooms.length > 0 && !data.rooms.some((room) => room.id === activeRoomRef.current)) {
+      setActiveRoom(data.rooms[0].id);
+    }
+  }
+
+  async function runAdminAction(action: () => Promise<void>) {
+    setAdminBusy(true);
+    setAdminError("");
+    try {
+      await action();
+      await refreshBootstrapData();
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : "admin operation failed");
+    } finally {
+      setAdminBusy(false);
+    }
+  }
+
+  function resetGroupForm() {
+    setAdminGroupId("");
+    setAdminGroupName("");
+    setAdminGroupRoomIds([]);
+  }
+
+  function saveRoleConfig() {
+    if (!token || !appData) return;
+    const id = adminRoleId.trim();
+    const name = adminRoleName.trim();
+    if (!id || !name) return;
+    const exists = appData.roles.some((role) => role.id === id);
+    void runAdminAction(async () => {
+      if (exists) {
+        await updateRole(token, id, {
+          name,
+          defaultRoomId: adminRoleDefaultRoomId.trim() || undefined,
+          defaultVoiceMode: adminRoleDefaultVoiceMode || undefined
+        });
+      } else {
+        await createRole(token, {
+          id,
+          name,
+          defaultRoomId: adminRoleDefaultRoomId.trim() || undefined,
+          defaultVoiceMode: adminRoleDefaultVoiceMode || undefined
+        });
+      }
+    });
+  }
+
+  function removeRoleConfig(id: string) {
+    if (!token) return;
+    void runAdminAction(() => deleteRole(token, id));
+  }
+
+  function saveRoomConfig() {
+    if (!token || !appData) return;
+    const id = adminRoomId.trim();
+    const name = adminRoomName.trim();
+    if (!id || !name) return;
+    const exists = appData.rooms.some((room) => room.id === id);
+    void runAdminAction(async () => {
+      if (exists) {
+        await updateRoom(token, id, { name });
+      } else {
+        await createRoom(token, { id, name });
+      }
+    });
+  }
+
+  function removeRoomConfig(id: string) {
+    if (!token) return;
+    void runAdminAction(() => deleteRoom(token, id));
+  }
+
+  function saveBroadcastGroupConfig() {
+    if (!token || !appData) return;
+    const id = adminGroupId.trim();
+    const name = adminGroupName.trim();
+    if (!id || !name || adminGroupRoomIds.length === 0) return;
+    const exists = appData.broadcastGroups.some((group) => group.id === id);
+    void runAdminAction(async () => {
+      if (exists) {
+        await updateBroadcastGroup(token, id, { name, roomIds: adminGroupRoomIds });
+      } else {
+        await createBroadcastGroup(token, { id, name, roomIds: adminGroupRoomIds });
+      }
+      resetGroupForm();
+    });
+  }
+
+  function removeBroadcastGroupConfig(id: string) {
+    if (!token) return;
+    void runAdminAction(async () => {
+      await deleteBroadcastGroup(token, id);
+      if (adminGroupId === id) {
+        resetGroupForm();
+      }
+    });
   }
 
   function sendChat() {
@@ -529,7 +717,22 @@ export function App() {
         </label>
         <label>
           Role
-          <select value={roleId} onChange={(e) => setRoleID(e.target.value)}>
+          <select
+            value={roleId}
+            onChange={(e) => {
+              const nextRoleId = e.target.value;
+              setRoleID(nextRoleId);
+              const selectedRole = publicData.roles.find((role) => role.id === nextRoleId);
+              if (selectedRole?.defaultRoomId) {
+                setActiveRoom(selectedRole.defaultRoomId);
+              }
+              if (selectedRole?.defaultVoiceMode) {
+                const nextMode = selectedRole.defaultVoiceMode as "always_on" | "ptt" | "listen_only";
+                setVoiceMode(nextMode);
+                voiceModeRef.current = nextMode;
+              }
+            }}
+          >
             <option value="">Select role</option>
             {publicData.roles.map((r) => (
               <option key={r.id} value={r.id}>
@@ -658,6 +861,154 @@ export function App() {
             <button onClick={() => sendVoiceState("always_on")}>Always On</button>
             <button onClick={() => sendVoiceState("listen_only")}>Listen Only</button>
           </div>
+          {isAdmin ? (
+            <div className="admin-panel">
+              <h3>Admin · configuration</h3>
+              {adminError ? <p className="admin-error">{adminError}</p> : null}
+              <div className="admin-block">
+                <h4>Roles</h4>
+                <div className="admin-grid">
+                  <input value={adminRoleId} onChange={(e) => setAdminRoleId(e.target.value)} placeholder="role-id" />
+                  <input value={adminRoleName} onChange={(e) => setAdminRoleName(e.target.value)} placeholder="Role name" />
+                  <select
+                    value={adminRoleDefaultRoomId}
+                    onChange={(e) => setAdminRoleDefaultRoomId(e.target.value)}
+                    aria-label="Default room"
+                  >
+                    <option value="">Default room…</option>
+                    {appData.rooms.map((room) => (
+                      <option key={`role-room-${room.id}`} value={room.id}>
+                        {room.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={adminRoleDefaultVoiceMode}
+                    onChange={(e) => setAdminRoleDefaultVoiceMode(e.target.value as "always_on" | "ptt" | "listen_only" | "")}
+                    aria-label="Default audio mode"
+                  >
+                    <option value="">Default audio mode…</option>
+                    <option value="always_on">Always on</option>
+                    <option value="ptt">PTT</option>
+                    <option value="listen_only">Listen only</option>
+                  </select>
+                  <button onClick={saveRoleConfig} disabled={adminBusy || !adminRoleId.trim() || !adminRoleName.trim()}>
+                    Save role
+                  </button>
+                </div>
+                <ul className="admin-list">
+                  {appData.roles.map((role) => (
+                    <li key={role.id}>
+                      <button
+                        onClick={() => {
+                          setAdminRoleId(role.id);
+                          setAdminRoleName(role.name);
+                          setAdminRoleDefaultRoomId(role.defaultRoomId || "");
+                          setAdminRoleDefaultVoiceMode((role.defaultVoiceMode as "always_on" | "ptt" | "listen_only") || "");
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <span>
+                        {role.name} <small>({role.id})</small>
+                      </span>
+                      <button onClick={() => removeRoleConfig(role.id)} disabled={adminBusy}>
+                        Delete
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="admin-block">
+                <h4>Rooms</h4>
+                <div className="admin-grid">
+                  <input value={adminRoomId} onChange={(e) => setAdminRoomId(e.target.value)} placeholder="room-id" />
+                  <input value={adminRoomName} onChange={(e) => setAdminRoomName(e.target.value)} placeholder="Room name" />
+                  <button onClick={saveRoomConfig} disabled={adminBusy || !adminRoomId.trim() || !adminRoomName.trim()}>
+                    Save room
+                  </button>
+                </div>
+                <ul className="admin-list">
+                  {appData.rooms.map((room) => (
+                    <li key={room.id}>
+                      <button
+                        onClick={() => {
+                          setAdminRoomId(room.id);
+                          setAdminRoomName(room.name);
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <span>
+                        {room.name} <small>({room.id})</small>
+                      </span>
+                      <button onClick={() => removeRoomConfig(room.id)} disabled={adminBusy}>
+                        Delete
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="admin-block">
+                <h4>Broadcast channels</h4>
+                <div className="admin-grid">
+                  <input
+                    value={adminGroupId}
+                    onChange={(e) => setAdminGroupId(e.target.value)}
+                    placeholder="broadcast-channel-id"
+                  />
+                  <input
+                    value={adminGroupName}
+                    onChange={(e) => setAdminGroupName(e.target.value)}
+                    placeholder="Broadcast channel name"
+                  />
+                  <button
+                    onClick={saveBroadcastGroupConfig}
+                    disabled={adminBusy || !adminGroupId.trim() || !adminGroupName.trim() || adminGroupRoomIds.length === 0}
+                  >
+                    Save channel
+                  </button>
+                </div>
+                <div className="admin-room-picker">
+                  {appData.rooms.map((room) => (
+                    <label key={`group-room-${room.id}`} className="admin-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={adminGroupRoomIds.includes(room.id)}
+                        onChange={() =>
+                          setAdminGroupRoomIds((prev) =>
+                            prev.includes(room.id) ? prev.filter((id) => id !== room.id) : [...prev, room.id]
+                          )
+                        }
+                      />
+                      <span>{room.name}</span>
+                    </label>
+                  ))}
+                </div>
+                <ul className="admin-list">
+                  {appData.broadcastGroups.map((group) => (
+                    <li key={group.id}>
+                      <button
+                        onClick={() => {
+                          setAdminGroupId(group.id);
+                          setAdminGroupName(group.name);
+                          setAdminGroupRoomIds(group.roomIds);
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <span>
+                        {group.name} <small>({group.id})</small>
+                      </span>
+                      <button onClick={() => removeBroadcastGroupConfig(group.id)} disabled={adminBusy}>
+                        Delete
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          ) : null}
           <h3>Realtime events</h3>
           <ul className="events">
             {events.map((e, i) => (

@@ -3,13 +3,77 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
 
+var (
+	ErrInvalidInput = errors.New("invalid input")
+	ErrConflict     = errors.New("conflict")
+	ErrNotFound     = errors.New("not found")
+)
+
 type Store struct {
 	db *sql.DB
+}
+
+func (s *Store) ensureColumn(ctx context.Context, table, column, columnType string) error {
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name string
+		var ctype string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if strings.EqualFold(name, column) {
+			return nil
+		}
+	}
+	_, err = s.db.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, columnType))
+	return err
+}
+
+func (s *Store) validateRoleDefaults(ctx context.Context, defaultRoomID, defaultVoiceMode string) error {
+	if strings.TrimSpace(defaultRoomID) != "" {
+		var n int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM rooms WHERE id = ?`, defaultRoomID).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrInvalidInput
+		}
+	}
+	if strings.TrimSpace(defaultVoiceMode) != "" && !isAllowedVoiceMode(defaultVoiceMode) {
+		return ErrInvalidInput
+	}
+	return nil
+}
+
+func isAllowedVoiceMode(mode string) bool {
+	switch mode {
+	case "always_on", "ptt", "listen_only":
+		return true
+	default:
+		return false
+	}
+}
+
+func nullableString(value string) sql.NullString {
+	if strings.TrimSpace(value) == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: value, Valid: true}
 }
 
 func NewStore(dbPath string) (*Store, error) {
@@ -59,21 +123,28 @@ func (s *Store) migrate(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := s.ensureColumn(ctx, "roles", "default_room_id", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, "roles", "default_voice_mode", "TEXT"); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (s *Store) seed(ctx context.Context) error {
 	roles := []Role{
-		{ID: "audio", Name: "Audio"},
-		{ID: "video", Name: "Video"},
-		{ID: "lighting", Name: "Lighting"},
-		{ID: "broadcast", Name: "Broadcast"},
-		{ID: "camera", Name: "Camera"},
-		{ID: "pastor", Name: "Pastor"},
-		{ID: "producer", Name: "Producer"},
+		{ID: "audio", Name: "Audio", DefaultRoomID: "foh", DefaultVoiceMode: "always_on"},
+		{ID: "video", Name: "Video", DefaultRoomID: "video-control", DefaultVoiceMode: "ptt"},
+		{ID: "lighting", Name: "Lighting", DefaultRoomID: "lighting-booth", DefaultVoiceMode: "ptt"},
+		{ID: "broadcast", Name: "Broadcast", DefaultRoomID: "livestream", DefaultVoiceMode: "always_on"},
+		{ID: "camera", Name: "Camera", DefaultRoomID: "stage", DefaultVoiceMode: "ptt"},
+		{ID: "pastor", Name: "Pastor", DefaultRoomID: "stage", DefaultVoiceMode: "listen_only"},
+		{ID: "producer", Name: "Producer", DefaultRoomID: "foh", DefaultVoiceMode: "always_on"},
 	}
 	for _, role := range roles {
-		if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO roles (id, name) VALUES (?, ?)`, role.ID, role.Name); err != nil {
+		if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO roles (id, name, default_room_id, default_voice_mode) VALUES (?, ?, ?, ?)`,
+			role.ID, role.Name, nullableString(role.DefaultRoomID), nullableString(role.DefaultVoiceMode)); err != nil {
 			return err
 		}
 	}
@@ -140,7 +211,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 }
 
 func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name FROM roles ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, default_room_id, default_voice_mode FROM roles ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -148,8 +219,16 @@ func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
 	var roles []Role
 	for rows.Next() {
 		var r Role
-		if err := rows.Scan(&r.ID, &r.Name); err != nil {
+		var defaultRoomID sql.NullString
+		var defaultVoiceMode sql.NullString
+		if err := rows.Scan(&r.ID, &r.Name, &defaultRoomID, &defaultVoiceMode); err != nil {
 			return nil, err
+		}
+		if defaultRoomID.Valid {
+			r.DefaultRoomID = defaultRoomID.String
+		}
+		if defaultVoiceMode.Valid {
+			r.DefaultVoiceMode = defaultVoiceMode.String
 		}
 		roles = append(roles, r)
 	}
@@ -221,4 +300,305 @@ func (s *Store) BroadcastGroupRoomSet(ctx context.Context, groupID string) (map[
 		return nil, fmt.Errorf("broadcast group not found or empty")
 	}
 	return out, nil
+}
+
+func (s *Store) CreateRole(ctx context.Context, id, name, defaultRoomID, defaultVoiceMode string) error {
+	id = strings.TrimSpace(id)
+	name = strings.TrimSpace(name)
+	if id == "" || name == "" {
+		return ErrInvalidInput
+	}
+	if err := s.validateRoleDefaults(ctx, defaultRoomID, defaultVoiceMode); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO roles (id, name, default_room_id, default_voice_mode) VALUES (?, ?, ?, ?)`,
+		id, name, nullableString(defaultRoomID), nullableString(defaultVoiceMode)); err != nil {
+		if isUniqueConstraintErr(err) {
+			return ErrConflict
+		}
+		return err
+	}
+	return nil
+}
+func (s *Store) UpdateRole(ctx context.Context, id, name, defaultRoomID, defaultVoiceMode string) error {
+	id = strings.TrimSpace(id)
+	name = strings.TrimSpace(name)
+	if id == "" || name == "" {
+		return ErrInvalidInput
+	}
+	if err := s.validateRoleDefaults(ctx, defaultRoomID, defaultVoiceMode); err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE roles SET name = ?, default_room_id = ?, default_voice_mode = ? WHERE id = ?`,
+		name, nullableString(defaultRoomID), nullableString(defaultVoiceMode), id)
+	if err != nil {
+		if isUniqueConstraintErr(err) {
+			return ErrConflict
+		}
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteRole(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrInvalidInput
+	}
+	var usersWithRole int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM users WHERE role_id = ?`, id).Scan(&usersWithRole); err != nil {
+		return err
+	}
+	if usersWithRole > 0 {
+		return ErrConflict
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM roles WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) CreateRoom(ctx context.Context, id, name string) error {
+	id = strings.TrimSpace(id)
+	name = strings.TrimSpace(name)
+	if id == "" || name == "" {
+		return ErrInvalidInput
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO rooms (id, name) VALUES (?, ?)`, id, name); err != nil {
+		if isUniqueConstraintErr(err) {
+			return ErrConflict
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Store) UpdateRoom(ctx context.Context, id, name string) error {
+	id = strings.TrimSpace(id)
+	name = strings.TrimSpace(name)
+	if id == "" || name == "" {
+		return ErrInvalidInput
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE rooms SET name = ? WHERE id = ?`, name, id)
+	if err != nil {
+		if isUniqueConstraintErr(err) {
+			return ErrConflict
+		}
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteRoom(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrInvalidInput
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM broadcast_group_rooms WHERE room_id = ?`, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	roomDeleteRes, err := tx.ExecContext(ctx, `DELETE FROM rooms WHERE id = ?`, id)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	roomDeletedRows, err := roomDeleteRes.RowsAffected()
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if roomDeletedRows == 0 {
+		_ = tx.Rollback()
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM broadcast_groups WHERE id IN (
+		SELECT bg.id
+		FROM broadcast_groups bg
+		LEFT JOIN broadcast_group_rooms bgr ON bgr.broadcast_group_id = bg.id
+		GROUP BY bg.id
+		HAVING COUNT(bgr.room_id) = 0
+	)`); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) CreateBroadcastGroup(ctx context.Context, id, name string, roomIDs []string) error {
+	id = strings.TrimSpace(id)
+	name = strings.TrimSpace(name)
+	roomIDs = normalizeIDs(roomIDs)
+	if id == "" || name == "" || len(roomIDs) == 0 {
+		return ErrInvalidInput
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := s.validateRoomsExistWithTx(ctx, tx, roomIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO broadcast_groups (id, name) VALUES (?, ?)`, id, name); err != nil {
+		_ = tx.Rollback()
+		if isUniqueConstraintErr(err) {
+			return ErrConflict
+		}
+		return err
+	}
+	for _, roomID := range roomIDs {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO broadcast_group_rooms (broadcast_group_id, room_id) VALUES (?, ?)`, id, roomID); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) UpdateBroadcastGroup(ctx context.Context, id, name string, roomIDs []string) error {
+	id = strings.TrimSpace(id)
+	name = strings.TrimSpace(name)
+	roomIDs = normalizeIDs(roomIDs)
+	if id == "" || name == "" || len(roomIDs) == 0 {
+		return ErrInvalidInput
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := s.validateRoomsExistWithTx(ctx, tx, roomIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	updateRes, err := tx.ExecContext(ctx, `UPDATE broadcast_groups SET name = ? WHERE id = ?`, name, id)
+	if err != nil {
+		_ = tx.Rollback()
+		if isUniqueConstraintErr(err) {
+			return ErrConflict
+		}
+		return err
+	}
+	updatedRows, err := updateRes.RowsAffected()
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if updatedRows == 0 {
+		_ = tx.Rollback()
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM broadcast_group_rooms WHERE broadcast_group_id = ?`, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	for _, roomID := range roomIDs {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO broadcast_group_rooms (broadcast_group_id, room_id) VALUES (?, ?)`, id, roomID); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) DeleteBroadcastGroup(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrInvalidInput
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM broadcast_group_rooms WHERE broadcast_group_id = ?`, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM broadcast_groups WHERE id = ?`, id)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if rows == 0 {
+		_ = tx.Rollback()
+		return ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) validateRoomsExistWithTx(ctx context.Context, tx *sql.Tx, roomIDs []string) error {
+	for _, roomID := range roomIDs {
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM rooms WHERE id = ?`, roomID).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrInvalidInput
+		}
+	}
+	return nil
+}
+
+func normalizeIDs(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func isUniqueConstraintErr(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "unique")
 }

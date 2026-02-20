@@ -148,6 +148,62 @@ aside li,
   width: 0%;
   transition: width 80ms linear;
 }
+.admin-panel {
+  margin-bottom: 1rem;
+  border: 1px solid #2b3341;
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: #121821;
+}
+.admin-error {
+  margin: 0.3rem 0 0.8rem;
+  color: #ffb4b4;
+}
+.admin-block {
+  margin-bottom: 1rem;
+}
+.admin-block:last-child {
+  margin-bottom: 0;
+}
+.admin-block h4 {
+  margin: 0 0 0.45rem;
+}
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.45rem;
+  margin-bottom: 0.5rem;
+}
+.admin-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.admin-list li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid #232b37;
+}
+.admin-list li:last-child {
+  border-bottom: 0;
+}
+.admin-room-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.65rem;
+  margin-bottom: 0.45rem;
+}
+.admin-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.admin-checkbox input {
+  margin: 0;
+}
 
 .events li {
   display: grid;
@@ -157,6 +213,9 @@ aside li,
 
 @media (max-width: 900px) {
   .app main {
+    grid-template-columns: 1fr;
+  }
+  .admin-grid {
     grid-template-columns: 1fr;
   }
 }
