@@ -83,6 +83,11 @@ export function App() {
     const room = params.get("room");
     return room && room.trim() ? room : null;
   })();
+  const showDebug = (() => {
+    const params = new URLSearchParams(window.location.search);
+    const value = params.get("debug");
+    return value === "1" || value === "true";
+  })();
   const initialRoomFromUrlRef = useRef<string | null>(initialRoomFromUrl);
 
   useEffect(() => {
@@ -771,11 +776,18 @@ export function App() {
           <h1>Live Production Intercom</h1>
           <p>
             Signed in as <strong>{appData.self.username}</strong> ({appData.self.roleId}) · connection:{" "}
-            <strong>{connectionState}</strong> · webrtc: <strong>{webrtcState}</strong>
+            <strong>{connectionState}</strong>
           </p>
-          <p style={{ margin: "0.2rem 0 0 0" }}>
-            audio rtp: <strong>in {rtpStats.inKbps} kbps</strong> / <strong>out {rtpStats.outKbps} kbps</strong>
-          </p>
+          {showDebug ? (
+            <>
+              <p style={{ margin: "0.2rem 0 0 0" }}>
+                webrtc: <strong>{webrtcState}</strong>
+              </p>
+              <p style={{ margin: "0.2rem 0 0 0" }}>
+                audio rtp: <strong>in {rtpStats.inKbps} kbps</strong> / <strong>out {rtpStats.outKbps} kbps</strong>
+              </p>
+            </>
+          ) : null}
           {audioError ? <p style={{ color: "#ffb4b4", margin: "0.35rem 0 0 0" }}>{audioError}</p> : null}
         </div>
         <button onClick={doLogout}>Logout</button>
@@ -827,14 +839,38 @@ export function App() {
           </div>
           <small>Input level</small>
           <h3>Online</h3>
-          <ul>
-            {presence.map((p) => (
-              <li key={`${p.userId}-${p.activeRoom}`}>
-                {p.username} ({p.roleId}) — {p.activeRoom || "no room"} — {p.voiceMode || "unknown"} /{" "}
-                {p.micEnabled ? "mic on" : "mic off"}
-              </li>
-            ))}
-          </ul>
+          <div className="online-rooms">
+            {appData.rooms.map((room) => {
+              const users = presence.filter((p) => p.activeRoom === room.id);
+              if (users.length === 0) return null;
+              return (
+                <div key={`online-room-${room.id}`} className="online-room">
+                  <div className="online-room-title">{room.name}</div>
+                  <ul>
+                    {users.map((p) => (
+                      <li key={`${p.userId}-${room.id}`}>
+                        {p.username} — {p.micEnabled ? "mic on" : "mic off"}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+            {presence.some((p) => !p.activeRoom) ? (
+              <div className="online-room">
+                <div className="online-room-title">No room</div>
+                <ul>
+                  {presence
+                    .filter((p) => !p.activeRoom)
+                    .map((p) => (
+                      <li key={`${p.userId}-noroom`}>
+                        {p.username} — {p.micEnabled ? "mic on" : "mic off"}
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
         </aside>
         <section>
           <div className="controls">
@@ -1033,15 +1069,19 @@ export function App() {
               </div>
             </div>
           ) : null}
-          <h3>Realtime events</h3>
-          <ul className="events">
-            {events.map((e, i) => (
-              <li key={`${e.at}-${i}`}>
-                <span>{e.at}</span>
-                <span>{e.label}</span>
-              </li>
-            ))}
-          </ul>
+          {showDebug ? (
+            <>
+              <h3>Realtime events</h3>
+              <ul className="events">
+                {events.map((e, i) => (
+                  <li key={`${e.at}-${i}`}>
+                    <span>{e.at}</span>
+                    <span>{e.label}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
         </section>
       </main>
     </div>
