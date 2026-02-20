@@ -46,6 +46,12 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/logout", s.withAuth(s.handleLogout))
 	mux.HandleFunc("/api/bootstrap", s.withAuth(s.handleBootstrap))
+	mux.HandleFunc("/api/admin/roles", s.withAuth(s.handleAdminRoles))
+	mux.HandleFunc("/api/admin/roles/", s.withAuth(s.handleAdminRoleByID))
+	mux.HandleFunc("/api/admin/rooms", s.withAuth(s.handleAdminRooms))
+	mux.HandleFunc("/api/admin/rooms/", s.withAuth(s.handleAdminRoomByID))
+	mux.HandleFunc("/api/admin/broadcast-groups", s.withAuth(s.handleAdminBroadcastGroups))
+	mux.HandleFunc("/api/admin/broadcast-groups/", s.withAuth(s.handleAdminBroadcastGroupByID))
 	mux.HandleFunc("/ws", s.handleWS)
 	if cfg.StaticDir != "" {
 		mux.Handle("/", s.staticHandler())
@@ -187,6 +193,234 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request, session
 	})
 }
 
+type upsertRoleRequest struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	DefaultRoomID    string `json:"defaultRoomId"`
+	DefaultVoiceMode string `json:"defaultVoiceMode"`
+}
+
+type upsertRoomRequest struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type upsertBroadcastGroupRequest struct {
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	RoomIDs []string `json:"roomIds"`
+}
+
+func (s *Server) handleAdminRoles(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, session) {
+		return
+	}
+	switch r.Method {
+	case http.MethodPost:
+		var req upsertRoleRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.CreateRole(r.Context(), req.ID, req.Name, req.DefaultRoomID, req.DefaultVoiceMode); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusCreated, map[string]bool{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleAdminRoleByID(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, session) {
+		return
+	}
+	roleID := strings.TrimPrefix(r.URL.Path, "/api/admin/roles/")
+	if roleID == "" || strings.Contains(roleID, "/") {
+		http.Error(w, "invalid role id", http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var req upsertRoleRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.UpdateRole(r.Context(), roleID, req.Name, req.DefaultRoomID, req.DefaultVoiceMode); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	case http.MethodDelete:
+		if err := s.store.DeleteRole(r.Context(), roleID); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleAdminRooms(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, session) {
+		return
+	}
+	switch r.Method {
+	case http.MethodPost:
+		var req upsertRoomRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.CreateRoom(r.Context(), req.ID, req.Name); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusCreated, map[string]bool{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleAdminRoomByID(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, session) {
+		return
+	}
+	roomID := strings.TrimPrefix(r.URL.Path, "/api/admin/rooms/")
+	if roomID == "" || strings.Contains(roomID, "/") {
+		http.Error(w, "invalid room id", http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var req upsertRoomRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.UpdateRoom(r.Context(), roomID, req.Name); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	case http.MethodDelete:
+		if err := s.store.DeleteRoom(r.Context(), roomID); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleAdminBroadcastGroups(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, session) {
+		return
+	}
+	switch r.Method {
+	case http.MethodPost:
+		var req upsertBroadcastGroupRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.CreateBroadcastGroup(r.Context(), req.ID, req.Name, req.RoomIDs); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusCreated, map[string]bool{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleAdminBroadcastGroupByID(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, session) {
+		return
+	}
+	groupID := strings.TrimPrefix(r.URL.Path, "/api/admin/broadcast-groups/")
+	if groupID == "" || strings.Contains(groupID, "/") {
+		http.Error(w, "invalid broadcast group id", http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var req upsertBroadcastGroupRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.UpdateBroadcastGroup(r.Context(), groupID, req.Name, req.RoomIDs); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	case http.MethodDelete:
+		if err := s.store.DeleteBroadcastGroup(r.Context(), groupID); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) requireAdmin(w http.ResponseWriter, session Session) bool {
+	if session.RoleID != "producer" {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+func (s *Server) writeStoreErr(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, ErrInvalidInput):
+		http.Error(w, "invalid input", http.StatusBadRequest)
+		return true
+	case errors.Is(err, ErrConflict):
+		http.Error(w, "conflict", http.StatusConflict)
+		return true
+	case errors.Is(err, ErrNotFound):
+		http.Error(w, "not found", http.StatusNotFound)
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Server) withAuth(next func(http.ResponseWriter, *http.Request, Session)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -207,7 +441,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.cfg.AllowCORS {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization,Content-Type")
 		}
 		if r.Method == http.MethodOptions {

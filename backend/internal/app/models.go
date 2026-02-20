@@ -3,8 +3,10 @@ package app
 import "time"
 
 type Role struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	DefaultRoomID    string `json:"defaultRoomId,omitempty"`
+	DefaultVoiceMode string `json:"defaultVoiceMode,omitempty"`
 }
 
 type Room struct {
