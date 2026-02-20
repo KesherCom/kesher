@@ -33,6 +33,8 @@ export function App() {
   const [username, setUsername] = useState("");
   const [roleId, setRoleID] = useState("");
   const [activeRoom, setActiveRoom] = useState("foh");
+  const [listenRoomIds, setListenRoomIds] = useState<string[]>([]);
+  const [talkRoomIds, setTalkRoomIds] = useState<string[]>([]);
   const [presence, setPresence] = useState<Presence[]>([]);
   const [scope, setScope] = useState<"direct" | "room" | "broadcast">("room");
   const [targetId, setTargetId] = useState("");
@@ -88,6 +90,8 @@ export function App() {
   const lastStatsRef = useRef<{ ts: number; inBytes: number; outBytes: number } | null>(null);
   const selectedInputDeviceIdRef = useRef("");
   const activeRoomRef = useRef(activeRoom);
+  const listenRoomIdsRef = useRef<string[]>(listenRoomIds);
+  const talkRoomIdsRef = useRef<string[]>(talkRoomIds);
   const micMenuRef = useRef<HTMLDivElement | null>(null);
   const initialRoomFromUrl = (() => {
     const params = new URLSearchParams(window.location.search);
@@ -110,6 +114,12 @@ export function App() {
   useEffect(() => {
     activeRoomRef.current = activeRoom;
   }, [activeRoom]);
+  useEffect(() => {
+    listenRoomIdsRef.current = listenRoomIds;
+  }, [listenRoomIds]);
+  useEffect(() => {
+    talkRoomIdsRef.current = talkRoomIds;
+  }, [talkRoomIds]);
 
   useEffect(() => {
     localStorage.removeItem(storageKey);
@@ -124,12 +134,18 @@ export function App() {
         setRoleID(data.self.roleId);
         const roleDefaults = data.roles.find((role) => role.id === data.self.roleId);
         const urlRoom = initialRoomFromUrlRef.current;
+        let initialRoom = "";
         if (urlRoom && data.rooms.some((room) => room.id === urlRoom)) {
-          setActiveRoom(urlRoom);
+          initialRoom = urlRoom;
         } else if (roleDefaults?.defaultRoomId) {
-          setActiveRoom(roleDefaults.defaultRoomId);
+          initialRoom = roleDefaults.defaultRoomId;
         } else if (data.rooms[0]) {
-          setActiveRoom(data.rooms[0].id);
+          initialRoom = data.rooms[0].id;
+        }
+        if (initialRoom) {
+          setActiveRoom(initialRoom);
+          setListenRoomIds([initialRoom]);
+          setTalkRoomIds([initialRoom]);
         }
         if (roleDefaults?.defaultVoiceMode) {
           const nextMode = roleDefaults.defaultVoiceMode as "always_on" | "ptt";
@@ -188,6 +204,27 @@ export function App() {
       window.clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
+  }
+
+  function toggleRoomSelection(
+    roomId: string,
+    setState: (value: string[] | ((prev: string[]) => string[])) => void
+  ) {
+    setState((prev) => {
+      if (prev.includes(roomId)) {
+        if (prev.length === 1) return prev;
+        return prev.filter((id) => id !== roomId);
+      }
+      return [...prev, roomId];
+    });
+  }
+
+  function toggleListenRoom(roomId: string) {
+    toggleRoomSelection(roomId, setListenRoomIds);
+  }
+
+  function toggleTalkRoom(roomId: string) {
+    toggleRoomSelection(roomId, setTalkRoomIds);
   }
 
   function clearRoomSwitchTimer() {
@@ -395,7 +432,16 @@ export function App() {
           setEvents((old) => [{ label: "system · local/mic · capture failed (receive-only)", at: new Date().toLocaleTimeString() }, ...old].slice(0, 200));
         }
         ws.send(JSON.stringify({ type: "webrtc_ready", data: {} }));
-        ws.send(JSON.stringify({ type: "set_active_room", data: { roomId: activeRoomRef.current } }));
+        ws.send(
+          JSON.stringify({
+            type: "set_room_matrix",
+            data: {
+              activeRoomId: activeRoomRef.current,
+              listenRoomIds: listenRoomIdsRef.current,
+              talkRoomIds: talkRoomIdsRef.current
+            }
+          })
+        );
         const initialVoiceMode = voiceModeRef.current;
         const voiceState = initialVoiceMode === "always_on" ? "always_on" : "ptt_stop";
         ws.send(
@@ -496,7 +542,16 @@ export function App() {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     roomSwitchTimerRef.current = window.setTimeout(() => {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-      wsRef.current.send(JSON.stringify({ type: "set_active_room", data: { roomId: activeRoom } }));
+      wsRef.current.send(
+        JSON.stringify({
+          type: "set_room_matrix",
+          data: {
+            activeRoomId: activeRoom,
+            listenRoomIds,
+            talkRoomIds
+          }
+        })
+      );
       const params = new URLSearchParams(window.location.search);
       params.set("room", activeRoom);
       const nextUrl = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
@@ -504,7 +559,7 @@ export function App() {
       setEvents((old) => [{ label: `system · room switch requested · ${activeRoom}`, at: new Date().toLocaleTimeString() }, ...old].slice(0, 200));
     }, 120);
     return () => clearRoomSwitchTimer();
-  }, [activeRoom]);
+  }, [activeRoom, listenRoomIds, talkRoomIds]);
 
   useEffect(() => {
     if (!token || !appData || !pcRef.current || !selectedInputDeviceId) return;
@@ -545,6 +600,11 @@ export function App() {
     return inputDevices.find((d) => d.deviceId === selectedInputDeviceId)?.label || "Select microphone";
   }, [inputDevices, selectedInputDeviceId]);
   const isAdmin = appData?.self.roleId === "producer";
+  const roomNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const room of appData?.rooms || []) map.set(room.id, room.name);
+    return map;
+  }, [appData]);
 
   useEffect(() => {
     if (currentTargets[0]) setTargetId(currentTargets[0].id);
@@ -583,6 +643,16 @@ export function App() {
     if (data.rooms.length > 0 && !data.rooms.some((room) => room.id === activeRoomRef.current)) {
       setActiveRoom(data.rooms[0].id);
     }
+    setListenRoomIds((prev) => {
+      const next = prev.filter((roomId) => data.rooms.some((room) => room.id === roomId));
+      if (next.length > 0) return next;
+      return data.rooms[0] ? [data.rooms[0].id] : [];
+    });
+    setTalkRoomIds((prev) => {
+      const next = prev.filter((roomId) => data.rooms.some((room) => room.id === roomId));
+      if (next.length > 0) return next;
+      return data.rooms[0] ? [data.rooms[0].id] : [];
+    });
   }
 
   async function runAdminAction(action: () => Promise<void>) {
@@ -833,6 +903,8 @@ export function App() {
               const selectedRole = publicData.roles.find((role) => role.id === nextRoleId);
               if (selectedRole?.defaultRoomId) {
                 setActiveRoom(selectedRole.defaultRoomId);
+                setListenRoomIds([selectedRole.defaultRoomId]);
+                setTalkRoomIds([selectedRole.defaultRoomId]);
               }
               if (selectedRole?.defaultVoiceMode) {
                 const nextMode = selectedRole.defaultVoiceMode as "always_on" | "ptt";
@@ -881,14 +953,39 @@ export function App() {
       </header>
       <main>
         <aside>
-          <h3>Active room</h3>
-          <select value={activeRoom} onChange={(e) => setActiveRoom(e.target.value)}>
-            {appData.rooms.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
+          <h3>Room matrix</h3>
+          <div className="room-matrix">
+            {appData.rooms.map((room) => {
+              const listening = listenRoomIds.includes(room.id);
+              const talking = talkRoomIds.includes(room.id);
+              return (
+                <div key={`matrix-${room.id}`} className={`matrix-card ${activeRoom === room.id ? "active" : ""}`}>
+                  <button className="matrix-room-name" onClick={() => setActiveRoom(room.id)}>
+                    {room.name}
+                  </button>
+                  <div className="matrix-actions">
+                    <button
+                      className={`matrix-action listen ${listening ? "on" : ""}`}
+                      onClick={() => toggleListenRoom(room.id)}
+                      title="Toggle listening for this room"
+                    >
+                      Listen
+                    </button>
+                    <button
+                      className={`matrix-action talk ${talking ? "on" : ""}`}
+                      onClick={() => toggleTalkRoom(room.id)}
+                      title="Toggle talking to this room"
+                    >
+                      Call
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <small>
+            Active: {roomNameById.get(activeRoom) || activeRoom || "none"} · Listen: {listenRoomIds.length} · Call: {talkRoomIds.length}
+          </small>
           <h3>Microphone</h3>
           <div className="mic-dropdown" ref={micMenuRef}>
             <button

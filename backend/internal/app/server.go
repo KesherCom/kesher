@@ -469,6 +469,16 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close()
 		return
 	}
+	roles, err := s.store.ListRoles(r.Context())
+	if err != nil {
+		_ = conn.Close()
+		return
+	}
+	rooms, err := s.store.ListRooms(r.Context())
+	if err != nil {
+		_ = conn.Close()
+		return
+	}
 	var user User
 	for _, u := range users {
 		if u.ID == session.UserID {
@@ -476,10 +486,19 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+	defaultRoomID := defaultRoomForSession(session, roles, rooms)
+	listenRooms := []string{}
+	talkRooms := []string{}
+	if defaultRoomID != "" {
+		listenRooms = []string{defaultRoomID}
+		talkRooms = []string{defaultRoomID}
+	}
 	c := &client{
 		session:         session,
 		user:            user,
-		activeRoom:      "foh",
+		activeRoom:      defaultRoomID,
+		listenRooms:     toRoomSet(listenRooms),
+		talkRooms:       toRoomSet(talkRooms),
 		voiceMode:       "always_on",
 		micEnabled:      true,
 		broadcastGroups: make(map[string]struct{}),
@@ -508,15 +527,31 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		switch in.Type {
 		case "webrtc_ready":
 			mediaReady = true
-			s.media.SwitchRoom(session.Token, currentRoom)
+			s.media.EnsureNegotiation(session.Token)
+			s.media.SyncRouting()
 		case "set_active_room":
 			raw, _ := json.Marshal(in.Data)
 			var e ActiveRoomEvent
 			_ = json.Unmarshal(raw, &e)
 			s.hub.SetActiveRoom(session.Token, e.RoomID)
+			s.hub.SetRoomMatrix(session.Token, []string{e.RoomID}, []string{e.RoomID})
 			currentRoom = e.RoomID
 			if mediaReady {
-				s.media.SwitchRoom(session.Token, e.RoomID)
+				s.media.SyncRouting()
+			}
+		case "set_room_matrix":
+			raw, _ := json.Marshal(in.Data)
+			var e RoomMatrixEvent
+			_ = json.Unmarshal(raw, &e)
+			if e.ActiveRoomID != "" {
+				currentRoom = e.ActiveRoomID
+			} else {
+				currentRoom = firstNonEmpty(e.TalkRoomIDs, e.ListenRoomIDs, currentRoom)
+			}
+			s.hub.SetActiveRoom(session.Token, currentRoom)
+			s.hub.SetRoomMatrix(session.Token, e.ListenRoomIDs, e.TalkRoomIDs)
+			if mediaReady {
+				s.media.SyncRouting()
 			}
 		case "chat":
 			s.routeInbound(session.Token, in, "chat")
@@ -604,4 +639,27 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, v any) {
 func (s *Server) internalErr(w http.ResponseWriter, err error) {
 	s.logger.Error("request failed", "error", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
+}
+
+func defaultRoomForSession(session Session, roles []Role, rooms []Room) string {
+	for _, role := range roles {
+		if role.ID == session.RoleID && role.DefaultRoomID != "" {
+			return role.DefaultRoomID
+		}
+	}
+	if len(rooms) > 0 {
+		return rooms[0].ID
+	}
+	return ""
+}
+
+func firstNonEmpty(primary []string, secondary []string, fallback string) string {
+	for _, values := range [][]string{primary, secondary} {
+		for _, value := range values {
+			if value != "" {
+				return value
+			}
+		}
+	}
+	return fallback
 }
