@@ -87,15 +87,6 @@ func (m *MediaManager) EnsurePeer(token string, user User) error {
 			m.RemovePeer(token)
 		}
 	})
-	pc.OnNegotiationNeeded(func() {
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		p, ok := m.peers[token]
-		if !ok {
-			return
-		}
-		m.renegotiateLocked(p)
-	})
 	m.peers[token] = peer
 	return nil
 }
@@ -110,8 +101,28 @@ func (m *MediaManager) SwitchRoom(token, roomID string) {
 	if roomID == "" || peer.roomID == roomID {
 		return
 	}
+	m.logger.Info("switching media room", "token", token, "fromRoom", peer.roomID, "toRoom", roomID)
 	oldRoom := peer.roomID
 	peer.roomID = roomID
+
+	var movedSource *mediaSourceTrack
+	if oldRoom != "" {
+		if oldSources, ok := m.sources[oldRoom]; ok {
+			if src, ok := oldSources[token]; ok {
+				movedSource = src
+				delete(oldSources, token)
+				if len(oldSources) == 0 {
+					delete(m.sources, oldRoom)
+				}
+			}
+		}
+	}
+	if movedSource != nil {
+		if _, ok := m.sources[roomID]; !ok {
+			m.sources[roomID] = make(map[string]*mediaSourceTrack)
+		}
+		m.sources[roomID][token] = movedSource
+	}
 	m.detachAllIncomingLocked(peer)
 	m.attachRoomSourcesLocked(peer)
 	m.renegotiateLocked(peer)
@@ -123,15 +134,13 @@ func (m *MediaManager) SwitchRoom(token, roomID string) {
 			}
 		}
 	}
-	if roomSources, ok := m.sources[roomID]; ok {
-		if src, ok := roomSources[token]; ok {
-			for _, p := range m.peers {
-				if p.token == token || p.roomID != roomID {
-					continue
-				}
-				m.attachSourceToPeerLocked(token, src, p)
-				m.renegotiateLocked(p)
+	if movedSource != nil {
+		for _, p := range m.peers {
+			if p.token == token || p.roomID != roomID {
+				continue
 			}
+			m.attachSourceToPeerLocked(token, movedSource, p)
+			m.renegotiateLocked(p)
 		}
 	}
 }

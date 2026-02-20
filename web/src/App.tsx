@@ -41,6 +41,7 @@ export function App() {
   const reconnectAttemptsRef = useRef(0);
   const shouldReconnectRef = useRef(false);
   const pendingICERef = useRef<Array<{ candidate: string; sdpMid?: string; sdpMLineIndex?: number }>>([]);
+  const roomSwitchTimerRef = useRef<number | null>(null);
   const voiceModeRef = useRef(voiceMode);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -101,6 +102,13 @@ export function App() {
     if (reconnectTimeoutRef.current !== null) {
       window.clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
+    }
+  }
+
+  function clearRoomSwitchTimer() {
+    if (roomSwitchTimerRef.current !== null) {
+      window.clearTimeout(roomSwitchTimerRef.current);
+      roomSwitchTimerRef.current = null;
     }
   }
 
@@ -250,6 +258,7 @@ export function App() {
         reconnectAttemptsRef.current = 0;
         setConnectionState("connected");
         setAudioError("");
+        pendingICERef.current = [];
         const pc = new RTCPeerConnection({ iceServers: [] });
         pcRef.current = pc;
         pc.onconnectionstatechange = () => setWebrtcState(pc.connectionState);
@@ -328,7 +337,9 @@ export function App() {
             await pc.setLocalDescription(answer);
             wsRef.current?.send(JSON.stringify({ type: "webrtc_answer", data: { sdp: answer.sdp || "" } }));
             setEvents((old) => [{ label: "system · webrtc · answered offer", at: new Date().toLocaleTimeString() }, ...old].slice(0, 200));
-          })().catch(console.error);
+          })().catch((err) => {
+            setAudioError(`WebRTC renegotiation failed: ${err instanceof Error ? err.message : "unknown error"}`);
+          });
           return;
         }
         if (msg.type === "webrtc_ice_candidate") {
@@ -359,6 +370,7 @@ export function App() {
       };
 
       ws.onclose = () => {
+        clearRoomSwitchTimer();
         cleanupRealtimeResources();
         if (!shouldReconnectRef.current || cancelled) {
           setConnectionState("offline");
@@ -385,8 +397,14 @@ export function App() {
   }, [token, appData]);
 
   useEffect(() => {
+    clearRoomSwitchTimer();
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ type: "set_active_room", data: { roomId: activeRoom } }));
+    roomSwitchTimerRef.current = window.setTimeout(() => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+      wsRef.current.send(JSON.stringify({ type: "set_active_room", data: { roomId: activeRoom } }));
+      setEvents((old) => [{ label: `system · room switch requested · ${activeRoom}`, at: new Date().toLocaleTimeString() }, ...old].slice(0, 200));
+    }, 120);
+    return () => clearRoomSwitchTimer();
   }, [activeRoom]);
 
   useEffect(() => {
