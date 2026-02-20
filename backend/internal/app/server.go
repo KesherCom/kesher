@@ -527,6 +527,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			var e RoutedEvent
 			_ = json.Unmarshal(raw, &e)
 			s.hub.SetVoiceState(session.Token, e.Body)
+			if e.Scope == "direct" {
+				if e.Body == "ptt_start" {
+					s.media.SetDirectTargetActive(session.Token, e.TargetID, true)
+				}
+				if e.Body == "ptt_stop" {
+					s.media.SetDirectTargetActive(session.Token, e.TargetID, false)
+				}
+			}
 			if e.Scope == "broadcast" {
 				if e.Body == "ptt_start" {
 					s.hub.SetBroadcastActive(session.Token, e.TargetID, true)
