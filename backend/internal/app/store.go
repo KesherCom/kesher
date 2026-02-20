@@ -166,9 +166,15 @@ func (s *Store) seed(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO broadcast_groups (id, name) VALUES ('all-tech', 'All Tech')`); err != nil {
 		return err
 	}
-	for _, roomID := range []string{"foh", "stage", "video-control", "livestream", "lighting-booth"} {
-		if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO broadcast_group_rooms (broadcast_group_id, room_id) VALUES ('all-tech', ?)`, roomID); err != nil {
-			return err
+	var allTechRooms int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM broadcast_group_rooms WHERE broadcast_group_id = 'all-tech'`).Scan(&allTechRooms); err != nil {
+		return err
+	}
+	if allTechRooms == 0 {
+		for _, roomID := range []string{"foh", "stage", "video-control", "livestream", "lighting-booth"} {
+			if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO broadcast_group_rooms (broadcast_group_id, room_id) VALUES ('all-tech', ?)`, roomID); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

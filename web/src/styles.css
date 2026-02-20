@@ -262,6 +262,22 @@ aside li,
 .admin-list li:last-child {
   border-bottom: 0;
 }
+.admin-edit-panel {
+  margin: 0.4rem 0 0.8rem;
+  padding: 0.6rem;
+  border: 1px dashed #2b3341;
+  border-radius: 10px;
+  background: #141a23;
+}
+.admin-edit-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 0.45rem;
+  color: #cfd6e4;
+}
+button.secondary {
+  background: transparent;
+}
 .admin-room-picker {
   display: flex;
   flex-wrap: wrap;
