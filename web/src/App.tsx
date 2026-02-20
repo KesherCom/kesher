@@ -72,6 +72,7 @@ export function App() {
   const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(null);
   const [directPttPressedUserId, setDirectPttPressedUserId] = useState<string | null>(null);
   const [roomPttPressedRoomId, setRoomPttPressedRoomId] = useState<string | null>(null);
+  const [lastDirectCallerUserId, setLastDirectCallerUserId] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -495,6 +496,15 @@ export function App() {
           }
           return;
         }
+        if (
+          msg.type === "voice_state" &&
+          msg.data.scope === "direct" &&
+          msg.data.targetId === appData.self.id &&
+          msg.data.fromUser.id !== appData.self.id &&
+          msg.data.body === "ptt_start"
+        ) {
+          setLastDirectCallerUserId(msg.data.fromUser.id);
+        }
         const body = (msg.data.signal || msg.data.body || "").toString();
         setEvents((old) =>
           [
@@ -621,6 +631,7 @@ export function App() {
       setToken(null);
       setAppData(null);
       setPresence([]);
+      setLastDirectCallerUserId(null);
       clearReconnectTimer();
       cleanupRealtimeResources();
       setConnectionState("offline");
@@ -1244,8 +1255,17 @@ export function App() {
       </section>
     ) : null;
 
-  const directOnlineTargets = presence.filter((p) => p.userId !== appData.self.id);
-  const replyTarget = directOnlineTargets[0] || null;
+  const directOnlineTargets = presence
+    .filter((p) => p.userId !== appData.self.id)
+    .slice()
+    .sort((a, b) => {
+      const roleA = (roleNameById.get(a.roleId) || a.roleId || "").toLowerCase();
+      const roleB = (roleNameById.get(b.roleId) || b.roleId || "").toLowerCase();
+      const byRole = roleA.localeCompare(roleB, undefined, { sensitivity: "base" });
+      if (byRole !== 0) return byRole;
+      return a.username.localeCompare(b.username, undefined, { sensitivity: "base" });
+    });
+  const replyTarget = directOnlineTargets.find((p) => p.userId === lastDirectCallerUserId) || null;
 
   return (
     <div className="root app station-shell">
