@@ -73,6 +73,16 @@ aside li,
   padding: 0.4rem 0;
   border-bottom: 1px solid #232b37;
 }
+.online-rooms {
+  display: grid;
+  gap: 0.5rem;
+}
+.online-room-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #cfd6e4;
+  margin-bottom: 0.2rem;
+}
 
 .controls,
 .chat,
