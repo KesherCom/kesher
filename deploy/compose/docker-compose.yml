@@ -1,0 +1,21 @@
+services:
+  intercom:
+    build:
+      context: ../../
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      APP_ADDR: ":8080"
+      STATIC_DIR: "/app/web-dist"
+      DB_PATH: "/app/data/intercom.db"
+      ALLOW_CORS: "false"
+      TRUSTED_LAN_HTTP: "true"
+      SESSION_TTL_MINUTES: "720"
+    volumes:
+      - intercom_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  intercom_data:
+
