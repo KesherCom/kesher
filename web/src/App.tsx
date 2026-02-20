@@ -59,6 +59,7 @@ export function App() {
   const [adminGroupName, setAdminGroupName] = useState("");
   const [adminGroupRoomIds, setAdminGroupRoomIds] = useState<string[]>([]);
   const [pttPressed, setPttPressed] = useState(false);
+  const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -727,6 +728,31 @@ export function App() {
     sendVoiceState("ptt_stop");
   }
 
+  function sendBroadcastVoiceState(groupId: string, state: string) {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const stream = localStreamRef.current;
+    if (stream) {
+      const enable = state === "ptt_start" || state === "always_on";
+      const disable = state === "ptt_stop";
+      if (enable || disable) {
+        for (const track of stream.getAudioTracks()) track.enabled = enable;
+      }
+    }
+    if (state === "always_on") setVoiceMode("always_on");
+    if (state === "ptt_start" || state === "ptt_stop") setVoiceMode("ptt");
+    wsRef.current.send(JSON.stringify({ type: "voice_state", data: { scope: "broadcast", targetId: groupId, body: state } }));
+  }
+
+  function startBroadcastPtt(groupId: string) {
+    setBroadcastPttPressed(groupId);
+    sendBroadcastVoiceState(groupId, "ptt_start");
+  }
+
+  function stopBroadcastPtt(groupId: string) {
+    setBroadcastPttPressed((current) => (current === groupId ? null : current));
+    sendBroadcastVoiceState(groupId, "ptt_stop");
+  }
+
   if (!publicData) return <div className="root">Loading configuration…</div>;
   if (!token || !appData) {
     return (
@@ -873,26 +899,6 @@ export function App() {
           </div>
         </aside>
         <section>
-          <div className="controls">
-            <label>
-              Scope
-              <select value={scope} onChange={(e) => setScope(e.target.value as "direct" | "room" | "broadcast")}>
-                <option value="direct">Direct</option>
-                <option value="room">Room</option>
-                <option value="broadcast">Broadcast</option>
-              </select>
-            </label>
-            <label>
-              Target
-              <select value={targetId} onChange={(e) => setTargetId(e.target.value)}>
-                {currentTargets.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
           <div className="chat">
             <input
               value={message}
@@ -922,6 +928,25 @@ export function App() {
               <span>Always on</span>
             </label>
           </div>
+          {appData.broadcastGroups.length > 0 ? (
+            <div className="broadcast-ptt">
+              <div className="broadcast-ptt-title">Broadcast PTT</div>
+              <div className="broadcast-ptt-buttons">
+                {appData.broadcastGroups.map((group) => (
+                  <button
+                    key={group.id}
+                    className={`broadcast-ptt-button ${broadcastPttPressed === group.id ? "active" : ""}`}
+                    onPointerDown={() => startBroadcastPtt(group.id)}
+                    onPointerUp={() => stopBroadcastPtt(group.id)}
+                    onPointerLeave={() => stopBroadcastPtt(group.id)}
+                    onPointerCancel={() => stopBroadcastPtt(group.id)}
+                  >
+                    {group.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
           {isAdmin ? (
             <div className="admin-panel">
               <h3>Admin · configuration</h3>
