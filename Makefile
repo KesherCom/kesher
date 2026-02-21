@@ -87,13 +87,17 @@ run-production-le: build-web
 	@TMP_CERT_DIR="/tmp/live-production-intercom-certs/$(DOMAIN)"; \
 	TMP_CERT_FILE="$$TMP_CERT_DIR/fullchain.pem"; \
 	TMP_KEY_FILE="$$TMP_CERT_DIR/privkey.pem"; \
-	echo "Copying certs to $$TMP_CERT_DIR via sudo..."; \
-	sudo mkdir -p "$$TMP_CERT_DIR"; \
-	sudo cp "/etc/letsencrypt/live/$(DOMAIN)/fullchain.pem" "$$TMP_CERT_FILE"; \
-	sudo cp "/etc/letsencrypt/live/$(DOMAIN)/privkey.pem" "$$TMP_KEY_FILE"; \
-	sudo chown "$$(id -u):$$(id -g)" "$$TMP_CERT_FILE" "$$TMP_KEY_FILE"; \
-	chmod 644 "$$TMP_CERT_FILE"; \
-	chmod 600 "$$TMP_KEY_FILE"; \
+	if [[ -f "$$TMP_CERT_FILE" && -f "$$TMP_KEY_FILE" ]]; then \
+		echo "Using existing certs in $$TMP_CERT_DIR"; \
+	else \
+		echo "Copying certs to $$TMP_CERT_DIR via sudo..."; \
+		sudo mkdir -p "$$TMP_CERT_DIR"; \
+		sudo cp "/etc/letsencrypt/live/$(DOMAIN)/fullchain.pem" "$$TMP_CERT_FILE"; \
+		sudo cp "/etc/letsencrypt/live/$(DOMAIN)/privkey.pem" "$$TMP_KEY_FILE"; \
+		sudo chown "$$(id -u):$$(id -g)" "$$TMP_CERT_FILE" "$$TMP_KEY_FILE"; \
+		chmod 644 "$$TMP_CERT_FILE"; \
+		chmod 600 "$$TMP_KEY_FILE"; \
+	fi; \
 	cd backend && sudo env "PATH=$$PATH" STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false PRODUCTION_MODE=true TLS_CERT_FILE="$$TMP_CERT_FILE" TLS_KEY_FILE="$$TMP_KEY_FILE" go run ./cmd/server
 
 build-backend:
