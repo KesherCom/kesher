@@ -11,6 +11,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 	config!: ModuleConfig
 	private ws: WebSocket | null = null
 	private reconnectTimer: NodeJS.Timeout | null = null
+	private signalBlinkTimer: NodeJS.Timeout | null = null
 	private reconnectAttempts = 0
 	private commandSeq = 0
 	private pendingCommands = new Map<
@@ -27,6 +28,10 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 	public talkRooms: string[] = []
 	public replyDirectUserId = ''
 	public replyDirectUsername = ''
+	public signalActive = false
+	public signalFrom = ''
+	public signalMessage = ''
+	public signalBlinkPhase = false
 	public lastCommandOK = true
 	public lastCommandError = ''
 	public discovery: DiscoveryResponse = {
@@ -43,6 +48,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 
 	async init(config: ModuleConfig): Promise<void> {
 		this.config = config
+		this.startSignalBlinkTimer()
 		await this.refreshDiscovery()
 		this.updateActions()
 		this.updateFeedbacks()
@@ -53,6 +59,10 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 
 	async destroy(): Promise<void> {
 		this.clearReconnectTimer()
+		if (this.signalBlinkTimer) {
+			clearInterval(this.signalBlinkTimer)
+			this.signalBlinkTimer = null
+		}
 		this.ws?.close()
 		this.ws = null
 	}
@@ -143,6 +153,16 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 		this.reconnectTimer = setTimeout(() => this.connectBridge(), delayMs)
 	}
 
+	private startSignalBlinkTimer(): void {
+		if (this.signalBlinkTimer) return
+		this.signalBlinkTimer = setInterval(() => {
+			const nextBlinkPhase = this.signalActive ? !this.signalBlinkPhase : false
+			if (nextBlinkPhase === this.signalBlinkPhase) return
+			this.signalBlinkPhase = nextBlinkPhase
+			this.checkFeedbacks()
+		}, 300)
+	}
+
 	private connectBridge(): void {
 		this.clearReconnectTimer()
 		this.ws?.close()
@@ -159,6 +179,10 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 			this.talkRooms = []
 			this.replyDirectUserId = ''
 			this.replyDirectUsername = ''
+			this.signalActive = false
+			this.signalFrom = ''
+			this.signalMessage = ''
+			this.signalBlinkPhase = false
 			this.lastCommandOK = false
 			this.lastCommandError = 'bridge not configured'
 			this.updateVariableValues()
@@ -216,6 +240,12 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 			this.talkRooms = payload.data.presence?.talkRooms || []
 			this.replyDirectUserId = payload.data.replyDirectUserId || ''
 			this.replyDirectUsername = payload.data.replyDirectUsername || ''
+			this.signalActive = !!payload.data.signalActive
+			this.signalFrom = payload.data.signalFrom || ''
+			this.signalMessage = payload.data.signalMessage || ''
+			if (!this.signalActive) {
+				this.signalBlinkPhase = false
+			}
 			this.updateVariableValues()
 			this.checkFeedbacks()
 		}
@@ -228,6 +258,10 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 			this.talkRooms = []
 			this.replyDirectUserId = ''
 			this.replyDirectUsername = ''
+			this.signalActive = false
+			this.signalFrom = ''
+			this.signalMessage = ''
+			this.signalBlinkPhase = false
 			this.lastCommandOK = false
 			this.lastCommandError = 'bridge disconnected'
 			for (const pending of this.pendingCommands.values()) {
@@ -257,6 +291,8 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 			talk_rooms: this.talkRooms.join(','),
 			reply_direct_user_id: this.replyDirectUserId,
 			reply_direct_username: this.replyDirectUsername,
+			signal_from: this.signalActive ? this.signalFrom : '',
+			signal_message: this.signalActive ? this.signalMessage : '',
 			last_command_ok: this.lastCommandOK ? 'true' : 'false',
 			last_command_error: this.lastCommandError,
 		})

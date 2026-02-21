@@ -14,6 +14,9 @@ type client struct {
 	connectedAt     time.Time
 	lastDirectFrom  string
 	lastDirectName  string
+	signalFrom      string
+	signalMessage   string
+	signalUntil     time.Time
 	activeRoom      string
 	listenRooms     map[string]struct{}
 	talkRooms       map[string]struct{}
@@ -22,6 +25,8 @@ type client struct {
 	broadcastGroups map[string]struct{}
 	send            chan WSOutbound
 }
+
+const incomingSignalAttentionWindow = 2200 * time.Millisecond
 
 func (h *Hub) ReplyTargetForUsername(username string) (string, string, bool) {
 	h.mu.RLock()
@@ -41,6 +46,24 @@ func (h *Hub) ReplyTargetForUsername(username string) (string, string, bool) {
 	return selected.lastDirectFrom, selected.lastDirectName, true
 }
 
+func (h *Hub) SignalStateForUsername(username string) (string, string, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var selected *client
+	for _, c := range h.clients {
+		if c.user.Username != username {
+			continue
+		}
+		if selected == nil || c.connectedAt.After(selected.connectedAt) {
+			selected = c
+		}
+	}
+	if selected == nil || time.Now().After(selected.signalUntil) || selected.signalFrom == "" {
+		return "", "", false
+	}
+	return selected.signalFrom, selected.signalMessage, true
+}
+
 type Hub struct {
 	mu                  sync.RWMutex
 	clients             map[string]*client
@@ -56,6 +79,58 @@ func NewHub(store *Store, logger *slog.Logger) *Hub {
 		store:               store,
 		logger:              logger,
 		presenceSubscribers: make(map[chan []PresenceState]struct{}),
+	}
+}
+
+func (h *Hub) markDirectSignalIncoming(targetUserID string, fromUser User, signal string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, c := range h.clients {
+		if c.user.ID != targetUserID || c.user.ID == fromUser.ID {
+			continue
+		}
+		c.signalFrom = fromUser.Username
+		c.signalMessage = signal
+		c.signalUntil = time.Now().Add(incomingSignalAttentionWindow)
+	}
+}
+
+func (h *Hub) roomNameByID(roomID string) string {
+	rooms, err := h.store.ListRooms(context.Background())
+	if err != nil {
+		return ""
+	}
+	for _, room := range rooms {
+		if room.ID == roomID {
+			return room.Name
+		}
+	}
+	return ""
+}
+
+func (h *Hub) markRoomSignalIncoming(roomID string, receiverRoles map[string]struct{}, fromUser User, signal string) {
+	if signal != "call" {
+		return
+	}
+	signalFrom := fromUser.Username
+	if roomName := h.roomNameByID(roomID); roomName != "" {
+		signalFrom = fromUser.Username + " (" + roomName + ")"
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, c := range h.clients {
+		if c.user.ID == fromUser.ID {
+			continue
+		}
+		if _, ok := c.listenRooms[roomID]; !ok {
+			continue
+		}
+		if !isRoleAllowed(receiverRoles, c.session.RoleID) {
+			continue
+		}
+		c.signalFrom = signalFrom
+		c.signalMessage = signal
+		c.signalUntil = time.Now().Add(incomingSignalAttentionWindow)
 	}
 }
 
@@ -179,6 +254,9 @@ func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
 
 	switch e.Scope {
 	case "direct":
+		if eventType == "signal" {
+			h.markDirectSignalIncoming(e.TargetID, sender.user, e.Signal)
+		}
 		if eventType == "voice_state" && e.Body == "ptt_start" {
 			h.mu.Lock()
 			for _, c := range h.clients {
@@ -196,6 +274,9 @@ func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
 		if err != nil {
 			h.logger.Warn("room routing failed", "targetId", e.TargetID, "error", err)
 			return
+		}
+		if eventType == "signal" {
+			h.markRoomSignalIncoming(e.TargetID, receiverRoles, sender.user, e.Signal)
 		}
 		h.sendToRoom(e.TargetID, receiverRoles, out)
 	case "broadcast":
