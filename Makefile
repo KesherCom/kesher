@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 LAN_IP ?= 127.0.0.1
 
-.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-web build-backend build-web build test docker-build docker-up docker-down clean
+.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-backend-le run-production-le run-web build-backend build-web build test docker-build docker-up docker-down clean
 
 help:
 	@echo "Available targets:"
@@ -10,6 +10,8 @@ help:
 	@echo "  make dev-web       - run React frontend dev server"
 	@echo "  make run-backend   - run backend serving built frontend assets"
 	@echo "  make run-backend-https - run backend with HTTPS; auto-generate self-signed certs if missing (LAN_IP=... optional)"
+	@echo "  make run-backend-le DOMAIN=... - run backend with HTTPS using Let's Encrypt certs from /etc/letsencrypt/live/\$$DOMAIN/"
+	@echo "  make run-production-le DOMAIN=... - production mode (HTTPS :443 + HTTP :80 redirect) with Let's Encrypt certs"
 	@echo "  make run-web       - alias for dev-web"
 	@echo "  make build-backend - build backend binary"
 	@echo "  make build-web     - build frontend bundle"
@@ -45,6 +47,54 @@ run-backend-https: build-web
 			-addext "subjectAltName=IP:$(LAN_IP),DNS:localhost"; \
 	fi
 	@cd backend && STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false TLS_CERT_FILE=./certs/lan-cert.pem TLS_KEY_FILE=./certs/lan-key.pem go run ./cmd/server
+
+run-backend-le: build-web
+	@if [[ -z "$(DOMAIN)" ]]; then \
+		echo "DOMAIN is required. Example: make run-backend-le DOMAIN=intercom.example.org"; \
+		exit 1; \
+	fi
+	@if ! sudo test -f "/etc/letsencrypt/live/$(DOMAIN)/fullchain.pem" || ! sudo test -f "/etc/letsencrypt/live/$(DOMAIN)/privkey.pem"; then \
+		echo "Let's Encrypt cert files not found for DOMAIN=$(DOMAIN)"; \
+		echo "Expected:"; \
+		echo "  /etc/letsencrypt/live/$(DOMAIN)/fullchain.pem"; \
+		echo "  /etc/letsencrypt/live/$(DOMAIN)/privkey.pem"; \
+		exit 1; \
+	fi
+	@TMP_CERT_DIR="/tmp/live-production-intercom-certs/$(DOMAIN)"; \
+	TMP_CERT_FILE="$$TMP_CERT_DIR/fullchain.pem"; \
+	TMP_KEY_FILE="$$TMP_CERT_DIR/privkey.pem"; \
+	echo "Copying certs to $$TMP_CERT_DIR via sudo..."; \
+	sudo mkdir -p "$$TMP_CERT_DIR"; \
+	sudo cp "/etc/letsencrypt/live/$(DOMAIN)/fullchain.pem" "$$TMP_CERT_FILE"; \
+	sudo cp "/etc/letsencrypt/live/$(DOMAIN)/privkey.pem" "$$TMP_KEY_FILE"; \
+	sudo chown "$$(id -u):$$(id -g)" "$$TMP_CERT_FILE" "$$TMP_KEY_FILE"; \
+	chmod 644 "$$TMP_CERT_FILE"; \
+	chmod 600 "$$TMP_KEY_FILE"; \
+	cd backend && STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false TLS_CERT_FILE="$$TMP_CERT_FILE" TLS_KEY_FILE="$$TMP_KEY_FILE" go run ./cmd/server
+
+run-production-le: build-web
+	@if [[ -z "$(DOMAIN)" ]]; then \
+		echo "DOMAIN is required. Example: make run-production-le DOMAIN=intercom.example.org"; \
+		exit 1; \
+	fi
+	@if ! sudo test -f "/etc/letsencrypt/live/$(DOMAIN)/fullchain.pem" || ! sudo test -f "/etc/letsencrypt/live/$(DOMAIN)/privkey.pem"; then \
+		echo "Let's Encrypt cert files not found for DOMAIN=$(DOMAIN)"; \
+		echo "Expected:"; \
+		echo "  /etc/letsencrypt/live/$(DOMAIN)/fullchain.pem"; \
+		echo "  /etc/letsencrypt/live/$(DOMAIN)/privkey.pem"; \
+		exit 1; \
+	fi
+	@TMP_CERT_DIR="/tmp/live-production-intercom-certs/$(DOMAIN)"; \
+	TMP_CERT_FILE="$$TMP_CERT_DIR/fullchain.pem"; \
+	TMP_KEY_FILE="$$TMP_CERT_DIR/privkey.pem"; \
+	echo "Copying certs to $$TMP_CERT_DIR via sudo..."; \
+	sudo mkdir -p "$$TMP_CERT_DIR"; \
+	sudo cp "/etc/letsencrypt/live/$(DOMAIN)/fullchain.pem" "$$TMP_CERT_FILE"; \
+	sudo cp "/etc/letsencrypt/live/$(DOMAIN)/privkey.pem" "$$TMP_KEY_FILE"; \
+	sudo chown "$$(id -u):$$(id -g)" "$$TMP_CERT_FILE" "$$TMP_KEY_FILE"; \
+	chmod 644 "$$TMP_CERT_FILE"; \
+	chmod 600 "$$TMP_KEY_FILE"; \
+	cd backend && sudo env "PATH=$$PATH" STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false PRODUCTION_MODE=true TLS_CERT_FILE="$$TMP_CERT_FILE" TLS_KEY_FILE="$$TMP_KEY_FILE" go run ./cmd/server
 
 build-backend:
 	@mkdir -p backend/bin

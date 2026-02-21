@@ -7,26 +7,32 @@ import (
 )
 
 type Config struct {
-	Addr           string
-	StaticDir      string
-	DBPath         string
-	AllowCORS      bool
-	SessionTTL     time.Duration
-	TrustedLANHTTP bool
-	TLSCertFile    string
-	TLSKeyFile     string
+	Addr                        string
+	StaticDir                   string
+	DBPath                      string
+	AllowCORS                   bool
+	SessionTTL                  time.Duration
+	TrustedLANHTTP              bool
+	TLSCertFile                 string
+	TLSKeyFile                  string
+	ProductionMode              bool
+	ProductionHTTPSAddr         string
+	ProductionHTTPRedirectAddr  string
 }
 
 func LoadConfig() Config {
 	return Config{
-		Addr:           getEnv("APP_ADDR", ":8080"),
-		StaticDir:      getEnv("STATIC_DIR", ""),
-		DBPath:         getEnv("DB_PATH", "intercom.db"),
-		AllowCORS:      getEnv("ALLOW_CORS", "true") == "true",
-		SessionTTL:     time.Duration(getEnvInt("SESSION_TTL_MINUTES", 720)) * time.Minute,
-		TrustedLANHTTP: getEnv("TRUSTED_LAN_HTTP", "true") == "true",
-		TLSCertFile:    getEnv("TLS_CERT_FILE", ""),
-		TLSKeyFile:     getEnv("TLS_KEY_FILE", ""),
+		Addr:                       getEnv("APP_ADDR", ":8080"),
+		StaticDir:                  getEnv("STATIC_DIR", ""),
+		DBPath:                     getEnv("DB_PATH", "intercom.db"),
+		AllowCORS:                  getEnv("ALLOW_CORS", "true") == "true",
+		SessionTTL:                 time.Duration(getEnvInt("SESSION_TTL_MINUTES", 720)) * time.Minute,
+		TrustedLANHTTP:             getEnv("TRUSTED_LAN_HTTP", "true") == "true",
+		TLSCertFile:                getEnv("TLS_CERT_FILE", ""),
+		TLSKeyFile:                 getEnv("TLS_KEY_FILE", ""),
+		ProductionMode:             getEnv("PRODUCTION_MODE", "false") == "true",
+		ProductionHTTPSAddr:        getEnv("PRODUCTION_HTTPS_ADDR", ":443"),
+		ProductionHTTPRedirectAddr: getEnv("PRODUCTION_HTTP_REDIRECT_ADDR", ":80"),
 	}
 }
 
