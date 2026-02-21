@@ -12,6 +12,7 @@ import {
 } from "../../api";
 import type { Bootstrap } from "../../types";
 import { RoleMultiSelect } from "./RoleMultiSelect";
+import { RoomMultiSelect } from "./RoomMultiSelect";
 
 type AdminPanelProps = {
   token: string;
@@ -28,6 +29,7 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
   const [roleCreateDefaultRoomId, setRoleCreateDefaultRoomId] = useState("");
   const [roleCreateDefaultVoiceMode, setRoleCreateDefaultVoiceMode] = useState<"always_on" | "ptt" | "">("");
   const [roleCreateDefaultSimpleView, setRoleCreateDefaultSimpleView] = useState(false);
+  const [showRoleCreateForm, setShowRoleCreateForm] = useState(false);
   const [roleEditId, setRoleEditId] = useState<string | null>(null);
   const [roleEditName, setRoleEditName] = useState("");
   const [roleEditDefaultRoomId, setRoleEditDefaultRoomId] = useState("");
@@ -37,6 +39,7 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
   const [roomCreateName, setRoomCreateName] = useState("");
   const [roomCreateSenderRoleIds, setRoomCreateSenderRoleIds] = useState<string[]>([]);
   const [roomCreateReceiverRoleIds, setRoomCreateReceiverRoleIds] = useState<string[]>([]);
+  const [showRoomCreateForm, setShowRoomCreateForm] = useState(false);
   const [roomEditId, setRoomEditId] = useState<string | null>(null);
   const [roomEditName, setRoomEditName] = useState("");
   const [roomEditSenderRoleIds, setRoomEditSenderRoleIds] = useState<string[]>([]);
@@ -45,6 +48,7 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
   const [groupCreateName, setGroupCreateName] = useState("");
   const [groupCreateRoomIds, setGroupCreateRoomIds] = useState<string[]>([]);
   const [groupCreateAllowedRoleIds, setGroupCreateAllowedRoleIds] = useState<string[]>([]);
+  const [showGroupCreateForm, setShowGroupCreateForm] = useState(false);
   const [groupEditId, setGroupEditId] = useState<string | null>(null);
   const [groupEditName, setGroupEditName] = useState("");
   const [groupEditRoomIds, setGroupEditRoomIds] = useState<string[]>([]);
@@ -69,6 +73,20 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
     }
   }
 
+  function resetRoleCreateForm() {
+    setRoleCreateId("");
+    setRoleCreateName("");
+    setRoleCreateDefaultRoomId("");
+    setRoleCreateDefaultVoiceMode("");
+    setRoleCreateDefaultSimpleView(false);
+  }
+
+  function resetRoomCreateForm() {
+    setRoomCreateId("");
+    setRoomCreateName("");
+    setRoomCreateSenderRoleIds([]);
+    setRoomCreateReceiverRoleIds([]);
+  }
   function resetGroupCreateForm() {
     setGroupCreateId("");
     setGroupCreateName("");
@@ -110,10 +128,8 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
         defaultVoiceMode: roleCreateDefaultVoiceMode || undefined,
         defaultSimpleView: roleCreateDefaultSimpleView
       });
-      setRoleCreateId("");
-      setRoleCreateName("");
-      setRoleCreateDefaultVoiceMode("");
-      setRoleCreateDefaultSimpleView(false);
+      resetRoleCreateForm();
+      setShowRoleCreateForm(false);
     });
   }
 
@@ -133,7 +149,12 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
   }
 
   function removeRoleConfig(id: string) {
-    void runAdminAction(() => deleteRole(token, id));
+    void runAdminAction(async () => {
+      await deleteRole(token, id);
+      if (roleEditId === id) {
+        resetRoleEditForm();
+      }
+    });
   }
 
   function createRoomConfig() {
@@ -147,10 +168,8 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
         senderRoleIds: roomCreateSenderRoleIds,
         receiverRoleIds: roomCreateReceiverRoleIds
       });
-      setRoomCreateId("");
-      setRoomCreateName("");
-      setRoomCreateSenderRoleIds([]);
-      setRoomCreateReceiverRoleIds([]);
+      resetRoomCreateForm();
+      setShowRoomCreateForm(false);
     });
   }
 
@@ -169,7 +188,12 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
   }
 
   function removeRoomConfig(id: string) {
-    void runAdminAction(() => deleteRoom(token, id));
+    void runAdminAction(async () => {
+      await deleteRoom(token, id);
+      if (roomEditId === id) {
+        resetRoomEditForm();
+      }
+    });
   }
 
   function createBroadcastGroupConfig() {
@@ -184,6 +208,7 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
         allowedRoleIds: groupCreateAllowedRoleIds
       });
       resetGroupCreateForm();
+      setShowGroupCreateForm(false);
     });
   }
 
@@ -215,43 +240,78 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
       <h3>Admin · configuration</h3>
       {adminError ? <p className="admin-error">{adminError}</p> : null}
       <div className="admin-block">
-        <h4>Create role</h4>
-        <div className="admin-grid">
-          <input value={roleCreateId} onChange={(e) => setRoleCreateId(e.target.value)} placeholder="role-id" />
-          <input value={roleCreateName} onChange={(e) => setRoleCreateName(e.target.value)} placeholder="Role name" />
-          <select
-            value={roleCreateDefaultRoomId}
-            onChange={(e) => setRoleCreateDefaultRoomId(e.target.value)}
-            aria-label="Default room"
-          >
-            <option value="">Default room…</option>
-            {appData.rooms.map((room) => (
-              <option key={`role-room-${room.id}`} value={room.id}>
-                {room.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={roleCreateDefaultVoiceMode}
-            onChange={(e) => setRoleCreateDefaultVoiceMode(e.target.value as "always_on" | "ptt" | "")}
-            aria-label="Default audio mode"
-          >
-            <option value="">Default audio mode…</option>
-            <option value="always_on">Always on</option>
-            <option value="ptt">PTT</option>
-          </select>
-          <label className="admin-checkbox admin-checkbox-wide">
-            <input
-              type="checkbox"
-              checked={roleCreateDefaultSimpleView}
-              onChange={(e) => setRoleCreateDefaultSimpleView(e.target.checked)}
-            />
-            <span>Default to simple mobile view</span>
-          </label>
-          <button onClick={createRoleConfig} disabled={adminBusy || !roleCreateId.trim() || !roleCreateName.trim()}>
-            Create role
-          </button>
+        <div className="admin-block-header">
+          <h4>Roles</h4>
+          {!roleEditId ? (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                if (showRoleCreateForm) {
+                  resetRoleCreateForm();
+                }
+                setShowRoleCreateForm((prev) => !prev);
+              }}
+              disabled={adminBusy}
+            >
+              {showRoleCreateForm ? "Cancel create" : "Create role"}
+            </button>
+          ) : null}
         </div>
+        {showRoleCreateForm && !roleEditId ? (
+          <div className="admin-edit-panel">
+            <div className="admin-edit-title">New role</div>
+            <div className="admin-grid">
+              <input value={roleCreateId} onChange={(e) => setRoleCreateId(e.target.value)} placeholder="role-id" />
+              <input value={roleCreateName} onChange={(e) => setRoleCreateName(e.target.value)} placeholder="Role name" />
+              <select
+                value={roleCreateDefaultRoomId}
+                onChange={(e) => setRoleCreateDefaultRoomId(e.target.value)}
+                aria-label="Default room"
+              >
+                <option value="">Default room…</option>
+                {appData.rooms.map((room) => (
+                  <option key={`role-room-${room.id}`} value={room.id}>
+                    {room.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={roleCreateDefaultVoiceMode}
+                onChange={(e) => setRoleCreateDefaultVoiceMode(e.target.value as "always_on" | "ptt" | "")}
+                aria-label="Default audio mode"
+              >
+                <option value="">Default audio mode…</option>
+                <option value="always_on">Always on</option>
+                <option value="ptt">PTT</option>
+              </select>
+              <label className="admin-checkbox admin-checkbox-wide">
+                <input
+                  type="checkbox"
+                  checked={roleCreateDefaultSimpleView}
+                  onChange={(e) => setRoleCreateDefaultSimpleView(e.target.checked)}
+                />
+                <span>Default to simple mobile view</span>
+              </label>
+            </div>
+            <div className="admin-form-actions">
+              <button onClick={createRoleConfig} disabled={adminBusy || !roleCreateId.trim() || !roleCreateName.trim()}>
+                Create role
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  resetRoleCreateForm();
+                  setShowRoleCreateForm(false);
+                }}
+                disabled={adminBusy}
+                className="secondary"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
         {roleEditId ? (
           <div className="admin-edit-panel">
             <div className="admin-edit-title">Editing role: {roleEditId}</div>
@@ -286,6 +346,8 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
                 />
                 <span>Default to simple mobile view</span>
               </label>
+            </div>
+            <div className="admin-form-actions">
               <button onClick={saveRoleEdit} disabled={adminBusy || !roleEditName.trim()}>
                 Save changes
               </button>
@@ -299,7 +361,9 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
           {appData.roles.map((role) => (
             <li key={role.id}>
               <button
+                disabled={adminBusy}
                 onClick={() => {
+                  setShowRoleCreateForm(false);
                   setRoleEditId(role.id);
                   setRoleEditName(role.name);
                   setRoleEditDefaultRoomId(role.defaultRoomId || "");
@@ -320,30 +384,63 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
         </ul>
       </div>
       <div className="admin-block">
-        <h4>Create room</h4>
-        <div className="admin-grid">
-          <input value={roomCreateId} onChange={(e) => setRoomCreateId(e.target.value)} placeholder="room-id" />
-          <input value={roomCreateName} onChange={(e) => setRoomCreateName(e.target.value)} placeholder="Room name" />
-          <button onClick={createRoomConfig} disabled={adminBusy || !roomCreateId.trim() || !roomCreateName.trim()}>
-            Create room
-          </button>
+        <div className="admin-block-header">
+          <h4>Rooms</h4>
+          {!roomEditId ? (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                if (showRoomCreateForm) {
+                  resetRoomCreateForm();
+                }
+                setShowRoomCreateForm((prev) => !prev);
+              }}
+              disabled={adminBusy}
+            >
+              {showRoomCreateForm ? "Cancel create" : "Create room"}
+            </button>
+          ) : null}
         </div>
-        <div className="admin-grid admin-grid-roles">
-          <RoleMultiSelect
-            label="Allowed senders"
-            selectedRoleIds={roomCreateSenderRoleIds}
-            setState={setRoomCreateSenderRoleIds}
-            keyPrefix="room-create-sender"
-            roles={appData.roles}
-          />
-          <RoleMultiSelect
-            label="Allowed receivers"
-            selectedRoleIds={roomCreateReceiverRoleIds}
-            setState={setRoomCreateReceiverRoleIds}
-            keyPrefix="room-create-receiver"
-            roles={appData.roles}
-          />
-        </div>
+        {showRoomCreateForm && !roomEditId ? (
+          <div className="admin-edit-panel">
+            <div className="admin-edit-title">New room</div>
+            <div className="admin-grid">
+              <input value={roomCreateId} onChange={(e) => setRoomCreateId(e.target.value)} placeholder="room-id" />
+              <input value={roomCreateName} onChange={(e) => setRoomCreateName(e.target.value)} placeholder="Room name" />
+              <button onClick={createRoomConfig} disabled={adminBusy || !roomCreateId.trim() || !roomCreateName.trim()}>
+                Create room
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  resetRoomCreateForm();
+                  setShowRoomCreateForm(false);
+                }}
+                disabled={adminBusy}
+                className="secondary"
+              >
+                Cancel
+              </button>
+            </div>
+            <div className="admin-grid admin-grid-roles">
+              <RoleMultiSelect
+                label="Allowed senders"
+                selectedRoleIds={roomCreateSenderRoleIds}
+                setState={setRoomCreateSenderRoleIds}
+                keyPrefix="room-create-sender"
+                roles={appData.roles}
+              />
+              <RoleMultiSelect
+                label="Allowed receivers"
+                selectedRoleIds={roomCreateReceiverRoleIds}
+                setState={setRoomCreateReceiverRoleIds}
+                keyPrefix="room-create-receiver"
+                roles={appData.roles}
+              />
+            </div>
+          </div>
+        ) : null}
         {roomEditId ? (
           <div className="admin-edit-panel">
             <div className="admin-edit-title">Editing room: {roomEditId}</div>
@@ -378,7 +475,9 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
           {appData.rooms.map((room) => (
             <li key={room.id}>
               <button
+                disabled={adminBusy}
                 onClick={() => {
+                  setShowRoomCreateForm(false);
                   setRoomEditId(room.id);
                   setRoomEditName(room.name);
                   setRoomEditSenderRoleIds(room.senderRoleIds || []);
@@ -398,42 +497,74 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
         </ul>
       </div>
       <div className="admin-block">
-        <h4>Create broadcast channel</h4>
-        <div className="admin-grid">
-          <input value={groupCreateId} onChange={(e) => setGroupCreateId(e.target.value)} placeholder="broadcast-channel-id" />
-          <input value={groupCreateName} onChange={(e) => setGroupCreateName(e.target.value)} placeholder="Broadcast channel name" />
-          <button
-            onClick={createBroadcastGroupConfig}
-            disabled={adminBusy || !groupCreateId.trim() || !groupCreateName.trim() || groupCreateRoomIds.length === 0}
-          >
-            Create channel
-          </button>
-        </div>
-        <div className="admin-room-picker">
-          {appData.rooms.map((room) => (
-            <label key={`group-create-room-${room.id}`} className="admin-checkbox">
-              <input
-                type="checkbox"
-                checked={groupCreateRoomIds.includes(room.id)}
-                onChange={() =>
-                  setGroupCreateRoomIds((prev) =>
-                    prev.includes(room.id) ? prev.filter((id) => id !== room.id) : [...prev, room.id]
-                  )
+        <div className="admin-block-header">
+          <h4>Broadcast channels</h4>
+          {!groupEditId ? (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                if (showGroupCreateForm) {
+                  resetGroupCreateForm();
                 }
+                setShowGroupCreateForm((prev) => !prev);
+              }}
+              disabled={adminBusy}
+            >
+              {showGroupCreateForm ? "Cancel create" : "Create channel"}
+            </button>
+          ) : null}
+        </div>
+        {showGroupCreateForm && !groupEditId ? (
+          <div className="admin-edit-panel">
+            <div className="admin-edit-title">New broadcast channel</div>
+            <div className="admin-grid">
+              <input
+                value={groupCreateId}
+                onChange={(e) => setGroupCreateId(e.target.value)}
+                placeholder="broadcast-channel-id"
               />
-              <span>{room.name}</span>
-            </label>
-          ))}
-        </div>
-        <div className="admin-grid admin-grid-roles">
-          <RoleMultiSelect
-            label="Allowed roles"
-            selectedRoleIds={groupCreateAllowedRoleIds}
-            setState={setGroupCreateAllowedRoleIds}
-            keyPrefix="group-create-allowed-roles"
-            roles={appData.roles}
-          />
-        </div>
+              <input
+                value={groupCreateName}
+                onChange={(e) => setGroupCreateName(e.target.value)}
+                placeholder="Broadcast channel name"
+              />
+              <button
+                onClick={createBroadcastGroupConfig}
+                disabled={adminBusy || !groupCreateId.trim() || !groupCreateName.trim() || groupCreateRoomIds.length === 0}
+              >
+                Create channel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  resetGroupCreateForm();
+                  setShowGroupCreateForm(false);
+                }}
+                disabled={adminBusy}
+                className="secondary"
+              >
+                Cancel
+              </button>
+            </div>
+            <div className="admin-grid admin-grid-roles">
+              <RoomMultiSelect
+                label="Included rooms"
+                selectedRoomIds={groupCreateRoomIds}
+                setState={setGroupCreateRoomIds}
+                keyPrefix="group-create-room"
+                rooms={appData.rooms}
+              />
+              <RoleMultiSelect
+                label="Allowed roles"
+                selectedRoleIds={groupCreateAllowedRoleIds}
+                setState={setGroupCreateAllowedRoleIds}
+                keyPrefix="group-create-allowed-roles"
+                roles={appData.roles}
+              />
+            </div>
+          </div>
+        ) : null}
         {groupEditId ? (
           <div className="admin-edit-panel">
             <div className="admin-edit-title">Editing channel: {groupEditId}</div>
@@ -446,23 +577,14 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
                 Cancel
               </button>
             </div>
-            <div className="admin-room-picker">
-              {appData.rooms.map((room) => (
-                <label key={`group-edit-room-${room.id}`} className="admin-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={groupEditRoomIds.includes(room.id)}
-                    onChange={() =>
-                      setGroupEditRoomIds((prev) =>
-                        prev.includes(room.id) ? prev.filter((id) => id !== room.id) : [...prev, room.id]
-                      )
-                    }
-                  />
-                  <span>{room.name}</span>
-                </label>
-              ))}
-            </div>
             <div className="admin-grid admin-grid-roles">
+              <RoomMultiSelect
+                label="Included rooms"
+                selectedRoomIds={groupEditRoomIds}
+                setState={setGroupEditRoomIds}
+                keyPrefix="group-edit-room"
+                rooms={appData.rooms}
+              />
               <RoleMultiSelect
                 label="Allowed roles"
                 selectedRoleIds={groupEditAllowedRoleIds}
@@ -477,7 +599,9 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
           {appData.broadcastGroups.map((group) => (
             <li key={group.id}>
               <button
+                disabled={adminBusy}
                 onClick={() => {
+                  setShowGroupCreateForm(false);
                   setGroupEditId(group.id);
                   setGroupEditName(group.name);
                   setGroupEditRoomIds(group.roomIds);

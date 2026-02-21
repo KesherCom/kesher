@@ -165,6 +165,16 @@ button { cursor: pointer; }
 }
 .admin-error { color: #ffb3b3; margin: 0.25rem 0 0.75rem; }
 .admin-block { margin-bottom: 0.95rem; }
+.admin-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+.admin-block-header h4 {
+  margin: 0;
+}
 .admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.5rem; margin-bottom: 0.45rem; }
 .admin-grid-roles { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 .admin-list { list-style: none; margin: 0; padding: 0; }
@@ -180,6 +190,14 @@ button { cursor: pointer; }
 .admin-room-picker { display: flex; flex-wrap: wrap; gap: 0.45rem 0.65rem; }
 .admin-checkbox { display: inline-flex; gap: 0.3rem; align-items: center; }
 .admin-checkbox-wide { grid-column: 1 / -1; }
+.admin-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.admin-form-actions button {
+  min-width: 170px;
+}
 .role-multiselect { min-width: 0; }
 .role-multiselect-details {
   border: 1px solid #334865;
