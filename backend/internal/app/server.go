@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -23,9 +25,39 @@ type Server struct {
 	sessions    *SessionManager
 	hub         *Hub
 	media       *MediaManager
+	certMagic   tlsProvider
 	httpSrv     *http.Server
 	redirectSrv *http.Server
 	upgrader    websocket.Upgrader
+}
+
+type tlsProvider interface {
+	ManageSync(ctx context.Context, domainNames []string) error
+	TLSConfig() *tls.Config
+}
+
+func (s *Server) listenAndServeHTTPS() error {
+	switch strings.ToLower(strings.TrimSpace(s.cfg.TLSMode)) {
+	case "", "file":
+		if s.cfg.TLSCertFile == "" || s.cfg.TLSKeyFile == "" {
+			return errors.New("file TLS mode requires TLS_CERT_FILE and TLS_KEY_FILE")
+		}
+		return s.httpSrv.ListenAndServeTLS(s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
+	case "certmagic":
+		if s.certMagic == nil {
+			return errors.New("TLS_MODE=certmagic is configured but CertMagic is not initialized")
+		}
+		if err := s.certMagic.ManageSync(context.Background(), s.cfg.CertMagicDomains); err != nil {
+			return fmt.Errorf("failed to initialize certificate management: %w", err)
+		}
+		ln, err := net.Listen("tcp", s.httpSrv.Addr)
+		if err != nil {
+			return err
+		}
+		return s.httpSrv.Serve(tls.NewListener(ln, s.certMagic.TLSConfig()))
+	default:
+		return fmt.Errorf("unsupported TLS_MODE %q", s.cfg.TLSMode)
+	}
 }
 
 type companionInbound struct {
@@ -254,6 +286,13 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 	s.media = NewMediaManager(s.hub, logger)
 	s.hub.SetMediaManager(s.media)
+	if strings.EqualFold(cfg.TLSMode, "certmagic") {
+		certMagicCfg, err := newCertMagicConfig(cfg)
+		if err != nil {
+			return nil, err
+		}
+		s.certMagic = certMagicCfg
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/healthz", s.handleHealth)
 	mux.HandleFunc("/api/public-bootstrap", s.handlePublicBootstrap)
@@ -293,13 +332,11 @@ func NewServer(cfg Config) (*Server, error) {
 
 func (s *Server) ListenAndServe() error {
 	if s.cfg.ProductionMode {
-		if s.cfg.TLSCertFile == "" || s.cfg.TLSKeyFile == "" {
-			return errors.New("production mode requires TLS_CERT_FILE and TLS_KEY_FILE")
-		}
 		s.logger.Info(
 			"starting production servers",
 			"httpsAddr", s.cfg.ProductionHTTPSAddr,
 			"httpRedirectAddr", s.cfg.ProductionHTTPRedirectAddr,
+			"tlsMode", s.cfg.TLSMode,
 			"dbPath", s.cfg.DBPath,
 		)
 		redirectErrCh := make(chan error, 1)
@@ -309,7 +346,7 @@ func (s *Server) ListenAndServe() error {
 				redirectErrCh <- err
 			}
 		}()
-		err := s.httpSrv.ListenAndServeTLS(s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
+		err := s.listenAndServeHTTPS()
 		if s.redirectSrv != nil {
 			_ = s.redirectSrv.Close()
 		}
@@ -328,10 +365,7 @@ func (s *Server) ListenAndServe() error {
 	if s.cfg.TrustedLANHTTP {
 		err = s.httpSrv.ListenAndServe()
 	} else {
-		if s.cfg.TLSCertFile == "" || s.cfg.TLSKeyFile == "" {
-			return errors.New("https is enabled but TLS_CERT_FILE or TLS_KEY_FILE is not set")
-		}
-		err = s.httpSrv.ListenAndServeTLS(s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
+		err = s.listenAndServeHTTPS()
 	}
 	if !errors.Is(err, http.ErrServerClosed) {
 		return err
