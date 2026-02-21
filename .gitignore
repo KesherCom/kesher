@@ -8,4 +8,5 @@ tmp
 *.db
 *.db-*
 backend/bin
+web/tsconfig.tsbuildinfo
 
