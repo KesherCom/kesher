@@ -308,9 +308,10 @@ type upsertRoomRequest struct {
 }
 
 type upsertBroadcastGroupRequest struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	RoomIDs []string `json:"roomIds"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	RoomIDs        []string `json:"roomIds"`
+	AllowedRoleIDs []string `json:"allowedRoleIds"`
 }
 
 func (s *Server) handleAdminRoles(w http.ResponseWriter, r *http.Request, session Session) {
@@ -448,7 +449,7 @@ func (s *Server) handleAdminBroadcastGroups(w http.ResponseWriter, r *http.Reque
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		if err := s.store.CreateBroadcastGroup(r.Context(), req.ID, req.Name, req.RoomIDs); err != nil {
+		if err := s.store.CreateBroadcastGroup(r.Context(), req.ID, req.Name, req.RoomIDs, req.AllowedRoleIDs); err != nil {
 			if s.writeStoreErr(w, err) {
 				return
 			}
@@ -477,7 +478,7 @@ func (s *Server) handleAdminBroadcastGroupByID(w http.ResponseWriter, r *http.Re
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		if err := s.store.UpdateBroadcastGroup(r.Context(), groupID, req.Name, req.RoomIDs); err != nil {
+		if err := s.store.UpdateBroadcastGroup(r.Context(), groupID, req.Name, req.RoomIDs, req.AllowedRoleIDs); err != nil {
 			if s.writeStoreErr(w, err) {
 				return
 			}
@@ -734,6 +735,10 @@ func (s *Server) isInboundAllowed(ctx context.Context, sender Session, e RoutedE
 		senderRoles, _, err := s.store.RoomRolePolicies(ctx, e.TargetID)
 		return err == nil && isRoleAllowed(senderRoles, sender.RoleID)
 	case "broadcast":
+		allowedRoles, err := s.store.BroadcastGroupAllowedRoleSet(ctx, e.TargetID)
+		if err != nil || !isRoleAllowed(allowedRoles, sender.RoleID) {
+			return false
+		}
 		roomSet, err := s.store.BroadcastGroupRoomSet(ctx, e.TargetID)
 		if err != nil {
 			return false

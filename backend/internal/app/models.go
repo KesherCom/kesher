@@ -18,9 +18,10 @@ type Room struct {
 }
 
 type BroadcastGroup struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	RoomIDs []string `json:"roomIds"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	RoomIDs        []string `json:"roomIds"`
+	AllowedRoleIDs []string `json:"allowedRoleIds"`
 }
 
 type User struct {

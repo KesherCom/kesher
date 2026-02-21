@@ -44,6 +44,17 @@ func (s *Store) replaceRoomRoleMappingsWithTx(ctx context.Context, tx *sql.Tx, t
 	}
 	return nil
 }
+func (s *Store) replaceBroadcastGroupRoleMappingsWithTx(ctx context.Context, tx *sql.Tx, groupID string, roleIDs []string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM broadcast_group_roles WHERE broadcast_group_id = ?`, groupID); err != nil {
+		return err
+	}
+	for _, roleID := range roleIDs {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO broadcast_group_roles (broadcast_group_id, role_id) VALUES (?, ?)`, groupID, roleID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (s *Store) roomRoleIDs(ctx context.Context, table, roomID string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`SELECT role_id FROM %s WHERE room_id = ? ORDER BY role_id`, table), roomID)
@@ -183,6 +194,11 @@ func (s *Store) migrate(ctx context.Context) error {
 			broadcast_group_id TEXT NOT NULL,
 			room_id TEXT NOT NULL,
 			PRIMARY KEY (broadcast_group_id, room_id)
+		);`,
+		`CREATE TABLE IF NOT EXISTS broadcast_group_roles (
+			broadcast_group_id TEXT NOT NULL,
+			role_id TEXT NOT NULL,
+			PRIMARY KEY (broadcast_group_id, role_id)
 		);`,
 		`CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
@@ -364,7 +380,10 @@ func (s *Store) ListBroadcastGroups(ctx context.Context) ([]BroadcastGroup, erro
 	defer rows.Close()
 	var groups []BroadcastGroup
 	for rows.Next() {
-		var g BroadcastGroup
+		g := BroadcastGroup{
+			RoomIDs:        []string{},
+			AllowedRoleIDs: []string{},
+		}
 		if err := rows.Scan(&g.ID, &g.Name); err != nil {
 			return nil, err
 		}
@@ -381,6 +400,19 @@ func (s *Store) ListBroadcastGroups(ctx context.Context) ([]BroadcastGroup, erro
 			g.RoomIDs = append(g.RoomIDs, rid)
 		}
 		roomRows.Close()
+		roleRows, err := s.db.QueryContext(ctx, `SELECT role_id FROM broadcast_group_roles WHERE broadcast_group_id = ? ORDER BY role_id`, g.ID)
+		if err != nil {
+			return nil, err
+		}
+		for roleRows.Next() {
+			var roleID string
+			if err := roleRows.Scan(&roleID); err != nil {
+				roleRows.Close()
+				return nil, err
+			}
+			g.AllowedRoleIDs = append(g.AllowedRoleIDs, roleID)
+		}
+		roleRows.Close()
 		groups = append(groups, g)
 	}
 	return groups, nil
@@ -404,6 +436,29 @@ func (s *Store) BroadcastGroupRoomSet(ctx context.Context, groupID string) (map[
 		return nil, fmt.Errorf("broadcast group not found or empty")
 	}
 	return out, nil
+}
+func (s *Store) BroadcastGroupAllowedRoleSet(ctx context.Context, groupID string) (map[string]struct{}, error) {
+	var groupCount int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM broadcast_groups WHERE id = ?`, groupID).Scan(&groupCount); err != nil {
+		return nil, err
+	}
+	if groupCount == 0 {
+		return nil, ErrNotFound
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT role_id FROM broadcast_group_roles WHERE broadcast_group_id = ?`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	allowed := make(map[string]struct{})
+	for rows.Next() {
+		var roleID string
+		if err := rows.Scan(&roleID); err != nil {
+			return nil, err
+		}
+		allowed[roleID] = struct{}{}
+	}
+	return allowed, nil
 }
 
 func (s *Store) CreateRole(ctx context.Context, id, name, defaultRoomID, defaultVoiceMode string, defaultSimpleView bool) error {
@@ -480,6 +535,10 @@ func (s *Store) DeleteRole(ctx context.Context, id string) error {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM room_receiver_roles WHERE role_id = ?`, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM broadcast_group_roles WHERE role_id = ?`, id); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -640,16 +699,21 @@ func (s *Store) DeleteRoom(ctx context.Context, id string) error {
 		_ = tx.Rollback()
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM broadcast_group_roles WHERE broadcast_group_id NOT IN (SELECT id FROM broadcast_groups)`); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *Store) CreateBroadcastGroup(ctx context.Context, id, name string, roomIDs []string) error {
+func (s *Store) CreateBroadcastGroup(ctx context.Context, id, name string, roomIDs, allowedRoleIDs []string) error {
 	id = strings.TrimSpace(id)
 	name = strings.TrimSpace(name)
 	roomIDs = normalizeIDs(roomIDs)
+	allowedRoleIDs = normalizeIDs(allowedRoleIDs)
 	if id == "" || name == "" || len(roomIDs) == 0 {
 		return ErrInvalidInput
 	}
@@ -658,6 +722,10 @@ func (s *Store) CreateBroadcastGroup(ctx context.Context, id, name string, roomI
 		return err
 	}
 	if err := s.validateRoomsExistWithTx(ctx, tx, roomIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := s.validateRolesExistWithTx(ctx, tx, allowedRoleIDs); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -674,16 +742,21 @@ func (s *Store) CreateBroadcastGroup(ctx context.Context, id, name string, roomI
 			return err
 		}
 	}
+	if err := s.replaceBroadcastGroupRoleMappingsWithTx(ctx, tx, id, allowedRoleIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *Store) UpdateBroadcastGroup(ctx context.Context, id, name string, roomIDs []string) error {
+func (s *Store) UpdateBroadcastGroup(ctx context.Context, id, name string, roomIDs, allowedRoleIDs []string) error {
 	id = strings.TrimSpace(id)
 	name = strings.TrimSpace(name)
 	roomIDs = normalizeIDs(roomIDs)
+	allowedRoleIDs = normalizeIDs(allowedRoleIDs)
 	if id == "" || name == "" || len(roomIDs) == 0 {
 		return ErrInvalidInput
 	}
@@ -692,6 +765,10 @@ func (s *Store) UpdateBroadcastGroup(ctx context.Context, id, name string, roomI
 		return err
 	}
 	if err := s.validateRoomsExistWithTx(ctx, tx, roomIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := s.validateRolesExistWithTx(ctx, tx, allowedRoleIDs); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -722,6 +799,10 @@ func (s *Store) UpdateBroadcastGroup(ctx context.Context, id, name string, roomI
 			return err
 		}
 	}
+	if err := s.replaceBroadcastGroupRoleMappingsWithTx(ctx, tx, id, allowedRoleIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -738,6 +819,10 @@ func (s *Store) DeleteBroadcastGroup(ctx context.Context, id string) error {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM broadcast_group_rooms WHERE broadcast_group_id = ?`, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM broadcast_group_roles WHERE broadcast_group_id = ?`, id); err != nil {
 		_ = tx.Rollback()
 		return err
 	}

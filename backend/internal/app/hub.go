@@ -165,6 +165,11 @@ func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
 		}
 		h.sendToRoom(e.TargetID, receiverRoles, out)
 	case "broadcast":
+		allowedRoles, err := h.store.BroadcastGroupAllowedRoleSet(context.Background(), e.TargetID)
+		if err != nil || !isRoleAllowed(allowedRoles, sender.session.RoleID) {
+			h.logger.Warn("broadcast group role check failed", "targetId", e.TargetID, "error", err)
+			return
+		}
 		rooms, err := h.store.BroadcastGroupRoomSet(context.Background(), e.TargetID)
 		if err != nil {
 			h.logger.Warn("broadcast group routing failed", "targetId", e.TargetID, "error", err)
