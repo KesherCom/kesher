@@ -2,11 +2,9 @@ type ChatSignalPanelProps = {
   message: string;
   onMessageChange: (value: string) => void;
   onSendChat: () => void;
-  onSendSignal: (signal: string) => void;
   chatMessages: Array<{ from: string; body: string; at: string; self: boolean }>;
 };
-
-export function ChatSignalPanel({ message, onMessageChange, onSendChat, onSendSignal, chatMessages }: ChatSignalPanelProps) {
+export function ChatSignalPanel({ message, onMessageChange, onSendChat, chatMessages }: ChatSignalPanelProps) {
   return (
     <>
       <div className="chat">
@@ -17,11 +15,6 @@ export function ChatSignalPanel({ message, onMessageChange, onSendChat, onSendSi
           placeholder="Type chat message…"
         />
         <button onClick={onSendChat}>Send chat</button>
-      </div>
-      <div className="signals">
-        <button onClick={() => onSendSignal("attention")}>Attention</button>
-        <button onClick={() => onSendSignal("standby")}>Standby</button>
-        <button onClick={() => onSendSignal("go")}>Go</button>
       </div>
       <div className="chat-feed" aria-live="polite">
         {chatMessages.length === 0 ? (
