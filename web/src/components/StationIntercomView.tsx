@@ -109,7 +109,7 @@ export function StationIntercomView({
         </div>
       </div>
 
-      <section className="station-block">
+      <section className="station-block station-talk-section">
         <h3>Talk channels</h3>
         <div className="station-talk-grid">
           {appData.rooms.map((room) => {
@@ -148,7 +148,7 @@ export function StationIntercomView({
         </div>
       </section>
 
-      <section className="station-block">
+      <section className="station-block station-direct-section">
         <h3>Direct communication</h3>
         <div className="station-direct-grid">
           {directOnlineTargets.map((p) => (
@@ -206,7 +206,7 @@ export function StationIntercomView({
       </section>
 
       {appData.broadcastGroups.length > 0 ? (
-        <section className="station-block">
+        <section className="station-block station-broadcast-section">
           <h3>Broadcast channels</h3>
           <div className="station-broadcast-grid">
             {appData.broadcastGroups.map((group) => (
@@ -226,9 +226,9 @@ export function StationIntercomView({
         </section>
       ) : null}
 
-      <section className="station-utility">
-        <div className="panel">{audioPanel}</div>
+      <section className="station-utility station-utility-section">
         <div className="panel">{chatAndSignalPanel}</div>
+        <div className="panel">{audioPanel}</div>
       </section>
       {isAdminModalOpen ? (
         <div className="station-modal-backdrop" onClick={() => setIsAdminModalOpen(false)}>

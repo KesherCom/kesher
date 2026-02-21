@@ -36,6 +36,7 @@ export function App() {
   const [scope, setScope] = useState<"direct" | "room" | "broadcast">("room");
   const [targetId, setTargetId] = useState("");
   const [message, setMessage] = useState("");
+  const [chatMessages, setChatMessages] = useState<Array<{ from: string; body: string; at: string; self: boolean }>>([]);
   const [events, setEvents] = useState<Array<{ label: string; at: string }>>([]);
   const [voiceMode, setVoiceMode] = useState<"always_on" | "ptt">("always_on");
   const [connectionState, setConnectionState] = useState<"connecting" | "connected" | "reconnecting" | "offline">("offline");
@@ -684,6 +685,22 @@ export function App() {
             triggerIncomingAttention(msg.data);
           }
         }
+        if (msg.type === "chat") {
+          const chatBody = (msg.data.body || "").toString().trim();
+          if (chatBody) {
+            setChatMessages((old) =>
+              [
+                {
+                  from: msg.data.fromUser.username,
+                  body: chatBody,
+                  at: new Date(msg.data.timestamp).toLocaleTimeString(),
+                  self: msg.data.fromUser.id === appData.self.id
+                },
+                ...old
+              ].slice(0, 120)
+            );
+          }
+        }
         const body = (msg.data.signal || msg.data.body || "").toString();
         setEvents((old) =>
           [
@@ -782,7 +799,11 @@ export function App() {
 
   const currentTargets = useMemo(() => {
     if (!appData) return [];
-    if (scope === "direct") return appData.users.map((u) => ({ id: u.id, label: `${u.username} (${u.roleId})` }));
+    if (scope === "direct") {
+      return appData.users
+        .filter((u) => u.id !== appData.self.id)
+        .map((u) => ({ id: u.id, label: `${u.username} (${u.roleId})` }));
+    }
     if (scope === "room") {
       return appData.rooms
         .filter((room) => roleAllowed(room.senderRoleIds, appData.self.roleId))
@@ -805,8 +826,11 @@ export function App() {
 
 
   useEffect(() => {
-    if (currentTargets[0]) setTargetId(currentTargets[0].id);
-  }, [scope, appData]);
+    setTargetId((prev) => {
+      if (currentTargets.some((target) => target.id === prev)) return prev;
+      return currentTargets[0]?.id || "";
+    });
+  }, [currentTargets]);
 
   async function doLogin() {
     const res = await login(username.trim(), roleId);
@@ -864,14 +888,20 @@ export function App() {
 
 
   function sendChat() {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !targetId || !message.trim()) return;
-    wsRef.current.send(JSON.stringify({ type: "chat", data: { scope, targetId, body: message.trim() } }));
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !message.trim()) return;
+    const resolvedTargetId =
+      scope === "room" ? matrixAnchorRoomId(listenRoomIdsRef.current, talkRoomIdsRef.current) || targetId : targetId;
+    if (!resolvedTargetId) return;
+    wsRef.current.send(JSON.stringify({ type: "chat", data: { scope, targetId: resolvedTargetId, body: message.trim() } }));
     setMessage("");
   }
 
   function sendSignal(signal: string) {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !targetId) return;
-    wsRef.current.send(JSON.stringify({ type: "signal", data: { scope, targetId, signal } }));
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const resolvedTargetId =
+      scope === "room" ? matrixAnchorRoomId(listenRoomIdsRef.current, talkRoomIdsRef.current) || targetId : targetId;
+    if (!resolvedTargetId) return;
+    wsRef.current.send(JSON.stringify({ type: "signal", data: { scope, targetId: resolvedTargetId, signal } }));
   }
   function sendScopedSignal(scopeValue: "direct" | "room" | "broadcast", scopedTargetId: string, signal: string) {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !scopedTargetId) return;
@@ -1006,6 +1036,7 @@ export function App() {
       onMessageChange={setMessage}
       onSendChat={sendChat}
       onSendSignal={sendSignal}
+      chatMessages={chatMessages}
     />
   );
 

@@ -2,14 +2,15 @@
 On-prem, web-based intercom for church live productions. Built for 30–50 concurrent users on a trusted LAN.
 
 ## Current state
-- **Auth:** username + role selection login, in-memory sessions with configurable TTL (default 12 h). Admin endpoints gated to the `producer` role.
+- **Auth:** username + role selection login, in-memory sessions with configurable TTL (default 12 h).
 - **Voice:** WebRTC SFU (Pion) embedded in the Go backend. Always-on and push-to-talk modes.
-- **Rooms:** users join a room; audio is routed per-room through the SFU. Room switching re-negotiates media tracks.
+- **Rooms:** clients maintain a listen/talk room matrix; audio is routed by talk/listen overlap with role-policy enforcement.
 - **Broadcast groups:** span multiple rooms. PTT on a broadcast group routes audio to all member rooms.
+- **Direct PTT:** users can temporarily route mic audio to one direct target user.
 - **Presence:** real-time presence over WebSocket — voice mode, mic state, active room, broadcast-active indicator.
 - **Admin CRUD:** REST endpoints for managing roles, rooms, and broadcast groups (create/update/delete).
 - **Persistence:** SQLite for roles, rooms, broadcast groups, and users.
-- **Frontend:** React + TypeScript (Vite). Includes mic device picker, input level meter, and WebSocket reconnect with exponential backoff.
+- **Frontend:** React + TypeScript (Vite). Componentized station/simple views, mic/speaker device pickers, input level meter, and WebSocket reconnect with exponential backoff.
 
 ## Repository layout
 ```
