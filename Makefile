@@ -77,19 +77,19 @@ run-production-le: build-web
 		echo "DOMAIN is required. Example: make run-production-le DOMAIN=intercom.example.org"; \
 		exit 1; \
 	fi
-	@if ! sudo test -f "/etc/letsencrypt/live/$(DOMAIN)/fullchain.pem" || ! sudo test -f "/etc/letsencrypt/live/$(DOMAIN)/privkey.pem"; then \
-		echo "Let's Encrypt cert files not found for DOMAIN=$(DOMAIN)"; \
-		echo "Expected:"; \
-		echo "  /etc/letsencrypt/live/$(DOMAIN)/fullchain.pem"; \
-		echo "  /etc/letsencrypt/live/$(DOMAIN)/privkey.pem"; \
-		exit 1; \
-	fi
 	@TMP_CERT_DIR="/tmp/live-production-intercom-certs/$(DOMAIN)"; \
 	TMP_CERT_FILE="$$TMP_CERT_DIR/fullchain.pem"; \
 	TMP_KEY_FILE="$$TMP_CERT_DIR/privkey.pem"; \
 	if [[ -f "$$TMP_CERT_FILE" && -f "$$TMP_KEY_FILE" ]]; then \
 		echo "Using existing certs in $$TMP_CERT_DIR"; \
 	else \
+		if ! sudo test -f "/etc/letsencrypt/live/$(DOMAIN)/fullchain.pem" || ! sudo test -f "/etc/letsencrypt/live/$(DOMAIN)/privkey.pem"; then \
+			echo "Let's Encrypt cert files not found for DOMAIN=$(DOMAIN)"; \
+			echo "Expected:"; \
+			echo "  /etc/letsencrypt/live/$(DOMAIN)/fullchain.pem"; \
+			echo "  /etc/letsencrypt/live/$(DOMAIN)/privkey.pem"; \
+			exit 1; \
+		fi; \
 		echo "Copying certs to $$TMP_CERT_DIR via sudo..."; \
 		sudo mkdir -p "$$TMP_CERT_DIR"; \
 		sudo cp "/etc/letsencrypt/live/$(DOMAIN)/fullchain.pem" "$$TMP_CERT_FILE"; \
