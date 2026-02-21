@@ -20,7 +20,6 @@ backend/           Go API + WebSocket signaling + WebRTC SFU + SQLite
 web/               React + TypeScript frontend (Vite)
 deploy/compose/    Docker Compose deployment
 docs/              implementation plan
-scripts/           soak tests
 ```
 
 ## Prerequisites
@@ -213,12 +212,6 @@ cd backend && sudo env "PATH=$PATH" PRODUCTION_MODE=true TLS_CERT_FILE=./certs/l
 ## Tests
 ```sh
 make test          # runs go test ./... and frontend build check
-```
-
-## Soak test
-Smoke-test login/bootstrap/logout cycles:
-```sh
-bash scripts/soak/session_soak.sh http://localhost:8080 30 20
 ```
 
 ## All Makefile targets
