@@ -54,9 +54,17 @@ Run backend over HTTPS with Let's Encrypt certs already present under `/etc/lets
 ```sh
 make run-backend-le DOMAIN=intercom.example.org
 ```
+Run backend over HTTPS with in-app CertMagic automation (DNS-01 only):
+```sh
+make run-backend-certmagic DOMAIN=intercom.example.org DNS_PROVIDER=cloudflare
+```
 Run in production mode (HTTPS on `:443`, HTTP redirect on `:80`):
 ```sh
 make run-production-le DOMAIN=intercom.example.org
+```
+Run in production mode with in-app CertMagic automation (DNS-01 only):
+```sh
+make run-production-certmagic DOMAIN=intercom.example.org DNS_PROVIDER=cloudflare
 ```
 
 ## Production (Docker Compose)
@@ -66,6 +74,15 @@ make docker-up     # builds image and starts on :8080
 Open `http://<host>:8080`. Stop with `make docker-down`.
 
 The Compose setup uses a named volume (`intercom_data`) for the SQLite database.
+
+### Docker Compose with CertMagic (DNS-01)
+Use the dedicated compose file and env template:
+```sh
+cp deploy/compose/.env.certmagic.example deploy/compose/.env.certmagic
+# edit deploy/compose/.env.certmagic
+docker compose -f deploy/compose/docker-compose.certmagic.yml --env-file deploy/compose/.env.certmagic up -d --build
+```
+This stack exposes `:80` and `:443`, enables `TLS_MODE=certmagic`, and persists cert/account state in the `intercom_certmagic` volume.
 
 ## Local deployment with a publicly trusted certificate (provider-agnostic)
 This setup gives LAN clients a trusted HTTPS URL (no browser warning) by combining:
@@ -128,6 +145,38 @@ This starts:
 - Ensure your router/firewall allows LAN access to ports `80` and `443`.
 - If clients bypass local DNS (for example via encrypted DNS), local override may fail; enforce your intended DNS path on managed networks.
 
+## Automated ACME inside the app (CertMagic, DNS-01 only)
+The backend can issue and renew certificates directly using CertMagic with DNS-01 challenge automation.
+
+Important behavior:
+- Only DNS-01 challenge is supported in this mode.
+- HTTP-01 and TLS-ALPN-01 are intentionally disabled.
+- A persistent storage path is required for account keys and cert state (`CERTMAGIC_STORAGE_PATH`).
+
+Supported DNS providers in this build:
+- `cloudflare`
+- `hetzner`
+- `route53`
+
+Example production run:
+```sh
+cd backend && sudo env "PATH=$PATH" \
+  STATIC_DIR=../web/dist \
+  TRUSTED_LAN_HTTP=false \
+  PRODUCTION_MODE=true \
+  TLS_MODE=certmagic \
+  CERTMAGIC_DOMAINS=intercom.example.org \
+  CERTMAGIC_DNS_PROVIDER=cloudflare \
+  CERTMAGIC_CHALLENGE=dns-01 \
+  CERTMAGIC_CLOUDFLARE_API_TOKEN={{CLOUDFLARE_API_TOKEN}} \
+  go run ./cmd/server
+```
+
+Provider-specific credentials:
+- Cloudflare: `CERTMAGIC_CLOUDFLARE_API_TOKEN` (optional `CERTMAGIC_CLOUDFLARE_ZONE_TOKEN`)
+- Hetzner: `CERTMAGIC_HETZNER_API_TOKEN`
+- Route53 (optional overrides): `CERTMAGIC_ROUTE53_REGION`, `CERTMAGIC_ROUTE53_PROFILE`, `CERTMAGIC_ROUTE53_ACCESS_KEY_ID`, `CERTMAGIC_ROUTE53_SECRET_ACCESS_KEY`, `CERTMAGIC_ROUTE53_SESSION_TOKEN`, `CERTMAGIC_ROUTE53_HOSTED_ZONE_ID`
+
 ### LLM prompt template
 Copy/paste this into your preferred LLM if you want guided setup help:
 
@@ -182,11 +231,21 @@ Output constraints:
 | `ALLOW_CORS` | `true` | Enable CORS headers (disable in production behind same origin) |
 | `SESSION_TTL_MINUTES` | `720` | Session lifetime in minutes |
 | `TRUSTED_LAN_HTTP` | `true` | Run plain HTTP (`true`) or HTTPS (`false`) |
+| `TLS_MODE` | `file` | TLS source: `file` (existing cert/key paths) or `certmagic` (in-app ACME) |
 | `TLS_CERT_FILE` | _(empty)_ | TLS certificate path (required when `TRUSTED_LAN_HTTP=false`) |
 | `TLS_KEY_FILE` | _(empty)_ | TLS private key path (required when `TRUSTED_LAN_HTTP=false`) |
 | `PRODUCTION_MODE` | `false` | Enable production listeners: HTTPS app server + HTTP redirect server |
 | `PRODUCTION_HTTPS_ADDR` | `:443` | HTTPS listen address used when `PRODUCTION_MODE=true` |
 | `PRODUCTION_HTTP_REDIRECT_ADDR` | `:80` | HTTP redirect listen address used when `PRODUCTION_MODE=true` |
+| `CERTMAGIC_DOMAINS` | _(empty)_ | Comma-separated certificate domain list (required when `TLS_MODE=certmagic`) |
+| `CERTMAGIC_EMAIL` | _(empty)_ | ACME account email (optional, recommended) |
+| `CERTMAGIC_CA` | `https://acme-v02.api.letsencrypt.org/directory` | ACME directory URL |
+| `CERTMAGIC_STORAGE_PATH` | `./certmagic-data` | Persistent CertMagic storage path |
+| `CERTMAGIC_CHALLENGE` | `dns-01` | Challenge type; only `dns-01` is supported |
+| `CERTMAGIC_DNS_PROVIDER` | _(empty)_ | DNS provider identifier (`cloudflare`, `hetzner`, `route53`) |
+| `CERTMAGIC_PROPAGATION_DELAY_SECONDS` | `0` | Delay before checking DNS challenge propagation |
+| `CERTMAGIC_PROPAGATION_TIMEOUT_SECONDS` | `120` | Max wait for DNS challenge propagation |
+| `CERTMAGIC_DNS_RESOLVERS` | _(empty)_ | Comma-separated DNS resolvers (e.g. `1.1.1.1:53,8.8.8.8:53`) |
 
 ## HTTPS with a self-signed certificate
 Generate a self-signed cert/key for your LAN IP (replace `192.168.1.50`):
@@ -216,6 +275,6 @@ make test          # runs go test ./... and frontend build check
 
 ## All Makefile targets
 Run `make help` to see available targets:
-`deps`, `dev-backend`, `dev-web`, `run-backend`, `run-backend-https`, `run-backend-le`, `run-production-le`, `build`, `test`, `docker-build`, `docker-up`, `docker-down`, `clean`.
+`deps`, `dev-backend`, `dev-web`, `run-backend`, `run-backend-https`, `run-backend-le`, `run-backend-certmagic`, `run-production-le`, `run-production-certmagic`, `build`, `test`, `docker-build`, `docker-up`, `docker-down`, `clean`.
 
 

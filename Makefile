@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 LAN_IP ?= 127.0.0.1
 
-.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-backend-le run-production-le run-web build-backend build-web build test docker-build docker-up docker-down clean
+.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web build-backend build-web build test docker-build docker-up docker-down clean
 
 help:
 	@echo "Available targets:"
@@ -11,7 +11,9 @@ help:
 	@echo "  make run-backend   - run backend serving built frontend assets"
 	@echo "  make run-backend-https - run backend with HTTPS; auto-generate self-signed certs if missing (LAN_IP=... optional)"
 	@echo "  make run-backend-le DOMAIN=... - run backend with HTTPS using Let's Encrypt certs from /etc/letsencrypt/live/\$$DOMAIN/"
+	@echo "  make run-backend-certmagic DOMAIN=... DNS_PROVIDER=... - run backend with CertMagic ACME DNS-01 automation"
 	@echo "  make run-production-le DOMAIN=... - production mode (HTTPS :443 + HTTP :80 redirect) with Let's Encrypt certs"
+	@echo "  make run-production-certmagic DOMAIN=... DNS_PROVIDER=... - production mode with in-app CertMagic DNS-01 automation"
 	@echo "  make run-web       - alias for dev-web"
 	@echo "  make build-backend - build backend binary"
 	@echo "  make build-web     - build frontend bundle"
@@ -71,6 +73,16 @@ run-backend-le: build-web
 	chmod 644 "$$TMP_CERT_FILE"; \
 	chmod 600 "$$TMP_KEY_FILE"; \
 	cd backend && STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false TLS_CERT_FILE="$$TMP_CERT_FILE" TLS_KEY_FILE="$$TMP_KEY_FILE" go run ./cmd/server
+run-backend-certmagic: build-web
+	@if [[ -z "$(DOMAIN)" ]]; then \
+		echo "DOMAIN is required. Example: make run-backend-certmagic DOMAIN=intercom.example.org DNS_PROVIDER=cloudflare"; \
+		exit 1; \
+	fi
+	@if [[ -z "$(DNS_PROVIDER)" ]]; then \
+		echo "DNS_PROVIDER is required. Example values: cloudflare, hetzner, route53"; \
+		exit 1; \
+	fi
+	@cd backend && STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false TLS_MODE=certmagic CERTMAGIC_DOMAINS="$(DOMAIN)" CERTMAGIC_DNS_PROVIDER="$(DNS_PROVIDER)" CERTMAGIC_CHALLENGE=dns-01 go run ./cmd/server
 
 run-production-le: build-web
 	@if [[ -z "$(DOMAIN)" ]]; then \
@@ -99,6 +111,17 @@ run-production-le: build-web
 		chmod 600 "$$TMP_KEY_FILE"; \
 	fi; \
 	cd backend && sudo env "PATH=$$PATH" STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false PRODUCTION_MODE=true TLS_CERT_FILE="$$TMP_CERT_FILE" TLS_KEY_FILE="$$TMP_KEY_FILE" go run ./cmd/server
+
+run-production-certmagic: build-web
+	@if [[ -z "$(DOMAIN)" ]]; then \
+		echo "DOMAIN is required. Example: make run-production-certmagic DOMAIN=intercom.example.org DNS_PROVIDER=cloudflare"; \
+		exit 1; \
+	fi
+	@if [[ -z "$(DNS_PROVIDER)" ]]; then \
+		echo "DNS_PROVIDER is required. Example values: cloudflare, hetzner, route53"; \
+		exit 1; \
+	fi
+	@cd backend && sudo env "PATH=$$PATH" STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false PRODUCTION_MODE=true TLS_MODE=certmagic CERTMAGIC_DOMAINS="$(DOMAIN)" CERTMAGIC_DNS_PROVIDER="$(DNS_PROVIDER)" CERTMAGIC_CHALLENGE=dns-01 go run ./cmd/server
 
 build-backend:
 	@mkdir -p backend/bin

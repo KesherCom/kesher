@@ -1,0 +1,64 @@
+services:
+  intercom:
+    build:
+      context: ../../
+      dockerfile: backend/Dockerfile
+      args:
+        TARGETOS: ${TARGETOS:-linux}
+        TARGETARCH: ${TARGETARCH:-amd64}
+    container_name: live-production-intercom-certmagic
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_ADDR: ${APP_ADDR:-:8080}
+      STATIC_DIR: ${STATIC_DIR:-/app/web-dist}
+      DB_PATH: ${DB_PATH:-/app/data/intercom.db}
+      ALLOW_CORS: ${ALLOW_CORS:-false}
+      SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-720}
+      TRUSTED_LAN_HTTP: ${TRUSTED_LAN_HTTP:-false}
+      PRODUCTION_MODE: ${PRODUCTION_MODE:-true}
+      PRODUCTION_HTTP_REDIRECT_ADDR: ${PRODUCTION_HTTP_REDIRECT_ADDR:-:80}
+      PRODUCTION_HTTPS_ADDR: ${PRODUCTION_HTTPS_ADDR:-:443}
+      TLS_MODE: ${TLS_MODE:-certmagic}
+      CERTMAGIC_DOMAINS: ${CERTMAGIC_DOMAINS:-}
+      CERTMAGIC_EMAIL: ${CERTMAGIC_EMAIL:-}
+      CERTMAGIC_CA: ${CERTMAGIC_CA:-https://acme-v02.api.letsencrypt.org/directory}
+      CERTMAGIC_STORAGE_PATH: ${CERTMAGIC_STORAGE_PATH:-/app/certmagic}
+      CERTMAGIC_CHALLENGE: ${CERTMAGIC_CHALLENGE:-dns-01}
+      CERTMAGIC_DNS_PROVIDER: ${CERTMAGIC_DNS_PROVIDER:-}
+      CERTMAGIC_PROPAGATION_DELAY_SECONDS: ${CERTMAGIC_PROPAGATION_DELAY_SECONDS:-0}
+      CERTMAGIC_PROPAGATION_TIMEOUT_SECONDS: ${CERTMAGIC_PROPAGATION_TIMEOUT_SECONDS:-120}
+      CERTMAGIC_DNS_RESOLVERS: ${CERTMAGIC_DNS_RESOLVERS:-}
+
+      # Provider credentials (set only the provider you use)
+      CERTMAGIC_CLOUDFLARE_API_TOKEN: ${CERTMAGIC_CLOUDFLARE_API_TOKEN:-}
+      CERTMAGIC_CLOUDFLARE_ZONE_TOKEN: ${CERTMAGIC_CLOUDFLARE_ZONE_TOKEN:-}
+      CERTMAGIC_HETZNER_API_TOKEN: ${CERTMAGIC_HETZNER_API_TOKEN:-}
+      CERTMAGIC_ROUTE53_REGION: ${CERTMAGIC_ROUTE53_REGION:-}
+      CERTMAGIC_ROUTE53_PROFILE: ${CERTMAGIC_ROUTE53_PROFILE:-}
+      CERTMAGIC_ROUTE53_ACCESS_KEY_ID: ${CERTMAGIC_ROUTE53_ACCESS_KEY_ID:-}
+      CERTMAGIC_ROUTE53_SECRET_ACCESS_KEY: ${CERTMAGIC_ROUTE53_SECRET_ACCESS_KEY:-}
+      CERTMAGIC_ROUTE53_SESSION_TOKEN: ${CERTMAGIC_ROUTE53_SESSION_TOKEN:-}
+      CERTMAGIC_ROUTE53_HOSTED_ZONE_ID: ${CERTMAGIC_ROUTE53_HOSTED_ZONE_ID:-}
+    volumes:
+      - intercom_data:/app/data
+      - intercom_certmagic:/app/certmagic
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/api/healthz >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    init: true
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+volumes:
+  intercom_data:
+  intercom_certmagic:
