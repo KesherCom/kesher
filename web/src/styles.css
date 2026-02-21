@@ -451,6 +451,41 @@ button.secondary { background: transparent; }
   font-size: 0.85rem;
   padding: 0.4rem 0;
 }
+.station-direct-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.55rem;
+}
+.station-direct-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border-radius: 10px;
+  border: 1px solid #2b3a55;
+  background: #141d2b;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.64rem;
+  font-weight: 800;
+  color: #b9c8de;
+  flex: 1 1 140px;
+}
+.station-direct-tab span {
+  text-align: left;
+}
+.station-direct-tab small {
+  border: 1px solid #385071;
+  border-radius: 999px;
+  padding: 0.08rem 0.42rem;
+  color: #d8e6ff;
+  font-size: 0.62rem;
+}
+.station-direct-tab.active {
+  border-color: #476086;
+  background: #1a2638;
+}
 .station-controls {
   display: flex;
   align-items: center;
