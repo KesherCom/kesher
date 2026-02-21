@@ -103,7 +103,7 @@ export function App() {
   const [scope, setScope] = useState<"direct" | "room" | "broadcast">("room");
   const [targetId, setTargetId] = useState("");
   const [message, setMessage] = useState("");
-  const [chatMessages, setChatMessages] = useState<Array<{ from: string; body: string; at: string; self: boolean }>>([]);
+  const [chatMessages, setChatMessages] = useState<Array<{ from: string; body: string; at: string; room: string; self: boolean }>>([]);
   const [events, setEvents] = useState<Array<{ label: string; at: string }>>([]);
   const [voiceMode, setVoiceMode] = useState<"always_on" | "ptt">("always_on");
   const [connectionState, setConnectionState] = useState<"connecting" | "connected" | "reconnecting" | "offline">("offline");
@@ -911,12 +911,19 @@ export function App() {
         if (msg.type === "chat") {
           const chatBody = (msg.data.body || "").toString().trim();
           if (chatBody) {
+            const roomLabel =
+              msg.data.scope === "room"
+                ? appData.rooms.find((room) => room.id === msg.data.targetId)?.name || msg.data.targetId
+                : msg.data.scope === "broadcast"
+                  ? appData.broadcastGroups.find((group) => group.id === msg.data.targetId)?.name || msg.data.targetId
+                  : "Direct";
             setChatMessages((old) =>
               [
                 {
                   from: msg.data.fromUser.username,
                   body: chatBody,
                   at: new Date(msg.data.timestamp).toLocaleTimeString(),
+                  room: roomLabel,
                   self: msg.data.fromUser.id === appData.self.id
                 },
                 ...old

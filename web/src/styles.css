@@ -77,6 +77,22 @@ button { cursor: pointer; }
 .chat-feed-list li strong {
   font-size: 0.84rem;
 }
+.chat-feed-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.28rem 0.48rem;
+}
+.chat-feed-meta span {
+  margin-right: 0;
+}
+.chat-feed-room {
+  color: #b7c8e3;
+  border: 1px solid #334865;
+  border-radius: 999px;
+  padding: 0.05rem 0.42rem;
+  line-height: 1.2;
+}
 .chat-feed-list li p {
   margin: 0.16rem 0 0;
   color: #e5edf9;

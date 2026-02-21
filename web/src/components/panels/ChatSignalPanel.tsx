@@ -2,7 +2,7 @@ type ChatSignalPanelProps = {
   message: string;
   onMessageChange: (value: string) => void;
   onSendChat: () => void;
-  chatMessages: Array<{ from: string; body: string; at: string; self: boolean }>;
+  chatMessages: Array<{ from: string; body: string; at: string; room: string; self: boolean }>;
 };
 export function ChatSignalPanel({ message, onMessageChange, onSendChat, chatMessages }: ChatSignalPanelProps) {
   return (
@@ -23,8 +23,11 @@ export function ChatSignalPanel({ message, onMessageChange, onSendChat, chatMess
           <ul className="chat-feed-list">
             {chatMessages.map((entry, index) => (
               <li key={`${entry.at}-${entry.from}-${index}`} className={entry.self ? "self" : ""}>
-                <span>{entry.at}</span>
-                <strong>{entry.from}</strong>
+                <div className="chat-feed-meta">
+                  <span>{entry.at}</span>
+                  <strong>{entry.from}</strong>
+                  <span className="chat-feed-room">{entry.room}</span>
+                </div>
                 <p>{entry.body}</p>
               </li>
             ))}
