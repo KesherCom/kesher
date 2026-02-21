@@ -1,25 +1,33 @@
 FROM node:22-alpine AS web-build
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json* ./
-RUN npm install
+RUN npm ci
 COPY web/ .
 RUN npm run build
 
 FROM golang:1.23-alpine AS go-build
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 WORKDIR /src/backend
 COPY backend/go.mod backend/go.sum* ./
 RUN go mod download
 COPY backend/ .
-RUN CGO_ENABLED=0 go build -o /out/server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
 
 FROM alpine:3.21
+LABEL org.opencontainers.image.title="live-production-intercom"
+LABEL org.opencontainers.image.description="On-prem web-based intercom for church live productions"
+LABEL org.opencontainers.image.source="https://github.com/staubichsauger/live-production-intercom"
 WORKDIR /app
 COPY --from=go-build /out/server /app/server
 COPY --from=web-build /src/web/dist /app/web-dist
+RUN mkdir -p /app/data
 EXPOSE 8080
 ENV APP_ADDR=:8080
 ENV STATIC_DIR=/app/web-dist
 ENV DB_PATH=/app/data/intercom.db
 ENV ALLOW_CORS=false
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 \
+  CMD wget -qO- http://127.0.0.1:8080/api/healthz >/dev/null 2>&1 || exit 1
 CMD ["/app/server"]
 

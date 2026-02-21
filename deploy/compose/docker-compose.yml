@@ -3,17 +3,34 @@ services:
     build:
       context: ../../
       dockerfile: backend/Dockerfile
+      args:
+        TARGETOS: ${TARGETOS:-linux}
+        TARGETARCH: ${TARGETARCH:-amd64}
+    container_name: live-production-intercom
     ports:
-      - "8080:8080"
+      - "${INTERCOM_PORT:-8080}:8080"
     environment:
-      APP_ADDR: ":8080"
-      STATIC_DIR: "/app/web-dist"
-      DB_PATH: "/app/data/intercom.db"
-      ALLOW_CORS: "false"
-      TRUSTED_LAN_HTTP: "true"
-      SESSION_TTL_MINUTES: "720"
+      APP_ADDR: ${APP_ADDR:-:8080}
+      STATIC_DIR: ${STATIC_DIR:-/app/web-dist}
+      DB_PATH: ${DB_PATH:-/app/data/intercom.db}
+      ALLOW_CORS: ${ALLOW_CORS:-false}
+      TRUSTED_LAN_HTTP: ${TRUSTED_LAN_HTTP:-true}
+      SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-720}
     volumes:
       - intercom_data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/healthz >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    init: true
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
 volumes:

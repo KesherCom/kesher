@@ -39,6 +39,53 @@ button { cursor: pointer; }
   margin-bottom: 0.75rem;
 }
 .chat input { flex: 1; min-width: 220px; }
+.chat-feed {
+  border: 1px solid #2a3547;
+  background: #0f1520;
+  border-radius: 10px;
+  padding: 0.45rem 0.55rem;
+  margin-top: 0.35rem;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.chat-feed-empty {
+  margin: 0;
+  color: #9fb0ca;
+  font-size: 0.88rem;
+}
+.chat-feed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.chat-feed-list li {
+  border-bottom: 1px solid #223148;
+  padding-bottom: 0.35rem;
+}
+.chat-feed-list li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.chat-feed-list li span {
+  color: #8ea2bf;
+  font-size: 0.72rem;
+  display: inline-block;
+  margin-right: 0.45rem;
+}
+.chat-feed-list li strong {
+  font-size: 0.84rem;
+}
+.chat-feed-list li p {
+  margin: 0.16rem 0 0;
+  color: #e5edf9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.chat-feed-list li.self strong {
+  color: #ffd86b;
+}
 .mic-dropdown { position: relative; width: 100%; }
 .mic-dropdown-trigger {
   width: 100%;
@@ -698,6 +745,16 @@ button.secondary { background: transparent; }
   100% { opacity: 0; }
 }
 @media (max-width: 960px) {
+  .station-shell {
+    display: flex;
+    flex-direction: column;
+  }
+  .station-topbar { order: 1; }
+  .station-controls { order: 2; }
+  .station-talk-section { order: 3; }
+  .station-direct-section { order: 4; }
+  .station-broadcast-section { order: 5; }
+  .station-utility-section { order: 6; }
   .station-controls { align-items: stretch; }
   .station-ptt { width: 100%; }
   .station-ptt { flex: 1 1 100%; }
