@@ -268,6 +268,61 @@ Production mode example (requires privileges for ports `80` and `443`):
 cd backend && sudo env "PATH=$PATH" PRODUCTION_MODE=true TLS_CERT_FILE=./certs/lan-cert.pem TLS_KEY_FILE=./certs/lan-key.pem go run ./cmd/server
 ```
 
+## Desktop launcher/proxy (localhost secure-context workaround)
+For desktop clients, you can run a local proxy app that opens the browser on `http://127.0.0.1:<port>` and forwards all UI/API/WS traffic to your backend.
+
+This avoids installing trust material system-wide on each client browser machine and uses the localhost secure-context behavior for `getUserMedia()`.
+
+Important:
+- The backend must serve the UI itself (`STATIC_DIR` configured on backend, e.g. via `make run-backend` / `make run-backend-https`).
+- The desktop proxy does **not** bundle frontend assets.
+
+Build:
+```sh
+make build-desktop-proxy
+```
+
+Run (HTTP upstream):
+```sh
+make run-desktop-proxy UPSTREAM=http://192.168.1.50:8080
+```
+
+Run (HTTPS upstream with private/self-signed CA):
+```sh
+make run-desktop-proxy UPSTREAM=https://intercom.example.org CA_FILE=/path/to/ca.pem
+```
+
+Run (HTTPS upstream with certificate/public-key pinning):
+```sh
+make run-desktop-proxy UPSTREAM=https://intercom.example.org PINS='spki-sha256:<base64>,cert-sha256:<hex>'
+```
+
+Direct binary example:
+```sh
+./desktop-proxy/bin/desktop-proxy --upstream http://192.168.1.50:8080
+```
+
+Phase C packaging (desktop release artifacts):
+```sh
+# build binaries for macOS, Linux, and Windows (amd64 + arm64)
+make build-desktop-proxy-all DESKTOP_PROXY_VERSION=v0.1.0
+
+# same as above, plus SHA256 checksum manifest
+make package-desktop-proxy DESKTOP_PROXY_VERSION=v0.1.0
+```
+
+Artifacts are written to:
+```text
+desktop-proxy/dist/<version>/
+```
+
+Notes:
+- Local listener defaults to `127.0.0.1:0` (ephemeral port on loopback only).
+- Browser is auto-opened on startup (`--open-browser=false` to disable).
+- All routes (including `/`, `/api/*`, and `/ws`) are forwarded upstream.
+- Startup runs a preflight probe to `/api/healthz` by default (fail-fast if upstream is not reachable). Override with `PRECHECK_PATH=...` or disable via `SKIP_PREFLIGHT=1`.
+- If `UPSTREAM` omits a port, scheme defaults are used (`http` -> `80`, `https` -> `443`) and the launcher logs a warning.
+
 ## Tests
 ```sh
 make test          # runs go test ./... and frontend build check
@@ -275,6 +330,6 @@ make test          # runs go test ./... and frontend build check
 
 ## All Makefile targets
 Run `make help` to see available targets:
-`deps`, `dev-backend`, `dev-web`, `run-backend`, `run-backend-https`, `run-backend-le`, `run-backend-certmagic`, `run-production-le`, `run-production-certmagic`, `build`, `test`, `docker-build`, `docker-up`, `docker-down`, `clean`.
+`deps`, `dev-backend`, `dev-web`, `run-backend`, `run-backend-https`, `run-backend-le`, `run-backend-certmagic`, `run-production-le`, `run-production-certmagic`, `run-desktop-proxy`, `build-backend`, `build-web`, `build-desktop-proxy`, `build-desktop-proxy-all`, `package-desktop-proxy`, `build`, `test`, `docker-build`, `docker-up`, `docker-down`, `clean`.
 
 
