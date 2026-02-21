@@ -44,6 +44,16 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 			options: [],
 			callback: () => !self.lastCommandOK,
 		},
+		reply_target_available: {
+			name: 'Reply-to-caller target available',
+			type: 'boolean',
+			defaultStyle: {
+				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(0, 130, 90),
+			},
+			options: [],
+			callback: () => self.replyDirectUserId !== '',
+		},
 		voice_mode_is: {
 			name: 'Voice mode equals',
 			type: 'boolean',
@@ -64,24 +74,6 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				},
 			],
 			callback: (feedback) => self.voiceMode === String(feedback.options.mode),
-		},
-		active_room_is: {
-			name: 'Active room equals',
-			type: 'boolean',
-			defaultStyle: {
-				color: combineRgb(255, 255, 255),
-				bgcolor: combineRgb(100, 0, 130),
-			},
-			options: [
-				{
-					id: 'roomId',
-					type: 'dropdown',
-					label: 'Room',
-					default: roomChoices[0]?.id ?? '',
-					choices: roomChoices,
-				},
-			],
-			callback: (feedback) => self.activeRoom === String(feedback.options.roomId || ''),
 		},
 		listen_room_selected: {
 			name: 'Listen room selected',

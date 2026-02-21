@@ -146,7 +146,9 @@ type CompanionCommand struct {
 }
 
 type CompanionBridgeState struct {
-	Username string         `json:"username"`
-	Bound    bool           `json:"bound"`
-	Presence *PresenceState `json:"presence,omitempty"`
+	Username            string         `json:"username"`
+	Bound               bool           `json:"bound"`
+	Presence            *PresenceState `json:"presence,omitempty"`
+	ReplyDirectUserID   string         `json:"replyDirectUserId,omitempty"`
+	ReplyDirectUsername string         `json:"replyDirectUsername,omitempty"`
 }

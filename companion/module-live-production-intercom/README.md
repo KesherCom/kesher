@@ -6,9 +6,10 @@ Custom Bitfocus Companion module for controlling `live-production-intercom` brow
 - Loads discovery data from: `/api/companion/discovery?username=<username>`
 - Exposes actions for:
   - voice mode (`always_on` / `ptt`)
-  - active room selection
   - listen/talk room matrix selection
-  - scoped PTT (`room` / `direct` / `broadcast`)
+  - PTT to active room
+  - PTT to explicit target (`room` / `direct` / `broadcast`)
+  - reply to latest direct caller (PTT)
   - scoped signal sending
 - Exposes feedbacks for:
   - bridge connected/bound

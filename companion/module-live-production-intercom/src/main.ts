@@ -25,6 +25,8 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 	public activeRoom = ''
 	public listenRooms: string[] = []
 	public talkRooms: string[] = []
+	public replyDirectUserId = ''
+	public replyDirectUsername = ''
 	public lastCommandOK = true
 	public lastCommandError = ''
 	public discovery: DiscoveryResponse = {
@@ -155,6 +157,8 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 			this.micEnabled = false
 			this.listenRooms = []
 			this.talkRooms = []
+			this.replyDirectUserId = ''
+			this.replyDirectUsername = ''
 			this.lastCommandOK = false
 			this.lastCommandError = 'bridge not configured'
 			this.updateVariableValues()
@@ -210,6 +214,8 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 			this.activeRoom = payload.data.presence?.activeRoom || ''
 			this.listenRooms = payload.data.presence?.listenRooms || []
 			this.talkRooms = payload.data.presence?.talkRooms || []
+			this.replyDirectUserId = payload.data.replyDirectUserId || ''
+			this.replyDirectUsername = payload.data.replyDirectUsername || ''
 			this.updateVariableValues()
 			this.checkFeedbacks()
 		}
@@ -220,6 +226,8 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 			this.micEnabled = false
 			this.listenRooms = []
 			this.talkRooms = []
+			this.replyDirectUserId = ''
+			this.replyDirectUsername = ''
 			this.lastCommandOK = false
 			this.lastCommandError = 'bridge disconnected'
 			for (const pending of this.pendingCommands.values()) {
@@ -247,6 +255,8 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 			active_room: this.activeRoom,
 			listen_rooms: this.listenRooms.join(','),
 			talk_rooms: this.talkRooms.join(','),
+			reply_direct_user_id: this.replyDirectUserId,
+			reply_direct_username: this.replyDirectUsername,
 			last_command_ok: this.lastCommandOK ? 'true' : 'false',
 			last_command_error: this.lastCommandError,
 		})

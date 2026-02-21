@@ -10,6 +10,8 @@ export function UpdateVariableDefinitions(self: ModuleInstance): void {
 		{ variableId: 'active_room', name: 'Active room ID' },
 		{ variableId: 'listen_rooms', name: 'Selected listen room IDs (comma-separated)' },
 		{ variableId: 'talk_rooms', name: 'Selected talk room IDs (comma-separated)' },
+		{ variableId: 'reply_direct_user_id', name: 'Reply-to-caller direct user ID' },
+		{ variableId: 'reply_direct_username', name: 'Reply-to-caller username' },
 		{ variableId: 'last_command_ok', name: 'Last command successful (true/false)' },
 		{ variableId: 'last_command_error', name: 'Last command error message' },
 	]
