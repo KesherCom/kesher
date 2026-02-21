@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,14 +16,23 @@ import (
 )
 
 type Server struct {
-	cfg      Config
-	logger   *slog.Logger
-	store    *Store
-	sessions *SessionManager
-	hub      *Hub
-	media    *MediaManager
-	httpSrv  *http.Server
-	upgrader websocket.Upgrader
+	cfg         Config
+	logger      *slog.Logger
+	store       *Store
+	sessions    *SessionManager
+	hub         *Hub
+	media       *MediaManager
+	httpSrv     *http.Server
+	redirectSrv *http.Server
+	upgrader    websocket.Upgrader
+}
+
+func (s *Server) handleHTTPRedirectToHTTPS(w http.ResponseWriter, r *http.Request) {
+	host := r.Host
+	if parsedHost, _, err := net.SplitHostPort(r.Host); err == nil && parsedHost != "" {
+		host = parsedHost
+	}
+	http.Redirect(w, r, "https://"+host+r.URL.RequestURI(), http.StatusMovedPermanently)
 }
 
 func (s *Server) filterAllowedRoomsForRole(ctx context.Context, roleID string, roomIDs []string, forSend bool) []string {
@@ -86,15 +96,57 @@ func NewServer(cfg Config) (*Server, error) {
 	if cfg.StaticDir != "" {
 		mux.Handle("/", s.staticHandler())
 	}
+	serveAddr := cfg.Addr
+	if cfg.ProductionMode {
+		serveAddr = cfg.ProductionHTTPSAddr
+	}
 	s.httpSrv = &http.Server{
-		Addr:              cfg.Addr,
+		Addr:              serveAddr,
 		Handler:           s.withCORS(mux),
 		ReadHeaderTimeout: 5 * time.Second,
+	}
+	if cfg.ProductionMode {
+		s.redirectSrv = &http.Server{
+			Addr:              cfg.ProductionHTTPRedirectAddr,
+			Handler:           http.HandlerFunc(s.handleHTTPRedirectToHTTPS),
+			ReadHeaderTimeout: 5 * time.Second,
+		}
 	}
 	return s, nil
 }
 
 func (s *Server) ListenAndServe() error {
+	if s.cfg.ProductionMode {
+		if s.cfg.TLSCertFile == "" || s.cfg.TLSKeyFile == "" {
+			return errors.New("production mode requires TLS_CERT_FILE and TLS_KEY_FILE")
+		}
+		s.logger.Info(
+			"starting production servers",
+			"httpsAddr", s.cfg.ProductionHTTPSAddr,
+			"httpRedirectAddr", s.cfg.ProductionHTTPRedirectAddr,
+			"dbPath", s.cfg.DBPath,
+		)
+		redirectErrCh := make(chan error, 1)
+		go func() {
+			err := s.redirectSrv.ListenAndServe()
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				redirectErrCh <- err
+			}
+		}()
+		err := s.httpSrv.ListenAndServeTLS(s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
+		if s.redirectSrv != nil {
+			_ = s.redirectSrv.Close()
+		}
+		select {
+		case redirectErr := <-redirectErrCh:
+			return redirectErr
+		default:
+		}
+		if !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	}
 	s.logger.Info("starting server", "addr", s.cfg.Addr, "dbPath", s.cfg.DBPath)
 	var err error
 	if s.cfg.TrustedLANHTTP {
@@ -113,7 +165,16 @@ func (s *Server) ListenAndServe() error {
 
 func (s *Server) Shutdown(ctx context.Context) error {
 	_ = s.store.Close()
-	return s.httpSrv.Shutdown(ctx)
+	var shutdownErr error
+	if s.redirectSrv != nil {
+		if err := s.redirectSrv.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			shutdownErr = err
+		}
+	}
+	if err := s.httpSrv.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) && shutdownErr == nil {
+		shutdownErr = err
+	}
+	return shutdownErr
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
