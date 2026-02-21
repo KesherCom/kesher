@@ -12,6 +12,7 @@ WORKDIR /src/backend
 COPY backend/go.mod backend/go.sum* ./
 RUN go mod download
 COPY backend/ .
+COPY --from=web-build /src/web/dist ./internal/app/embedded_web
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
 
 FROM alpine:3.21
@@ -20,11 +21,9 @@ LABEL org.opencontainers.image.description="On-prem web-based intercom for churc
 LABEL org.opencontainers.image.source="https://github.com/staubichsauger/live-production-intercom"
 WORKDIR /app
 COPY --from=go-build /out/server /app/server
-COPY --from=web-build /src/web/dist /app/web-dist
 RUN mkdir -p /app/data
 EXPOSE 8080
 ENV APP_ADDR=:8080
-ENV STATIC_DIR=/app/web-dist
 ENV DB_PATH=/app/data/intercom.db
 ENV ALLOW_CORS=false
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 \

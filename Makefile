@@ -4,7 +4,7 @@ DESKTOP_PROXY_VERSION ?= dev
 DESKTOP_PROXY_DIST_DIR ?= desktop-proxy/dist
 DESKTOP_PROXY_PLATFORMS ?= darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64
 
-.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web run-desktop-proxy build-backend build-web build-desktop-proxy build-desktop-proxy-all package-desktop-proxy build test docker-build docker-up docker-down clean
+.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web run-desktop-proxy sync-embedded-web build-backend build-web build-desktop-proxy build-desktop-proxy-all package-desktop-proxy build test docker-build docker-up docker-down clean
 
 help:
 	@echo "Available targets:"
@@ -19,6 +19,7 @@ help:
 	@echo "  make run-production-certmagic DOMAIN=... DNS_PROVIDER=... - production mode with in-app CertMagic DNS-01 automation"
 	@echo "  make run-desktop-proxy UPSTREAM=... [CA_FILE=...] [PINS=...] [SKIP_PREFLIGHT=1] - run localhost desktop launcher/proxy"
 	@echo "  make run-web       - alias for dev-web"
+	@echo "  make sync-embedded-web - copy web/dist into backend embedded assets directory"
 	@echo "  make build-backend - build backend binary"
 	@echo "  make build-web     - build frontend bundle"
 	@echo "  make build-desktop-proxy - build desktop proxy binary"
@@ -138,12 +139,17 @@ run-desktop-proxy:
 	fi
 	@cd desktop-proxy && go run ./cmd/desktop-proxy --upstream "$(UPSTREAM)" $(if $(CA_FILE),--ca-file "$(CA_FILE)",) $(if $(PINS),--pins "$(PINS)",) $(if $(PRECHECK_PATH),--preflight-path "$(PRECHECK_PATH)",) $(if $(SKIP_PREFLIGHT),--skip-preflight,)
 
-build-backend:
-	@mkdir -p backend/bin
-	@cd backend && go build -o ./bin/server ./cmd/server
 
 build-web:
 	@cd web && npm run build
+
+sync-embedded-web: build-web
+	@mkdir -p backend/internal/app/embedded_web
+	@cp -R web/dist/. backend/internal/app/embedded_web/
+
+build-backend: sync-embedded-web
+	@mkdir -p backend/bin
+	@cd backend && go build -o ./bin/server ./cmd/server
 
 build-desktop-proxy:
 	@mkdir -p desktop-proxy/bin
@@ -164,7 +170,7 @@ package-desktop-proxy: build-desktop-proxy-all
 	@cd "$(DESKTOP_PROXY_DIST_DIR)/$(DESKTOP_PROXY_VERSION)" && \
 	shasum -a 256 desktop-proxy-* > SHA256SUMS.txt
 
-build: build-backend build-web build-desktop-proxy
+build: build-backend build-desktop-proxy
 
 test:
 	@cd backend && go test ./...
