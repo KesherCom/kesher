@@ -151,4 +151,7 @@ type CompanionBridgeState struct {
 	Presence            *PresenceState `json:"presence,omitempty"`
 	ReplyDirectUserID   string         `json:"replyDirectUserId,omitempty"`
 	ReplyDirectUsername string         `json:"replyDirectUsername,omitempty"`
+	SignalActive        bool           `json:"signalActive"`
+	SignalFrom          string         `json:"signalFrom,omitempty"`
+	SignalMessage       string         `json:"signalMessage,omitempty"`
 }

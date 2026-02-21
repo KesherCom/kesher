@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -46,6 +47,12 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 	presenceCh, unsubscribe := s.hub.SubscribePresence()
 	defer unsubscribe()
+	var connMu sync.Mutex
+	writeJSON := func(msg WSOutbound) {
+		connMu.Lock()
+		defer connMu.Unlock()
+		_ = conn.WriteJSON(msg)
+	}
 
 	writeState := func() {
 		state := CompanionBridgeState{
@@ -60,7 +67,12 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			state.ReplyDirectUserID = replyUserID
 			state.ReplyDirectUsername = replyUsername
 		}
-		_ = conn.WriteJSON(WSOutbound{
+		if signalFrom, signalMessage, signalActive := s.hub.SignalStateForUsername(username); signalActive {
+			state.SignalActive = true
+			state.SignalFrom = signalFrom
+			state.SignalMessage = signalMessage
+		}
+		writeJSON(WSOutbound{
 			Type: "companion_state",
 			Data: state,
 		})
@@ -70,10 +82,14 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-done:
 				return
+			case <-ticker.C:
+				writeState()
 			case _, ok := <-presenceCh:
 				if !ok {
 					return
@@ -94,21 +110,21 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 		commandID := strings.TrimSpace(in.Data.CommandID)
 		token, ok := s.hub.LatestTokenForUsername(username)
 		if !ok {
-			_ = conn.WriteJSON(WSOutbound{
+			writeJSON(WSOutbound{
 				Type: "companion_command_result",
 				Data: map[string]any{"ok": false, "error": "target unavailable", "commandId": commandID},
 			})
 			continue
 		}
 		if in.Data.Command == "" {
-			_ = conn.WriteJSON(WSOutbound{
+			writeJSON(WSOutbound{
 				Type: "companion_command_result",
 				Data: map[string]any{"ok": false, "error": "missing command", "commandId": commandID},
 			})
 			continue
 		}
 		if in.Data.Command == "set_voice_mode" && in.Data.Mode == "" {
-			_ = conn.WriteJSON(WSOutbound{
+			writeJSON(WSOutbound{
 				Type: "companion_command_result",
 				Data: map[string]any{"ok": false, "error": "missing mode", "commandId": commandID},
 			})
@@ -119,13 +135,13 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			Data: in.Data,
 		})
 		if !sent {
-			_ = conn.WriteJSON(WSOutbound{
+			writeJSON(WSOutbound{
 				Type: "companion_command_result",
 				Data: map[string]any{"ok": false, "error": "failed to deliver command", "commandId": commandID},
 			})
 			continue
 		}
-		_ = conn.WriteJSON(WSOutbound{
+		writeJSON(WSOutbound{
 			Type: "companion_command_result",
 			Data: map[string]any{"ok": true, "commandId": commandID},
 		})

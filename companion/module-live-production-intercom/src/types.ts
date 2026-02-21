@@ -3,6 +3,9 @@ export type CompanionState = {
 	bound: boolean
 	replyDirectUserId?: string
 	replyDirectUsername?: string
+	signalActive?: boolean
+	signalFrom?: string
+	signalMessage?: string
 	presence?: {
 		activeRoom: string
 		listenRooms: string[]
