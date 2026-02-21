@@ -138,7 +138,7 @@ export function StationIntercomView({
                   >
                     Listen
                   </button>
-                  <button className="call placeholder" disabled title="Reserved for upcoming feature">
+                  <button className="call" onClick={() => sendScopedSignal("room", room.id, "call")}>
                     Call
                   </button>
                 </div>

@@ -390,7 +390,13 @@ button.secondary { background: transparent; }
 }
 .station-card-actions button:last-child { border-right: 0; }
 .station-card-actions .listen.on { background: #16a34a; color: #fff; }
+.station-card-actions .call { background: #171f2c; color: #f0c95d; }
 .station-card-actions .signal { background: #171f2c; color: #f0c95d; }
+.station-card-actions .call:active,
+.station-card-actions .signal:active {
+  background: #f3c337;
+  color: #1a1a1a;
+}
 .station-card-actions .placeholder { opacity: 0.5; cursor: not-allowed; }
 .station-empty {
   margin: 0;
@@ -609,6 +615,87 @@ button.secondary { background: transparent; }
 .station-modal-note {
   margin: 0;
   color: #aebdd4;
+}
+.attention-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.attention-flash-signal {
+  background: transparent;
+}
+.attention-flash-call {
+  background: transparent;
+}
+.attention-flash::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.attention-flash-signal::before {
+  background: radial-gradient(circle at 50% 50%, rgba(255, 239, 170, 0.32), rgba(227, 34, 42, 0.2) 46%, rgba(4, 7, 12, 0.04) 74%);
+  animation: attention-flash-fade 2.2s ease-out forwards;
+}
+.attention-flash-call::before {
+  background: radial-gradient(circle at 50% 50%, rgba(255, 232, 120, 0.72), rgba(243, 195, 55, 0.5) 52%, rgba(10, 12, 16, 0.12) 82%);
+  animation: attention-call-multi-flash 3.8s linear forwards;
+}
+.attention-flash-card {
+  min-width: min(520px, 92vw);
+  text-align: center;
+  border: 1px solid rgba(255, 224, 167, 0.8);
+  background: rgba(19, 12, 11, 0.88);
+  box-shadow: 0 0 28px rgba(255, 75, 75, 0.38);
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+  display: grid;
+  gap: 0.22rem;
+  position: relative;
+  z-index: 1;
+}
+.attention-flash-card strong {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.74rem;
+  color: #ffe7ae;
+}
+.attention-flash-card span {
+  font-size: 1.03rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fff5dd;
+}
+@keyframes attention-flash-fade {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  32% { opacity: 0.96; }
+  100% { opacity: 0; }
+}
+@keyframes attention-call-multi-flash {
+  0% { opacity: 0; }
+  4% { opacity: 1; }
+  8% { opacity: 0.08; }
+  12% { opacity: 1; }
+  16% { opacity: 0.08; }
+  20% { opacity: 1; }
+  24% { opacity: 0.08; }
+  28% { opacity: 1; }
+  32% { opacity: 0.12; }
+  36% { opacity: 1; }
+  40% { opacity: 0.12; }
+  44% { opacity: 1; }
+  48% { opacity: 0.16; }
+  56% { opacity: 1; }
+  64% { opacity: 0.2; }
+  72% { opacity: 0.92; }
+  84% { opacity: 0.5; }
+  100% { opacity: 0; }
 }
 @media (max-width: 960px) {
   .station-controls { align-items: stretch; }
