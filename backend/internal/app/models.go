@@ -10,6 +10,21 @@ type Role struct {
 	DefaultSimpleView bool   `json:"defaultSimpleView,omitempty"`
 }
 
+type CompanionRoomDiscovery struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	CanTalk   bool   `json:"canTalk"`
+	CanListen bool   `json:"canListen"`
+}
+
+type CompanionDiscoveryResponse struct {
+	Username        string                   `json:"username"`
+	RoleID          string                   `json:"roleId"`
+	Rooms           []CompanionRoomDiscovery `json:"rooms"`
+	Users           []User                   `json:"users"`
+	BroadcastGroups []BroadcastGroup         `json:"broadcastGroups"`
+}
+
 type Room struct {
 	ID              string   `json:"id"`
 	Name            string   `json:"name"`
@@ -114,4 +129,24 @@ type WebRTCIceCandidate struct {
 	Candidate     string `json:"candidate"`
 	SDPMid        string `json:"sdpMid,omitempty"`
 	SDPMLineIndex uint16 `json:"sdpMLineIndex,omitempty"`
+}
+
+type CompanionCommand struct {
+	CommandID     string   `json:"commandId,omitempty"`
+	Command       string   `json:"command"`
+	Mode          string   `json:"mode,omitempty"`
+	Scope         string   `json:"scope,omitempty"`
+	TargetID      string   `json:"targetId,omitempty"`
+	State         string   `json:"state,omitempty"`
+	Signal        string   `json:"signal,omitempty"`
+	RoomID        string   `json:"roomId,omitempty"`
+	ActiveRoomID  string   `json:"activeRoomId,omitempty"`
+	ListenRoomIDs []string `json:"listenRoomIds,omitempty"`
+	TalkRoomIDs   []string `json:"talkRoomIds,omitempty"`
+}
+
+type CompanionBridgeState struct {
+	Username string         `json:"username"`
+	Bound    bool           `json:"bound"`
+	Presence *PresenceState `json:"presence,omitempty"`
 }

@@ -19,6 +19,21 @@ type WsMessage =
   | { type: "chat"; data: RoutedEvent }
   | { type: "signal"; data: RoutedEvent }
   | { type: "voice_state"; data: RoutedEvent }
+  | {
+      type: "companion_command";
+      data: {
+        command: string;
+        mode?: "always_on" | "ptt";
+        scope?: "direct" | "room" | "broadcast";
+        targetId?: string;
+        state?: "ptt_start" | "ptt_stop";
+        signal?: string;
+        roomId?: string;
+        activeRoomId?: string;
+        listenRoomIds?: string[];
+        talkRoomIds?: string[];
+      };
+    }
   | { type: "webrtc_offer"; data: { sdp: string } }
   | { type: "webrtc_ice_candidate"; data: { candidate: string; sdpMid?: string; sdpMLineIndex?: number } };
 
@@ -334,6 +349,13 @@ export function App() {
     if (!room) return false;
     return roleAllowed(room.receiverRoleIds, currentRoleId);
   }
+  function sameStringArray(a: string[], b: string[]) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  }
 
 
   function toggleListenRoom(roomId: string) {
@@ -615,6 +637,79 @@ export function App() {
           setPresence(msg.data);
           return;
         }
+        if (msg.type === "companion_command") {
+          if (msg.data.command === "set_voice_mode" && msg.data.mode) {
+            setAlwaysOn(msg.data.mode === "always_on");
+            return;
+          }
+          if (msg.data.command === "ptt") {
+            const nextScope = msg.data.scope || "room";
+            const desiredState = msg.data.state || "ptt_stop";
+            const resolvedTargetId =
+              msg.data.targetId ||
+              (nextScope === "room" ? matrixAnchorRoomId(listenRoomIdsRef.current, talkRoomIdsRef.current) : "");
+            if (nextScope === "room") {
+              setPttPressed(desiredState === "ptt_start");
+            } else if (nextScope === "direct") {
+              if (desiredState === "ptt_start" && resolvedTargetId) {
+                setDirectPttPressedUserId(resolvedTargetId);
+              } else {
+                setDirectPttPressedUserId((current) => (current === resolvedTargetId ? null : current));
+              }
+            } else if (nextScope === "broadcast") {
+              if (desiredState === "ptt_start" && resolvedTargetId) {
+                setBroadcastPttPressed(resolvedTargetId);
+              } else {
+                setBroadcastPttPressed((current) => (current === resolvedTargetId ? null : current));
+              }
+            }
+            if (resolvedTargetId) {
+              sendScopedVoiceState(nextScope, resolvedTargetId, desiredState);
+            }
+            return;
+          }
+          if (msg.data.command === "signal") {
+            const nextScope = msg.data.scope || "room";
+            const resolvedTargetId =
+              msg.data.targetId ||
+              (nextScope === "room" ? matrixAnchorRoomId(listenRoomIdsRef.current, talkRoomIdsRef.current) : "");
+            if (resolvedTargetId && msg.data.signal) {
+              sendScopedSignal(nextScope, resolvedTargetId, msg.data.signal);
+            }
+            return;
+          }
+          if (msg.data.command === "set_active_room" && msg.data.roomId) {
+            setTalkRoomIds([msg.data.roomId]);
+            setListenRoomIds([msg.data.roomId]);
+            wsRef.current?.send(JSON.stringify({ type: "set_active_room", data: { roomId: msg.data.roomId } }));
+            return;
+          }
+          if (msg.data.command === "set_room_matrix") {
+            const nextListen = Array.isArray(msg.data.listenRoomIds) ? msg.data.listenRoomIds : listenRoomIdsRef.current;
+            const nextTalk = Array.isArray(msg.data.talkRoomIds) ? msg.data.talkRoomIds : talkRoomIdsRef.current;
+            if (Array.isArray(msg.data.listenRoomIds)) {
+              setListenRoomIds(msg.data.listenRoomIds);
+            }
+            if (Array.isArray(msg.data.talkRoomIds)) {
+              setTalkRoomIds(msg.data.talkRoomIds);
+            }
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              const activeRoomId = msg.data.activeRoomId || matrixAnchorRoomId(nextListen, nextTalk);
+              wsRef.current.send(
+                JSON.stringify({
+                  type: "set_room_matrix",
+                  data: {
+                    activeRoomId,
+                    listenRoomIds: nextListen,
+                    talkRoomIds: nextTalk
+                  }
+                })
+              );
+            }
+            return;
+          }
+          return;
+        }
         if (msg.type === "webrtc_offer") {
           const pc = pcRef.current;
           if (!pc || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -739,6 +834,30 @@ export function App() {
       setConnectionState("offline");
     };
   }, [token, appData, refreshAudioDevices]);
+
+  useEffect(() => {
+    if (!appData) return;
+    const selfPresence = presence.find((entry) => entry.userId === appData.self.id);
+    if (!selfPresence) return;
+    setListenRoomIds((prev) => (sameStringArray(prev, selfPresence.listenRooms) ? prev : selfPresence.listenRooms));
+    setTalkRoomIds((prev) => (sameStringArray(prev, selfPresence.talkRooms) ? prev : selfPresence.talkRooms));
+    const nextVoiceMode = selfPresence.voiceMode === "always_on" ? "always_on" : "ptt";
+    if (nextVoiceMode !== voiceModeRef.current) {
+      setVoiceMode(nextVoiceMode);
+      voiceModeRef.current = nextVoiceMode;
+    }
+    if (nextVoiceMode === "always_on") {
+      setPttPressed(false);
+      setDirectPttPressedUserId(null);
+      setBroadcastPttPressed(null);
+      return;
+    }
+    setPttPressed(selfPresence.micEnabled);
+    if (!selfPresence.micEnabled) {
+      setDirectPttPressedUserId(null);
+      setBroadcastPttPressed(null);
+    }
+  }, [presence, appData]);
 
   useEffect(() => {
     clearRoomSwitchTimer();

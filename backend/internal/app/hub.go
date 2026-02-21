@@ -11,6 +11,7 @@ import (
 type client struct {
 	session         Session
 	user            User
+	connectedAt     time.Time
 	activeRoom      string
 	listenRooms     map[string]struct{}
 	talkRooms       map[string]struct{}
@@ -21,18 +22,20 @@ type client struct {
 }
 
 type Hub struct {
-	mu      sync.RWMutex
-	clients map[string]*client
-	store   *Store
-	logger  *slog.Logger
-	media   *MediaManager
+	mu                  sync.RWMutex
+	clients             map[string]*client
+	store               *Store
+	logger              *slog.Logger
+	media               *MediaManager
+	presenceSubscribers map[chan []PresenceState]struct{}
 }
 
 func NewHub(store *Store, logger *slog.Logger) *Hub {
 	return &Hub{
-		clients: make(map[string]*client),
-		store:   store,
-		logger:  logger,
+		clients:             make(map[string]*client),
+		store:               store,
+		logger:              logger,
+		presenceSubscribers: make(map[chan []PresenceState]struct{}),
 	}
 }
 
@@ -42,6 +45,7 @@ func (h *Hub) SetMediaManager(m *MediaManager) {
 
 func (h *Hub) Add(c *client) {
 	h.mu.Lock()
+	c.connectedAt = time.Now()
 	if c.broadcastGroups == nil {
 		c.broadcastGroups = make(map[string]struct{})
 	}
@@ -256,6 +260,84 @@ func (h *Hub) sendToRooms(roomSet map[string]struct{}, receiverRolesByRoom map[s
 	}
 }
 
+func (h *Hub) LatestTokenForUsername(username string) (string, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var selectedToken string
+	var selectedAt time.Time
+	for token, c := range h.clients {
+		if c.user.Username != username {
+			continue
+		}
+		if selectedToken == "" || c.connectedAt.After(selectedAt) {
+			selectedToken = token
+			selectedAt = c.connectedAt
+		}
+	}
+	if selectedToken == "" {
+		return "", false
+	}
+	return selectedToken, true
+}
+
+func (h *Hub) PresenceForUsername(username string) (PresenceState, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var selected *client
+	for _, c := range h.clients {
+		if c.user.Username != username {
+			continue
+		}
+		if selected == nil || c.connectedAt.After(selected.connectedAt) {
+			selected = c
+		}
+	}
+	if selected == nil {
+		return PresenceState{}, false
+	}
+	return PresenceState{
+		UserID:          selected.user.ID,
+		Username:        selected.user.Username,
+		RoleID:          selected.user.RoleID,
+		ActiveRoom:      selected.activeRoom,
+		ListenRooms:     roomSetToSortedSlice(selected.listenRooms),
+		TalkRooms:       roomSetToSortedSlice(selected.talkRooms),
+		VoiceMode:       selected.voiceMode,
+		MicEnabled:      selected.micEnabled,
+		BroadcastActive: len(selected.broadcastGroups) > 0,
+	}, true
+}
+
+func (h *Hub) SendToToken(token string, msg WSOutbound) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	c, ok := h.clients[token]
+	if !ok {
+		return false
+	}
+	select {
+	case c.send <- msg:
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *Hub) SubscribePresence() (chan []PresenceState, func()) {
+	ch := make(chan []PresenceState, 8)
+	h.mu.Lock()
+	h.presenceSubscribers[ch] = struct{}{}
+	h.mu.Unlock()
+	unsubscribe := func() {
+		h.mu.Lock()
+		if _, ok := h.presenceSubscribers[ch]; ok {
+			delete(h.presenceSubscribers, ch)
+			close(ch)
+		}
+		h.mu.Unlock()
+	}
+	return ch, unsubscribe
+}
 func (h *Hub) broadcastPresence() {
 	h.mu.RLock()
 	var list []PresenceState
@@ -273,6 +355,10 @@ func (h *Hub) broadcastPresence() {
 		})
 	}
 	msg := WSOutbound{Type: "presence", Data: list}
+	subscribers := make([]chan []PresenceState, 0, len(h.presenceSubscribers))
+	for ch := range h.presenceSubscribers {
+		subscribers = append(subscribers, ch)
+	}
 	for _, c := range h.clients {
 		select {
 		case c.send <- msg:
@@ -280,6 +366,12 @@ func (h *Hub) broadcastPresence() {
 		}
 	}
 	h.mu.RUnlock()
+	for _, ch := range subscribers {
+		select {
+		case ch <- list:
+		default:
+		}
+	}
 }
 
 func toRoomSet(roomIDs []string) map[string]struct{} {
