@@ -37,23 +37,6 @@ export function UpdateActions(self: ModuleInstance): void {
 				})
 			},
 		},
-		set_active_room: {
-			name: 'Set active room',
-			options: [
-				{
-					id: 'roomId',
-					type: 'dropdown',
-					label: 'Room',
-					default: allRooms[0]?.id ?? '',
-					choices: allRooms,
-				},
-			],
-			callback: async (event) => {
-				const roomId = String(event.options.roomId || '').trim()
-				if (!roomId) throw new Error('roomId is required')
-				await self.sendBridgeCommand({ command: 'set_active_room', roomId })
-			},
-		},
 		set_room_selection: {
 			name: 'Set room selection',
 			options: [
@@ -94,7 +77,14 @@ export function UpdateActions(self: ModuleInstance): void {
 				const current = matrix === 'listen' ? [...self.listenRooms] : [...self.talkRooms]
 				const has = current.includes(roomId)
 				const wantOn = mode === 'on' || (mode === 'toggle' && !has)
-				const next = wantOn ? Array.from(new Set([...current, roomId])) : current.filter((v) => v !== roomId)
+				const next =
+					matrix === 'talk'
+						? wantOn
+							? [roomId]
+							: current.filter((v) => v !== roomId)
+						: wantOn
+							? Array.from(new Set([...current, roomId]))
+							: current.filter((v) => v !== roomId)
 				const nextListen = matrix === 'listen' ? next : [...self.listenRooms]
 				const nextTalk = matrix === 'talk' ? next : [...self.talkRooms]
 				await self.sendBridgeCommand({
@@ -105,8 +95,33 @@ export function UpdateActions(self: ModuleInstance): void {
 				})
 			},
 		},
-		set_ptt: {
-			name: 'Set PTT state',
+		set_ptt_active_room: {
+			name: 'Set PTT state (active room)',
+			options: [
+				{
+					id: 'state',
+					type: 'dropdown',
+					label: 'State',
+					default: 'ptt_start',
+					choices: [
+						{ id: 'ptt_start', label: 'Start' },
+						{ id: 'ptt_stop', label: 'Stop' },
+					],
+				},
+			],
+			callback: async (event) => {
+				const targetId = self.activeRoom
+				if (!targetId) throw new Error('No active room selected')
+				await self.sendBridgeCommand({
+					command: 'ptt',
+					scope: 'room',
+					targetId,
+					state: String(event.options.state) as 'ptt_start' | 'ptt_stop',
+				})
+			},
+		},
+		set_ptt_target: {
+			name: 'Set PTT state (target)',
 			options: [
 				{
 					id: 'scope',
@@ -162,6 +177,31 @@ export function UpdateActions(self: ModuleInstance): void {
 					command: 'ptt',
 					scope,
 					targetId: targetId || undefined,
+					state: String(event.options.state) as 'ptt_start' | 'ptt_stop',
+				})
+			},
+		},
+		reply_to_caller_ptt: {
+			name: 'Reply to caller PTT',
+			options: [
+				{
+					id: 'state',
+					type: 'dropdown',
+					label: 'State',
+					default: 'ptt_start',
+					choices: [
+						{ id: 'ptt_start', label: 'Start' },
+						{ id: 'ptt_stop', label: 'Stop' },
+					],
+				},
+			],
+			callback: async (event) => {
+				const targetId = self.replyDirectUserId
+				if (!targetId) throw new Error('No recent direct caller to reply to')
+				await self.sendBridgeCommand({
+					command: 'ptt',
+					scope: 'direct',
+					targetId,
 					state: String(event.options.state) as 'ptt_start' | 'ptt_stop',
 				})
 			},

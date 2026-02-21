@@ -12,6 +12,8 @@ type client struct {
 	session         Session
 	user            User
 	connectedAt     time.Time
+	lastDirectFrom  string
+	lastDirectName  string
 	activeRoom      string
 	listenRooms     map[string]struct{}
 	talkRooms       map[string]struct{}
@@ -19,6 +21,24 @@ type client struct {
 	micEnabled      bool
 	broadcastGroups map[string]struct{}
 	send            chan WSOutbound
+}
+
+func (h *Hub) ReplyTargetForUsername(username string) (string, string, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var selected *client
+	for _, c := range h.clients {
+		if c.user.Username != username {
+			continue
+		}
+		if selected == nil || c.connectedAt.After(selected.connectedAt) {
+			selected = c
+		}
+	}
+	if selected == nil || selected.lastDirectFrom == "" {
+		return "", "", false
+	}
+	return selected.lastDirectFrom, selected.lastDirectName, true
 }
 
 type Hub struct {
@@ -159,6 +179,16 @@ func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
 
 	switch e.Scope {
 	case "direct":
+		if eventType == "voice_state" && e.Body == "ptt_start" {
+			h.mu.Lock()
+			for _, c := range h.clients {
+				if c.user.ID == e.TargetID {
+					c.lastDirectFrom = sender.user.ID
+					c.lastDirectName = sender.user.Username
+				}
+			}
+			h.mu.Unlock()
+		}
 		h.sendToUser(e.TargetID, out)
 		h.sendToToken(senderToken, out)
 	case "room":

@@ -38,7 +38,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 		room_ptt: {
 			type: 'button',
 			category: 'Voice',
-			name: 'Room PTT (first talk room)',
+			name: 'Room PTT (active room)',
 			style: {
 				text: 'ROOM\\nPTT',
 				size: 'auto',
@@ -48,8 +48,8 @@ export function UpdatePresets(self: ModuleInstance): void {
 			},
 			steps: [
 				{
-					down: [{ actionId: 'set_ptt', options: { scope: 'room', roomTargetId: firstTalkRoom, state: 'ptt_start' } }],
-					up: [{ actionId: 'set_ptt', options: { scope: 'room', roomTargetId: firstTalkRoom, state: 'ptt_stop' } }],
+					down: [{ actionId: 'set_ptt_active_room', options: { state: 'ptt_start' } }],
+					up: [{ actionId: 'set_ptt_active_room', options: { state: 'ptt_stop' } }],
 				},
 			],
 			feedbacks: [{ feedbackId: 'mic_live', options: {} }],
@@ -67,11 +67,33 @@ export function UpdatePresets(self: ModuleInstance): void {
 			},
 			steps: [
 				{
-					down: [{ actionId: 'set_ptt', options: { scope: 'direct', directTargetId: firstDirectUser, state: 'ptt_start' } }],
-					up: [{ actionId: 'set_ptt', options: { scope: 'direct', directTargetId: firstDirectUser, state: 'ptt_stop' } }],
+					down: [{ actionId: 'set_ptt_target', options: { scope: 'direct', directTargetId: firstDirectUser, state: 'ptt_start' } }],
+					up: [{ actionId: 'set_ptt_target', options: { scope: 'direct', directTargetId: firstDirectUser, state: 'ptt_stop' } }],
 				},
 			],
 			feedbacks: [{ feedbackId: 'mic_live', options: {} }],
+		},
+		reply_to_caller: {
+			type: 'button',
+			category: 'Voice',
+			name: 'Reply to caller',
+			style: {
+				text: 'REPLY\\nCALLER',
+				size: 'auto',
+				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(0, 0, 0),
+				show_topbar: false,
+			},
+			steps: [
+				{
+					down: [{ actionId: 'reply_to_caller_ptt', options: { state: 'ptt_start' } }],
+					up: [{ actionId: 'reply_to_caller_ptt', options: { state: 'ptt_stop' } }],
+				},
+			],
+			feedbacks: [
+				{ feedbackId: 'reply_target_available', options: {} },
+				{ feedbackId: 'mic_live', options: {} },
+			],
 		},
 		broadcast_ptt: {
 			type: 'button',
@@ -88,13 +110,42 @@ export function UpdatePresets(self: ModuleInstance): void {
 				{
 					down: [
 						{
-							actionId: 'set_ptt',
+							actionId: 'set_ptt_target',
 							options: { scope: 'broadcast', broadcastTargetId: firstBroadcast, state: 'ptt_start' },
 						},
 					],
 					up: [
 						{
-							actionId: 'set_ptt',
+							actionId: 'set_ptt_target',
+							options: { scope: 'room', roomTargetId: firstTalkRoom, state: 'ptt_stop' },
+						},
+					],
+				},
+			],
+			feedbacks: [{ feedbackId: 'mic_live', options: {} }],
+		},
+		room_target_ptt: {
+			type: 'button',
+			category: 'Voice',
+			name: 'Room PTT (first talk room target)',
+			style: {
+				text: 'ROOM\\nPTT\\nTARGET',
+				size: 'auto',
+				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(0, 0, 0),
+				show_topbar: false,
+			},
+			steps: [
+				{
+					down: [
+						{
+							actionId: 'set_ptt_target',
+							options: { scope: 'room', roomTargetId: firstTalkRoom, state: 'ptt_start' },
+						},
+					],
+					up: [
+						{
+							actionId: 'set_ptt_target',
 							options: { scope: 'broadcast', broadcastTargetId: firstBroadcast, state: 'ptt_stop' },
 						},
 					],

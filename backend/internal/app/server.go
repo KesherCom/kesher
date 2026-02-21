@@ -56,6 +56,10 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			state.Bound = true
 			state.Presence = &presence
 		}
+		if replyUserID, replyUsername, ok := s.hub.ReplyTargetForUsername(username); ok {
+			state.ReplyDirectUserID = replyUserID
+			state.ReplyDirectUsername = replyUsername
+		}
 		_ = conn.WriteJSON(WSOutbound{
 			Type: "companion_state",
 			Data: state,
