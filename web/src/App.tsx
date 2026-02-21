@@ -55,6 +55,8 @@ export function App() {
   const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(null);
   const [directPttPressedUserId, setDirectPttPressedUserId] = useState<string | null>(null);
   const [lastDirectCallerUserId, setLastDirectCallerUserId] = useState<string | null>(null);
+  const [incomingAttention, setIncomingAttention] = useState<{ title: string; detail: string } | null>(null);
+  const [attentionFlashKey, setAttentionFlashKey] = useState(0);
   const [incomingAudioActive, setIncomingAudioActive] = useState(false);
   const [activeVoiceRoutes, setActiveVoiceRoutes] = useState<
     Array<{ senderUserID: string; scope: "direct" | "room" | "broadcast"; targetID: string; label: string }>
@@ -74,6 +76,7 @@ export function App() {
   const remoteAnalyserNodesRef = useRef<Map<string, { ctx: AudioContext; analyser: AnalyserNode; buf: Uint8Array }>>(new Map());
   const remoteAudioMeterRafRef = useRef<number | null>(null);
   const incomingAudioOffTimeoutRef = useRef<number | null>(null);
+  const incomingAttentionTimeoutRef = useRef<number | null>(null);
   const incomingAudioActiveRef = useRef(false);
   const roomSwitchTimerRef = useRef<number | null>(null);
   const voiceModeRef = useRef(voiceMode);
@@ -208,6 +211,33 @@ export function App() {
       window.clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
+  }
+  function clearIncomingAttentionTimer() {
+    if (incomingAttentionTimeoutRef.current !== null) {
+      window.clearTimeout(incomingAttentionTimeoutRef.current);
+      incomingAttentionTimeoutRef.current = null;
+    }
+  }
+
+  function triggerIncomingAttention(event: RoutedEvent) {
+    if (!appData) return;
+    let title = "Incoming signal";
+    let detail = event.fromUser.username;
+    if (event.scope === "room") {
+      const roomName = appData.rooms.find((room) => room.id === event.targetId)?.name || event.targetId;
+      title = event.signal === "call" ? "Incoming group call" : "Incoming group signal";
+      detail = `${event.fromUser.username} · ${roomName}`;
+    } else if (event.scope === "direct") {
+      title = "Incoming direct signal";
+      detail = event.signal ? `${event.fromUser.username} · ${event.signal}` : event.fromUser.username;
+    }
+    setIncomingAttention({ title, detail });
+    setAttentionFlashKey((prev) => prev + 1);
+    clearIncomingAttentionTimer();
+    incomingAttentionTimeoutRef.current = window.setTimeout(() => {
+      incomingAttentionTimeoutRef.current = null;
+      setIncomingAttention(null);
+    }, 2200);
   }
 
   function stopRemoteAudioMeter() {
@@ -468,6 +498,8 @@ export function App() {
     stopStatsLoop();
     stopLevelMeter();
     stopRemoteAudioMeter();
+    clearIncomingAttentionTimer();
+    setIncomingAttention(null);
   }
 
   useEffect(() => {
@@ -644,6 +676,13 @@ export function App() {
           msg.data.body === "ptt_start"
         ) {
           setLastDirectCallerUserId(msg.data.fromUser.id);
+        }
+        if (msg.type === "signal" && msg.data.fromUser.id !== appData.self.id) {
+          const incomingGroupCall = msg.data.scope === "room" && msg.data.signal === "call";
+          const incomingDirectSignal = msg.data.scope === "direct" && msg.data.targetId === appData.self.id;
+          if (incomingGroupCall || incomingDirectSignal) {
+            triggerIncomingAttention(msg.data);
+          }
         }
         const body = (msg.data.signal || msg.data.body || "").toString();
         setEvents((old) =>
@@ -1017,67 +1056,86 @@ export function App() {
   const replyTarget = directOnlineTargets.find((p) => p.userId === lastDirectCallerUserId) || null;
   const simpleVoiceTargetId = matrixAnchorRoomId(listenRoomIds, talkRoomIds);
   const simplePttTargetLabel = appData.rooms.find((room) => room.id === simpleVoiceTargetId)?.name || "No room selected";
+  const attentionFlashOverlay = incomingAttention ? (
+    <div
+      key={attentionFlashKey}
+      className="attention-flash attention-flash-call"
+      role="status"
+      aria-live="assertive"
+    >
+      <div className="attention-flash-card">
+        <strong>{incomingAttention.title}</strong>
+        <span>{incomingAttention.detail}</span>
+      </div>
+    </div>
+  ) : null;
 
   if (viewMode === "simple") {
     return (
-      <SimpleIntercomView
-        pttPressed={pttPressed}
-        onStartPtt={startPtt}
-        onStopPtt={stopPtt}
-        replyTarget={replyTarget ? { userId: replyTarget.userId, username: replyTarget.username } : null}
-        directPttPressedUserId={directPttPressedUserId}
-        onStartDirectPtt={startDirectPtt}
-        onStopDirectPtt={stopDirectPtt}
-        selectedInputDeviceId={selectedInputDeviceId}
-        onSelectedInputDeviceIdChange={setSelectedInputDeviceId}
-        inputDevices={inputDevices}
-        selectedOutputDeviceId={selectedOutputDeviceId}
-        onSelectedOutputDeviceIdChange={setSelectedOutputDeviceId}
-        outputDevices={outputDevices}
-        simplePttTargetLabel={simplePttTargetLabel}
-      />
+      <>
+        <SimpleIntercomView
+          pttPressed={pttPressed}
+          onStartPtt={startPtt}
+          onStopPtt={stopPtt}
+          replyTarget={replyTarget ? { userId: replyTarget.userId, username: replyTarget.username } : null}
+          directPttPressedUserId={directPttPressedUserId}
+          onStartDirectPtt={startDirectPtt}
+          onStopDirectPtt={stopDirectPtt}
+          selectedInputDeviceId={selectedInputDeviceId}
+          onSelectedInputDeviceIdChange={setSelectedInputDeviceId}
+          inputDevices={inputDevices}
+          selectedOutputDeviceId={selectedOutputDeviceId}
+          onSelectedOutputDeviceIdChange={setSelectedOutputDeviceId}
+          outputDevices={outputDevices}
+          simplePttTargetLabel={simplePttTargetLabel}
+        />
+        {attentionFlashOverlay}
+      </>
     );
   }
 
   return (
-    <StationIntercomView
-      appData={appData}
-      token={token}
-      doLogout={() => {
-        void doLogout();
-      }}
-      isAdminModalOpen={isAdminModalOpen}
-      setIsAdminModalOpen={setIsAdminModalOpen}
-      listenRoomIds={listenRoomIds}
-      talkRoomIds={talkRoomIds}
-      canRoleSendToRoom={canRoleSendToRoom}
-      canRoleReceiveFromRoom={canRoleReceiveFromRoom}
-      toggleTalkRoom={toggleTalkRoom}
-      toggleListenRoom={toggleListenRoom}
-      isReceivingRoom={isReceivingRoom}
-      isReceivingBroadcast={isReceivingBroadcast}
-      isReceivingDirect={isReceivingDirect}
-      broadcastPttPressed={broadcastPttPressed}
-      startBroadcastPtt={startBroadcastPtt}
-      stopBroadcastPtt={stopBroadcastPtt}
-      presence={presence}
-      roleNameById={roleNameById}
-      lastDirectCallerUserId={lastDirectCallerUserId}
-      directPttPressedUserId={directPttPressedUserId}
-      startDirectPtt={startDirectPtt}
-      stopDirectPtt={stopDirectPtt}
-      sendScopedSignal={sendScopedSignal}
-      pttPressed={pttPressed}
-      startPtt={startPtt}
-      stopPtt={stopPtt}
-      voiceMode={voiceMode}
-      setAlwaysOn={setAlwaysOn}
-      audioPanel={audioPanel}
-      chatAndSignalPanel={chatAndSignalBlock}
-      showDebug={showDebug}
-      realtimeDebugBlock={realtimeDebugBlock}
-      refreshBootstrapData={refreshBootstrapData}
-    />
+    <>
+      <StationIntercomView
+        appData={appData}
+        token={token}
+        doLogout={() => {
+          void doLogout();
+        }}
+        isAdminModalOpen={isAdminModalOpen}
+        setIsAdminModalOpen={setIsAdminModalOpen}
+        listenRoomIds={listenRoomIds}
+        talkRoomIds={talkRoomIds}
+        canRoleSendToRoom={canRoleSendToRoom}
+        canRoleReceiveFromRoom={canRoleReceiveFromRoom}
+        toggleTalkRoom={toggleTalkRoom}
+        toggleListenRoom={toggleListenRoom}
+        isReceivingRoom={isReceivingRoom}
+        isReceivingBroadcast={isReceivingBroadcast}
+        isReceivingDirect={isReceivingDirect}
+        broadcastPttPressed={broadcastPttPressed}
+        startBroadcastPtt={startBroadcastPtt}
+        stopBroadcastPtt={stopBroadcastPtt}
+        presence={presence}
+        roleNameById={roleNameById}
+        lastDirectCallerUserId={lastDirectCallerUserId}
+        directPttPressedUserId={directPttPressedUserId}
+        startDirectPtt={startDirectPtt}
+        stopDirectPtt={stopDirectPtt}
+        sendScopedSignal={sendScopedSignal}
+        pttPressed={pttPressed}
+        startPtt={startPtt}
+        stopPtt={stopPtt}
+        voiceMode={voiceMode}
+        setAlwaysOn={setAlwaysOn}
+        audioPanel={audioPanel}
+        chatAndSignalPanel={chatAndSignalBlock}
+        showDebug={showDebug}
+        realtimeDebugBlock={realtimeDebugBlock}
+        refreshBootstrapData={refreshBootstrapData}
+      />
+      {attentionFlashOverlay}
+    </>
   );
 }
 
