@@ -755,6 +755,13 @@ button.secondary { background: transparent; }
   .station-direct-section { order: 4; }
   .station-broadcast-section { order: 5; }
   .station-utility-section { order: 6; }
+  .station-talk-grid,
+  .station-direct-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .station-card-actions button {
+    min-height: 46px;
+  }
   .station-controls { align-items: stretch; }
   .station-ptt { width: 100%; }
   .station-ptt { flex: 1 1 100%; }
