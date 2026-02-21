@@ -226,7 +226,7 @@ Output constraints:
 | Variable | Default | Description |
 |---|---|---|
 | `APP_ADDR` | `:8080` | Listen address |
-| `STATIC_DIR` | _(empty)_ | Path to built frontend assets (enables static file serving) |
+| `STATIC_DIR` | _(empty)_ | Optional path to built frontend assets; when empty, backend serves embedded UI assets (if bundled at build time) |
 | `DB_PATH` | `intercom.db` | SQLite database file path |
 | `ALLOW_CORS` | `true` | Enable CORS headers (disable in production behind same origin) |
 | `SESSION_TTL_MINUTES` | `720` | Session lifetime in minutes |
@@ -274,8 +274,22 @@ For desktop clients, you can run a local proxy app that opens the browser on `ht
 This avoids installing trust material system-wide on each client browser machine and uses the localhost secure-context behavior for `getUserMedia()`.
 
 Important:
-- The backend must serve the UI itself (`STATIC_DIR` configured on backend, e.g. via `make run-backend` / `make run-backend-https`).
+- The backend must serve the UI itself (either with `STATIC_DIR`, e.g. `make run-backend` / `make run-backend-https`, or with embedded UI assets in the binary).
 - The desktop proxy does **not** bundle frontend assets.
+
+## Single-binary backend (embedded UI)
+The backend can embed the built frontend into the Go binary.
+
+Build backend with embedded UI:
+```sh
+make build-backend
+```
+
+This runs `make sync-embedded-web` (builds `web/dist` and copies it to `backend/internal/app/embedded_web/`) before compiling `backend/bin/server`.
+
+Runtime behavior:
+- if `STATIC_DIR` is set, backend serves assets from that directory,
+- otherwise it serves embedded assets from the binary.
 
 Build:
 ```sh
@@ -330,6 +344,6 @@ make test          # runs go test ./... and frontend build check
 
 ## All Makefile targets
 Run `make help` to see available targets:
-`deps`, `dev-backend`, `dev-web`, `run-backend`, `run-backend-https`, `run-backend-le`, `run-backend-certmagic`, `run-production-le`, `run-production-certmagic`, `run-desktop-proxy`, `build-backend`, `build-web`, `build-desktop-proxy`, `build-desktop-proxy-all`, `package-desktop-proxy`, `build`, `test`, `docker-build`, `docker-up`, `docker-down`, `clean`.
+`deps`, `dev-backend`, `dev-web`, `run-backend`, `run-backend-https`, `run-backend-le`, `run-backend-certmagic`, `run-production-le`, `run-production-certmagic`, `run-desktop-proxy`, `sync-embedded-web`, `build-backend`, `build-web`, `build-desktop-proxy`, `build-desktop-proxy-all`, `package-desktop-proxy`, `build`, `test`, `docker-build`, `docker-up`, `docker-down`, `clean`.
 
 

@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -308,7 +310,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/companion/discovery", s.handleCompanionDiscovery)
 	mux.HandleFunc("/api/companion/ws", s.handleCompanionWS)
 	mux.HandleFunc("/ws", s.handleWS)
-	if cfg.StaticDir != "" {
+	if cfg.StaticDir != "" || embeddedStaticAvailable() {
 		mux.Handle("/", s.staticHandler())
 	}
 	serveAddr := cfg.Addr
@@ -991,6 +993,9 @@ func (s *Server) isInboundAllowed(ctx context.Context, sender Session, e RoutedE
 }
 
 func (s *Server) staticHandler() http.Handler {
+	if s.cfg.StaticDir == "" {
+		return s.embeddedStaticHandler()
+	}
 	fileServer := http.FileServer(http.Dir(s.cfg.StaticDir))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws") {
@@ -1009,6 +1014,38 @@ func (s *Server) staticHandler() http.Handler {
 		http.ServeFile(w, r, s.cfg.StaticDir+"/index.html")
 		return
 	})
+}
+
+func (s *Server) embeddedStaticHandler() http.Handler {
+	assets, err := fs.Sub(embeddedStaticFS, "embedded_web")
+	if err != nil {
+		return http.NotFoundHandler()
+	}
+	fileServer := http.FileServer(http.FS(assets))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws") {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path == "/" {
+			serveEmbeddedFile(fileServer, w, r, "/index.html")
+			return
+		}
+		requestedPath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if info, err := fs.Stat(assets, requestedPath); err == nil && !info.IsDir() {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		serveEmbeddedFile(fileServer, w, r, "/index.html")
+	})
+}
+
+func serveEmbeddedFile(fileServer http.Handler, w http.ResponseWriter, r *http.Request, requestedPath string) {
+	cloned := r.Clone(r.Context())
+	urlCopy := *r.URL
+	urlCopy.Path = requestedPath
+	cloned.URL = &urlCopy
+	fileServer.ServeHTTP(w, cloned)
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, status int, v any) {
