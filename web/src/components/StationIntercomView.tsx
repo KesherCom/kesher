@@ -163,7 +163,7 @@ export function StationIntercomView({
                 </button>
                 <div className="station-card-actions">
                   <button
-                    className={listening ? "on listen" : "listen"}
+                    className={`listen ${listening ? "on" : ""} ${canListen ? "" : "disabled"}`}
                     onClick={() => toggleListenRoom(room.id)}
                     disabled={!canListen}
                     title={canListen ? "" : "Your role is not allowed to receive from this room"}
