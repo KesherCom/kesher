@@ -1,19 +1,17 @@
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   bootstrap,
-  createBroadcastGroup,
-  createRole,
-  createRoom,
-  deleteBroadcastGroup,
-  deleteRole,
-  deleteRoom,
   getPublicBootstrap,
   login,
-  logout,
-  updateBroadcastGroup,
-  updateRole,
-  updateRoom
+  logout
 } from "./api";
+import { LoginView } from "./components/LoginView";
+import { SimpleIntercomView } from "./components/SimpleIntercomView";
+import { StationIntercomView } from "./components/StationIntercomView";
+import { AudioPanel } from "./components/panels/AudioPanel";
+import { ChatSignalPanel } from "./components/panels/ChatSignalPanel";
+import { RealtimeEventsPanel } from "./components/panels/RealtimeEventsPanel";
+import { matrixAnchorRoomId, roleAllowed, toggleRoomSelectionState } from "./lib/intercom";
 import type { Bootstrap, Presence, PublicBootstrap, RoutedEvent } from "./types";
 
 type WsMessage =
@@ -53,36 +51,9 @@ export function App() {
   const [isOutputMenuOpen, setIsOutputMenuOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"station" | "simple">("station");
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
-  const [adminBusy, setAdminBusy] = useState(false);
-  const [adminError, setAdminError] = useState("");
-  const [roleCreateId, setRoleCreateId] = useState("");
-  const [roleCreateName, setRoleCreateName] = useState("");
-  const [roleCreateDefaultRoomId, setRoleCreateDefaultRoomId] = useState("");
-  const [roleCreateDefaultVoiceMode, setRoleCreateDefaultVoiceMode] = useState<"always_on" | "ptt" | "">("");
-  const [roleCreateDefaultSimpleView, setRoleCreateDefaultSimpleView] = useState(false);
-  const [roleEditId, setRoleEditId] = useState<string | null>(null);
-  const [roleEditName, setRoleEditName] = useState("");
-  const [roleEditDefaultRoomId, setRoleEditDefaultRoomId] = useState("");
-  const [roleEditDefaultVoiceMode, setRoleEditDefaultVoiceMode] = useState<"always_on" | "ptt" | "">("");
-  const [roleEditDefaultSimpleView, setRoleEditDefaultSimpleView] = useState(false);
-  const [roomCreateId, setRoomCreateId] = useState("");
-  const [roomCreateName, setRoomCreateName] = useState("");
-  const [roomCreateSenderRoleIds, setRoomCreateSenderRoleIds] = useState<string[]>([]);
-  const [roomCreateReceiverRoleIds, setRoomCreateReceiverRoleIds] = useState<string[]>([]);
-  const [roomEditId, setRoomEditId] = useState<string | null>(null);
-  const [roomEditName, setRoomEditName] = useState("");
-  const [roomEditSenderRoleIds, setRoomEditSenderRoleIds] = useState<string[]>([]);
-  const [roomEditReceiverRoleIds, setRoomEditReceiverRoleIds] = useState<string[]>([]);
-  const [groupCreateId, setGroupCreateId] = useState("");
-  const [groupCreateName, setGroupCreateName] = useState("");
-  const [groupCreateRoomIds, setGroupCreateRoomIds] = useState<string[]>([]);
-  const [groupEditId, setGroupEditId] = useState<string | null>(null);
-  const [groupEditName, setGroupEditName] = useState("");
-  const [groupEditRoomIds, setGroupEditRoomIds] = useState<string[]>([]);
   const [pttPressed, setPttPressed] = useState(false);
   const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(null);
   const [directPttPressedUserId, setDirectPttPressedUserId] = useState<string | null>(null);
-  const [roomPttPressedRoomId, setRoomPttPressedRoomId] = useState<string | null>(null);
   const [lastDirectCallerUserId, setLastDirectCallerUserId] = useState<string | null>(null);
   const [incomingAudioActive, setIncomingAudioActive] = useState(false);
   const [activeVoiceRoutes, setActiveVoiceRoutes] = useState<
@@ -180,12 +151,6 @@ export function App() {
       });
   }, [token]);
 
-  useEffect(() => {
-    if (!appData) return;
-    if (roleCreateDefaultRoomId === "" && appData.rooms[0]) {
-      setRoleCreateDefaultRoomId(appData.rooms[0].id);
-    }
-  }, [appData, roleCreateDefaultRoomId]);
 
   const refreshAudioDevices = useCallback(async () => {
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -326,14 +291,6 @@ export function App() {
     refreshActiveVoiceChannelState();
   }
 
-  function matrixAnchorRoomId(listenIds: string[], talkIds: string[]) {
-    return talkIds[0] || listenIds[0] || "";
-  }
-
-  function roleAllowed(roleIDs: string[] | undefined, currentRoleId: string) {
-    if (!roleIDs || roleIDs.length === 0) return true;
-    return roleIDs.includes(currentRoleId);
-  }
 
   function canRoleSendToRoom(roomId: string, currentRoleId: string) {
     const room = appData?.rooms.find((entry) => entry.id === roomId);
@@ -347,22 +304,10 @@ export function App() {
     return roleAllowed(room.receiverRoleIds, currentRoleId);
   }
 
-  function toggleRoomSelection(
-    roomId: string,
-    setState: (value: string[] | ((prev: string[]) => string[])) => void
-  ) {
-    setState((prev) => {
-      if (prev.includes(roomId)) {
-        if (prev.length === 1) return prev;
-        return prev.filter((id) => id !== roomId);
-      }
-      return [...prev, roomId];
-    });
-  }
 
   function toggleListenRoom(roomId: string) {
     if (!appData || !canRoleReceiveFromRoom(roomId, appData.self.roleId)) return;
-    toggleRoomSelection(roomId, setListenRoomIds);
+    setListenRoomIds((prev) => toggleRoomSelectionState(prev, roomId));
   }
 
   function toggleTalkRoom(roomId: string) {
@@ -819,53 +764,6 @@ export function App() {
     return map;
   }, [appData]);
 
-  function toggleRoleInSelection(
-    roleValue: string,
-    setState: Dispatch<SetStateAction<string[]>>
-  ) {
-    setState((prev) => (prev.includes(roleValue) ? prev.filter((entry) => entry !== roleValue) : [...prev, roleValue]));
-  }
-
-  function renderRoleMultiSelect(
-    label: string,
-    selectedRoleIds: string[],
-    setState: Dispatch<SetStateAction<string[]>>,
-    keyPrefix: string
-  ) {
-    return (
-      <div className="role-multiselect">
-        <details className="role-multiselect-details">
-          <summary className="role-multiselect-summary">
-            <span className="role-multiselect-label">{label}</span>
-            <span className="role-multiselect-value">
-              {selectedRoleIds.length === 0
-                ? "All roles"
-                : selectedRoleIds
-                    .map((roleEntryId) => appData?.roles.find((role) => role.id === roleEntryId)?.name || roleEntryId)
-                    .join(", ")}
-            </span>
-          </summary>
-          <div className="role-multiselect-menu">
-            <button type="button" className="secondary role-multiselect-reset" onClick={() => setState([])}>
-              Clear (allow all)
-            </button>
-            <div className="role-multiselect-options">
-              {appData?.roles.map((role) => (
-                <label key={`${keyPrefix}-${role.id}`} className="role-multiselect-option">
-                  <input
-                    type="checkbox"
-                    checked={selectedRoleIds.includes(role.id)}
-                    onChange={() => toggleRoleInSelection(role.id, setState)}
-                  />
-                  <span>{role.name}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-        </details>
-      </div>
-    );
-  }
 
   useEffect(() => {
     if (currentTargets[0]) setTargetId(currentTargets[0].id);
@@ -925,154 +823,6 @@ export function App() {
     });
   }
 
-  async function runAdminAction(action: () => Promise<void>) {
-    setAdminBusy(true);
-    setAdminError("");
-    try {
-      await action();
-      await refreshBootstrapData();
-    } catch (error) {
-      setAdminError(error instanceof Error ? error.message : "admin operation failed");
-    } finally {
-      setAdminBusy(false);
-    }
-  }
-
-  function resetGroupCreateForm() {
-    setGroupCreateId("");
-    setGroupCreateName("");
-    setGroupCreateRoomIds([]);
-  }
-
-  function resetRoleEditForm() {
-    setRoleEditId(null);
-    setRoleEditName("");
-    setRoleEditDefaultRoomId("");
-    setRoleEditDefaultVoiceMode("");
-    setRoleEditDefaultSimpleView(false);
-  }
-
-  function resetRoomEditForm() {
-    setRoomEditId(null);
-    setRoomEditName("");
-    setRoomEditSenderRoleIds([]);
-    setRoomEditReceiverRoleIds([]);
-  }
-
-  function resetGroupEditForm() {
-    setGroupEditId(null);
-    setGroupEditName("");
-    setGroupEditRoomIds([]);
-  }
-
-  function createRoleConfig() {
-    if (!token) return;
-    const id = roleCreateId.trim();
-    const name = roleCreateName.trim();
-    if (!id || !name) return;
-    void runAdminAction(async () => {
-      await createRole(token, {
-        id,
-        name,
-        defaultRoomId: roleCreateDefaultRoomId.trim() || undefined,
-        defaultVoiceMode: roleCreateDefaultVoiceMode || undefined,
-        defaultSimpleView: roleCreateDefaultSimpleView
-      });
-      setRoleCreateId("");
-      setRoleCreateName("");
-      setRoleCreateDefaultVoiceMode("");
-      setRoleCreateDefaultSimpleView(false);
-    });
-  }
-
-  function saveRoleEdit() {
-    if (!token || !roleEditId) return;
-    const name = roleEditName.trim();
-    if (!name) return;
-    void runAdminAction(async () => {
-      await updateRole(token, roleEditId, {
-        name,
-        defaultRoomId: roleEditDefaultRoomId.trim() || undefined,
-        defaultVoiceMode: roleEditDefaultVoiceMode || undefined,
-        defaultSimpleView: roleEditDefaultSimpleView
-      });
-      resetRoleEditForm();
-    });
-  }
-
-  function removeRoleConfig(id: string) {
-    if (!token) return;
-    void runAdminAction(() => deleteRole(token, id));
-  }
-
-  function createRoomConfig() {
-    if (!token) return;
-    const id = roomCreateId.trim();
-    const name = roomCreateName.trim();
-    if (!id || !name) return;
-    void runAdminAction(async () => {
-      await createRoom(token, {
-        id,
-        name,
-        senderRoleIds: roomCreateSenderRoleIds,
-        receiverRoleIds: roomCreateReceiverRoleIds
-      });
-      setRoomCreateId("");
-      setRoomCreateName("");
-      setRoomCreateSenderRoleIds([]);
-      setRoomCreateReceiverRoleIds([]);
-    });
-  }
-
-  function saveRoomEdit() {
-    if (!token || !roomEditId) return;
-    const name = roomEditName.trim();
-    if (!name) return;
-    void runAdminAction(async () => {
-      await updateRoom(token, roomEditId, {
-        name,
-        senderRoleIds: roomEditSenderRoleIds,
-        receiverRoleIds: roomEditReceiverRoleIds
-      });
-      resetRoomEditForm();
-    });
-  }
-
-  function removeRoomConfig(id: string) {
-    if (!token) return;
-    void runAdminAction(() => deleteRoom(token, id));
-  }
-
-  function createBroadcastGroupConfig() {
-    if (!token) return;
-    const id = groupCreateId.trim();
-    const name = groupCreateName.trim();
-    if (!id || !name || groupCreateRoomIds.length === 0) return;
-    void runAdminAction(async () => {
-      await createBroadcastGroup(token, { id, name, roomIds: groupCreateRoomIds });
-      resetGroupCreateForm();
-    });
-  }
-
-  function saveGroupEdit() {
-    if (!token || !groupEditId) return;
-    const name = groupEditName.trim();
-    if (!name || groupEditRoomIds.length === 0) return;
-    void runAdminAction(async () => {
-      await updateBroadcastGroup(token, groupEditId, { name, roomIds: groupEditRoomIds });
-      resetGroupEditForm();
-    });
-  }
-
-  function removeBroadcastGroupConfig(id: string) {
-    if (!token) return;
-    void runAdminAction(async () => {
-      await deleteBroadcastGroup(token, id);
-      if (groupEditId === id) {
-        resetGroupEditForm();
-      }
-    });
-  }
 
   function sendChat() {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !targetId || !message.trim()) return;
@@ -1162,423 +912,65 @@ export function App() {
     sendDirectVoiceState(userId, "ptt_stop");
   }
 
-  function startRoomPtt(roomId: string) {
-    setRoomPttPressedRoomId(roomId);
-    sendScopedVoiceState("room", roomId, "ptt_start");
-  }
-
-  function stopRoomPtt(roomId: string) {
-    setRoomPttPressedRoomId((current) => (current === roomId ? null : current));
-    sendScopedVoiceState("room", roomId, "ptt_stop");
-  }
 
   if (!publicData) return <div className="root">Loading configuration…</div>;
   if (!token || !appData) {
     return (
-      <div className="root login">
-        <h1>Live Production Intercom</h1>
-        <p className="variant-subtitle">Station Deck</p>
-        <label>
-          Display name
-          <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. Tim FOH" />
-        </label>
-        <label>
-          Role
-          <select
-            value={roleId}
-            onChange={(e) => {
-              const nextRoleId = e.target.value;
-              setRoleID(nextRoleId);
-              const selectedRole = publicData.roles.find((role) => role.id === nextRoleId);
-              if (selectedRole?.defaultRoomId) {
-                setListenRoomIds([selectedRole.defaultRoomId]);
-                setTalkRoomIds([selectedRole.defaultRoomId]);
-              }
-              if (selectedRole?.defaultVoiceMode) {
-                const nextMode = selectedRole.defaultVoiceMode as "always_on" | "ptt";
-                setVoiceMode(nextMode);
-                voiceModeRef.current = nextMode;
-              }
-            }}
-          >
-            <option value="">Select role</option>
-            {publicData.roles.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button onClick={doLogin} disabled={!username.trim() || !roleId}>
-          Join Intercom
-        </button>
-      </div>
+      <LoginView
+        publicData={publicData}
+        username={username}
+        roleId={roleId}
+        onUsernameChange={setUsername}
+        onRoleChange={(nextRoleId) => {
+          setRoleID(nextRoleId);
+          const selectedRole = publicData.roles.find((role) => role.id === nextRoleId);
+          if (selectedRole?.defaultRoomId) {
+            setListenRoomIds([selectedRole.defaultRoomId]);
+            setTalkRoomIds([selectedRole.defaultRoomId]);
+          }
+          if (selectedRole?.defaultVoiceMode) {
+            const nextMode = selectedRole.defaultVoiceMode as "always_on" | "ptt";
+            setVoiceMode(nextMode);
+            voiceModeRef.current = nextMode;
+          }
+        }}
+        onLogin={() => {
+          void doLogin();
+        }}
+      />
     );
   }
 
-
-  const micBlock = (
-    <>
-      <h3>Microphone</h3>
-      <div className="mic-dropdown" ref={micMenuRef}>
-        <button
-          type="button"
-          className="mic-dropdown-trigger"
-          onClick={() => setIsMicMenuOpen((v) => !v)}
-          disabled={inputDevices.length === 0}
-          aria-haspopup="listbox"
-          aria-expanded={isMicMenuOpen}
-        >
-          <span>{selectedMicLabel}</span>
-          <span>▾</span>
-        </button>
-        {isMicMenuOpen ? (
-          <div className="mic-dropdown-menu" role="listbox">
-            {inputDevices.map((d) => (
-              <button
-                type="button"
-                key={d.deviceId}
-                className={`mic-dropdown-item ${d.deviceId === selectedInputDeviceId ? "active" : ""}`}
-                onClick={() => {
-                  setSelectedInputDeviceId(d.deviceId);
-                  setIsMicMenuOpen(false);
-                }}
-                title={d.label || `Mic ${d.deviceId.slice(0, 6)}`}
-              >
-                {d.label || `Mic ${d.deviceId.slice(0, 6)}`}
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </div>
-      <div className="meter">
-        <div className="meter-bar" style={{ width: `${inputLevel}%` }} />
-      </div>
-      <small>Input level</small>
-      <h3 style={{ marginTop: "1rem" }}>Speaker output</h3>
-      <div className="mic-dropdown" ref={outputMenuRef}>
-        <button
-          type="button"
-          className="mic-dropdown-trigger"
-          onClick={() => setIsOutputMenuOpen((v) => !v)}
-          disabled={outputDevices.length === 0}
-          aria-haspopup="listbox"
-          aria-expanded={isOutputMenuOpen}
-        >
-          <span>{selectedOutputLabel}</span>
-          <span>▾</span>
-        </button>
-        {isOutputMenuOpen ? (
-          <div className="mic-dropdown-menu" role="listbox">
-            {outputDevices.map((d) => (
-              <button
-                type="button"
-                key={d.deviceId}
-                className={`mic-dropdown-item ${d.deviceId === selectedOutputDeviceId ? "active" : ""}`}
-                onClick={() => {
-                  setSelectedOutputDeviceId(d.deviceId);
-                  setIsOutputMenuOpen(false);
-                }}
-                title={d.label || `Output ${d.deviceId.slice(0, 6)}`}
-              >
-                {d.label || `Output ${d.deviceId.slice(0, 6)}`}
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </>
+  const audioPanel = (
+    <AudioPanel
+      inputDevices={inputDevices}
+      selectedInputDeviceId={selectedInputDeviceId}
+      selectedMicLabel={selectedMicLabel}
+      isMicMenuOpen={isMicMenuOpen}
+      setIsMicMenuOpen={setIsMicMenuOpen}
+      setSelectedInputDeviceId={setSelectedInputDeviceId}
+      inputLevel={inputLevel}
+      outputDevices={outputDevices}
+      selectedOutputDeviceId={selectedOutputDeviceId}
+      selectedOutputLabel={selectedOutputLabel}
+      isOutputMenuOpen={isOutputMenuOpen}
+      setIsOutputMenuOpen={setIsOutputMenuOpen}
+      setSelectedOutputDeviceId={setSelectedOutputDeviceId}
+      micMenuRef={micMenuRef}
+      outputMenuRef={outputMenuRef}
+    />
   );
-
 
   const chatAndSignalBlock = (
-    <>
-      <div className="chat">
-        <input
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && sendChat()}
-          placeholder="Type chat message…"
-        />
-        <button onClick={sendChat}>Send chat</button>
-      </div>
-      <div className="signals">
-        <button onClick={() => sendSignal("attention")}>Attention</button>
-        <button onClick={() => sendSignal("standby")}>Standby</button>
-        <button onClick={() => sendSignal("go")}>Go</button>
-      </div>
-    </>
+    <ChatSignalPanel
+      message={message}
+      onMessageChange={setMessage}
+      onSendChat={sendChat}
+      onSendSignal={sendSignal}
+    />
   );
 
-  const adminPanel = (
-    <div className="admin-panel">
-      <h3>Admin · configuration</h3>
-      {adminError ? <p className="admin-error">{adminError}</p> : null}
-      <div className="admin-block">
-        <h4>Create role</h4>
-        <div className="admin-grid">
-          <input value={roleCreateId} onChange={(e) => setRoleCreateId(e.target.value)} placeholder="role-id" />
-          <input value={roleCreateName} onChange={(e) => setRoleCreateName(e.target.value)} placeholder="Role name" />
-          <select
-            value={roleCreateDefaultRoomId}
-            onChange={(e) => setRoleCreateDefaultRoomId(e.target.value)}
-            aria-label="Default room"
-          >
-            <option value="">Default room…</option>
-            {appData.rooms.map((room) => (
-              <option key={`role-room-${room.id}`} value={room.id}>
-                {room.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={roleCreateDefaultVoiceMode}
-            onChange={(e) => setRoleCreateDefaultVoiceMode(e.target.value as "always_on" | "ptt" | "")}
-            aria-label="Default audio mode"
-          >
-            <option value="">Default audio mode…</option>
-            <option value="always_on">Always on</option>
-            <option value="ptt">PTT</option>
-          </select>
-          <label className="admin-checkbox admin-checkbox-wide">
-            <input
-              type="checkbox"
-              checked={roleCreateDefaultSimpleView}
-              onChange={(e) => setRoleCreateDefaultSimpleView(e.target.checked)}
-            />
-            <span>Default to simple mobile view</span>
-          </label>
-          <button onClick={createRoleConfig} disabled={adminBusy || !roleCreateId.trim() || !roleCreateName.trim()}>
-            Create role
-          </button>
-        </div>
-        {roleEditId ? (
-          <div className="admin-edit-panel">
-            <div className="admin-edit-title">Editing role: {roleEditId}</div>
-            <div className="admin-grid">
-              <input value={roleEditName} onChange={(e) => setRoleEditName(e.target.value)} placeholder="Role name" />
-              <select
-                value={roleEditDefaultRoomId}
-                onChange={(e) => setRoleEditDefaultRoomId(e.target.value)}
-                aria-label="Default room"
-              >
-                <option value="">Default room…</option>
-                {appData.rooms.map((room) => (
-                  <option key={`role-edit-room-${room.id}`} value={room.id}>
-                    {room.name}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={roleEditDefaultVoiceMode}
-                onChange={(e) => setRoleEditDefaultVoiceMode(e.target.value as "always_on" | "ptt" | "")}
-                aria-label="Default audio mode"
-              >
-                <option value="">Default audio mode…</option>
-                <option value="always_on">Always on</option>
-                <option value="ptt">PTT</option>
-              </select>
-              <label className="admin-checkbox admin-checkbox-wide">
-                <input
-                  type="checkbox"
-                  checked={roleEditDefaultSimpleView}
-                  onChange={(e) => setRoleEditDefaultSimpleView(e.target.checked)}
-                />
-                <span>Default to simple mobile view</span>
-              </label>
-              <button onClick={saveRoleEdit} disabled={adminBusy || !roleEditName.trim()}>
-                Save changes
-              </button>
-              <button onClick={resetRoleEditForm} disabled={adminBusy} className="secondary">
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : null}
-        <ul className="admin-list">
-          {appData.roles.map((role) => (
-            <li key={role.id}>
-              <button
-                onClick={() => {
-                  setRoleEditId(role.id);
-                  setRoleEditName(role.name);
-                  setRoleEditDefaultRoomId(role.defaultRoomId || "");
-                  setRoleEditDefaultVoiceMode((role.defaultVoiceMode as "always_on" | "ptt") || "");
-                  setRoleEditDefaultSimpleView(!!role.defaultSimpleView);
-                }}
-              >
-                Edit
-              </button>
-              <span>
-                {role.name} <small>({role.id})</small>
-              </span>
-              <button onClick={() => removeRoleConfig(role.id)} disabled={adminBusy}>
-                Delete
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div className="admin-block">
-        <h4>Create room</h4>
-        <div className="admin-grid">
-          <input value={roomCreateId} onChange={(e) => setRoomCreateId(e.target.value)} placeholder="room-id" />
-          <input value={roomCreateName} onChange={(e) => setRoomCreateName(e.target.value)} placeholder="Room name" />
-          <button onClick={createRoomConfig} disabled={adminBusy || !roomCreateId.trim() || !roomCreateName.trim()}>
-            Create room
-          </button>
-        </div>
-        <div className="admin-grid admin-grid-roles">
-          {renderRoleMultiSelect("Allowed senders", roomCreateSenderRoleIds, setRoomCreateSenderRoleIds, "room-create-sender")}
-          {renderRoleMultiSelect(
-            "Allowed receivers",
-            roomCreateReceiverRoleIds,
-            setRoomCreateReceiverRoleIds,
-            "room-create-receiver"
-          )}
-        </div>
-        {roomEditId ? (
-          <div className="admin-edit-panel">
-            <div className="admin-edit-title">Editing room: {roomEditId}</div>
-            <div className="admin-grid">
-              <input value={roomEditName} onChange={(e) => setRoomEditName(e.target.value)} placeholder="Room name" />
-              <button onClick={saveRoomEdit} disabled={adminBusy || !roomEditName.trim()}>
-                Save changes
-              </button>
-              <button onClick={resetRoomEditForm} disabled={adminBusy} className="secondary">
-                Cancel
-              </button>
-            </div>
-            <div className="admin-grid admin-grid-roles">
-              {renderRoleMultiSelect("Allowed senders", roomEditSenderRoleIds, setRoomEditSenderRoleIds, "room-edit-sender")}
-              {renderRoleMultiSelect(
-                "Allowed receivers",
-                roomEditReceiverRoleIds,
-                setRoomEditReceiverRoleIds,
-                "room-edit-receiver"
-              )}
-            </div>
-          </div>
-        ) : null}
-        <ul className="admin-list">
-          {appData.rooms.map((room) => (
-            <li key={room.id}>
-              <button
-                onClick={() => {
-                  setRoomEditId(room.id);
-                  setRoomEditName(room.name);
-                  setRoomEditSenderRoleIds(room.senderRoleIds || []);
-                  setRoomEditReceiverRoleIds(room.receiverRoleIds || []);
-                }}
-              >
-                Edit
-              </button>
-              <span>
-                {room.name} <small>({room.id})</small>
-              </span>
-              <button onClick={() => removeRoomConfig(room.id)} disabled={adminBusy}>
-                Delete
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div className="admin-block">
-        <h4>Create broadcast channel</h4>
-        <div className="admin-grid">
-          <input value={groupCreateId} onChange={(e) => setGroupCreateId(e.target.value)} placeholder="broadcast-channel-id" />
-          <input value={groupCreateName} onChange={(e) => setGroupCreateName(e.target.value)} placeholder="Broadcast channel name" />
-          <button
-            onClick={createBroadcastGroupConfig}
-            disabled={adminBusy || !groupCreateId.trim() || !groupCreateName.trim() || groupCreateRoomIds.length === 0}
-          >
-            Create channel
-          </button>
-        </div>
-        <div className="admin-room-picker">
-          {appData.rooms.map((room) => (
-            <label key={`group-create-room-${room.id}`} className="admin-checkbox">
-              <input
-                type="checkbox"
-                checked={groupCreateRoomIds.includes(room.id)}
-                onChange={() =>
-                  setGroupCreateRoomIds((prev) =>
-                    prev.includes(room.id) ? prev.filter((id) => id !== room.id) : [...prev, room.id]
-                  )
-                }
-              />
-              <span>{room.name}</span>
-            </label>
-          ))}
-        </div>
-        {groupEditId ? (
-          <div className="admin-edit-panel">
-            <div className="admin-edit-title">Editing channel: {groupEditId}</div>
-            <div className="admin-grid">
-              <input value={groupEditName} onChange={(e) => setGroupEditName(e.target.value)} placeholder="Channel name" />
-              <button onClick={saveGroupEdit} disabled={adminBusy || !groupEditName.trim() || groupEditRoomIds.length === 0}>
-                Save changes
-              </button>
-              <button onClick={resetGroupEditForm} disabled={adminBusy} className="secondary">
-                Cancel
-              </button>
-            </div>
-            <div className="admin-room-picker">
-              {appData.rooms.map((room) => (
-                <label key={`group-edit-room-${room.id}`} className="admin-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={groupEditRoomIds.includes(room.id)}
-                    onChange={() =>
-                      setGroupEditRoomIds((prev) =>
-                        prev.includes(room.id) ? prev.filter((id) => id !== room.id) : [...prev, room.id]
-                      )
-                    }
-                  />
-                  <span>{room.name}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-        ) : null}
-        <ul className="admin-list">
-          {appData.broadcastGroups.map((group) => (
-            <li key={group.id}>
-              <button
-                onClick={() => {
-                  setGroupEditId(group.id);
-                  setGroupEditName(group.name);
-                  setGroupEditRoomIds(group.roomIds);
-                }}
-              >
-                Edit
-              </button>
-              <span>
-                {group.name} <small>({group.id})</small>
-              </span>
-              <button onClick={() => removeBroadcastGroupConfig(group.id)} disabled={adminBusy}>
-                Delete
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
-
-  const realtimeDebugBlock = showDebug ? (
-    <>
-      <h3>Realtime events</h3>
-      <ul className="events">
-        {events.map((e, i) => (
-          <li key={`${e.at}-${i}`}>
-            <span>{e.at}</span>
-            <span>{e.label}</span>
-          </li>
-        ))}
-      </ul>
-    </>
-  ) : null;
+  const realtimeDebugBlock = <RealtimeEventsPanel events={events} />;
   const receivingRoutes = incomingAudioActive ? activeVoiceRoutes : [];
   const hasExplicitReceivingRoutes = receivingRoutes.length > 0;
   const alwaysOnFallbackRoomIds = new Set(
@@ -1595,40 +987,22 @@ export function App() {
           )
           .flatMap((p) => p.talkRooms.filter((roomId) => listenRoomIds.includes(roomId)))
   );
+
   function isReceivingRoom(roomId: string) {
     if (!incomingAudioActive) return false;
     if (receivingRoutes.some((route) => route.scope === "room" && route.targetID === roomId)) return true;
     return alwaysOnFallbackRoomIds.has(roomId);
   }
+
   function isReceivingBroadcast(groupId: string) {
     if (!incomingAudioActive) return false;
     return receivingRoutes.some((route) => route.scope === "broadcast" && route.targetID === groupId);
   }
+
   function isReceivingDirect(userId: string) {
     if (!incomingAudioActive) return false;
     return receivingRoutes.some((route) => route.scope === "direct" && route.senderUserID === userId);
   }
-  const stationBroadcastBlock =
-    appData.broadcastGroups.length > 0 ? (
-      <section className="station-block">
-        <h3>Broadcast channels</h3>
-        <div className="station-broadcast-grid">
-          {appData.broadcastGroups.map((group) => (
-            <button
-              key={group.id}
-              className={`station-broadcast-button ${broadcastPttPressed === group.id ? "active" : ""}`}
-              onPointerDown={() => startBroadcastPtt(group.id)}
-              onPointerUp={() => stopBroadcastPtt(group.id)}
-              onPointerLeave={() => stopBroadcastPtt(group.id)}
-              onPointerCancel={() => stopBroadcastPtt(group.id)}
-            >
-              {isReceivingBroadcast(group.id) ? <span className="station-broadcast-receiving">🔊</span> : null}
-              {group.name}
-            </button>
-          ))}
-        </div>
-      </section>
-    ) : null;
 
   const directOnlineTargets = presence
     .filter((p) => p.userId !== appData.self.id)
@@ -1646,200 +1020,64 @@ export function App() {
 
   if (viewMode === "simple") {
     return (
-      <div className="root app simple-shell">
-        <section className="simple-controls">
-          <button
-            className={`simple-ptt ${pttPressed ? "active" : ""}`}
-            onPointerDown={startPtt}
-            onPointerUp={stopPtt}
-            onPointerLeave={stopPtt}
-            onPointerCancel={stopPtt}
-          >
-            Hold to talk
-            <small>{simplePttTargetLabel}</small>
-          </button>
-          <button
-            className={`simple-reply ${replyTarget ? "" : "disabled"} ${
-              replyTarget && directPttPressedUserId === replyTarget.userId ? "active" : ""
-            }`}
-            disabled={!replyTarget}
-            onPointerDown={() => (replyTarget ? startDirectPtt(replyTarget.userId) : undefined)}
-            onPointerUp={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
-            onPointerLeave={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
-            onPointerCancel={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
-          >
-            Reply to caller
-            <small>{replyTarget ? replyTarget.username : "No active caller"}</small>
-          </button>
-          <label className="simple-mic">
-            <span>Microphone</span>
-            <select
-              value={selectedInputDeviceId}
-              onChange={(e) => setSelectedInputDeviceId(e.target.value)}
-              disabled={inputDevices.length === 0}
-            >
-              {inputDevices.length === 0 ? <option value="">No input devices</option> : null}
-              {inputDevices.map((d) => (
-                <option key={`simple-mic-${d.deviceId}`} value={d.deviceId}>
-                  {d.label || `Mic ${d.deviceId.slice(0, 6)}`}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="simple-mic">
-            <span>Speaker output</span>
-            <select
-              value={selectedOutputDeviceId}
-              onChange={(e) => setSelectedOutputDeviceId(e.target.value)}
-              disabled={outputDevices.length === 0}
-            >
-              {outputDevices.length === 0 ? <option value="">No output devices</option> : null}
-              {outputDevices.map((d) => (
-                <option key={`simple-out-${d.deviceId}`} value={d.deviceId}>
-                  {d.label || `Output ${d.deviceId.slice(0, 6)}`}
-                </option>
-              ))}
-            </select>
-          </label>
-        </section>
-      </div>
+      <SimpleIntercomView
+        pttPressed={pttPressed}
+        onStartPtt={startPtt}
+        onStopPtt={stopPtt}
+        replyTarget={replyTarget ? { userId: replyTarget.userId, username: replyTarget.username } : null}
+        directPttPressedUserId={directPttPressedUserId}
+        onStartDirectPtt={startDirectPtt}
+        onStopDirectPtt={stopDirectPtt}
+        selectedInputDeviceId={selectedInputDeviceId}
+        onSelectedInputDeviceIdChange={setSelectedInputDeviceId}
+        inputDevices={inputDevices}
+        selectedOutputDeviceId={selectedOutputDeviceId}
+        onSelectedOutputDeviceIdChange={setSelectedOutputDeviceId}
+        outputDevices={outputDevices}
+        simplePttTargetLabel={simplePttTargetLabel}
+      />
     );
   }
 
   return (
-    <div className="root app station-shell">
-      <div className="station-topbar">
-        <div className="station-live">
-          <span className="station-live-dot" />
-          Live: {appData.self.username.toUpperCase()}
-        </div>
-        <div className="station-top-actions">
-          <button className="station-top-admin" onClick={() => setIsAdminModalOpen(true)}>
-            Configuration
-          </button>
-          <button className="station-top-logout" onClick={doLogout}>
-            Logout / Lock
-          </button>
-        </div>
-      </div>
-
-      <section className="station-block">
-        <h3>Talk channels</h3>
-        <div className="station-talk-grid">
-          {appData.rooms.map((room) => {
-            const listening = listenRoomIds.includes(room.id);
-            const talking = talkRoomIds.includes(room.id);
-            const canTalk = canRoleSendToRoom(room.id, appData.self.roleId);
-            const canListen = canRoleReceiveFromRoom(room.id, appData.self.roleId);
-            return (
-              <article key={`station-room-${room.id}`} className="station-card">
-                <button
-                  className={`station-card-head ${talking ? "selected" : ""}`}
-                  onClick={() => toggleTalkRoom(room.id)}
-                  disabled={!canTalk}
-                  title={canTalk ? "" : "Your role is not allowed to send to this room"}
-                >
-                  {isReceivingRoom(room.id) ? <span className="station-receiving-badge">🔊</span> : null}
-                  <small>Talk</small>
-                  <strong>{room.name}</strong>
-                </button>
-                <div className="station-card-actions">
-                  <button
-                    className={listening ? "on listen" : "listen"}
-                    onClick={() => toggleListenRoom(room.id)}
-                    disabled={!canListen}
-                    title={canListen ? "" : "Your role is not allowed to receive from this room"}
-                  >
-                    Listen
-                  </button>
-                  <button className="call placeholder" disabled title="Reserved for upcoming feature">
-                    Call
-                  </button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="station-block">
-        <h3>Direct communication</h3>
-        <div className="station-direct-grid">
-          {directOnlineTargets.map((p) => (
-            <article key={`station-direct-${p.userId}`} className="station-card station-direct-card">
-              <button
-                className={`station-card-head direct-ptt ${directPttPressedUserId === p.userId ? "active" : ""}`}
-                onPointerDown={() => startDirectPtt(p.userId)}
-                onPointerUp={() => stopDirectPtt(p.userId)}
-                onPointerLeave={() => stopDirectPtt(p.userId)}
-                onPointerCancel={() => stopDirectPtt(p.userId)}
-              >
-                {isReceivingDirect(p.userId) ? <span className="station-receiving-badge">🔊</span> : null}
-                <small>Direct</small>
-                <strong>{p.username}</strong>
-                <em>{roleNameById.get(p.roleId) || p.roleId || "Unknown role"}</em>
-              </button>
-              <div className="station-card-actions single">
-                <button className="signal" onClick={() => sendScopedSignal("direct", p.userId, "attention")}>
-                  Signal
-                </button>
-              </div>
-            </article>
-          ))}
-          {directOnlineTargets.length === 0 ? <p className="station-empty">No other users online.</p> : null}
-        </div>
-      </section>
-
-      <section className="station-controls">
-        <button
-          className={`station-ptt ${pttPressed ? "active" : ""}`}
-          onPointerDown={startPtt}
-          onPointerUp={stopPtt}
-          onPointerLeave={stopPtt}
-          onPointerCancel={stopPtt}
-        >
-          Hold to talk
-        </button>
-        <label className={`station-always-on ${voiceMode === "always_on" ? "active" : ""}`}>
-          <input type="checkbox" checked={voiceMode === "always_on"} onChange={(e) => setAlwaysOn(e.target.checked)} />
-          <span>Always on</span>
-        </label>
-        <button
-          className={`station-reply ${replyTarget ? "" : "disabled"} ${
-            replyTarget && directPttPressedUserId === replyTarget.userId ? "active" : ""
-          }`}
-          disabled={!replyTarget}
-          onPointerDown={() => (replyTarget ? startDirectPtt(replyTarget.userId) : undefined)}
-          onPointerUp={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
-          onPointerLeave={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
-          onPointerCancel={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
-        >
-          Reply to caller
-          <small>{replyTarget ? replyTarget.username : "No active caller"}</small>
-        </button>
-      </section>
-
-      {stationBroadcastBlock}
-
-      <section className="station-utility">
-        <div className="panel">{micBlock}</div>
-        <div className="panel">{chatAndSignalBlock}</div>
-      </section>
-      {isAdminModalOpen ? (
-        <div className="station-modal-backdrop" onClick={() => setIsAdminModalOpen(false)}>
-          <section className="station-modal panel" onClick={(event) => event.stopPropagation()}>
-            <div className="station-modal-header">
-              <h3>Configuration</h3>
-              <button className="station-modal-close" onClick={() => setIsAdminModalOpen(false)}>
-                Close
-              </button>
-            </div>
-            {adminPanel}
-          </section>
-        </div>
-      ) : null}
-      {showDebug ? <section className="panel">{realtimeDebugBlock}</section> : null}
-    </div>
+    <StationIntercomView
+      appData={appData}
+      token={token}
+      doLogout={() => {
+        void doLogout();
+      }}
+      isAdminModalOpen={isAdminModalOpen}
+      setIsAdminModalOpen={setIsAdminModalOpen}
+      listenRoomIds={listenRoomIds}
+      talkRoomIds={talkRoomIds}
+      canRoleSendToRoom={canRoleSendToRoom}
+      canRoleReceiveFromRoom={canRoleReceiveFromRoom}
+      toggleTalkRoom={toggleTalkRoom}
+      toggleListenRoom={toggleListenRoom}
+      isReceivingRoom={isReceivingRoom}
+      isReceivingBroadcast={isReceivingBroadcast}
+      isReceivingDirect={isReceivingDirect}
+      broadcastPttPressed={broadcastPttPressed}
+      startBroadcastPtt={startBroadcastPtt}
+      stopBroadcastPtt={stopBroadcastPtt}
+      presence={presence}
+      roleNameById={roleNameById}
+      lastDirectCallerUserId={lastDirectCallerUserId}
+      directPttPressedUserId={directPttPressedUserId}
+      startDirectPtt={startDirectPtt}
+      stopDirectPtt={stopDirectPtt}
+      sendScopedSignal={sendScopedSignal}
+      pttPressed={pttPressed}
+      startPtt={startPtt}
+      stopPtt={stopPtt}
+      voiceMode={voiceMode}
+      setAlwaysOn={setAlwaysOn}
+      audioPanel={audioPanel}
+      chatAndSignalPanel={chatAndSignalBlock}
+      showDebug={showDebug}
+      realtimeDebugBlock={realtimeDebugBlock}
+      refreshBootstrapData={refreshBootstrapData}
+    />
   );
 }
 
