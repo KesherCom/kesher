@@ -27,6 +27,160 @@ type Server struct {
 	upgrader    websocket.Upgrader
 }
 
+type companionInbound struct {
+	Type string           `json:"type"`
+	Data CompanionCommand `json:"data"`
+}
+
+func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
+	username := strings.TrimSpace(r.URL.Query().Get("username"))
+	if username == "" {
+		http.Error(w, "username required", http.StatusBadRequest)
+		return
+	}
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		s.logger.Error("companion websocket upgrade failed", "error", err)
+		return
+	}
+	defer conn.Close()
+	presenceCh, unsubscribe := s.hub.SubscribePresence()
+	defer unsubscribe()
+
+	writeState := func() {
+		state := CompanionBridgeState{
+			Username: username,
+			Bound:    false,
+		}
+		if presence, ok := s.hub.PresenceForUsername(username); ok {
+			state.Bound = true
+			state.Presence = &presence
+		}
+		_ = conn.WriteJSON(WSOutbound{
+			Type: "companion_state",
+			Data: state,
+		})
+	}
+	writeState()
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case _, ok := <-presenceCh:
+				if !ok {
+					return
+				}
+				writeState()
+			}
+		}
+	}()
+
+	for {
+		var in companionInbound
+		if err := conn.ReadJSON(&in); err != nil {
+			return
+		}
+		if in.Type != "command" {
+			continue
+		}
+		commandID := strings.TrimSpace(in.Data.CommandID)
+		token, ok := s.hub.LatestTokenForUsername(username)
+		if !ok {
+			_ = conn.WriteJSON(WSOutbound{
+				Type: "companion_command_result",
+				Data: map[string]any{"ok": false, "error": "target unavailable", "commandId": commandID},
+			})
+			continue
+		}
+		if in.Data.Command == "" {
+			_ = conn.WriteJSON(WSOutbound{
+				Type: "companion_command_result",
+				Data: map[string]any{"ok": false, "error": "missing command", "commandId": commandID},
+			})
+			continue
+		}
+		if in.Data.Command == "set_voice_mode" && in.Data.Mode == "" {
+			_ = conn.WriteJSON(WSOutbound{
+				Type: "companion_command_result",
+				Data: map[string]any{"ok": false, "error": "missing mode", "commandId": commandID},
+			})
+			continue
+		}
+		sent := s.hub.SendToToken(token, WSOutbound{
+			Type: "companion_command",
+			Data: in.Data,
+		})
+		if !sent {
+			_ = conn.WriteJSON(WSOutbound{
+				Type: "companion_command_result",
+				Data: map[string]any{"ok": false, "error": "failed to deliver command", "commandId": commandID},
+			})
+			continue
+		}
+		_ = conn.WriteJSON(WSOutbound{
+			Type: "companion_command_result",
+			Data: map[string]any{"ok": true, "commandId": commandID},
+		})
+	}
+}
+
+func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	username := strings.TrimSpace(r.URL.Query().Get("username"))
+	if username == "" {
+		http.Error(w, "username required", http.StatusBadRequest)
+		return
+	}
+	targetUser, err := s.store.FindUserByUsername(r.Context(), username)
+	if err != nil {
+		http.Error(w, "unknown username", http.StatusNotFound)
+		return
+	}
+	rooms, err := s.store.ListRooms(r.Context())
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	users, err := s.store.ListUsers(r.Context())
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	groups, err := s.store.ListBroadcastGroups(r.Context())
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	groups = filterBroadcastGroupsForRole(targetUser.RoleID, groups)
+	roomDiscovery := make([]CompanionRoomDiscovery, 0, len(rooms))
+	for _, room := range rooms {
+		senderRoles, receiverRoles, err := s.store.RoomRolePolicies(r.Context(), room.ID)
+		if err != nil {
+			continue
+		}
+		roomDiscovery = append(roomDiscovery, CompanionRoomDiscovery{
+			ID:        room.ID,
+			Name:      room.Name,
+			CanTalk:   isRoleAllowed(senderRoles, targetUser.RoleID),
+			CanListen: isRoleAllowed(receiverRoles, targetUser.RoleID),
+		})
+	}
+	s.writeJSON(w, http.StatusOK, CompanionDiscoveryResponse{
+		Username:        targetUser.Username,
+		RoleID:          targetUser.RoleID,
+		Rooms:           roomDiscovery,
+		Users:           users,
+		BroadcastGroups: groups,
+	})
+}
+
 func (s *Server) handleHTTPRedirectToHTTPS(w http.ResponseWriter, r *http.Request) {
 	host := r.Host
 	if parsedHost, _, err := net.SplitHostPort(r.Host); err == nil && parsedHost != "" {
@@ -92,6 +246,8 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/rooms/", s.withAuth(s.handleAdminRoomByID))
 	mux.HandleFunc("/api/admin/broadcast-groups", s.withAuth(s.handleAdminBroadcastGroups))
 	mux.HandleFunc("/api/admin/broadcast-groups/", s.withAuth(s.handleAdminBroadcastGroupByID))
+	mux.HandleFunc("/api/companion/discovery", s.handleCompanionDiscovery)
+	mux.HandleFunc("/api/companion/ws", s.handleCompanionWS)
 	mux.HandleFunc("/ws", s.handleWS)
 	if cfg.StaticDir != "" {
 		mux.Handle("/", s.staticHandler())
@@ -290,6 +446,16 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request, session
 		BroadcastGroups: groups,
 		Users:           users,
 	})
+}
+
+func filterBroadcastGroupsForRole(roleID string, groups []BroadcastGroup) []BroadcastGroup {
+	filtered := make([]BroadcastGroup, 0, len(groups))
+	for _, group := range groups {
+		if isRoleAllowed(toStringSet(group.AllowedRoleIDs), roleID) {
+			filtered = append(filtered, group)
+		}
+	}
+	return filtered
 }
 
 type upsertRoleRequest struct {
@@ -585,6 +751,18 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+	initialVoiceMode := "ptt"
+	initialMicEnabled := false
+	for _, role := range roles {
+		if role.ID != session.RoleID {
+			continue
+		}
+		if role.DefaultVoiceMode == "always_on" {
+			initialVoiceMode = "always_on"
+			initialMicEnabled = true
+		}
+		break
+	}
 	defaultRoomID := defaultRoomForSession(session, roles, rooms)
 	listenRooms := []string{}
 	talkRooms := []string{}
@@ -601,8 +779,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		activeRoom:      defaultRoomID,
 		listenRooms:     toRoomSet(listenRooms),
 		talkRooms:       toRoomSet(talkRooms),
-		voiceMode:       "always_on",
-		micEnabled:      true,
+		voiceMode:       initialVoiceMode,
+		micEnabled:      initialMicEnabled,
 		broadcastGroups: make(map[string]struct{}),
 		send:            make(chan WSOutbound, 32),
 	}

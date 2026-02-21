@@ -1,0 +1,25 @@
+{
+  "id": "live-production-intercom",
+  "name": "live-production-intercom",
+  "shortname": "intercom",
+  "description": "Control live-production-intercom browser sessions via Companion",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": "git+https://github.com/staubichsauger/live-production-intercom.git",
+  "bugs": "https://github.com/staubichsauger/live-production-intercom/issues",
+  "maintainers": [
+    {
+      "name": "Tim Schweikert"
+    }
+  ],
+  "runtime": {
+    "type": "node22",
+    "api": "nodejs-ipc",
+    "apiVersion": "1.12.0",
+    "entrypoint": "../dist/main.js"
+  },
+  "legacyIds": [],
+  "manufacturer": "staubichsauger",
+  "products": ["live-production-intercom"],
+  "keywords": ["intercom", "ptt", "churchtools"]
+}
