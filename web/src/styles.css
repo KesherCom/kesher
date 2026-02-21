@@ -460,6 +460,13 @@ button.secondary { background: transparent; }
 }
 .station-card-actions button:last-child { border-right: 0; }
 .station-card-actions .listen.on { background: #16a34a; color: #fff; }
+.station-card-actions .listen.disabled,
+.station-card-actions .listen:disabled {
+  opacity: 0.45;
+  background: #141b28;
+  color: #8a9ab4;
+  cursor: not-allowed;
+}
 .station-card-actions .call { background: #171f2c; color: #f0c95d; }
 .station-card-actions .signal { background: #171f2c; color: #f0c95d; }
 .station-card-actions .call.disabled,
