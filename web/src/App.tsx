@@ -1176,13 +1176,6 @@ export function App() {
     setMessage("");
   }
 
-  function sendSignal(signal: string) {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    const resolvedTargetId =
-      scope === "room" ? matrixAnchorRoomId(listenRoomIdsRef.current, talkRoomIdsRef.current) || targetId : targetId;
-    if (!resolvedTargetId) return;
-    wsRef.current.send(JSON.stringify({ type: "signal", data: { scope, targetId: resolvedTargetId, signal } }));
-  }
   function sendScopedSignal(scopeValue: "direct" | "room" | "broadcast", scopedTargetId: string, signal: string) {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !scopedTargetId) return;
     wsRef.current.send(JSON.stringify({ type: "signal", data: { scope: scopeValue, targetId: scopedTargetId, signal } }));
@@ -1318,7 +1311,6 @@ export function App() {
       message={message}
       onMessageChange={setMessage}
       onSendChat={sendChat}
-      onSendSignal={sendSignal}
       chatMessages={chatMessages}
     />
   );
