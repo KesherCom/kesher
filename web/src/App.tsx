@@ -809,7 +809,9 @@ export function App() {
         .filter((room) => roleAllowed(room.senderRoleIds, appData.self.roleId))
         .map((r) => ({ id: r.id, label: r.name }));
     }
-    return appData.broadcastGroups.map((b) => ({ id: b.id, label: b.name }));
+    return appData.broadcastGroups
+      .filter((group) => roleAllowed(Array.isArray(group.allowedRoleIds) ? group.allowedRoleIds : [], appData.self.roleId))
+      .map((b) => ({ id: b.id, label: b.name }));
   }, [scope, appData]);
 
   const selectedMicLabel = useMemo(() => {
@@ -1147,6 +1149,7 @@ export function App() {
         broadcastPttPressed={broadcastPttPressed}
         startBroadcastPtt={startBroadcastPtt}
         stopBroadcastPtt={stopBroadcastPtt}
+        broadcastGroups={appData.broadcastGroups}
         presence={presence}
         roleNameById={roleNameById}
         lastDirectCallerUserId={lastDirectCallerUserId}

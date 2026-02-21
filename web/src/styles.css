@@ -413,6 +413,13 @@ button.secondary { background: transparent; }
   background: #e3222a;
   color: #fff;
 }
+.station-card-head.disabled,
+.station-card-head:disabled {
+  opacity: 0.45;
+  background: rgba(255, 255, 255, 0.01);
+  color: #8a9ab4;
+  cursor: not-allowed;
+}
 .station-card-head.selected small,
 .station-card-head.selected em { color: #ffe7e7; }
 .station-card-head.direct-ptt.active {
@@ -439,6 +446,13 @@ button.secondary { background: transparent; }
 .station-card-actions .listen.on { background: #16a34a; color: #fff; }
 .station-card-actions .call { background: #171f2c; color: #f0c95d; }
 .station-card-actions .signal { background: #171f2c; color: #f0c95d; }
+.station-card-actions .call.disabled,
+.station-card-actions .call:disabled {
+  opacity: 0.45;
+  background: #141b28;
+  color: #8a9ab4;
+  cursor: not-allowed;
+}
 .station-card-actions .call:active,
 .station-card-actions .signal:active {
   background: #f3c337;
@@ -626,6 +640,14 @@ button.secondary { background: transparent; }
   background: #f3c337;
   border-color: #f3c337;
   color: #1a1a1a;
+}
+.station-broadcast-button.disabled,
+.station-broadcast-button:disabled {
+  opacity: 0.45;
+  background: #141b28;
+  border-color: #222e45;
+  color: #8a9ab4;
+  cursor: not-allowed;
 }
 .station-broadcast-receiving {
   font-size: 0.78rem;

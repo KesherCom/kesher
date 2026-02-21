@@ -44,9 +44,11 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
   const [groupCreateId, setGroupCreateId] = useState("");
   const [groupCreateName, setGroupCreateName] = useState("");
   const [groupCreateRoomIds, setGroupCreateRoomIds] = useState<string[]>([]);
+  const [groupCreateAllowedRoleIds, setGroupCreateAllowedRoleIds] = useState<string[]>([]);
   const [groupEditId, setGroupEditId] = useState<string | null>(null);
   const [groupEditName, setGroupEditName] = useState("");
   const [groupEditRoomIds, setGroupEditRoomIds] = useState<string[]>([]);
+  const [groupEditAllowedRoleIds, setGroupEditAllowedRoleIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (roleCreateDefaultRoomId === "" && appData.rooms[0]) {
@@ -71,6 +73,7 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
     setGroupCreateId("");
     setGroupCreateName("");
     setGroupCreateRoomIds([]);
+    setGroupCreateAllowedRoleIds([]);
   }
 
   function resetRoleEditForm() {
@@ -92,6 +95,7 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
     setGroupEditId(null);
     setGroupEditName("");
     setGroupEditRoomIds([]);
+    setGroupEditAllowedRoleIds([]);
   }
 
   function createRoleConfig() {
@@ -173,7 +177,12 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
     const name = groupCreateName.trim();
     if (!id || !name || groupCreateRoomIds.length === 0) return;
     void runAdminAction(async () => {
-      await createBroadcastGroup(token, { id, name, roomIds: groupCreateRoomIds });
+      await createBroadcastGroup(token, {
+        id,
+        name,
+        roomIds: groupCreateRoomIds,
+        allowedRoleIds: groupCreateAllowedRoleIds
+      });
       resetGroupCreateForm();
     });
   }
@@ -183,7 +192,11 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
     const name = groupEditName.trim();
     if (!name || groupEditRoomIds.length === 0) return;
     void runAdminAction(async () => {
-      await updateBroadcastGroup(token, groupEditId, { name, roomIds: groupEditRoomIds });
+      await updateBroadcastGroup(token, groupEditId, {
+        name,
+        roomIds: groupEditRoomIds,
+        allowedRoleIds: groupEditAllowedRoleIds
+      });
       resetGroupEditForm();
     });
   }
@@ -412,6 +425,15 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
             </label>
           ))}
         </div>
+        <div className="admin-grid admin-grid-roles">
+          <RoleMultiSelect
+            label="Allowed roles"
+            selectedRoleIds={groupCreateAllowedRoleIds}
+            setState={setGroupCreateAllowedRoleIds}
+            keyPrefix="group-create-allowed-roles"
+            roles={appData.roles}
+          />
+        </div>
         {groupEditId ? (
           <div className="admin-edit-panel">
             <div className="admin-edit-title">Editing channel: {groupEditId}</div>
@@ -440,6 +462,15 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
                 </label>
               ))}
             </div>
+            <div className="admin-grid admin-grid-roles">
+              <RoleMultiSelect
+                label="Allowed roles"
+                selectedRoleIds={groupEditAllowedRoleIds}
+                setState={setGroupEditAllowedRoleIds}
+                keyPrefix="group-edit-allowed-roles"
+                roles={appData.roles}
+              />
+            </div>
           </div>
         ) : null}
         <ul className="admin-list">
@@ -450,6 +481,7 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
                   setGroupEditId(group.id);
                   setGroupEditName(group.name);
                   setGroupEditRoomIds(group.roomIds);
+                  setGroupEditAllowedRoleIds(group.allowedRoleIds || []);
                 }}
               >
                 Edit

@@ -363,6 +363,14 @@ func (m *MediaManager) broadcastRoomsForSourceLocked(sourceToken string) map[str
 	}
 	rooms := make(map[string]struct{})
 	for groupID := range groups {
+		allowedRoles, err := m.hub.store.BroadcastGroupAllowedRoleSet(context.Background(), groupID)
+		if err != nil {
+			m.logger.Warn("broadcast group role lookup failed", "groupId", groupID, "error", err)
+			continue
+		}
+		if !isRoleAllowed(allowedRoles, sourceClient.session.RoleID) {
+			continue
+		}
 		set, err := m.hub.store.BroadcastGroupRoomSet(context.Background(), groupID)
 		if err != nil {
 			m.logger.Warn("broadcast group room lookup failed", "groupId", groupID, "error", err)

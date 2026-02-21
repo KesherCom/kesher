@@ -6,7 +6,7 @@ export type Role = {
   defaultSimpleView?: boolean;
 };
 export type Room = { id: string; name: string; senderRoleIds: string[]; receiverRoleIds: string[] };
-export type BroadcastGroup = { id: string; name: string; roomIds: string[] };
+export type BroadcastGroup = { id: string; name: string; roomIds: string[]; allowedRoleIds: string[] };
 export type User = { id: string; username: string; roleId: string };
 export type Presence = {
   userId: string;

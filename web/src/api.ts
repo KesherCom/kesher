@@ -81,7 +81,7 @@ export async function deleteRoom(token: string, roomId: string): Promise<void> {
 
 export async function createBroadcastGroup(
   token: string,
-  payload: { id: string; name: string; roomIds: string[] }
+  payload: { id: string; name: string; roomIds: string[]; allowedRoleIds?: string[] }
 ): Promise<void> {
   await apiMutation("/api/admin/broadcast-groups", token, "POST", payload);
 }
@@ -89,7 +89,7 @@ export async function createBroadcastGroup(
 export async function updateBroadcastGroup(
   token: string,
   groupId: string,
-  payload: { name: string; roomIds: string[] }
+  payload: { name: string; roomIds: string[]; allowedRoleIds?: string[] }
 ): Promise<void> {
   await apiMutation(`/api/admin/broadcast-groups/${encodeURIComponent(groupId)}`, token, "PUT", payload);
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Bootstrap, Presence } from "../types";
+import type { Bootstrap, BroadcastGroup, Presence } from "../types";
 import { AdminPanel } from "./admin/AdminPanel";
 
 type StationIntercomViewProps = {
@@ -20,6 +20,7 @@ type StationIntercomViewProps = {
   broadcastPttPressed: string | null;
   startBroadcastPtt: (groupId: string) => void;
   stopBroadcastPtt: (groupId: string) => void;
+  broadcastGroups: BroadcastGroup[];
   presence: Presence[];
   roleNameById: Map<string, string>;
   lastDirectCallerUserId: string | null;
@@ -57,6 +58,7 @@ export function StationIntercomView({
   broadcastPttPressed,
   startBroadcastPtt,
   stopBroadcastPtt,
+  broadcastGroups,
   presence,
   roleNameById,
   lastDirectCallerUserId,
@@ -150,7 +152,7 @@ export function StationIntercomView({
             return (
               <article key={`station-room-${room.id}`} className="station-card">
                 <button
-                  className={`station-card-head ${talking ? "selected" : ""}`}
+                  className={`station-card-head ${talking ? "selected" : ""} ${canTalk ? "" : "disabled"}`}
                   onClick={() => toggleTalkRoom(room.id)}
                   disabled={!canTalk}
                   title={canTalk ? "" : "Your role is not allowed to send to this room"}
@@ -168,7 +170,12 @@ export function StationIntercomView({
                   >
                     Listen
                   </button>
-                  <button className="call" onClick={() => sendScopedSignal("room", room.id, "call")}>
+                  <button
+                    className={`call ${canTalk ? "" : "disabled"}`}
+                    onClick={() => sendScopedSignal("room", room.id, "call")}
+                    disabled={!canTalk}
+                    title={canTalk ? "" : "Your role is not allowed to send to this room"}
+                  >
                     Call
                   </button>
                 </div>
@@ -253,23 +260,31 @@ export function StationIntercomView({
         </button>
       </section>
 
-      {appData.broadcastGroups.length > 0 ? (
+      {broadcastGroups.length > 0 ? (
         <section className="station-block station-broadcast-section">
           <h3>Broadcast channels</h3>
           <div className="station-broadcast-grid">
-            {appData.broadcastGroups.map((group) => (
-              <button
-                key={group.id}
-                className={`station-broadcast-button ${broadcastPttPressed === group.id ? "active" : ""}`}
-                onPointerDown={() => startBroadcastPtt(group.id)}
-                onPointerUp={() => stopBroadcastPtt(group.id)}
-                onPointerLeave={() => stopBroadcastPtt(group.id)}
-                onPointerCancel={() => stopBroadcastPtt(group.id)}
-              >
-                {isReceivingBroadcast(group.id) ? <span className="station-broadcast-receiving">🔊</span> : null}
-                {group.name}
-              </button>
-            ))}
+            {broadcastGroups.map((group) => {
+              const allowedRoleIds = Array.isArray(group.allowedRoleIds) ? group.allowedRoleIds : [];
+              const canSend = allowedRoleIds.length === 0 || allowedRoleIds.includes(appData.self.roleId);
+              return (
+                <button
+                  key={group.id}
+                  className={`station-broadcast-button ${broadcastPttPressed === group.id ? "active" : ""} ${
+                    canSend ? "" : "disabled"
+                  }`}
+                  onPointerDown={() => (canSend ? startBroadcastPtt(group.id) : undefined)}
+                  onPointerUp={() => (canSend ? stopBroadcastPtt(group.id) : undefined)}
+                  onPointerLeave={() => (canSend ? stopBroadcastPtt(group.id) : undefined)}
+                  onPointerCancel={() => (canSend ? stopBroadcastPtt(group.id) : undefined)}
+                  disabled={!canSend}
+                  title={canSend ? "" : "Your role is not allowed to send to this broadcast channel"}
+                >
+                  {isReceivingBroadcast(group.id) ? <span className="station-broadcast-receiving">🔊</span> : null}
+                  {group.name}
+                </button>
+              );
+            })}
           </div>
         </section>
       ) : null}
