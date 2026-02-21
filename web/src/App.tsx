@@ -183,7 +183,7 @@ export function App() {
     });
     setSelectedOutputDeviceId((prev) => {
       if (prev && outputs.some((d) => d.deviceId === prev)) return prev;
-      return outputs[0]?.deviceId || "";
+      return "";
     });
   }, []);
 
@@ -227,6 +227,23 @@ export function App() {
       window.clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
+  }
+
+  async function canApplyOutputDevice(outputDeviceId: string): Promise<boolean> {
+    if (outputDeviceId === "") return true;
+    type AudioWithSinkId = HTMLAudioElement & { setSinkId?: (sinkId: string) => Promise<void> };
+    const probe = document.createElement("audio") as AudioWithSinkId;
+    if (typeof probe.setSinkId !== "function") return false;
+    return applyOutputDeviceToAudio(probe as HTMLAudioElement, outputDeviceId);
+  }
+
+  async function changeOutputDevice(outputDeviceId: string) {
+    if (outputDeviceId === selectedOutputDeviceIdRef.current) return;
+    const canApply = await canApplyOutputDevice(outputDeviceId);
+    if (!canApply) return;
+    setSelectedOutputDeviceId(outputDeviceId);
+    selectedOutputDeviceIdRef.current = outputDeviceId;
+    setAudioError("");
   }
   function clearIncomingAttentionTimer() {
     if (incomingAttentionTimeoutRef.current !== null) {
@@ -466,15 +483,17 @@ export function App() {
     }
   }
 
-  async function applyOutputDeviceToAudio(audio: HTMLAudioElement, outputDeviceId: string) {
+  async function applyOutputDeviceToAudio(audio: HTMLAudioElement, outputDeviceId: string): Promise<boolean> {
     type AudioWithSinkId = HTMLAudioElement & { setSinkId?: (sinkId: string) => Promise<void> };
     const audioWithSink = audio as AudioWithSinkId;
-    if (typeof audioWithSink.setSinkId !== "function") return;
+    if (typeof audioWithSink.setSinkId !== "function") return outputDeviceId === "";
     const sinkId = outputDeviceId || "default";
     try {
       await audioWithSink.setSinkId(sinkId);
+      return true;
     } catch (err) {
       setAudioError(`Failed to switch speaker output: ${err instanceof Error ? err.message : "unknown error"}`);
+      return false;
     }
   }
 
@@ -936,8 +955,14 @@ export function App() {
   const selectedMicLabel = useMemo(() => {
     return inputDevices.find((d) => d.deviceId === selectedInputDeviceId)?.label || "Select microphone";
   }, [inputDevices, selectedInputDeviceId]);
+  const outputSelectionSupported = useMemo(() => {
+    type AudioWithSinkId = HTMLAudioElement & { setSinkId?: (sinkId: string) => Promise<void> };
+    const probe = document.createElement("audio") as AudioWithSinkId;
+    return typeof probe.setSinkId === "function";
+  }, []);
   const selectedOutputLabel = useMemo(() => {
-    return outputDevices.find((d) => d.deviceId === selectedOutputDeviceId)?.label || "Select speaker";
+    if (!selectedOutputDeviceId) return "System default";
+    return outputDevices.find((d) => d.deviceId === selectedOutputDeviceId)?.label || "System default";
   }, [outputDevices, selectedOutputDeviceId]);
   const roleNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -1145,7 +1170,10 @@ export function App() {
       selectedOutputLabel={selectedOutputLabel}
       isOutputMenuOpen={isOutputMenuOpen}
       setIsOutputMenuOpen={setIsOutputMenuOpen}
-      setSelectedOutputDeviceId={setSelectedOutputDeviceId}
+      setSelectedOutputDeviceId={(nextOutputDeviceId) => {
+        void changeOutputDevice(nextOutputDeviceId);
+      }}
+      outputSelectionSupported={outputSelectionSupported}
       micMenuRef={micMenuRef}
       outputMenuRef={outputMenuRef}
     />
@@ -1237,8 +1265,11 @@ export function App() {
           onSelectedInputDeviceIdChange={setSelectedInputDeviceId}
           inputDevices={inputDevices}
           selectedOutputDeviceId={selectedOutputDeviceId}
-          onSelectedOutputDeviceIdChange={setSelectedOutputDeviceId}
+          onSelectedOutputDeviceIdChange={(nextOutputDeviceId) => {
+            void changeOutputDevice(nextOutputDeviceId);
+          }}
           outputDevices={outputDevices}
+          outputSelectionSupported={outputSelectionSupported}
           simplePttTargetLabel={simplePttTargetLabel}
         />
         {attentionFlashOverlay}
