@@ -11,6 +11,7 @@ type AudioPanelProps = {
   outputDevices: MediaDeviceInfo[];
   selectedOutputDeviceId: string;
   selectedOutputLabel: string;
+  outputSelectionSupported: boolean;
   isOutputMenuOpen: boolean;
   setIsOutputMenuOpen: (value: boolean | ((prev: boolean) => boolean)) => void;
   setSelectedOutputDeviceId: (value: string) => void;
@@ -29,6 +30,7 @@ export function AudioPanel({
   outputDevices,
   selectedOutputDeviceId,
   selectedOutputLabel,
+  outputSelectionSupported,
   isOutputMenuOpen,
   setIsOutputMenuOpen,
   setSelectedOutputDeviceId,
@@ -88,6 +90,17 @@ export function AudioPanel({
         </button>
         {isOutputMenuOpen ? (
           <div className="mic-dropdown-menu" role="listbox">
+            <button
+              type="button"
+              className={`mic-dropdown-item ${selectedOutputDeviceId === "" ? "active" : ""}`}
+              onClick={() => {
+                setSelectedOutputDeviceId("");
+                setIsOutputMenuOpen(false);
+              }}
+              title="System default"
+            >
+              System default
+            </button>
             {outputDevices.map((d) => (
               <button
                 type="button"
@@ -105,6 +118,9 @@ export function AudioPanel({
           </div>
         ) : null}
       </div>
+      {!outputSelectionSupported ? (
+        <small>Explicit speaker selection is not supported by this browser; using system default output.</small>
+      ) : null}
     </>
   );
 }

@@ -17,6 +17,7 @@ type SimpleIntercomViewProps = {
   selectedOutputDeviceId: string;
   onSelectedOutputDeviceIdChange: (deviceId: string) => void;
   outputDevices: MediaDeviceInfo[];
+  outputSelectionSupported: boolean;
   simplePttTargetLabel: string;
 };
 
@@ -34,6 +35,7 @@ export function SimpleIntercomView({
   selectedOutputDeviceId,
   onSelectedOutputDeviceIdChange,
   outputDevices,
+  outputSelectionSupported,
   simplePttTargetLabel
 }: SimpleIntercomViewProps) {
   return (
@@ -84,13 +86,17 @@ export function SimpleIntercomView({
             onChange={(e) => onSelectedOutputDeviceIdChange(e.target.value)}
             disabled={outputDevices.length === 0}
           >
-            {outputDevices.length === 0 ? <option value="">No output devices</option> : null}
+            <option value="">System default</option>
+            {outputDevices.length === 0 ? <option value="" disabled>No output devices</option> : null}
             {outputDevices.map((d) => (
               <option key={`simple-out-${d.deviceId}`} value={d.deviceId}>
                 {d.label || `Output ${d.deviceId.slice(0, 6)}`}
               </option>
             ))}
           </select>
+          {!outputSelectionSupported ? (
+            <small>Explicit speaker selection is not supported; using system default output.</small>
+          ) : null}
         </label>
       </section>
     </div>
