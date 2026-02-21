@@ -37,16 +37,68 @@ type WsMessage =
   | { type: "webrtc_offer"; data: { sdp: string } }
   | { type: "webrtc_ice_candidate"; data: { candidate: string; sdpMid?: string; sdpMLineIndex?: number } };
 
-const storageKey = "intercom-token";
+const tokenStorageKey = "intercom-token";
+const sessionSettingsStorageKey = "intercom-session-settings";
+const globalSettingsStorageKey = "intercom-global-settings";
+
+type SessionSettings = {
+  username: string;
+  roleId: string;
+  listenRoomIds: string[];
+  talkRoomIds: string[];
+};
+
+type GlobalSettings = {
+  selectedInputDeviceId: string;
+  selectedOutputDeviceId: string;
+};
+
+function loadSessionSettings(): SessionSettings {
+  try {
+    const raw = localStorage.getItem(sessionSettingsStorageKey);
+    if (!raw) {
+      return { username: "", roleId: "", listenRoomIds: [], talkRoomIds: [] };
+    }
+    const parsed = JSON.parse(raw) as Partial<SessionSettings>;
+    return {
+      username: typeof parsed.username === "string" ? parsed.username : "",
+      roleId: typeof parsed.roleId === "string" ? parsed.roleId : "",
+      listenRoomIds: Array.isArray(parsed.listenRoomIds) ? parsed.listenRoomIds.filter((value) => typeof value === "string") : [],
+      talkRoomIds: Array.isArray(parsed.talkRoomIds) ? parsed.talkRoomIds.filter((value) => typeof value === "string") : []
+    };
+  } catch {
+    return { username: "", roleId: "", listenRoomIds: [], talkRoomIds: [] };
+  }
+}
+
+function loadGlobalSettings(): GlobalSettings {
+  try {
+    const raw = localStorage.getItem(globalSettingsStorageKey);
+    if (!raw) {
+      return { selectedInputDeviceId: "", selectedOutputDeviceId: "" };
+    }
+    const parsed = JSON.parse(raw) as Partial<GlobalSettings>;
+    return {
+      selectedInputDeviceId: typeof parsed.selectedInputDeviceId === "string" ? parsed.selectedInputDeviceId : "",
+      selectedOutputDeviceId: typeof parsed.selectedOutputDeviceId === "string" ? parsed.selectedOutputDeviceId : ""
+    };
+  } catch {
+    return { selectedInputDeviceId: "", selectedOutputDeviceId: "" };
+  }
+}
 
 export function App() {
+  const initialSessionSettings = loadSessionSettings();
+  const initialGlobalSettings = loadGlobalSettings();
+  const hadStoredRoomMatrix =
+    initialSessionSettings.listenRoomIds.length > 0 || initialSessionSettings.talkRoomIds.length > 0;
   const [publicData, setPublicData] = useState<PublicBootstrap | null>(null);
   const [appData, setAppData] = useState<Bootstrap | null>(null);
-  const [token, setToken] = useState<string | null>(() => sessionStorage.getItem(storageKey));
-  const [username, setUsername] = useState("");
-  const [roleId, setRoleID] = useState("");
-  const [listenRoomIds, setListenRoomIds] = useState<string[]>([]);
-  const [talkRoomIds, setTalkRoomIds] = useState<string[]>([]);
+  const [token, setToken] = useState<string | null>(() => sessionStorage.getItem(tokenStorageKey));
+  const [username, setUsername] = useState(initialSessionSettings.username);
+  const [roleId, setRoleID] = useState(initialSessionSettings.roleId);
+  const [listenRoomIds, setListenRoomIds] = useState<string[]>(initialSessionSettings.listenRoomIds);
+  const [talkRoomIds, setTalkRoomIds] = useState<string[]>(initialSessionSettings.talkRoomIds);
   const [presence, setPresence] = useState<Presence[]>([]);
   const [scope, setScope] = useState<"direct" | "room" | "broadcast">("room");
   const [targetId, setTargetId] = useState("");
@@ -56,9 +108,9 @@ export function App() {
   const [voiceMode, setVoiceMode] = useState<"always_on" | "ptt">("always_on");
   const [connectionState, setConnectionState] = useState<"connecting" | "connected" | "reconnecting" | "offline">("offline");
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedInputDeviceId, setSelectedInputDeviceId] = useState("");
+  const [selectedInputDeviceId, setSelectedInputDeviceId] = useState(initialGlobalSettings.selectedInputDeviceId);
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState("");
+  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState(initialGlobalSettings.selectedOutputDeviceId);
   const [inputLevel, setInputLevel] = useState(0);
   const [audioError, setAudioError] = useState<string>("");
   const [webrtcState, setWebrtcState] = useState<string>("new");
@@ -101,10 +153,11 @@ export function App() {
   const meterRafRef = useRef<number | null>(null);
   const statsIntervalRef = useRef<number | null>(null);
   const lastStatsRef = useRef<{ ts: number; inBytes: number; outBytes: number } | null>(null);
-  const selectedInputDeviceIdRef = useRef("");
-  const selectedOutputDeviceIdRef = useRef("");
+  const selectedInputDeviceIdRef = useRef(initialGlobalSettings.selectedInputDeviceId);
+  const selectedOutputDeviceIdRef = useRef(initialGlobalSettings.selectedOutputDeviceId);
   const listenRoomIdsRef = useRef<string[]>(listenRoomIds);
   const talkRoomIdsRef = useRef<string[]>(talkRoomIds);
+  const pendingInitialRoomRestoreRef = useRef(hadStoredRoomMatrix);
   const micMenuRef = useRef<HTMLDivElement | null>(null);
   const outputMenuRef = useRef<HTMLDivElement | null>(null);
   const showDebug = (() => {
@@ -130,9 +183,31 @@ export function App() {
   }, [talkRoomIds]);
 
   useEffect(() => {
-    localStorage.removeItem(storageKey);
+    localStorage.removeItem(tokenStorageKey);
     getPublicBootstrap().then(setPublicData).catch(console.error);
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(
+      sessionSettingsStorageKey,
+      JSON.stringify({
+        username,
+        roleId,
+        listenRoomIds,
+        talkRoomIds
+      } satisfies SessionSettings)
+    );
+  }, [username, roleId, listenRoomIds, talkRoomIds]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      globalSettingsStorageKey,
+      JSON.stringify({
+        selectedInputDeviceId,
+        selectedOutputDeviceId
+      } satisfies GlobalSettings)
+    );
+  }, [selectedInputDeviceId, selectedOutputDeviceId]);
 
   useEffect(() => {
     if (!token) return;
@@ -141,20 +216,34 @@ export function App() {
         setAppData(data);
         setRoleID(data.self.roleId);
         const roleDefaults = data.roles.find((role) => role.id === data.self.roleId);
-        let initialRoom = "";
-        if (roleDefaults?.defaultRoomId) {
-          initialRoom = roleDefaults.defaultRoomId;
+        const sanitizedListen = listenRoomIdsRef.current.filter((roomId) => {
+          const room = data.rooms.find((entry) => entry.id === roomId);
+          return !!room && roleAllowed(room.receiverRoleIds, data.self.roleId);
+        });
+        const sanitizedTalk = talkRoomIdsRef.current.filter((roomId) => {
+          const room = data.rooms.find((entry) => entry.id === roomId);
+          return !!room && roleAllowed(room.senderRoleIds, data.self.roleId);
+        });
+        pendingInitialRoomRestoreRef.current = sanitizedListen.length > 0 || sanitizedTalk.length > 0;
+        if (sanitizedListen.length > 0 || sanitizedTalk.length > 0) {
+          setListenRoomIds(sanitizedListen);
+          setTalkRoomIds(sanitizedTalk);
         } else {
-          const firstAllowedTalkRoom = data.rooms.find((room) => roleAllowed(room.senderRoleIds, data.self.roleId));
-          const firstAllowedListenRoom = data.rooms.find((room) => roleAllowed(room.receiverRoleIds, data.self.roleId));
-          initialRoom = firstAllowedTalkRoom?.id || firstAllowedListenRoom?.id || "";
-        }
-        if (initialRoom) {
-          const initialRoomConfig = data.rooms.find((room) => room.id === initialRoom);
-          const initialCanListen = roleAllowed(initialRoomConfig?.receiverRoleIds, data.self.roleId);
-          const initialCanTalk = roleAllowed(initialRoomConfig?.senderRoleIds, data.self.roleId);
-          setListenRoomIds(initialCanListen ? [initialRoom] : []);
-          setTalkRoomIds(initialCanTalk ? [initialRoom] : []);
+          let initialRoom = "";
+          if (roleDefaults?.defaultRoomId) {
+            initialRoom = roleDefaults.defaultRoomId;
+          } else {
+            const firstAllowedTalkRoom = data.rooms.find((room) => roleAllowed(room.senderRoleIds, data.self.roleId));
+            const firstAllowedListenRoom = data.rooms.find((room) => roleAllowed(room.receiverRoleIds, data.self.roleId));
+            initialRoom = firstAllowedTalkRoom?.id || firstAllowedListenRoom?.id || "";
+          }
+          if (initialRoom) {
+            const initialRoomConfig = data.rooms.find((room) => room.id === initialRoom);
+            const initialCanListen = roleAllowed(initialRoomConfig?.receiverRoleIds, data.self.roleId);
+            const initialCanTalk = roleAllowed(initialRoomConfig?.senderRoleIds, data.self.roleId);
+            setListenRoomIds(initialCanListen ? [initialRoom] : []);
+            setTalkRoomIds(initialCanTalk ? [initialRoom] : []);
+          }
         }
         if (roleDefaults?.defaultVoiceMode) {
           const nextMode = roleDefaults.defaultVoiceMode as "always_on" | "ptt";
@@ -164,8 +253,8 @@ export function App() {
         setViewMode(roleDefaults?.defaultSimpleView ? "simple" : "station");
       })
       .catch(() => {
-        sessionStorage.removeItem(storageKey);
-        localStorage.removeItem(storageKey);
+        sessionStorage.removeItem(tokenStorageKey);
+        localStorage.removeItem(tokenStorageKey);
         setToken(null);
       });
   }, [token]);
@@ -374,6 +463,13 @@ export function App() {
     return true;
   }
 
+  function sameStringSet(a: string[], b: string[]) {
+    if (a.length !== b.length) return false;
+    const sortedA = [...a].sort();
+    const sortedB = [...b].sort();
+    return sameStringArray(sortedA, sortedB);
+  }
+
 
   function toggleListenRoom(roomId: string) {
     if (!appData || !canRoleReceiveFromRoom(roomId, appData.self.roleId)) return;
@@ -552,6 +648,7 @@ export function App() {
     const connect = async () => {
       if (cancelled) return;
       setConnectionState(reconnectAttemptsRef.current > 0 ? "reconnecting" : "connecting");
+      pendingInitialRoomRestoreRef.current = listenRoomIdsRef.current.length > 0 || talkRoomIdsRef.current.length > 0;
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(`${proto}//${window.location.host}/ws?token=${encodeURIComponent(token)}`);
       wsRef.current = ws;
@@ -589,9 +686,12 @@ export function App() {
             audio.volume = 1;
             remoteAudioRef.current.set(key, audio);
           }
-          void applyOutputDeviceToAudio(audio, selectedOutputDeviceIdRef.current);
           const stream = event.streams[0] ?? new MediaStream([event.track]);
           audio.srcObject = stream;
+          const reapplyOutputDevice = () => {
+            void applyOutputDeviceToAudio(audio, selectedOutputDeviceIdRef.current);
+          };
+          reapplyOutputDevice();
           if (!remoteAnalyserNodesRef.current.has(key)) {
             const AudioCtx = window.AudioContext;
             if (AudioCtx) {
@@ -605,9 +705,14 @@ export function App() {
               startRemoteAudioMeterLoop();
             }
           }
-          void audio.play().catch((err) => {
-            setAudioError(`Remote audio playback blocked: ${err instanceof Error ? err.message : "unknown error"}`);
-          });
+          void audio
+            .play()
+            .then(() => {
+              reapplyOutputDevice();
+            })
+            .catch((err) => {
+              setAudioError(`Remote audio playback blocked: ${err instanceof Error ? err.message : "unknown error"}`);
+            });
           setEvents((old) => [{ label: "system · webrtc · remote audio track attached", at: new Date().toLocaleTimeString() }, ...old].slice(0, 200));
         };
         try {
@@ -626,11 +731,15 @@ export function App() {
           setEvents((old) => [{ label: "system · local/mic · capture failed (receive-only)", at: new Date().toLocaleTimeString() }, ...old].slice(0, 200));
         }
         ws.send(JSON.stringify({ type: "webrtc_ready", data: {} }));
+        const activeRoomId = matrixAnchorRoomId(listenRoomIdsRef.current, talkRoomIdsRef.current);
+        if (activeRoomId) {
+          ws.send(JSON.stringify({ type: "set_active_room", data: { roomId: activeRoomId } }));
+        }
         ws.send(
           JSON.stringify({
             type: "set_room_matrix",
             data: {
-              activeRoomId: matrixAnchorRoomId(listenRoomIdsRef.current, talkRoomIdsRef.current),
+              activeRoomId,
               listenRoomIds: listenRoomIdsRef.current,
               talkRoomIds: talkRoomIdsRef.current
             }
@@ -858,6 +967,30 @@ export function App() {
     if (!appData) return;
     const selfPresence = presence.find((entry) => entry.userId === appData.self.id);
     if (!selfPresence) return;
+    if (pendingInitialRoomRestoreRef.current) {
+      const matchesListen = sameStringSet(listenRoomIdsRef.current, selfPresence.listenRooms);
+      const matchesTalk = sameStringSet(talkRoomIdsRef.current, selfPresence.talkRooms);
+      if (!matchesListen || !matchesTalk) {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          const activeRoomId = matrixAnchorRoomId(listenRoomIdsRef.current, talkRoomIdsRef.current);
+          if (activeRoomId) {
+            wsRef.current.send(JSON.stringify({ type: "set_active_room", data: { roomId: activeRoomId } }));
+          }
+          wsRef.current.send(
+            JSON.stringify({
+              type: "set_room_matrix",
+              data: {
+                activeRoomId,
+                listenRoomIds: listenRoomIdsRef.current,
+                talkRoomIds: talkRoomIdsRef.current
+              }
+            })
+          );
+        }
+        return;
+      }
+      pendingInitialRoomRestoreRef.current = false;
+    }
     setListenRoomIds((prev) => (sameStringArray(prev, selfPresence.listenRooms) ? prev : selfPresence.listenRooms));
     setTalkRoomIds((prev) => (sameStringArray(prev, selfPresence.talkRooms) ? prev : selfPresence.talkRooms));
     const nextVoiceMode = selfPresence.voiceMode === "always_on" ? "always_on" : "ptt";
@@ -980,16 +1113,17 @@ export function App() {
 
   async function doLogin() {
     const res = await login(username.trim(), roleId);
-    sessionStorage.setItem(storageKey, res.token);
-    localStorage.removeItem(storageKey);
+    sessionStorage.setItem(tokenStorageKey, res.token);
+    localStorage.removeItem(tokenStorageKey);
     setToken(res.token);
   }
 
   async function doLogout() {
     if (token) {
       await logout(token);
-      sessionStorage.removeItem(storageKey);
-      localStorage.removeItem(storageKey);
+      sessionStorage.removeItem(tokenStorageKey);
+      localStorage.removeItem(tokenStorageKey);
+      localStorage.removeItem(sessionSettingsStorageKey);
       setToken(null);
       setAppData(null);
       setPresence([]);
