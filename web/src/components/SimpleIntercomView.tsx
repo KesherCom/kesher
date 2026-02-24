@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 type DirectReplyTarget = {
   userId: string;
   username: string;
@@ -35,6 +37,11 @@ export function SimpleIntercomView({
   ,
   doLogout
 }: SimpleIntercomViewProps) {
+  const [pressedButton, setPressedButton] = useState<"main" | "reply" | null>(null);
+
+  const mainActive = pressedButton === "main" || (pttPressed && pressedButton == null);
+  const replyActive = pressedButton === "reply";
+
   return (
     <div className="root app simple-shell">
       <section className="simple-controls">
@@ -42,22 +49,50 @@ export function SimpleIntercomView({
           <button className="simple-logout" onClick={doLogout}>Logout</button>
         </div>
         <button
-          className={`simple-ppt ${pttPressed ? "active" : ""}`}
-          onPointerDown={onStartPpt}
-          onPointerUp={onStopPpt}
-          onPointerLeave={onStopPpt}
-          onPointerCancel={onStopPpt}
+          className={`simple-ptt ${mainActive ? "active" : ""}`}
+          onPointerDown={() => {
+            setPressedButton("main");
+            onStartPpt();
+          }}
+          onPointerUp={() => {
+            setPressedButton(null);
+            onStopPpt();
+          }}
+          onPointerLeave={() => {
+            setPressedButton(null);
+            onStopPpt();
+          }}
+          onPointerCancel={() => {
+            setPressedButton(null);
+            onStopPpt();
+          }}
         >
           Hold to talk
           <small>{simplePptTargetLabel}</small>
         </button>
         <button
-          className={`simple-reply ${replyTarget ? "" : "disabled"}`}
+          className={`simple-reply ${replyTarget ? "" : "disabled"} ${replyActive ? "active" : ""}`}
           disabled={!replyTarget}
-          onPointerDown={() => (replyTarget ? onStartPpt() : undefined)}
-          onPointerUp={() => (replyTarget ? onStopPpt() : undefined)}
-          onPointerLeave={() => (replyTarget ? onStopPpt() : undefined)}
-          onPointerCancel={() => (replyTarget ? onStopPpt() : undefined)}
+          onPointerDown={() => {
+            if (!replyTarget) return;
+            setPressedButton("reply");
+            onStartPpt();
+          }}
+          onPointerUp={() => {
+            if (!replyTarget) return;
+            setPressedButton(null);
+            onStopPpt();
+          }}
+          onPointerLeave={() => {
+            if (!replyTarget) return;
+            setPressedButton(null);
+            onStopPpt();
+          }}
+          onPointerCancel={() => {
+            if (!replyTarget) return;
+            setPressedButton(null);
+            onStopPpt();
+          }}
         >
           Reply to caller
           <small>{replyTarget ? replyTarget.username : "No active caller"}</small>
