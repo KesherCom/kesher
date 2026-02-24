@@ -1,0 +1,45 @@
+services:
+  intercom:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.selfsigned
+      args:
+        TARGETOS: ${TARGETOS:-linux}
+        TARGETARCH: ${TARGETARCH:-amd64}
+    container_name: live-production-intercom-selfsigned
+    ports:
+      - "${INTERCOM_HTTPS_PORT:-8443}:8443"
+    environment:
+      APP_HTTPS_PORT: ${APP_HTTPS_PORT:-8443}
+      APP_ADDR: ${APP_ADDR:-:8443}
+      DB_PATH: ${DB_PATH:-/app/data/intercom.db}
+      ALLOW_CORS: ${ALLOW_CORS:-false}
+      TRUSTED_LAN_HTTP: ${TRUSTED_LAN_HTTP:-false}
+      TLS_CERT_FILE: ${TLS_CERT_FILE:-/app/certs/tls.crt}
+      TLS_KEY_FILE: ${TLS_KEY_FILE:-/app/certs/tls.key}
+      CERT_HOST: ${CERT_HOST:-localhost}
+      CERT_DAYS: ${CERT_DAYS:-365}
+      # Optional: append SAN entries like "IP:192.168.1.50,DNS:intercom.local"
+      CERT_EXTRA_SAN: ${CERT_EXTRA_SAN:-}
+      SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-720}
+    volumes:
+      - intercom_data:/app/data
+      - intercom_certs:/app/certs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://127.0.0.1:8443/api/healthz >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    init: true
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+volumes:
+  intercom_data:
+  intercom_certs:
