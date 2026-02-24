@@ -1469,28 +1469,29 @@ export function App() {
     return <div className="root">Lade Daten…</div>;
   }
 
-  const audioPanel = (
-    <AudioPanel
-      inputDevices={inputDevices}
-      selectedInputDeviceId={selectedInputDeviceId}
-      selectedMicLabel={selectedMicLabel}
-      isMicMenuOpen={isMicMenuOpen}
-      setIsMicMenuOpen={setIsMicMenuOpen}
-      setSelectedInputDeviceId={setSelectedInputDeviceId}
-      inputLevel={inputLevel}
-      outputDevices={outputDevices}
-      selectedOutputDeviceId={selectedOutputDeviceId}
-      selectedOutputLabel={selectedOutputLabel}
-      isOutputMenuOpen={isOutputMenuOpen}
-      setIsOutputMenuOpen={setIsOutputMenuOpen}
-      setSelectedOutputDeviceId={(nextOutputDeviceId) => {
-        void changeOutputDevice(nextOutputDeviceId);
-      }}
-      outputSelectionSupported={outputSelectionSupported}
-      micMenuRef={micMenuRef}
-      outputMenuRef={outputMenuRef}
-    />
-  );
+  // audioPanel is now integrated into the User Settings modal in StationIntercomView
+  // const audioPanel = (
+  //   <AudioPanel
+  //     inputDevices={inputDevices}
+  //     selectedInputDeviceId={selectedInputDeviceId}
+  //     selectedMicLabel={selectedMicLabel}
+  //     isMicMenuOpen={isMicMenuOpen}
+  //     setIsMicMenuOpen={setIsMicMenuOpen}
+  //     setSelectedInputDeviceId={setSelectedInputDeviceId}
+  //     inputLevel={inputLevel}
+  //     outputDevices={outputDevices}
+  //     selectedOutputDeviceId={selectedOutputDeviceId}
+  //     selectedOutputLabel={selectedOutputLabel}
+  //     isOutputMenuOpen={isOutputMenuOpen}
+  //     setIsOutputMenuOpen={setIsOutputMenuOpen}
+  //     setSelectedOutputDeviceId={(nextOutputDeviceId) => {
+  //       void changeOutputDevice(nextOutputDeviceId);
+  //     }}
+  //     outputSelectionSupported={outputSelectionSupported}
+  //     micMenuRef={micMenuRef}
+  //     outputMenuRef={outputMenuRef}
+  //   />
+  // );
 
   const chatAndSignalBlock = (
     <ChatSignalPanel
@@ -1656,9 +1657,20 @@ export function App() {
         stopPtt={stopPtt}
         voiceMode={voiceMode}
         setAlwaysOn={setAlwaysOn}
-        audioPanel={audioPanel}
         chatAndSignalPanel={chatAndSignalBlock}
         showDebug={showDebug}
+        inputDevices={inputDevices}
+        selectedInputDeviceId={selectedInputDeviceId}
+        selectedMicLabel={selectedMicLabel}
+        setSelectedInputDeviceId={setSelectedInputDeviceId}
+        inputLevel={inputLevel}
+        outputDevices={outputDevices}
+        selectedOutputDeviceId={selectedOutputDeviceId}
+        selectedOutputLabel={selectedOutputLabel}
+        outputSelectionSupported={outputSelectionSupported}
+        setSelectedOutputDeviceId={(nextOutputDeviceId) => {
+          void changeOutputDevice(nextOutputDeviceId);
+        }}
         realtimeDebugBlock={realtimeDebugBlock}
         enableDirectPpt={enableDirectPpt}
         onEnableDirectPptChange={handleEnableDirectPptChange}

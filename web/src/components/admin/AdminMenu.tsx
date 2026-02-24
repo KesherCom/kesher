@@ -5,6 +5,8 @@ import { AdminPinCard } from "./AdminPinCard";
 import { AdminMonitoringCard } from "./AdminMonitoringCard";
 
 type AdminMenuProps = {
+  isOpen: boolean;
+  setIsOpen: (value: boolean) => void;
   token: string | null;
   appData: Bootstrap;
   refreshBootstrapData: () => Promise<void>;
@@ -15,6 +17,8 @@ type AdminMenuProps = {
 };
 
 export function AdminMenu({
+  isOpen,
+  setIsOpen,
   token,
   appData,
   refreshBootstrapData,

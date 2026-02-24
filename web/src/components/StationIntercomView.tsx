@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Bootstrap, BroadcastGroup, Presence } from "../types";
 
 type StationIntercomViewProps = {
@@ -29,7 +29,6 @@ type StationIntercomViewProps = {
   stopPtt: () => void;
   voiceMode: "always_on" | "ptt";
   setAlwaysOn: (enabled: boolean) => void;
-  audioPanel: React.ReactNode;
   chatAndSignalPanel: React.ReactNode;
   showDebug: boolean;
   realtimeDebugBlock: React.ReactNode;
@@ -49,6 +48,17 @@ type StationIntercomViewProps = {
   onShowPinnedOnlyChange: (value: boolean) => void;
   isUserSettingsOpen: boolean;
   setIsUserSettingsOpen: (value: boolean) => void;
+  // Audio device props
+  inputDevices: MediaDeviceInfo[];
+  selectedInputDeviceId: string;
+  selectedMicLabel: string;
+  setSelectedInputDeviceId: (value: string) => void;
+  inputLevel: number;
+  outputDevices: MediaDeviceInfo[];
+  selectedOutputDeviceId: string;
+  selectedOutputLabel: string;
+  outputSelectionSupported: boolean;
+  setSelectedOutputDeviceId: (value: string) => void;
 };
 
 export function StationIntercomView({
@@ -79,7 +89,6 @@ export function StationIntercomView({
   stopPtt,
   voiceMode,
   setAlwaysOn,
-  audioPanel,
   chatAndSignalPanel,
   showDebug,
   realtimeDebugBlock,
@@ -98,8 +107,38 @@ export function StationIntercomView({
   onTogglePinnedUser,
   onShowPinnedOnlyChange,
   isUserSettingsOpen,
-  setIsUserSettingsOpen
+  setIsUserSettingsOpen,
+  inputDevices,
+  selectedInputDeviceId,
+  selectedMicLabel,
+  setSelectedInputDeviceId,
+  inputLevel,
+  outputDevices,
+  selectedOutputDeviceId,
+  selectedOutputLabel,
+  outputSelectionSupported,
+  setSelectedOutputDeviceId
 }: StationIntercomViewProps) {
+  const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
+  const [isOutputMenuOpen, setIsOutputMenuOpen] = useState(false);
+  const micMenuRef = useRef<HTMLDivElement>(null);
+  const outputMenuRef = useRef<HTMLDivElement>(null);
+  const [isAudioOpen, setIsAudioOpen] = useState(true);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (micMenuRef.current && !micMenuRef.current.contains(event.target as Node)) {
+        setIsMicMenuOpen(false);
+      }
+      if (outputMenuRef.current && !outputMenuRef.current.contains(event.target as Node)) {
+        setIsOutputMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const allDirectOnlineTargets = useMemo(() => {
     return presence
       .filter((p) => p.userId !== appData.self.id && p.username.toLowerCase() !== "admin")
@@ -334,7 +373,6 @@ export function StationIntercomView({
 
       <section className="station-utility station-utility-section">
         <div className="panel">{chatAndSignalPanel}</div>
-        <div className="panel">{audioPanel}</div>
       </section>
       {showDebug ? <section className="panel">{realtimeDebugBlock}</section> : null}
       {isUserSettingsOpen ? (
@@ -363,6 +401,117 @@ export function StationIntercomView({
                 />
                 <span>Direct PTT Mode (press channel to talk)</span>
               </label>
+              
+              <div className="audio-section">
+              <div className={`audio-box ${isAudioOpen ? "" : "collapsed"}`}>
+                <div className="audio-box-header">
+                  <button
+                    type="button"
+                    className="audio-box-toggle"
+                    onClick={() => setIsAudioOpen((v) => !v)}
+                    aria-expanded={isAudioOpen}
+                  >
+                    Sound settings
+                    <span className={`chev ${isAudioOpen ? "open" : ""}`}>▾</span>
+                  </button>
+                </div>
+                {isAudioOpen ? (
+                  <div className="audio-box-body">
+                    <div className="audio-left">
+                <h4>Microphone</h4>
+                <div className="audio-row">
+                  <div className="mic-dropdown" ref={micMenuRef}>
+                    <button
+                      type="button"
+                      className="mic-dropdown-trigger"
+                      onClick={() => setIsMicMenuOpen((v) => !v)}
+                      disabled={inputDevices.length === 0}
+                      aria-haspopup="listbox"
+                      aria-expanded={isMicMenuOpen}
+                    >
+                      <span>{selectedMicLabel}</span>
+                      <span>▾</span>
+                    </button>
+                    {isMicMenuOpen ? (
+                      <div className="mic-dropdown-menu" role="listbox">
+                        {inputDevices.map((d) => (
+                          <button
+                            type="button"
+                            key={d.deviceId}
+                            className={`mic-dropdown-item ${d.deviceId === selectedInputDeviceId ? "active" : ""}`}
+                            onClick={() => {
+                              setSelectedInputDeviceId(d.deviceId);
+                              setIsMicMenuOpen(false);
+                            }}
+                            title={d.label || `Mic ${d.deviceId.slice(0, 6)}`}
+                          >
+                            {d.label || `Mic ${d.deviceId.slice(0, 6)}`}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="meter">
+                      <div className="meter-bar" style={{ width: `${inputLevel}%` }} />
+                    </div>
+                </div>
+                <small>Input level</small>
+                    </div>
+                    <div className="audio-right">
+                      <h4>Speaker output</h4>
+                      <div className="mic-dropdown" ref={outputMenuRef}>
+                  <button
+                    type="button"
+                    className="mic-dropdown-trigger"
+                    onClick={() => setIsOutputMenuOpen((v) => !v)}
+                    disabled={outputDevices.length === 0}
+                    aria-haspopup="listbox"
+                    aria-expanded={isOutputMenuOpen}
+                  >
+                    <span>{selectedOutputLabel}</span>
+                    <span>▾</span>
+                  </button>
+                  {isOutputMenuOpen ? (
+                    <div className="mic-dropdown-menu" role="listbox">
+                      <button
+                        type="button"
+                        className={`mic-dropdown-item ${selectedOutputDeviceId === "" ? "active" : ""}`}
+                        onClick={() => {
+                          setSelectedOutputDeviceId("");
+                          setIsOutputMenuOpen(false);
+                        }}
+                        title="System default"
+                      >
+                        System default
+                      </button>
+                      {outputDevices.map((d) => (
+                        <button
+                          type="button"
+                          key={d.deviceId}
+                          className={`mic-dropdown-item ${d.deviceId === selectedOutputDeviceId ? "active" : ""}`}
+                          onClick={() => {
+                            setSelectedOutputDeviceId(d.deviceId);
+                            setIsOutputMenuOpen(false);
+                          }}
+                          title={d.label || `Output ${d.deviceId.slice(0, 6)}`}
+                        >
+                          {d.label || `Output ${d.deviceId.slice(0, 6)}`}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                      {!outputSelectionSupported ? (
+                        <small style={{ display: "block", marginTop: "0.5rem" }}>
+                          Explicit speaker selection is not supported by this browser; using system default output.
+                        </small>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              </div>
+
               <p className="station-modal-hint">Preferences gelten nur für dich auf diesem Gerät.</p>
             </div>
           </section>
