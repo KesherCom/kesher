@@ -53,6 +53,7 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
   const [groupEditName, setGroupEditName] = useState("");
   const [groupEditRoomIds, setGroupEditRoomIds] = useState<string[]>([]);
   const [groupEditAllowedRoleIds, setGroupEditAllowedRoleIds] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<"roles" | "rooms" | "channels">("roles");
 
   useEffect(() => {
     if (roleCreateDefaultRoomId === "" && appData.rooms[0]) {
@@ -239,7 +240,38 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
     <div className="admin-panel">
       <h3>Admin · configuration</h3>
       {adminError ? <p className="admin-error">{adminError}</p> : null}
-      <div className="admin-block">
+
+      <div className="admin-tabs">
+        <nav className="admin-tabs-nav">
+          <button
+            type="button"
+            className={`admin-tab-button ${activeTab === "roles" ? "active" : ""}`}
+            onClick={() => setActiveTab("roles")}
+            aria-pressed={activeTab === "roles"}
+          >
+            Roles <span className="admin-tab-badge">{appData.roles.length}</span>
+          </button>
+          <button
+            type="button"
+            className={`admin-tab-button ${activeTab === "rooms" ? "active" : ""}`}
+            onClick={() => setActiveTab("rooms")}
+            aria-pressed={activeTab === "rooms"}
+          >
+            Rooms <span className="admin-tab-badge">{appData.rooms.length}</span>
+          </button>
+          <button
+            type="button"
+            className={`admin-tab-button ${activeTab === "channels" ? "active" : ""}`}
+            onClick={() => setActiveTab("channels")}
+            aria-pressed={activeTab === "channels"}
+          >
+            Channels <span className="admin-tab-badge">{appData.broadcastGroups.length}</span>
+          </button>
+        </nav>
+      </div>
+
+      {activeTab === "roles" && (
+        <div className="admin-block">
         <div className="admin-block-header">
           <h4>Roles</h4>
           {!roleEditId ? (
@@ -383,7 +415,9 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
           ))}
         </ul>
       </div>
-      <div className="admin-block">
+      )}
+      {activeTab === "rooms" && (
+        <div className="admin-block">
         <div className="admin-block-header">
           <h4>Rooms</h4>
           {!roomEditId ? (
@@ -496,7 +530,9 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
           ))}
         </ul>
       </div>
-      <div className="admin-block">
+      )}
+      {activeTab === "channels" && (
+        <div className="admin-block">
         <div className="admin-block-header">
           <h4>Broadcast channels</h4>
           {!groupEditId ? (
@@ -620,6 +656,7 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
           ))}
         </ul>
       </div>
+      )}
     </div>
   );
 }
