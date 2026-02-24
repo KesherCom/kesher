@@ -6,6 +6,9 @@
   --muted: #97a4bb;
   --panel: #171f2c;
   --panel-2: #121925;
+  --accent: #f3c337;
+  --accent-dark: #c48f20;
+  --accent-glow: rgba(243, 195, 55, 0.96);
 }
 * { box-sizing: border-box; }
 body {
@@ -24,6 +27,7 @@ input, select, button {
   padding: 0.62rem 0.78rem;
   background: #1a2332;
   color: inherit;
+  transition: background-color 160ms linear, border-color 160ms linear, box-shadow 160ms linear, transform 120ms cubic-bezier(.2,.9,.2,1), color 160ms linear;
 }
 button { cursor: pointer; }
 .panel {
@@ -280,6 +284,13 @@ button.secondary { background: transparent; }
   justify-items: center;
   align-content: center;
 }
+.simple-ptt, .station-ptt, .station-card-head {
+  position: relative;
+  will-change: transform, box-shadow;
+}
+.simple-ptt, .station-ptt {
+  transition: transform 160ms cubic-bezier(.2,.9,.2,1), box-shadow 180ms ease, background-color 160ms linear, border-color 160ms linear;
+}
 .simple-ptt small {
   margin-top: 0.35rem;
   text-transform: none;
@@ -294,6 +305,66 @@ button.secondary { background: transparent; }
 }
 .simple-ptt.active small {
   color: #40330c;
+}
+.simple-ptt:active, .station-ptt:active, .station-card-head:active {
+  transform: scale(0.985);
+}
+
+/* Quick tactile press ripple (subtle) */
+@keyframes ptt-press {
+  0% { transform: scale(0.98); opacity: 0.65; }
+  100% { transform: scale(1); opacity: 0; }
+}
+
+/* Transmitting pulse */
+@keyframes ptt-pulse {
+  0% { transform: scale(1); opacity: 0.9; }
+  60% { transform: scale(1.6); opacity: 0.14; }
+  100% { transform: scale(2.1); opacity: 0; }
+}
+
+/* Add a soft glow ring when actively transmitting */
+.simple-ptt.transmitting::after,
+.station-ptt.transmitting::after,
+.station-card-head.ppt-active.transmitting::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: calc(100% + 18px);
+  height: calc(100% + 18px);
+  border-radius: 999px;
+  background: radial-gradient(circle at 50% 50%, var(--accent-glow) 0%, rgba(243,195,55,0.06) 35%, rgba(4,7,12,0) 50%);
+  pointer-events: none;
+  z-index: 0;
+  animation: ptt-pulse 1600ms ease-out infinite;
+  box-shadow: 0 6px 34px rgba(243,195,55,0.14), inset 0 1px 8px rgba(255,255,255,0.02);
+}
+
+/* Keep content above the ring */
+.simple-ptt.transmitting > *,
+.station-ptt.transmitting > *,
+.station-card-head.ppt-active.transmitting > * { position: relative; z-index: 1; }
+
+/* Make .ppt-active slightly more lively when transmitting */
+.station-card-head.ppt-active {
+  transition: box-shadow 220ms ease, transform 160ms cubic-bezier(.2,.9,.2,1), background-color 160ms ease;
+}
+.station-card-head.ppt-active.transmitting {
+  transform: scale(0.985);
+  box-shadow: 0 0 18px rgba(255, 23, 68, 0.18), 0 0 6px rgba(196,28,59,0.08) inset;
+}
+
+/* Micro interaction: small heartbeat when active-but-not-transmitting (attention) */
+@keyframes ppt-breathe {
+  0% { transform: translateZ(0) scale(1); }
+  50% { transform: translateZ(0) scale(0.997); }
+  100% { transform: translateZ(0) scale(1); }
+}
+.station-card-head.direct-ptt.active:not(.transmitting),
+.station-card-head.selected:not(.transmitting) {
+  animation: ppt-breathe 2.2s ease-in-out infinite;
 }
 .simple-reply {
   background: #171f2d;
