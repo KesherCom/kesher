@@ -14,3 +14,4 @@ web/tsconfig.tsbuildinfo
 backend/internal/app/embedded_web/*
 !backend/internal/app/embedded_web/_placeholder.txt
 
+backend/app
