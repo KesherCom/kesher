@@ -51,6 +51,7 @@ type SessionSettings = {
 type GlobalSettings = {
   selectedInputDeviceId: string;
   selectedOutputDeviceId: string;
+  enableDirectPpt: boolean;
 };
 
 function loadSessionSettings(): SessionSettings {
@@ -75,15 +76,16 @@ function loadGlobalSettings(): GlobalSettings {
   try {
     const raw = localStorage.getItem(globalSettingsStorageKey);
     if (!raw) {
-      return { selectedInputDeviceId: "", selectedOutputDeviceId: "" };
+      return { selectedInputDeviceId: "", selectedOutputDeviceId: "", enableDirectPpt: false };
     }
     const parsed = JSON.parse(raw) as Partial<GlobalSettings>;
     return {
       selectedInputDeviceId: typeof parsed.selectedInputDeviceId === "string" ? parsed.selectedInputDeviceId : "",
-      selectedOutputDeviceId: typeof parsed.selectedOutputDeviceId === "string" ? parsed.selectedOutputDeviceId : ""
+      selectedOutputDeviceId: typeof parsed.selectedOutputDeviceId === "string" ? parsed.selectedOutputDeviceId : "",
+      enableDirectPpt: typeof parsed.enableDirectPpt === "boolean" ? parsed.enableDirectPpt : false
     };
   } catch {
-    return { selectedInputDeviceId: "", selectedOutputDeviceId: "" };
+    return { selectedInputDeviceId: "", selectedOutputDeviceId: "", enableDirectPpt: false };
   }
 }
 
@@ -111,6 +113,8 @@ export function App() {
   const [selectedInputDeviceId, setSelectedInputDeviceId] = useState(initialGlobalSettings.selectedInputDeviceId);
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState(initialGlobalSettings.selectedOutputDeviceId);
+  const [enableDirectPpt, setEnableDirectPpt] = useState(initialGlobalSettings.enableDirectPpt);
+  const [selectedChannelId, setSelectedChannelId] = useState<string>("");
   const [inputLevel, setInputLevel] = useState(0);
   const [audioError, setAudioError] = useState<string>("");
   const [webrtcState, setWebrtcState] = useState<string>("new");
@@ -121,7 +125,8 @@ export function App() {
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [pttPressed, setPttPressed] = useState(false);
   const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(null);
-  const [directPttPressedUserId, setDirectPttPressedUserId] = useState<string | null>(null);
+  const [directPttPressedUserId, setdirectPttPressedUserId] = useState<string | null>(null);
+  const [pttPressedChannelId, setPttPressedChannelId] = useState<string | null>(null);
   const [lastDirectCallerUserId, setLastDirectCallerUserId] = useState<string | null>(null);
   const [incomingAttention, setIncomingAttention] = useState<{ title: string; detail: string } | null>(null);
   const [attentionFlashKey, setAttentionFlashKey] = useState(0);
@@ -157,6 +162,7 @@ export function App() {
   const selectedOutputDeviceIdRef = useRef(initialGlobalSettings.selectedOutputDeviceId);
   const listenRoomIdsRef = useRef<string[]>(listenRoomIds);
   const talkRoomIdsRef = useRef<string[]>(talkRoomIds);
+  const prevChannelRef = useRef<string>("");
   const pendingInitialRoomRestoreRef = useRef(hadStoredRoomMatrix);
   const micMenuRef = useRef<HTMLDivElement | null>(null);
   const outputMenuRef = useRef<HTMLDivElement | null>(null);
@@ -204,10 +210,11 @@ export function App() {
       globalSettingsStorageKey,
       JSON.stringify({
         selectedInputDeviceId,
-        selectedOutputDeviceId
+        selectedOutputDeviceId,
+        enableDirectPpt
       } satisfies GlobalSettings)
     );
-  }, [selectedInputDeviceId, selectedOutputDeviceId]);
+  }, [selectedInputDeviceId, selectedOutputDeviceId, enableDirectPpt]);
 
   useEffect(() => {
     if (!token) return;
@@ -780,9 +787,9 @@ export function App() {
               setPttPressed(desiredState === "ptt_start");
             } else if (nextScope === "direct") {
               if (desiredState === "ptt_start" && resolvedTargetId) {
-                setDirectPttPressedUserId(resolvedTargetId);
+                setdirectPttPressedUserId(resolvedTargetId);
               } else {
-                setDirectPttPressedUserId((current) => (current === resolvedTargetId ? null : current));
+                setdirectPttPressedUserId((current) => (current === resolvedTargetId ? null : current));
               }
             } else if (nextScope === "broadcast") {
               if (desiredState === "ptt_start" && resolvedTargetId) {
@@ -1007,13 +1014,13 @@ export function App() {
     }
     if (nextVoiceMode === "always_on") {
       setPttPressed(false);
-      setDirectPttPressedUserId(null);
+      setdirectPttPressedUserId(null);
       setBroadcastPttPressed(null);
       return;
     }
     setPttPressed(selfPresence.micEnabled);
     if (!selfPresence.micEnabled) {
-      setDirectPttPressedUserId(null);
+      setdirectPttPressedUserId(null);
       setBroadcastPttPressed(null);
     }
   }, [presence, appData]);
@@ -1108,6 +1115,10 @@ export function App() {
     const map = new Map<string, string>();
     for (const role of appData?.roles || []) map.set(role.id, role.name);
     return map;
+  }, [appData]);
+
+  const availableChannels = useMemo(() => {
+    return (appData?.rooms || []).map((room) => ({ id: room.id, label: room.name }));
   }, [appData]);
 
 
@@ -1252,13 +1263,32 @@ export function App() {
   }
 
   function startDirectPtt(userId: string) {
-    setDirectPttPressedUserId(userId);
+    setdirectPttPressedUserId(userId);
     sendDirectVoiceState(userId, "ptt_start");
   }
 
   function stopDirectPtt(userId: string) {
-    setDirectPttPressedUserId((current) => (current === userId ? null : current));
+    setdirectPttPressedUserId((current) => (current === userId ? null : current));
     sendDirectVoiceState(userId, "ptt_stop");
+  }
+
+  function handleChannelPttStart(channelId: string) {
+    if (!appData || !channelId) return;
+    // Select the channel and start PTT
+    setSelectedChannelId(channelId);
+    setTalkRoomIds([channelId]);
+    setListenRoomIds([channelId]);
+    startPtt();
+    setPttPressedChannelId(channelId);
+    prevChannelRef.current = channelId;
+  }
+
+  function handleChannelPttStop(channelId: string) {
+    if (prevChannelRef.current === channelId) {
+      setPttPressedChannelId(null);
+      stopPtt();
+      prevChannelRef.current = "";
+    }
   }
 
 
@@ -1388,12 +1418,9 @@ export function App() {
       <>
         <SimpleIntercomView
           pttPressed={pttPressed}
-          onStartPtt={startPtt}
-          onStopPtt={stopPtt}
+          onStartPpt={startPtt}
+          onStopPpt={stopPtt}
           replyTarget={replyTarget ? { userId: replyTarget.userId, username: replyTarget.username } : null}
-          directPttPressedUserId={directPttPressedUserId}
-          onStartDirectPtt={startDirectPtt}
-          onStopDirectPtt={stopDirectPtt}
           selectedInputDeviceId={selectedInputDeviceId}
           onSelectedInputDeviceIdChange={setSelectedInputDeviceId}
           inputDevices={inputDevices}
@@ -1403,7 +1430,7 @@ export function App() {
           }}
           outputDevices={outputDevices}
           outputSelectionSupported={outputSelectionSupported}
-          simplePttTargetLabel={simplePttTargetLabel}
+          simplePptTargetLabel={simplePttTargetLabel}
         />
         {attentionFlashOverlay}
       </>
@@ -1450,6 +1477,14 @@ export function App() {
         showDebug={showDebug}
         realtimeDebugBlock={realtimeDebugBlock}
         refreshBootstrapData={refreshBootstrapData}
+        enableDirectPpt={enableDirectPpt}
+        onEnableDirectPptChange={setEnableDirectPpt}
+        availableChannels={availableChannels}
+        selectedChannelId={selectedChannelId}
+        onSelectChannel={setSelectedChannelId}
+        onChannelPptStart={handleChannelPttStart}
+        onChannelPptStop={handleChannelPttStop}
+        pptPressedChannelId={pttPressedChannelId}
       />
       {attentionFlashOverlay}
     </>
