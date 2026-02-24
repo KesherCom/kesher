@@ -1382,19 +1382,35 @@ export function App() {
 
   function handleChannelPttStart(channelId: string) {
     if (!appData || !channelId) return;
-    // Select the channel and start PTT
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    // Select the channel and start PTT with that channel directly
     setSelectedChannelId(channelId);
     setTalkRoomIds([channelId]);
     setListenRoomIds([channelId]);
-    startPtt();
+    setPttPressed(true);
     setPttPressedChannelId(channelId);
     prevChannelRef.current = channelId;
+    // First: Notify backend of the room matrix change
+    wsRef.current.send(
+      JSON.stringify({
+        type: "set_room_matrix",
+        data: {
+          listenRoomIDs: [channelId],
+          talkRoomIDs: [channelId],
+          activeRoomID: channelId
+        }
+      })
+    );
+    sendScopedVoiceState("room", channelId, "ptt_start");
   }
 
   function handleChannelPttStop(channelId: string) {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     if (prevChannelRef.current === channelId) {
+      setPttPressed(false);
       setPttPressedChannelId(null);
-      stopPtt();
+      // Send voice state with the channel that was being pressed
+      sendScopedVoiceState("room", channelId, "ptt_stop");
       prevChannelRef.current = "";
     }
   }
