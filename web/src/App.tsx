@@ -1431,6 +1431,9 @@ export function App() {
           outputDevices={outputDevices}
           outputSelectionSupported={outputSelectionSupported}
           simplePptTargetLabel={simplePttTargetLabel}
+          doLogout={() => {
+            void doLogout();
+          }}
         />
         {attentionFlashOverlay}
       </>

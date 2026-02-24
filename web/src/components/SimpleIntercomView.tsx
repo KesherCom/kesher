@@ -16,6 +16,7 @@ type SimpleIntercomViewProps = {
   outputDevices: MediaDeviceInfo[];
   outputSelectionSupported: boolean;
   simplePptTargetLabel: string;
+  doLogout: () => void;
 };
 
 export function SimpleIntercomView({
@@ -31,10 +32,15 @@ export function SimpleIntercomView({
   outputDevices,
   outputSelectionSupported,
   simplePptTargetLabel
+  ,
+  doLogout
 }: SimpleIntercomViewProps) {
   return (
     <div className="root app simple-shell">
       <section className="simple-controls">
+        <div className="simple-top-actions">
+          <button className="simple-logout" onClick={doLogout}>Logout</button>
+        </div>
         <button
           className={`simple-ppt ${pttPressed ? "active" : ""}`}
           onPointerDown={onStartPpt}
