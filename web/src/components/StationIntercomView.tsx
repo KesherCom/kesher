@@ -38,6 +38,14 @@ type StationIntercomViewProps = {
   showDebug: boolean;
   realtimeDebugBlock: React.ReactNode;
   refreshBootstrapData: () => Promise<void>;
+  enableDirectPpt: boolean;
+  onEnableDirectPptChange: (enabled: boolean) => void;
+  availableChannels: Array<{ id: string; label: string }>;
+  selectedChannelId: string;
+  onSelectChannel: (channelId: string) => void;
+  onChannelPptStart: (channelId: string) => void;
+  onChannelPptStop: (channelId: string) => void;
+  pptPressedChannelId: string | null;
 };
 
 export function StationIntercomView({
@@ -75,7 +83,15 @@ export function StationIntercomView({
   chatAndSignalPanel,
   showDebug,
   realtimeDebugBlock,
-  refreshBootstrapData
+  refreshBootstrapData,
+  enableDirectPpt,
+  onEnableDirectPptChange,
+  availableChannels,
+  selectedChannelId,
+  onSelectChannel,
+  onChannelPptStart,
+  onChannelPptStop,
+  pptPressedChannelId
 }: StationIntercomViewProps) {
   const directOnlineTargets = useMemo(
     () =>
@@ -149,11 +165,33 @@ export function StationIntercomView({
             const talking = talkRoomIds.includes(room.id);
             const canTalk = canRoleSendToRoom(room.id, appData.self.roleId);
             const canListen = canRoleReceiveFromRoom(room.id, appData.self.roleId);
+            const isPttPressed = enableDirectPpt && pptPressedChannelId === room.id;
+            
+            const handleTalkPointerDown = () => {
+              if (enableDirectPpt) {
+                onChannelPptStart(room.id);
+              } else {
+                toggleTalkRoom(room.id);
+              }
+            };
+            
+            const handleTalkPointerUp = () => {
+              if (enableDirectPpt) {
+                onChannelPptStop(room.id);
+              }
+            };
+            
             return (
               <article key={`station-room-${room.id}`} className="station-card">
                 <button
-                  className={`station-card-head ${talking ? "selected" : ""} ${canTalk ? "" : "disabled"}`}
-                  onClick={() => toggleTalkRoom(room.id)}
+                  className={`station-card-head ${
+                    enableDirectPpt ? (isPttPressed ? "ppt-active" : "") : talking ? "selected" : ""
+                  } ${canTalk ? "" : "disabled"}`}
+                  onPointerDown={canTalk ? handleTalkPointerDown : undefined}
+                  onPointerUp={canTalk ? handleTalkPointerUp : undefined}
+                  onPointerLeave={canTalk && enableDirectPpt && isPttPressed ? handleTalkPointerUp : undefined}
+                  onPointerCancel={canTalk && enableDirectPpt && isPttPressed ? handleTalkPointerUp : undefined}
+                  onClick={!enableDirectPpt && canTalk ? () => toggleTalkRoom(room.id) : undefined}
                   disabled={!canTalk}
                   title={canTalk ? "" : "Your role is not allowed to send to this room"}
                 >
@@ -245,6 +283,11 @@ export function StationIntercomView({
           <input type="checkbox" checked={voiceMode === "always_on"} onChange={(e) => setAlwaysOn(e.target.checked)} />
           <span>Always on</span>
         </label>
+        <label className="station-setting">
+          <input type="checkbox" checked={enableDirectPpt} onChange={(e) => onEnableDirectPptChange(e.target.checked)} />
+          <span>Direct PTT Mode (press channel to talk)</span>
+        </label>
+
         <button
           className={`station-reply ${replyTarget ? "" : "disabled"} ${
             replyTarget && directPttPressedUserId === replyTarget.userId ? "active" : ""

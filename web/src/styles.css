@@ -461,8 +461,14 @@ button.secondary { background: transparent; }
   color: #fff;
 }
 .station-card-head.direct-ptt.active small,
-.station-card-head.direct-ptt.active em { color: #ffe7e7; }
-.station-card-actions { display: grid; grid-template-columns: 1fr 1fr; }
+.station-card-head.direct-ptt.active em { color: #ffe7e7; }.station-card-head.ppt-active {
+  background: #c41c3b !important;
+  color: #fff;
+  box-shadow: 0 0 15px rgba(255, 23, 68, 0.6), inset 0 2px 8px rgba(0, 0, 0, 0.4);
+  transform: scale(0.98);
+}
+.station-card-head.ppt-active small,
+.station-card-head.ppt-active em { color: #ffe7e7; }.station-card-actions { display: grid; grid-template-columns: 1fr 1fr; }
 .station-card-actions.single { grid-template-columns: 1fr; }
 .station-card-actions button {
   border-radius: 0;

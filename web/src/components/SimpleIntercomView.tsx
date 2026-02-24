@@ -5,12 +5,9 @@ type DirectReplyTarget = {
 
 type SimpleIntercomViewProps = {
   pttPressed: boolean;
-  onStartPtt: () => void;
-  onStopPtt: () => void;
+  onStartPpt: () => void;
+  onStopPpt: () => void;
   replyTarget: DirectReplyTarget | null;
-  directPttPressedUserId: string | null;
-  onStartDirectPtt: (userId: string) => void;
-  onStopDirectPtt: (userId: string) => void;
   selectedInputDeviceId: string;
   onSelectedInputDeviceIdChange: (deviceId: string) => void;
   inputDevices: MediaDeviceInfo[];
@@ -18,17 +15,14 @@ type SimpleIntercomViewProps = {
   onSelectedOutputDeviceIdChange: (deviceId: string) => void;
   outputDevices: MediaDeviceInfo[];
   outputSelectionSupported: boolean;
-  simplePttTargetLabel: string;
+  simplePptTargetLabel: string;
 };
 
 export function SimpleIntercomView({
   pttPressed,
-  onStartPtt,
-  onStopPtt,
+  onStartPpt,
+  onStopPpt,
   replyTarget,
-  directPttPressedUserId,
-  onStartDirectPtt,
-  onStopDirectPtt,
   selectedInputDeviceId,
   onSelectedInputDeviceIdChange,
   inputDevices,
@@ -36,34 +30,33 @@ export function SimpleIntercomView({
   onSelectedOutputDeviceIdChange,
   outputDevices,
   outputSelectionSupported,
-  simplePttTargetLabel
+  simplePptTargetLabel
 }: SimpleIntercomViewProps) {
   return (
     <div className="root app simple-shell">
       <section className="simple-controls">
         <button
-          className={`simple-ptt ${pttPressed ? "active" : ""}`}
-          onPointerDown={onStartPtt}
-          onPointerUp={onStopPtt}
-          onPointerLeave={onStopPtt}
-          onPointerCancel={onStopPtt}
+          className={`simple-ppt ${pttPressed ? "active" : ""}`}
+          onPointerDown={onStartPpt}
+          onPointerUp={onStopPpt}
+          onPointerLeave={onStopPpt}
+          onPointerCancel={onStopPpt}
         >
           Hold to talk
-          <small>{simplePttTargetLabel}</small>
+          <small>{simplePptTargetLabel}</small>
         </button>
         <button
-          className={`simple-reply ${replyTarget ? "" : "disabled"} ${
-            replyTarget && directPttPressedUserId === replyTarget.userId ? "active" : ""
-          }`}
+          className={`simple-reply ${replyTarget ? "" : "disabled"}`}
           disabled={!replyTarget}
-          onPointerDown={() => (replyTarget ? onStartDirectPtt(replyTarget.userId) : undefined)}
-          onPointerUp={() => (replyTarget ? onStopDirectPtt(replyTarget.userId) : undefined)}
-          onPointerLeave={() => (replyTarget ? onStopDirectPtt(replyTarget.userId) : undefined)}
-          onPointerCancel={() => (replyTarget ? onStopDirectPtt(replyTarget.userId) : undefined)}
+          onPointerDown={() => (replyTarget ? onStartPpt() : undefined)}
+          onPointerUp={() => (replyTarget ? onStopPpt() : undefined)}
+          onPointerLeave={() => (replyTarget ? onStopPpt() : undefined)}
+          onPointerCancel={() => (replyTarget ? onStopPpt() : undefined)}
         >
           Reply to caller
           <small>{replyTarget ? replyTarget.username : "No active caller"}</small>
         </button>
+
         <label className="simple-mic">
           <span>Microphone</span>
           <select
@@ -102,4 +95,3 @@ export function SimpleIntercomView({
     </div>
   );
 }
-
