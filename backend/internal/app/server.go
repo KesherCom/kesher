@@ -907,6 +907,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			s.hub.SetVoiceState(session.Token, e.Body)
+			if e.Scope == "room" {
+				if e.Body == "ptt_start" {
+					s.media.SyncRouting()
+				}
+				if e.Body == "ptt_stop" {
+					s.media.SyncRouting()
+				}
+			}
 			if e.Scope == "direct" {
 				if e.Body == "ptt_start" {
 					s.media.SetDirectTargetActive(session.Token, e.TargetID, true)
