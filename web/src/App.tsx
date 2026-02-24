@@ -1386,16 +1386,15 @@ export function App() {
     // Select the channel and start PTT with that channel directly
     setSelectedChannelId(channelId);
     setTalkRoomIds([channelId]);
-    setListenRoomIds([channelId]);
     setPttPressed(true);
     setPttPressedChannelId(channelId);
     prevChannelRef.current = channelId;
-    // First: Notify backend of the room matrix change
+    // First: Notify backend of the room matrix change (keep listen rooms unchanged)
     wsRef.current.send(
       JSON.stringify({
         type: "set_room_matrix",
         data: {
-          listenRoomIDs: [channelId],
+          listenRoomIDs: listenRoomIdsRef.current,
           talkRoomIDs: [channelId],
           activeRoomID: channelId
         }
