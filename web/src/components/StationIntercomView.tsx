@@ -1,13 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Bootstrap, BroadcastGroup, Presence } from "../types";
-import { AdminPanel } from "./admin/AdminPanel";
 
 type StationIntercomViewProps = {
   appData: Bootstrap;
-  token: string;
   doLogout: () => void;
-  isAdminModalOpen: boolean;
-  setIsAdminModalOpen: (value: boolean) => void;
   listenRoomIds: string[];
   talkRoomIds: string[];
   canRoleSendToRoom: (roomId: string, currentRoleId: string) => boolean;
@@ -37,7 +33,6 @@ type StationIntercomViewProps = {
   chatAndSignalPanel: React.ReactNode;
   showDebug: boolean;
   realtimeDebugBlock: React.ReactNode;
-  refreshBootstrapData: () => Promise<void>;
   enableDirectPpt: boolean;
   onEnableDirectPptChange: (enabled: boolean) => void;
   availableChannels: Array<{ id: string; label: string }>;
@@ -56,10 +51,7 @@ type StationIntercomViewProps = {
 
 export function StationIntercomView({
   appData,
-  token,
   doLogout,
-  isAdminModalOpen,
-  setIsAdminModalOpen,
   listenRoomIds,
   talkRoomIds,
   canRoleSendToRoom,
@@ -89,7 +81,6 @@ export function StationIntercomView({
   chatAndSignalPanel,
   showDebug,
   realtimeDebugBlock,
-  refreshBootstrapData,
   enableDirectPpt,
   onEnableDirectPptChange,
   availableChannels,
@@ -164,9 +155,6 @@ export function StationIntercomView({
           Live: {appData.self.username.toUpperCase()}
         </div>
         <div className="station-top-actions">
-          <button className="station-top-admin" onClick={() => setIsAdminModalOpen(true)}>
-            Configuration
-          </button>
           <button className="station-top-logout" onClick={doLogout}>
             Logout / Lock
           </button>
@@ -396,19 +384,6 @@ export function StationIntercomView({
         <div className="panel">{chatAndSignalPanel}</div>
         <div className="panel">{audioPanel}</div>
       </section>
-      {isAdminModalOpen ? (
-        <div className="station-modal-backdrop" onClick={() => setIsAdminModalOpen(false)}>
-          <section className="station-modal panel" onClick={(event) => event.stopPropagation()}>
-            <div className="station-modal-header">
-              <h3>Configuration</h3>
-              <button className="station-modal-close" onClick={() => setIsAdminModalOpen(false)}>
-                Close
-              </button>
-            </div>
-            <AdminPanel token={token} appData={appData} refreshBootstrapData={refreshBootstrapData} />
-          </section>
-        </div>
-      ) : null}
       {showDebug ? <section className="panel">{realtimeDebugBlock}</section> : null}
     </div>
   );

@@ -18,6 +18,28 @@ body {
 }
 .root { max-width: 1520px; margin: 0 auto; padding: 1rem; }
 .login { max-width: 520px; display: grid; gap: 0.85rem; }
+.login-error {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid #7a2b2b;
+  background: #201017;
+  color: #ffb7b7;
+}
+.login-admin-card { display: grid; gap: 0.6rem; }
+.login-admin-head { display: flex; align-items: center; justify-content: space-between; }
+.login-admin-pin-hint { color: var(--muted); font-size: 0.85rem; }
+.login-admin-note { color: var(--muted); margin: 0; }
+.admin-shell { display: grid; gap: 1rem; }
+.admin-shell-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.admin-shell-actions { display: flex; gap: 0.65rem; }
+.admin-shell-user { margin: 0.2rem 0 0; color: var(--muted); }
+.admin-pin-panel { display: grid; gap: 0.6rem; }
+.admin-pin-grid { display: grid; grid-template-columns: 1fr auto; gap: 0.6rem; align-items: end; }
+.admin-pin-hint { color: var(--muted); margin: 0.2rem 0 0; }
+.admin-error { color: #ffb7b7; margin: 0; }
+.admin-success { color: #c9f7a4; margin: 0; }
+.admin-panel-wrapper { padding-top: 0.35rem; }
   .admin-block {
     min-height: 260px;
     display: flex;
