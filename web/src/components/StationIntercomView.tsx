@@ -102,7 +102,7 @@ export function StationIntercomView({
 }: StationIntercomViewProps) {
   const directOnlineTargets = useMemo(() => {
     const sorted = presence
-      .filter((p) => p.userId !== appData.self.id)
+      .filter((p) => p.userId !== appData.self.id && p.username.toLowerCase() !== "admin")
       .slice()
       .sort((a, b) => {
         const roleA = (roleNameById.get(a.roleId) || a.roleId || "").toLowerCase();

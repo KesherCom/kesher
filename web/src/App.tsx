@@ -1142,7 +1142,7 @@ export function App() {
     if (!appData) return [];
     if (scope === "direct") {
       return appData.users
-        .filter((u) => u.id !== appData.self.id)
+        .filter((u) => u.id !== appData.self.id && u.username.toLowerCase() !== "admin")
         .map((u) => ({ id: u.id, label: `${u.username} (${u.roleId})` }));
     }
     if (scope === "room") {

@@ -261,7 +261,7 @@ export function AdminPanel({ token, appData, refreshBootstrapData, activeSection
           className={`admin-inline-button ${section === "users" ? "active" : ""}`}
           onClick={() => setLocalSection("users")}
         >
-          Users <span className="admin-tab-badge">{appData.users.length}</span>
+          Users <span className="admin-tab-badge">{appData.users.filter((u) => u.username.toLowerCase() !== "admin").length}</span>
         </button>
         <button
           className={`admin-inline-button ${section === "rooms" ? "active" : ""}`}
