@@ -209,6 +209,9 @@ export function AdminRoomsCard({
             <ul className="admin-list">
               {appData.rooms.map((room) => (
                 <li key={room.id}>
+                  <span>
+                    {room.name} <small>({room.id})</small>
+                  </span>
                   <button
                     disabled={adminBusy}
                     onClick={() => {
@@ -221,10 +224,7 @@ export function AdminRoomsCard({
                   >
                     Edit
                   </button>
-                  <span>
-                    {room.name} <small>({room.id})</small>
-                  </span>
-                  <button onClick={() => removeRoomConfig(room.id)} disabled={adminBusy}>
+                  <button onClick={() => removeRoomConfig(room.id)} disabled={adminBusy} className="delete">
                     Delete
                   </button>
                 </li>

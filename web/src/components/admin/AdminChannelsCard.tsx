@@ -221,6 +221,9 @@ export function AdminChannelsCard({
             <ul className="admin-list">
               {appData.broadcastGroups.map((group) => (
                 <li key={group.id}>
+                  <span>
+                    {group.name} <small>({group.id})</small>
+                  </span>
                   <button
                     disabled={adminBusy}
                     onClick={() => {
@@ -233,10 +236,7 @@ export function AdminChannelsCard({
                   >
                     Edit
                   </button>
-                  <span>
-                    {group.name} <small>({group.id})</small>
-                  </span>
-                  <button onClick={() => removeBroadcastGroupConfig(group.id)} disabled={adminBusy}>
+                  <button onClick={() => removeBroadcastGroupConfig(group.id)} disabled={adminBusy} className="delete">
                     Delete
                   </button>
                 </li>

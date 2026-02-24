@@ -244,6 +244,9 @@ export function AdminRolesCard({
             <ul className="admin-list">
               {appData.roles.map((role) => (
                 <li key={role.id}>
+                  <span>
+                    {role.name} <small>({role.id})</small>
+                  </span>
                   <button
                     disabled={adminBusy}
                     onClick={() => {
@@ -257,10 +260,7 @@ export function AdminRolesCard({
                   >
                     Edit
                   </button>
-                  <span>
-                    {role.name} <small>({role.id})</small>
-                  </span>
-                  <button onClick={() => removeRoleConfig(role.id)} disabled={adminBusy}>
+                  <button onClick={() => removeRoleConfig(role.id)} disabled={adminBusy} className="delete">
                     Delete
                   </button>
                 </li>
