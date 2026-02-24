@@ -42,7 +42,7 @@ const tokenStorageKey = "intercom-token";
 const sessionSettingsStorageKey = "intercom-session-settings";
 const globalSettingsStorageKey = "intercom-global-settings";
 const favoritesStorageKey = "intercom-favorites";
-const adminPinStorageKey = "intercom-admin-pin";
+// Admin PIN stored in component state so it can be changed from the admin UI.
 const defaultAdminPin = "123456";
 
 type SessionSettings = {
@@ -63,17 +63,6 @@ type FavoriteSettings = {
   pinnedUserIds: string[];
   showPinnedOnly: boolean;
 };
-
-function loadAdminPin(): string {
-  try {
-    const raw = localStorage.getItem(adminPinStorageKey);
-    if (!raw) return defaultAdminPin;
-    const trimmed = raw.trim();
-    return trimmed || defaultAdminPin;
-  } catch {
-    return defaultAdminPin;
-  }
-}
 
 function loadSessionSettings(): SessionSettings {
   try {
@@ -139,7 +128,6 @@ export function App() {
     initialSessionSettings.listenRoomIds.length > 0 || initialSessionSettings.talkRoomIds.length > 0;
   const [publicData, setPublicData] = useState<PublicBootstrap | null>(null);
   const [appData, setAppData] = useState<Bootstrap | null>(null);
-  const [accessMode, setAccessMode] = useState<"operator" | "admin">("operator");
   const [token, setToken] = useState<string | null>(() => sessionStorage.getItem(tokenStorageKey));
   const [username, setUsername] = useState(initialSessionSettings.username);
   const [roleId, setRoleID] = useState(initialSessionSettings.roleId);
@@ -161,12 +149,6 @@ export function App() {
   const [pinnedRoomIds, setPinnedRoomIds] = useState<string[]>(initialFavorites.pinnedRoomIds);
   const [pinnedUserIds, setPinnedUserIds] = useState<string[]>(initialFavorites.pinnedUserIds);
   const [showPinnedOnly, setShowPinnedOnly] = useState<boolean>(initialFavorites.showPinnedOnly);
-  const [adminPin, setAdminPin] = useState<string>(() => loadAdminPin());
-  const [adminPinInput, setAdminPinInput] = useState("");
-  const [nextAdminPin, setNextAdminPin] = useState<string>(() => loadAdminPin());
-  const [pinUpdateMessage, setPinUpdateMessage] = useState("");
-  const [pinUpdateError, setPinUpdateError] = useState("");
-  const [loginError, setLoginError] = useState("");
   const [selectedChannelId, setSelectedChannelId] = useState<string>("");
   const [inputLevel, setInputLevel] = useState(0);
   const [audioError, setAudioError] = useState<string>("");
@@ -175,6 +157,11 @@ export function App() {
   const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
   const [isOutputMenuOpen, setIsOutputMenuOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"station" | "simple">("station");
+  const [authMode, setAuthMode] = useState<"operator" | "admin">("operator");
+  const [adminPinInput, setAdminPinInput] = useState("");
+  const [adminLoginError, setAdminLoginError] = useState("");
+  const [adminPinGuard, setAdminPinGuard] = useState<string>(defaultAdminPin);
+  const [isUserSettingsOpen, setIsUserSettingsOpen] = useState(false);
   const [pttPressed, setPttPressed] = useState(false);
   const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(null);
   const [directPttPressedUserId, setdirectPttPressedUserId] = useState<string | null>(null);
@@ -278,14 +265,6 @@ export function App() {
       } satisfies FavoriteSettings)
     );
   }, [pinnedRoomIds, pinnedUserIds, showPinnedOnly]);
-
-  useEffect(() => {
-    localStorage.setItem(adminPinStorageKey, adminPin);
-  }, [adminPin]);
-
-  useEffect(() => {
-    setNextAdminPin(adminPin);
-  }, [adminPin]);
 
   useEffect(() => {
     if (!token) return;
@@ -722,7 +701,7 @@ export function App() {
   }
 
   useEffect(() => {
-    if (!token || !appData || accessMode === "admin") return;
+    if (!token || !appData) return;
     shouldReconnectRef.current = true;
     let cancelled = false;
 
@@ -1049,7 +1028,7 @@ export function App() {
       cleanupRealtimeResources();
       setConnectionState("offline");
     };
-  }, [token, appData, refreshAudioDevices, accessMode]);
+  }, [token, appData, refreshAudioDevices]);
 
   useEffect(() => {
     if (!appData) return;
@@ -1123,7 +1102,7 @@ export function App() {
   }, [listenRoomIds, talkRoomIds]);
 
   useEffect(() => {
-    if (!token || !appData || !pcRef.current || !selectedInputDeviceId || accessMode === "admin") return;
+    if (!token || !appData || !pcRef.current || !selectedInputDeviceId) return;
     void (async () => {
       const pc = pcRef.current;
       if (!pc) return;
@@ -1203,30 +1182,31 @@ export function App() {
     });
   }, [currentTargets]);
 
-  async function attemptLogin(mode: "operator" | "admin") {
-    setAccessMode(mode);
-    setLoginError("");
-    try {
-      const res = await login(username.trim(), roleId);
-      sessionStorage.setItem(tokenStorageKey, res.token);
-      localStorage.removeItem(tokenStorageKey);
-      setToken(res.token);
-      setAdminPinInput("");
-    } catch (error) {
-      setLoginError(error instanceof Error ? error.message : "Login failed");
-    }
+  async function doLogin() {
+    const res = await login(username.trim(), roleId);
+    sessionStorage.setItem(tokenStorageKey, res.token);
+    localStorage.removeItem(tokenStorageKey);
+    setToken(res.token);
   }
 
-  function handleOperatorLogin() {
-    void attemptLogin("operator");
+  async function handleOperatorLogin() {
+    setAuthMode("operator");
+    setAdminLoginError("");
+    await doLogin();
   }
 
-  function handleAdminLogin() {
-    if (adminPinInput.trim() !== adminPin) {
-      setLoginError("Falscher Admin-PIN");
+  async function handleAdminLogin() {
+    if (adminPinInput.trim() !== adminPinGuard) {
+      setAdminLoginError("Falscher Admin-PIN.");
       return;
     }
-    void attemptLogin("admin");
+    if (!username.trim() || !roleId) {
+      setAdminLoginError("Bitte Anzeigenamen und Rolle wählen.");
+      return;
+    }
+    setAdminLoginError("");
+    setAuthMode("admin");
+    await doLogin();
   }
 
   async function doLogout() {
@@ -1235,6 +1215,9 @@ export function App() {
       sessionStorage.removeItem(tokenStorageKey);
       localStorage.removeItem(tokenStorageKey);
       localStorage.removeItem(sessionSettingsStorageKey);
+      setAuthMode("operator");
+      setAdminPinInput("");
+      setAdminLoginError("");
       setToken(null);
       setAppData(null);
       setPresence([]);
@@ -1243,11 +1226,6 @@ export function App() {
       clearReconnectTimer();
       cleanupRealtimeResources();
       setConnectionState("offline");
-      setAccessMode("operator");
-      setAdminPinInput("");
-      setLoginError("");
-      setPinUpdateError("");
-      setPinUpdateMessage("");
     }
   }
 
@@ -1280,18 +1258,6 @@ export function App() {
       const firstAllowed = data.rooms.find((room) => roleAllowed(room.senderRoleIds, data.self.roleId));
       return firstAllowed ? [firstAllowed.id] : [];
     });
-  }
-
-  function updateAdminPin() {
-    const trimmed = nextAdminPin.trim();
-    if (!/^[0-9]{4,}$/.test(trimmed)) {
-      setPinUpdateError("PIN muss aus mindestens 4 Ziffern bestehen.");
-      setPinUpdateMessage("");
-      return;
-    }
-    setAdminPin(trimmed);
-    setPinUpdateError("");
-    setPinUpdateMessage("Admin-PIN aktualisiert.");
   }
 
 
@@ -1403,7 +1369,7 @@ export function App() {
 
 
   if (!publicData) return <div className="root">Loading configuration…</div>;
-  if (!token || !appData) {
+  if (!token) {
     return (
       <LoginView
         publicData={publicData}
@@ -1423,13 +1389,21 @@ export function App() {
             voiceModeRef.current = nextMode;
           }
         }}
-        onLogin={handleOperatorLogin}
-        onAdminLogin={handleAdminLogin}
-        adminPinInput={adminPinInput}
-        onAdminPinInputChange={setAdminPinInput}
-        loginError={loginError}
+        onLogin={() => {
+          void handleOperatorLogin();
+        }}
+        adminPin={adminPinInput}
+        onAdminPinChange={setAdminPinInput}
+        onAdminLogin={() => {
+          void handleAdminLogin();
+        }}
+        adminError={adminLoginError}
       />
     );
+  }
+
+  if (!appData) {
+    return <div className="root">Lade Daten…</div>;
   }
 
   const audioPanel = (
@@ -1482,6 +1456,35 @@ export function App() {
           .flatMap((p) => p.talkRooms.filter((roomId) => listenRoomIds.includes(roomId)))
   );
 
+  if (authMode === "admin" && token) {
+    const adminRoleLabel = roleNameById.get(appData.self.roleId) || appData.self.roleId || "Admin";
+    return (
+      <div className="root admin-shell">
+        <div className="admin-shell-header">
+          <div>
+            <h1>Admin-Konsole</h1>
+            <p className="admin-shell-user">
+              Angemeldet als {appData.self.username} ({adminRoleLabel})
+            </p>
+          </div>
+          <div className="admin-shell-actions">
+            <button onClick={() => void refreshBootstrapData()}>Neu laden</button>
+            <button className="station-top-logout" onClick={() => void doLogout()}>
+              Logout / Lock
+            </button>
+          </div>
+        </div>
+        <AdminPanel
+          token={token}
+          appData={appData}
+          refreshBootstrapData={refreshBootstrapData}
+          adminPin={adminPinGuard}
+          onUpdateAdminPin={(next) => setAdminPinGuard(next)}
+        />
+      </div>
+    );
+  }
+
   function isReceivingRoom(roomId: string) {
     if (!incomingAudioActive) return false;
     if (receivingRoutes.some((route) => route.scope === "room" && route.targetID === roomId)) return true;
@@ -1524,65 +1527,6 @@ export function App() {
       </div>
     </div>
   ) : null;
-
-  if (accessMode === "admin") {
-    return (
-      <div className="root app admin-shell">
-        <header className="admin-shell-header">
-          <div>
-            <p className="variant-subtitle">Admin console</p>
-            <h1>Live Production Intercom</h1>
-            <p className="admin-shell-user">Signed in as {appData.self.username}</p>
-          </div>
-          <div className="admin-shell-actions">
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                void refreshBootstrapData();
-              }}
-            >
-              Reload data
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void doLogout();
-              }}
-            >
-              Logout
-            </button>
-          </div>
-        </header>
-
-        <section className="panel admin-pin-panel">
-          <div className="admin-pin-head">
-            <div>
-              <h3>Admin PIN</h3>
-              <p className="admin-pin-hint">Default PIN is 123456. Only admins should know this.</p>
-            </div>
-          </div>
-          <div className="admin-pin-grid">
-            <input
-              type="password"
-              value={nextAdminPin}
-              onChange={(e) => setNextAdminPin(e.target.value)}
-              placeholder="New PIN"
-            />
-            <button type="button" onClick={updateAdminPin}>
-              Update PIN
-            </button>
-          </div>
-          {pinUpdateError ? <p className="admin-error">{pinUpdateError}</p> : null}
-          {pinUpdateMessage ? <p className="admin-success">{pinUpdateMessage}</p> : null}
-        </section>
-
-        <section className="panel admin-panel-wrapper">
-          <AdminPanel token={token} appData={appData} refreshBootstrapData={refreshBootstrapData} />
-        </section>
-      </div>
-    );
-  }
 
   if (viewMode === "simple") {
     return (
@@ -1661,6 +1605,8 @@ export function App() {
         onTogglePinnedRoom={togglePinnedRoom}
         onTogglePinnedUser={togglePinnedUser}
         onShowPinnedOnlyChange={setShowPinnedOnly}
+        isUserSettingsOpen={isUserSettingsOpen}
+        setIsUserSettingsOpen={setIsUserSettingsOpen}
       />
       {attentionFlashOverlay}
     </>

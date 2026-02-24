@@ -47,6 +47,8 @@ type StationIntercomViewProps = {
   onTogglePinnedRoom: (roomId: string) => void;
   onTogglePinnedUser: (userId: string) => void;
   onShowPinnedOnlyChange: (value: boolean) => void;
+  isUserSettingsOpen: boolean;
+  setIsUserSettingsOpen: (value: boolean) => void;
 };
 
 export function StationIntercomView({
@@ -94,7 +96,9 @@ export function StationIntercomView({
   showPinnedOnly,
   onTogglePinnedRoom,
   onTogglePinnedUser,
-  onShowPinnedOnlyChange
+  onShowPinnedOnlyChange,
+  isUserSettingsOpen,
+  setIsUserSettingsOpen
 }: StationIntercomViewProps) {
   const directOnlineTargets = useMemo(() => {
     const sorted = presence
@@ -155,6 +159,9 @@ export function StationIntercomView({
           Live: {appData.self.username.toUpperCase()}
         </div>
         <div className="station-top-actions">
+          <button className="station-top-admin" onClick={() => setIsUserSettingsOpen(true)}>
+            User settings
+          </button>
           <button className="station-top-logout" onClick={doLogout}>
             Logout / Lock
           </button>
@@ -164,14 +171,6 @@ export function StationIntercomView({
       <section className="station-block station-talk-section">
         <h3>Talk channels</h3>
         <div className="station-filter-bar small">
-          <label>
-            <input
-              type="checkbox"
-              checked={showPinnedOnly}
-              onChange={(event) => onShowPinnedOnlyChange(event.target.checked)}
-            />
-            <span>Show only pinned</span>
-          </label>
           <span className="station-filter-hint">Pin rooms or users to keep focus when things get busy.</span>
         </div>
         {visibleRooms.length === 0 ? <p className="station-empty">No channels to show.</p> : null}
@@ -331,10 +330,6 @@ export function StationIntercomView({
           <input type="checkbox" checked={voiceMode === "always_on"} onChange={(e) => setAlwaysOn(e.target.checked)} />
           <span>Always on</span>
         </label>
-        <label className="station-setting">
-          <input type="checkbox" checked={enableDirectPpt} onChange={(e) => onEnableDirectPptChange(e.target.checked)} />
-          <span>Direct PTT Mode (press channel to talk)</span>
-        </label>
 
         <button
           className={`station-reply ${replyTarget ? "" : "disabled"} ${
@@ -385,6 +380,37 @@ export function StationIntercomView({
         <div className="panel">{audioPanel}</div>
       </section>
       {showDebug ? <section className="panel">{realtimeDebugBlock}</section> : null}
+      {isUserSettingsOpen ? (
+        <div className="station-modal-backdrop" onClick={() => setIsUserSettingsOpen(false)}>
+          <section className="station-modal panel" onClick={(event) => event.stopPropagation()}>
+            <div className="station-modal-header">
+              <h3>User settings</h3>
+              <button className="station-modal-close" onClick={() => setIsUserSettingsOpen(false)}>
+                Close
+              </button>
+            </div>
+            <div className="station-modal-body">
+              <label className="station-setting">
+                <input
+                  type="checkbox"
+                  checked={showPinnedOnly}
+                  onChange={(e) => onShowPinnedOnlyChange(e.target.checked)}
+                />
+                <span>Show only pinned</span>
+              </label>
+              <label className="station-setting">
+                <input
+                  type="checkbox"
+                  checked={enableDirectPpt}
+                  onChange={(e) => onEnableDirectPptChange(e.target.checked)}
+                />
+                <span>Direct PTT Mode (press channel to talk)</span>
+              </label>
+              <p className="station-modal-hint">Preferences gelten nur für dich auf diesem Gerät.</p>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
