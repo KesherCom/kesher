@@ -113,6 +113,22 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 	}
 	writeState()
 
+	// Set up ping/pong to keep WebSocket connection alive
+	pingTicker := time.NewTicker(30 * time.Second)
+	defer pingTicker.Stop()
+	go func() {
+		for range pingTicker.C {
+			connMu.Lock()
+			_ = conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second))
+			connMu.Unlock()
+		}
+	}()
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -136,8 +152,12 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 	for {
 		var in companionInbound
 		if err := conn.ReadJSON(&in); err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				s.logger.Warn("companion websocket closed unexpectedly", "username", username, "error", err)
+			}
 			return
 		}
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		if in.Type != "command" {
 			continue
 		}
@@ -284,7 +304,10 @@ func NewServer(cfg Config) (*Server, error) {
 		store:    store,
 		sessions: NewSessionManager(cfg.SessionTTL),
 		hub:      NewHub(store, logger),
-		upgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		upgrader: websocket.Upgrader{
+			CheckOrigin:     func(r *http.Request) bool { return true },
+			HandshakeTimeout: 10 * time.Second,
+		},
 	}
 	s.media = NewMediaManager(s.hub, logger)
 	s.hub.SetMediaManager(s.media)
@@ -854,12 +877,30 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// Set up ping/pong to keep WebSocket connection alive
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	go func() {
+		for range ticker.C {
+			_ = conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second))
+		}
+	}()
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
 	for {
 		var in WSInbound
 		if err := conn.ReadJSON(&in); err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				s.logger.Warn("websocket closed unexpectedly", "token", session.Token, "error", err)
+			}
 			_ = conn.Close()
 			return
 		}
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		switch in.Type {
 		case "webrtc_ready":
 			mediaReady = true

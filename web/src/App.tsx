@@ -1008,13 +1008,23 @@ export function App() {
         );
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         clearRoomSwitchTimer();
         cleanupRealtimeResources();
         if (!shouldReconnectRef.current || cancelled) {
           setConnectionState("offline");
           return;
         }
+        console.warn("WebSocket closed:", { code: event.code, reason: event.reason, wasClean: event.wasClean });
+        setEvents((old) =>
+          [
+            {
+              label: `system · websocket closed · code:${event.code} clean:${event.wasClean ? "yes" : "no"} · reconnecting...`,
+              at: new Date().toLocaleTimeString()
+            },
+            ...old
+          ].slice(0, 200)
+        );
         setConnectionState("reconnecting");
         reconnectAttemptsRef.current += 1;
         const backoff = Math.min(8000, 500 * 2 ** Math.min(reconnectAttemptsRef.current, 5));
@@ -1022,7 +1032,13 @@ export function App() {
           void connect();
         }, backoff);
       };
-      ws.onerror = () => ws.close();
+      ws.onerror = (event) => {
+        console.error("WebSocket error:", event);
+        setEvents((old) =>
+          [{ label: `system · websocket error · ${event instanceof ErrorEvent ? event.message : "check console"}`, at: new Date().toLocaleTimeString() }, ...old].slice(0, 200)
+        );
+        ws.close();
+      };
     };
 
     void connect();
