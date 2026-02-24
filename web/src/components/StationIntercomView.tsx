@@ -118,36 +118,6 @@ export function StationIntercomView({
     () => (showPinnedOnly ? appData.rooms.filter((room) => pinnedRoomIds.includes(room.id)) : appData.rooms),
     [appData.rooms, pinnedRoomIds, showPinnedOnly]
   );
-  const directGroups = useMemo(() => {
-    const byRole = new Map<string, Presence[]>();
-    for (const target of directOnlineTargets) {
-      const list = byRole.get(target.roleId) || [];
-      list.push(target);
-      byRole.set(target.roleId, list);
-    }
-    return Array.from(byRole.entries())
-      .map(([roleId, users]) => ({
-        roleId,
-        roleLabel: roleNameById.get(roleId) || roleId || "Unknown role",
-        users
-      }))
-      .sort((a, b) => {
-        if (a.roleId === appData.self.roleId && b.roleId !== appData.self.roleId) return -1;
-        if (b.roleId === appData.self.roleId && a.roleId !== appData.self.roleId) return 1;
-        return a.roleLabel.localeCompare(b.roleLabel, undefined, { sensitivity: "base" });
-      });
-  }, [appData.self.roleId, directOnlineTargets, roleNameById]);
-  const [activeDirectRoleTab, setActiveDirectRoleTab] = useState<string>("");
-  useEffect(() => {
-    if (directGroups.length === 0) {
-      setActiveDirectRoleTab("");
-      return;
-    }
-    const currentExists = directGroups.some((group) => group.roleId === activeDirectRoleTab);
-    if (currentExists) return;
-    const preferredGroup = directGroups.find((group) => group.roleId === appData.self.roleId);
-    setActiveDirectRoleTab(preferredGroup?.roleId || directGroups[0].roleId);
-  }, [activeDirectRoleTab, appData.self.roleId, directGroups]);
 
   const replyTarget = directOnlineTargets.find((p) => p.userId === lastDirectCallerUserId) || null;
 
@@ -253,67 +223,50 @@ export function StationIntercomView({
 
       <section className="station-block station-direct-section">
         <h3>Direct communication</h3>
-        {directGroups.length === 0 ? (
+        {directOnlineTargets.length === 0 ? (
           <p className="station-empty">{showPinnedOnly ? "No pinned users online." : "No other users online."}</p>
-        ) : null}
-        {directGroups.length > 0 ? (
-          <>
-            <div className="station-direct-tabs" role="tablist" aria-label="Direct communication roles">
-              {directGroups.map((group) => (
+        ) : (
+          <div className="station-direct-grid">
+            {directOnlineTargets.map((p) => (
+              <article key={`station-direct-${p.userId}`} className="station-card station-direct-card">
                 <button
-                  key={`direct-role-tab-${group.roleId}`}
-                  role="tab"
-                  className={`station-direct-tab ${activeDirectRoleTab === group.roleId ? "active" : ""}`}
-                  aria-selected={activeDirectRoleTab === group.roleId}
-                  onClick={() => setActiveDirectRoleTab(group.roleId)}
+                  type="button"
+                  className={`station-pin-top ${pinnedUserIds.includes(p.userId) ? "active" : ""}`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onPointerUp={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onTogglePinnedUser(p.userId);
+                  }}
+                  title={pinnedUserIds.includes(p.userId) ? "Unpin user" : "Pin user"}
                 >
-                  <span>{group.roleLabel}</span>
-                  <small>{group.users.length}</small>
+                  ★
                 </button>
-              ))}
-            </div>
-            <div className="station-direct-grid">
-              {(directGroups.find((group) => group.roleId === activeDirectRoleTab)?.users || []).map((p) => (
-                <article key={`station-direct-${p.userId}`} className="station-card station-direct-card">
+                <button
+                  className={`station-card-head direct-ptt ${directPttPressedUserId === p.userId ? "active" : ""}`}
+                  onPointerDown={() => startDirectPtt(p.userId)}
+                  onPointerUp={() => stopDirectPtt(p.userId)}
+                  onPointerLeave={() => stopDirectPtt(p.userId)}
+                  onPointerCancel={() => stopDirectPtt(p.userId)}
+                >
+                  {isReceivingDirect(p.userId) ? <span className="station-receiving-badge">🔊</span> : null}
+                  <small>Direct</small>
+                  <strong>{p.username}</strong>
+                  <em>{roleNameById.get(p.roleId) || p.roleId || "Unknown role"}</em>
+                </button>
+                <div className="station-card-actions single">
                   <button
-                    type="button"
-                    className={`station-pin-top ${pinnedUserIds.includes(p.userId) ? "active" : ""}`}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onPointerUp={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onTogglePinnedUser(p.userId);
-                    }}
-                    title={pinnedUserIds.includes(p.userId) ? "Unpin user" : "Pin user"}
+                    className={`call ${/* disabled handled by class */ ""}`}
+                    onClick={() => sendScopedSignal("direct", p.userId, "call")}
+                    title="Call user"
                   >
-                    ★
+                    Call
                   </button>
-                  <button
-                    className={`station-card-head direct-ptt ${directPttPressedUserId === p.userId ? "active" : ""}`}
-                    onPointerDown={() => startDirectPtt(p.userId)}
-                    onPointerUp={() => stopDirectPtt(p.userId)}
-                    onPointerLeave={() => stopDirectPtt(p.userId)}
-                    onPointerCancel={() => stopDirectPtt(p.userId)}
-                  >
-                    {isReceivingDirect(p.userId) ? <span className="station-receiving-badge">🔊</span> : null}
-                    <small>Direct</small>
-                    <strong>{p.username}</strong>
-                    <em>{roleNameById.get(p.roleId) || p.roleId || "Unknown role"}</em>
-                  </button>
-                  <div className="station-card-actions single">
-                    <button
-                      className={`call ${/* disabled handled by class */ ""}`}
-                      onClick={() => sendScopedSignal("direct", p.userId, "call")}
-                      title="Call user"
-                    >
-                      Call
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </>
-        ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="station-controls">
