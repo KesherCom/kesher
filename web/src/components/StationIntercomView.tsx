@@ -100,8 +100,8 @@ export function StationIntercomView({
   isUserSettingsOpen,
   setIsUserSettingsOpen
 }: StationIntercomViewProps) {
-  const directOnlineTargets = useMemo(() => {
-    const sorted = presence
+  const allDirectOnlineTargets = useMemo(() => {
+    return presence
       .filter((p) => p.userId !== appData.self.id && p.username.toLowerCase() !== "admin")
       .slice()
       .sort((a, b) => {
@@ -111,15 +111,19 @@ export function StationIntercomView({
         if (byRole !== 0) return byRole;
         return a.username.localeCompare(b.username, undefined, { sensitivity: "base" });
       });
-    return showPinnedOnly ? sorted.filter((p) => pinnedUserIds.includes(p.userId)) : sorted;
-  }, [appData.self.id, pinnedUserIds, presence, roleNameById, showPinnedOnly]);
+  }, [appData.self.id, presence, roleNameById]);
+
+  const directOnlineTargets = useMemo(
+    () => (showPinnedOnly ? allDirectOnlineTargets.filter((p) => pinnedUserIds.includes(p.userId)) : allDirectOnlineTargets),
+    [allDirectOnlineTargets, pinnedUserIds, showPinnedOnly]
+  );
 
   const visibleRooms = useMemo(
     () => (showPinnedOnly ? appData.rooms.filter((room) => pinnedRoomIds.includes(room.id)) : appData.rooms),
     [appData.rooms, pinnedRoomIds, showPinnedOnly]
   );
 
-  const replyTarget = directOnlineTargets.find((p) => p.userId === lastDirectCallerUserId) || null;
+  const replyTarget = allDirectOnlineTargets.find((p) => p.userId === lastDirectCallerUserId) || null;
 
   return (
     <div className="root app station-shell">
