@@ -19,17 +19,14 @@ type AdminPanelProps = {
   token: string;
   appData: Bootstrap;
   refreshBootstrapData: () => Promise<void>;
-  adminPin: string;
-  onUpdateAdminPin: (nextPin: string) => void;
+  activeSection?: "roles" | "users" | "rooms" | "channels" | null;
+  showHeading?: boolean;
+  compact?: boolean;
 };
 
-export function AdminPanel({ token, appData, refreshBootstrapData, adminPin, onUpdateAdminPin }: AdminPanelProps) {
+export function AdminPanel({ token, appData, refreshBootstrapData, activeSection, showHeading = true, compact = false }: AdminPanelProps) {
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminError, setAdminError] = useState("");
-  const [pinCurrentInput, setPinCurrentInput] = useState("");
-  const [pinNewInput, setPinNewInput] = useState("");
-  const [pinConfirmInput, setPinConfirmInput] = useState("");
-  const [pinMessage, setPinMessage] = useState("");
 
   const [roleCreateId, setRoleCreateId] = useState("");
   const [roleCreateName, setRoleCreateName] = useState("");
@@ -60,7 +57,14 @@ export function AdminPanel({ token, appData, refreshBootstrapData, adminPin, onU
   const [groupEditName, setGroupEditName] = useState("");
   const [groupEditRoomIds, setGroupEditRoomIds] = useState<string[]>([]);
   const [groupEditAllowedRoleIds, setGroupEditAllowedRoleIds] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<"users" | "roles" | "rooms" | "channels">("roles");
+  const [localSection, setLocalSection] = useState<"roles" | "users" | "rooms" | "channels">(
+    activeSection ?? "roles"
+  );
+  // keep local section in sync if parent controls it
+  useEffect(() => {
+    if (activeSection) setLocalSection(activeSection);
+  }, [activeSection]);
+  const section = activeSection ?? localSection;
 
   useEffect(() => {
     if (roleCreateDefaultRoomId === "" && appData.rooms[0]) {
@@ -244,112 +248,41 @@ export function AdminPanel({ token, appData, refreshBootstrapData, adminPin, onU
   }
 
   return (
-    <div className="admin-panel">
-      <h3>Admin · configuration</h3>
+    <div className={compact ? "admin-panel admin-panel-compact" : "admin-panel"}>
+      {showHeading ? <h3>Admin · configuration</h3> : null}
+      <nav className="admin-inline-nav" aria-label="Admin sections">
+        <button
+          className={`admin-inline-button ${section === "roles" ? "active" : ""}`}
+          onClick={() => setLocalSection("roles")}
+        >
+          Roles <span className="admin-tab-badge">{appData.roles.length}</span>
+        </button>
+        <button
+          className={`admin-inline-button ${section === "users" ? "active" : ""}`}
+          onClick={() => setLocalSection("users")}
+        >
+          Users <span className="admin-tab-badge">{appData.users.length}</span>
+        </button>
+        <button
+          className={`admin-inline-button ${section === "rooms" ? "active" : ""}`}
+          onClick={() => setLocalSection("rooms")}
+        >
+          Rooms <span className="admin-tab-badge">{appData.rooms.length}</span>
+        </button>
+        <button
+          className={`admin-inline-button ${section === "channels" ? "active" : ""}`}
+          onClick={() => setLocalSection("channels")}
+        >
+          Channels <span className="admin-tab-badge">{appData.broadcastGroups.length}</span>
+        </button>
+      </nav>
       {adminError ? <p className="admin-error">{adminError}</p> : null}
 
-      <div className="admin-block">
-        <div className="admin-block-header">
-          <h4>Admin PIN</h4>
-        </div>
-        <div className="admin-grid">
-          <input
-            type="password"
-            value={pinCurrentInput}
-            onChange={(e) => setPinCurrentInput(e.target.value)}
-            placeholder="Current PIN"
-          />
-          <input
-            type="password"
-            value={pinNewInput}
-            onChange={(e) => setPinNewInput(e.target.value)}
-            placeholder="New PIN"
-          />
-          <input
-            type="password"
-            value={pinConfirmInput}
-            onChange={(e) => setPinConfirmInput(e.target.value)}
-            placeholder="Confirm new PIN"
-          />
-        </div>
-        <div className="admin-form-actions">
-          <button
-            onClick={() => {
-              setPinMessage("");
-              setAdminError("");
-              if (pinCurrentInput.trim() !== adminPin) {
-                setPinMessage("Current PIN is incorrect.");
-                return;
-              }
-              if (!pinNewInput.trim()) {
-                setPinMessage("New PIN cannot be empty.");
-                return;
-              }
-              if (pinNewInput !== pinConfirmInput) {
-                setPinMessage("New PIN and confirmation do not match.");
-                return;
-              }
-              try {
-                onUpdateAdminPin(pinNewInput.trim());
-                setPinMessage("Admin PIN updated successfully.");
-                setPinCurrentInput("");
-                setPinNewInput("");
-                setPinConfirmInput("");
-              } catch (err) {
-                setPinMessage("Failed to update PIN.");
-              }
-            }}
-            className="secondary"
-            disabled={adminBusy}
-          >
-            Update PIN
-          </button>
-          {pinMessage ? <div className="admin-pin-note">{pinMessage}</div> : null}
-        </div>
-      </div>
-
-      <div className="admin-tabs">
-        <nav className="admin-tabs-nav">
-          <button
-            type="button"
-            className={`admin-tab-button ${activeTab === "roles" ? "active" : ""}`}
-            onClick={() => setActiveTab("roles")}
-            aria-pressed={activeTab === "roles"}
-          >
-            Roles <span className="admin-tab-badge">{appData.roles.length}</span>
-          </button>
-          <button
-            type="button"
-            className={`admin-tab-button ${activeTab === "users" ? "active" : ""}`}
-            onClick={() => setActiveTab("users")}
-            aria-pressed={activeTab === "users"}
-          >
-            Users <span className="admin-tab-badge">{appData.users.length}</span>
-          </button>
-          <button
-            type="button"
-            className={`admin-tab-button ${activeTab === "rooms" ? "active" : ""}`}
-            onClick={() => setActiveTab("rooms")}
-            aria-pressed={activeTab === "rooms"}
-          >
-            Rooms <span className="admin-tab-badge">{appData.rooms.length}</span>
-          </button>
-          <button
-            type="button"
-            className={`admin-tab-button ${activeTab === "channels" ? "active" : ""}`}
-            onClick={() => setActiveTab("channels")}
-            aria-pressed={activeTab === "channels"}
-          >
-            Channels <span className="admin-tab-badge">{appData.broadcastGroups.length}</span>
-          </button>
-        </nav>
-      </div>
-
-      {activeTab === "users" && (
+      {section === "users" && (
         <UsersPanel token={token} appData={appData} refreshBootstrapData={refreshBootstrapData} adminBusy={adminBusy} />
       )}
 
-      {activeTab === "roles" && (
+      {section === "roles" && (
         <div className="admin-block">
         <div className="admin-block-header">
           <h4>Roles</h4>
@@ -495,7 +428,7 @@ export function AdminPanel({ token, appData, refreshBootstrapData, adminPin, onU
         </ul>
       </div>
       )}
-      {activeTab === "rooms" && (
+      {section === "rooms" && (
         <div className="admin-block">
         <div className="admin-block-header">
           <h4>Rooms</h4>
@@ -610,7 +543,7 @@ export function AdminPanel({ token, appData, refreshBootstrapData, adminPin, onU
         </ul>
       </div>
       )}
-      {activeTab === "channels" && (
+      {section === "channels" && (
         <div className="admin-block">
         <div className="admin-block-header">
           <h4>Broadcast channels</h4>

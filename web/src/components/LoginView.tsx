@@ -81,7 +81,7 @@ export function LoginView({
               </label>
               {adminError ? <p className="login-error">{adminError}</p> : null}
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <button className="secondary" onClick={onAdminLogin} disabled={!adminPin.trim() || !username.trim() || !roleId}>
+                <button className="secondary" onClick={onAdminLogin} disabled={!adminPin.trim()}>
                   Admin-Konsole öffnen
                 </button>
                 <button className="secondary" onClick={() => setShowAdmin(false)}>Verbergen</button>

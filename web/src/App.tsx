@@ -9,6 +9,7 @@ import { LoginView } from "./components/LoginView";
 import { SimpleIntercomView } from "./components/SimpleIntercomView";
 import { StationIntercomView } from "./components/StationIntercomView";
 import { AdminPanel } from "./components/admin/AdminPanel";
+import { AdminMenu } from "./components/admin/AdminMenu";
 import { AudioPanel } from "./components/panels/AudioPanel";
 import { ChatSignalPanel } from "./components/panels/ChatSignalPanel";
 import { RealtimeEventsPanel } from "./components/panels/RealtimeEventsPanel";
@@ -161,6 +162,7 @@ export function App() {
   const [adminPinInput, setAdminPinInput] = useState("");
   const [adminLoginError, setAdminLoginError] = useState("");
   const [adminPinGuard, setAdminPinGuard] = useState<string>(defaultAdminPin);
+  const [adminOverrideActive, setAdminOverrideActive] = useState(false);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState<boolean>(false);
   const [isUserSettingsOpen, setIsUserSettingsOpen] = useState(false);
   const [pttPressed, setPttPressed] = useState(false);
@@ -1183,8 +1185,10 @@ export function App() {
     });
   }, [currentTargets]);
 
-  async function doLogin() {
-    const res = await login(username.trim(), roleId);
+  async function doLogin(overrideUsername?: string, overrideRoleId?: string) {
+    const useUsername = typeof overrideUsername === "string" ? overrideUsername : username.trim();
+    const useRoleId = typeof overrideRoleId === "string" ? overrideRoleId : roleId;
+    const res = await login(useUsername, useRoleId);
     sessionStorage.setItem(tokenStorageKey, res.token);
     localStorage.removeItem(tokenStorageKey);
     setToken(res.token);
@@ -1201,13 +1205,18 @@ export function App() {
       setAdminLoginError("Falscher Admin-PIN.");
       return;
     }
-    if (!username.trim() || !roleId) {
-      setAdminLoginError("Bitte Anzeigenamen und Rolle wählen.");
-      return;
-    }
     setAdminLoginError("");
     setAuthMode("admin");
-    await doLogin();
+    // Allow direct admin login even when no username/role selected.
+    // Use provided username/role if present, otherwise fall back to sensible defaults.
+    const nextRoleId = roleId || publicData?.roles?.[0]?.id || "";
+    if (!nextRoleId) {
+      setAdminLoginError("Keine Rolle verfügbar zum Anmelden.");
+      return;
+    }
+    // Perform a login using the reserved admin username, but don't overwrite the user's session settings.
+    await doLogin("admin", nextRoleId);
+    setAdminOverrideActive(true);
   }
 
   async function doLogout() {
@@ -1219,6 +1228,7 @@ export function App() {
       setAuthMode("operator");
       setAdminPinInput("");
       setAdminLoginError("");
+      setAdminOverrideActive(false);
       setToken(null);
       setAppData(null);
       setPresence([]);
@@ -1458,13 +1468,16 @@ export function App() {
   );
 
   if (authMode === "admin" && token) {
-    const adminRoleLabel = roleNameById.get(appData.self.roleId) || appData.self.roleId || "Admin";
+    const displayUsername = adminOverrideActive ? "admin" : appData.self.username;
+    const adminRoleLabel = adminOverrideActive
+      ? "Admin"
+      : roleNameById.get(appData.self.roleId) || appData.self.roleId || "Admin";
     return (
       <div className="root admin-shell">
         <div className="admin-shell-header">
           <div>
             <h1>Admin-Konsole</h1>
-            <p className="admin-shell-user">Angemeldet als {appData.self.username} ({adminRoleLabel})</p>
+            <p className="admin-shell-user">Angemeldet als {displayUsername} ({adminRoleLabel})</p>
           </div>
           <div className="admin-shell-actions">
             <button onClick={() => void refreshBootstrapData()}>Neu laden</button>
@@ -1474,32 +1487,17 @@ export function App() {
           </div>
         </div>
 
-        <div className={`admin-collapsible ${isAdminPanelOpen ? "open" : "collapsed"}`}>
-          <div className="admin-collapsible-bar">
-            <div className="admin-collapsible-title">Konfiguration</div>
-            <div className="admin-collapsible-actions">
-              <button
-                className="admin-toggle-button"
-                onClick={() => setIsAdminPanelOpen((v) => !v)}
-                aria-expanded={isAdminPanelOpen}
-              >
-                {isAdminPanelOpen ? "Verbergen" : "Anzeigen"}
-              </button>
-            </div>
-          </div>
-
-          {isAdminPanelOpen ? (
-            <div className="admin-collapsible-body">
-              <AdminPanel
-                token={token}
-                appData={appData}
-                refreshBootstrapData={refreshBootstrapData}
-                adminPin={adminPinGuard}
-                onUpdateAdminPin={(next) => setAdminPinGuard(next)}
-              />
-            </div>
-          ) : null}
-        </div>
+        <AdminMenu
+          isOpen={isAdminPanelOpen}
+          setIsOpen={setIsAdminPanelOpen}
+          token={token}
+          appData={appData}
+          refreshBootstrapData={refreshBootstrapData}
+          adminPin={adminPinGuard}
+          onUpdateAdminPin={(next) => setAdminPinGuard(next)}
+          audioStats={rtpStats}
+          activeRoutesCount={activeVoiceRoutes.length}
+        />
       </div>
     );
   }
