@@ -1,0 +1,250 @@
+import React, { useState } from "react";
+import type { Bootstrap } from "../../types";
+import {
+  createBroadcastGroup,
+  deleteBroadcastGroup,
+  updateBroadcastGroup
+} from "../../api";
+import { RoleMultiSelect } from "./RoleMultiSelect";
+import { RoomMultiSelect } from "./RoomMultiSelect";
+
+type AdminChannelsCardProps = {
+  token: string;
+  appData: Bootstrap;
+  refreshBootstrapData: () => Promise<void>;
+};
+
+export function AdminChannelsCard({
+  token,
+  appData,
+  refreshBootstrapData
+}: AdminChannelsCardProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [adminBusy, setAdminBusy] = useState(false);
+  const [adminError, setAdminError] = useState("");
+
+  const [groupCreateId, setGroupCreateId] = useState("");
+  const [groupCreateName, setGroupCreateName] = useState("");
+  const [groupCreateRoomIds, setGroupCreateRoomIds] = useState<string[]>([]);
+  const [groupCreateAllowedRoleIds, setGroupCreateAllowedRoleIds] = useState<string[]>([]);
+  const [showGroupCreateForm, setShowGroupCreateForm] = useState(false);
+  const [groupEditId, setGroupEditId] = useState<string | null>(null);
+  const [groupEditName, setGroupEditName] = useState("");
+  const [groupEditRoomIds, setGroupEditRoomIds] = useState<string[]>([]);
+  const [groupEditAllowedRoleIds, setGroupEditAllowedRoleIds] = useState<string[]>([]);
+
+  async function runAdminAction(action: () => Promise<void>) {
+    setAdminBusy(true);
+    setAdminError("");
+    try {
+      await action();
+      await refreshBootstrapData();
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : "admin operation failed");
+    } finally {
+      setAdminBusy(false);
+    }
+  }
+
+  function resetGroupCreateForm() {
+    setGroupCreateId("");
+    setGroupCreateName("");
+    setGroupCreateRoomIds([]);
+    setGroupCreateAllowedRoleIds([]);
+  }
+
+  function resetGroupEditForm() {
+    setGroupEditId(null);
+    setGroupEditName("");
+    setGroupEditRoomIds([]);
+    setGroupEditAllowedRoleIds([]);
+  }
+
+  function createBroadcastGroupConfig() {
+    const id = groupCreateId.trim();
+    const name = groupCreateName.trim();
+    if (!id || !name || groupCreateRoomIds.length === 0) return;
+    void runAdminAction(async () => {
+      await createBroadcastGroup(token, {
+        id,
+        name,
+        roomIds: groupCreateRoomIds,
+        allowedRoleIds: groupCreateAllowedRoleIds
+      });
+      resetGroupCreateForm();
+      setShowGroupCreateForm(false);
+    });
+  }
+
+  function saveGroupEdit() {
+    if (!groupEditId) return;
+    const name = groupEditName.trim();
+    if (!name || groupEditRoomIds.length === 0) return;
+    void runAdminAction(async () => {
+      await updateBroadcastGroup(token, groupEditId, {
+        name,
+        roomIds: groupEditRoomIds,
+        allowedRoleIds: groupEditAllowedRoleIds
+      });
+      resetGroupEditForm();
+    });
+  }
+
+  function removeBroadcastGroupConfig(id: string) {
+    void runAdminAction(async () => {
+      await deleteBroadcastGroup(token, id);
+      if (groupEditId === id) {
+        resetGroupEditForm();
+      }
+    });
+  }
+
+  return (
+    <div className="admin-card">
+      <div className="admin-card-header">
+        <div className="admin-card-title">Configuration · Broadcast Channels</div>
+        <div className="admin-card-actions">
+          <button
+            className="admin-toggle-button"
+            onClick={() => setIsOpen((v) => !v)}
+            aria-expanded={isOpen}
+          >
+            {isOpen ? "Verbergen" : "Anzeigen"}
+          </button>
+        </div>
+      </div>
+      {isOpen ? (
+        <div className="admin-card-body">
+          <div className="admin-block">
+            <div className="admin-block-header">
+              <h4>Broadcast channels ({appData.broadcastGroups.length})</h4>
+              {!groupEditId ? (
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    if (showGroupCreateForm) {
+                      resetGroupCreateForm();
+                    }
+                    setShowGroupCreateForm((prev) => !prev);
+                  }}
+                  disabled={adminBusy}
+                >
+                  {showGroupCreateForm ? "Cancel create" : "Create channel"}
+                </button>
+              ) : null}
+            </div>
+            {adminError ? <p className="admin-error">{adminError}</p> : null}
+
+            {showGroupCreateForm && !groupEditId ? (
+              <div className="admin-edit-panel">
+                <div className="admin-edit-title">New broadcast channel</div>
+                <div className="admin-grid">
+                  <input
+                    value={groupCreateId}
+                    onChange={(e) => setGroupCreateId(e.target.value)}
+                    placeholder="broadcast-channel-id"
+                  />
+                  <input
+                    value={groupCreateName}
+                    onChange={(e) => setGroupCreateName(e.target.value)}
+                    placeholder="Broadcast channel name"
+                  />
+                  <button
+                    onClick={createBroadcastGroupConfig}
+                    disabled={adminBusy || !groupCreateId.trim() || !groupCreateName.trim() || groupCreateRoomIds.length === 0}
+                  >
+                    Create channel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetGroupCreateForm();
+                      setShowGroupCreateForm(false);
+                    }}
+                    disabled={adminBusy}
+                    className="secondary"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <div className="admin-grid admin-grid-roles">
+                  <RoomMultiSelect
+                    label="Included rooms"
+                    selectedRoomIds={groupCreateRoomIds}
+                    setState={setGroupCreateRoomIds}
+                    keyPrefix="group-create-room"
+                    rooms={appData.rooms}
+                  />
+                  <RoleMultiSelect
+                    label="Allowed roles"
+                    selectedRoleIds={groupCreateAllowedRoleIds}
+                    setState={setGroupCreateAllowedRoleIds}
+                    keyPrefix="group-create-allowed-roles"
+                    roles={appData.roles}
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {groupEditId ? (
+              <div className="admin-edit-panel">
+                <div className="admin-edit-title">Editing channel: {groupEditId}</div>
+                <div className="admin-grid">
+                  <input value={groupEditName} onChange={(e) => setGroupEditName(e.target.value)} placeholder="Channel name" />
+                  <button onClick={saveGroupEdit} disabled={adminBusy || !groupEditName.trim() || groupEditRoomIds.length === 0}>
+                    Save changes
+                  </button>
+                  <button onClick={resetGroupEditForm} disabled={adminBusy} className="secondary">
+                    Cancel
+                  </button>
+                </div>
+                <div className="admin-grid admin-grid-roles">
+                  <RoomMultiSelect
+                    label="Included rooms"
+                    selectedRoomIds={groupEditRoomIds}
+                    setState={setGroupEditRoomIds}
+                    keyPrefix="group-edit-room"
+                    rooms={appData.rooms}
+                  />
+                  <RoleMultiSelect
+                    label="Allowed roles"
+                    selectedRoleIds={groupEditAllowedRoleIds}
+                    setState={setGroupEditAllowedRoleIds}
+                    keyPrefix="group-edit-allowed-roles"
+                    roles={appData.roles}
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            <ul className="admin-list">
+              {appData.broadcastGroups.map((group) => (
+                <li key={group.id}>
+                  <button
+                    disabled={adminBusy}
+                    onClick={() => {
+                      setShowGroupCreateForm(false);
+                      setGroupEditId(group.id);
+                      setGroupEditName(group.name);
+                      setGroupEditRoomIds(group.roomIds);
+                      setGroupEditAllowedRoleIds(group.allowedRoleIds || []);
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <span>
+                    {group.name} <small>({group.id})</small>
+                  </span>
+                  <button onClick={() => removeBroadcastGroupConfig(group.id)} disabled={adminBusy}>
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
