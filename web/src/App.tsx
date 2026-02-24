@@ -161,6 +161,7 @@ export function App() {
   const [adminPinInput, setAdminPinInput] = useState("");
   const [adminLoginError, setAdminLoginError] = useState("");
   const [adminPinGuard, setAdminPinGuard] = useState<string>(defaultAdminPin);
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState<boolean>(false);
   const [isUserSettingsOpen, setIsUserSettingsOpen] = useState(false);
   const [pttPressed, setPttPressed] = useState(false);
   const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(null);
@@ -1463,9 +1464,7 @@ export function App() {
         <div className="admin-shell-header">
           <div>
             <h1>Admin-Konsole</h1>
-            <p className="admin-shell-user">
-              Angemeldet als {appData.self.username} ({adminRoleLabel})
-            </p>
+            <p className="admin-shell-user">Angemeldet als {appData.self.username} ({adminRoleLabel})</p>
           </div>
           <div className="admin-shell-actions">
             <button onClick={() => void refreshBootstrapData()}>Neu laden</button>
@@ -1474,13 +1473,33 @@ export function App() {
             </button>
           </div>
         </div>
-        <AdminPanel
-          token={token}
-          appData={appData}
-          refreshBootstrapData={refreshBootstrapData}
-          adminPin={adminPinGuard}
-          onUpdateAdminPin={(next) => setAdminPinGuard(next)}
-        />
+
+        <div className={`admin-collapsible ${isAdminPanelOpen ? "open" : "collapsed"}`}>
+          <div className="admin-collapsible-bar">
+            <div className="admin-collapsible-title">Konfiguration</div>
+            <div className="admin-collapsible-actions">
+              <button
+                className="admin-toggle-button"
+                onClick={() => setIsAdminPanelOpen((v) => !v)}
+                aria-expanded={isAdminPanelOpen}
+              >
+                {isAdminPanelOpen ? "Verbergen" : "Anzeigen"}
+              </button>
+            </div>
+          </div>
+
+          {isAdminPanelOpen ? (
+            <div className="admin-collapsible-body">
+              <AdminPanel
+                token={token}
+                appData={appData}
+                refreshBootstrapData={refreshBootstrapData}
+                adminPin={adminPinGuard}
+                onUpdateAdminPin={(next) => setAdminPinGuard(next)}
+              />
+            </div>
+          ) : null}
+        </div>
       </div>
     );
   }

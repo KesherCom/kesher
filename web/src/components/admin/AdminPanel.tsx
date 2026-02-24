@@ -10,6 +10,7 @@ import {
   updateRole,
   updateRoom
 } from "../../api";
+import { UsersPanel } from "./UsersPanel";
 import type { Bootstrap } from "../../types";
 import { RoleMultiSelect } from "./RoleMultiSelect";
 import { RoomMultiSelect } from "./RoomMultiSelect";
@@ -59,7 +60,7 @@ export function AdminPanel({ token, appData, refreshBootstrapData, adminPin, onU
   const [groupEditName, setGroupEditName] = useState("");
   const [groupEditRoomIds, setGroupEditRoomIds] = useState<string[]>([]);
   const [groupEditAllowedRoleIds, setGroupEditAllowedRoleIds] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<"roles" | "rooms" | "channels">("roles");
+  const [activeTab, setActiveTab] = useState<"users" | "roles" | "rooms" | "channels">("roles");
 
   useEffect(() => {
     if (roleCreateDefaultRoomId === "" && appData.rooms[0]) {
@@ -319,6 +320,14 @@ export function AdminPanel({ token, appData, refreshBootstrapData, adminPin, onU
           </button>
           <button
             type="button"
+            className={`admin-tab-button ${activeTab === "users" ? "active" : ""}`}
+            onClick={() => setActiveTab("users")}
+            aria-pressed={activeTab === "users"}
+          >
+            Users <span className="admin-tab-badge">{appData.users.length}</span>
+          </button>
+          <button
+            type="button"
             className={`admin-tab-button ${activeTab === "rooms" ? "active" : ""}`}
             onClick={() => setActiveTab("rooms")}
             aria-pressed={activeTab === "rooms"}
@@ -335,6 +344,10 @@ export function AdminPanel({ token, appData, refreshBootstrapData, adminPin, onU
           </button>
         </nav>
       </div>
+
+      {activeTab === "users" && (
+        <UsersPanel token={token} appData={appData} refreshBootstrapData={refreshBootstrapData} adminBusy={adminBusy} />
+      )}
 
       {activeTab === "roles" && (
         <div className="admin-block">
