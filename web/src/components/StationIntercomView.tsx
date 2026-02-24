@@ -46,6 +46,12 @@ type StationIntercomViewProps = {
   onChannelPptStart: (channelId: string) => void;
   onChannelPptStop: (channelId: string) => void;
   pptPressedChannelId: string | null;
+  pinnedRoomIds: string[];
+  pinnedUserIds: string[];
+  showPinnedOnly: boolean;
+  onTogglePinnedRoom: (roomId: string) => void;
+  onTogglePinnedUser: (userId: string) => void;
+  onShowPinnedOnlyChange: (value: boolean) => void;
 };
 
 export function StationIntercomView({
@@ -91,21 +97,31 @@ export function StationIntercomView({
   onSelectChannel,
   onChannelPptStart,
   onChannelPptStop,
-  pptPressedChannelId
+  pptPressedChannelId,
+  pinnedRoomIds,
+  pinnedUserIds,
+  showPinnedOnly,
+  onTogglePinnedRoom,
+  onTogglePinnedUser,
+  onShowPinnedOnlyChange
 }: StationIntercomViewProps) {
-  const directOnlineTargets = useMemo(
-    () =>
-      presence
-        .filter((p) => p.userId !== appData.self.id)
-        .slice()
-        .sort((a, b) => {
-          const roleA = (roleNameById.get(a.roleId) || a.roleId || "").toLowerCase();
-          const roleB = (roleNameById.get(b.roleId) || b.roleId || "").toLowerCase();
-          const byRole = roleA.localeCompare(roleB, undefined, { sensitivity: "base" });
-          if (byRole !== 0) return byRole;
-          return a.username.localeCompare(b.username, undefined, { sensitivity: "base" });
-        }),
-    [appData.self.id, presence, roleNameById]
+  const directOnlineTargets = useMemo(() => {
+    const sorted = presence
+      .filter((p) => p.userId !== appData.self.id)
+      .slice()
+      .sort((a, b) => {
+        const roleA = (roleNameById.get(a.roleId) || a.roleId || "").toLowerCase();
+        const roleB = (roleNameById.get(b.roleId) || b.roleId || "").toLowerCase();
+        const byRole = roleA.localeCompare(roleB, undefined, { sensitivity: "base" });
+        if (byRole !== 0) return byRole;
+        return a.username.localeCompare(b.username, undefined, { sensitivity: "base" });
+      });
+    return showPinnedOnly ? sorted.filter((p) => pinnedUserIds.includes(p.userId)) : sorted;
+  }, [appData.self.id, pinnedUserIds, presence, roleNameById, showPinnedOnly]);
+
+  const visibleRooms = useMemo(
+    () => (showPinnedOnly ? appData.rooms.filter((room) => pinnedRoomIds.includes(room.id)) : appData.rooms),
+    [appData.rooms, pinnedRoomIds, showPinnedOnly]
   );
   const directGroups = useMemo(() => {
     const byRole = new Map<string, Presence[]>();
@@ -159,8 +175,20 @@ export function StationIntercomView({
 
       <section className="station-block station-talk-section">
         <h3>Talk channels</h3>
+        <div className="station-filter-bar small">
+          <label>
+            <input
+              type="checkbox"
+              checked={showPinnedOnly}
+              onChange={(event) => onShowPinnedOnlyChange(event.target.checked)}
+            />
+            <span>Show only pinned</span>
+          </label>
+          <span className="station-filter-hint">Pin rooms or users to keep focus when things get busy.</span>
+        </div>
+        {visibleRooms.length === 0 ? <p className="station-empty">No channels to show.</p> : null}
         <div className="station-talk-grid">
-          {appData.rooms.map((room) => {
+              {visibleRooms.map((room) => {
             const listening = listenRoomIds.includes(room.id);
             const talking = talkRoomIds.includes(room.id);
             const canTalk = canRoleSendToRoom(room.id, appData.self.roleId);
@@ -183,6 +211,19 @@ export function StationIntercomView({
             
             return (
               <article key={`station-room-${room.id}`} className="station-card">
+                <button
+                  type="button"
+                  className={`station-pin-top ${pinnedRoomIds.includes(room.id) ? "active" : ""}`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onPointerUp={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onTogglePinnedRoom(room.id);
+                  }}
+                  title={pinnedRoomIds.includes(room.id) ? "Unpin channel" : "Pin channel"}
+                >
+                  ★
+                </button>
                 <button
                   className={`station-card-head ${
                     enableDirectPpt ? (isPttPressed ? "ppt-active" : "") : talking ? "selected" : ""
@@ -225,7 +266,9 @@ export function StationIntercomView({
 
       <section className="station-block station-direct-section">
         <h3>Direct communication</h3>
-        {directGroups.length === 0 ? <p className="station-empty">No other users online.</p> : null}
+        {directGroups.length === 0 ? (
+          <p className="station-empty">{showPinnedOnly ? "No pinned users online." : "No other users online."}</p>
+        ) : null}
         {directGroups.length > 0 ? (
           <>
             <div className="station-direct-tabs" role="tablist" aria-label="Direct communication roles">
@@ -246,6 +289,19 @@ export function StationIntercomView({
               {(directGroups.find((group) => group.roleId === activeDirectRoleTab)?.users || []).map((p) => (
                 <article key={`station-direct-${p.userId}`} className="station-card station-direct-card">
                   <button
+                    type="button"
+                    className={`station-pin-top ${pinnedUserIds.includes(p.userId) ? "active" : ""}`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onPointerUp={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onTogglePinnedUser(p.userId);
+                    }}
+                    title={pinnedUserIds.includes(p.userId) ? "Unpin user" : "Pin user"}
+                  >
+                    ★
+                  </button>
+                  <button
                     className={`station-card-head direct-ptt ${directPttPressedUserId === p.userId ? "active" : ""}`}
                     onPointerDown={() => startDirectPtt(p.userId)}
                     onPointerUp={() => stopDirectPtt(p.userId)}
@@ -258,8 +314,12 @@ export function StationIntercomView({
                     <em>{roleNameById.get(p.roleId) || p.roleId || "Unknown role"}</em>
                   </button>
                   <div className="station-card-actions single">
-                    <button className="signal" onClick={() => sendScopedSignal("direct", p.userId, "attention")}>
-                      Signal
+                    <button
+                      className={`call ${/* disabled handled by class */ ""}`}
+                      onClick={() => sendScopedSignal("direct", p.userId, "call")}
+                      title="Call user"
+                    >
+                      Call
                     </button>
                   </div>
                 </article>

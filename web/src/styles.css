@@ -593,6 +593,7 @@ button.secondary { background: transparent; }
   border-radius: 8px;
   overflow: hidden;
   background: linear-gradient(180deg, #2a3243 0%, #1b2230 100%);
+  position: relative;
 }
 .station-card-head {
   width: 100%;
@@ -605,6 +606,68 @@ button.secondary { background: transparent; }
   text-align: center;
   position: relative;
 }
+.station-pin {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.08);
+  color: #bfc8dc;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 0.86rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.station-pin:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
+.station-pin.active { background: #ffb43a; color: #1b2230; font-weight: 800; }
+.station-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.2rem 0 0.45rem;
+  font-size: 0.78rem;
+  color: #b4c2d5;
+}
+.station-filter-bar input { margin-right: 0.35rem; }
+.station-filter-hint { opacity: 0.8; font-size: 0.8rem; }
+.station-filter-bar.small { font-size: 0.74rem; gap: 0.35rem; margin-top: 0.15rem; }
+.station-pin-action {
+  border: 0;
+  background: rgba(255, 255, 255, 0.03);
+  color: #bfc8dc;
+  padding: 0.18rem 0.36rem;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  margin-right: 0.25rem;
+}
+.station-pin-action.active { background: #ffb43a; color: #1b2230; font-weight: 800; }
+.station-card-actions.single { display: block; padding: 0; }
+.station-card-actions.single button { display: block; width: 100%; padding: 0.8rem 0; text-align: center; border-right: 0; }
+.station-pin-action[title] { line-height: 1; }
+
+.station-pin-top {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 0;
+  background: rgba(255,255,255,0.02);
+  color: #bfc8dc;
+  font-size: 0.76rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.station-pin-top.active { background: #ffb43a; color: #1b2230; font-weight: 800; }
+.station-pin-top { z-index: 3; }
+.station-card-head { z-index: 2; }
 .station-card-head small {
   text-transform: uppercase;
   letter-spacing: 0.09em;
