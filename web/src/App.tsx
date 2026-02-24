@@ -40,6 +40,7 @@ type WsMessage =
 const tokenStorageKey = "intercom-token";
 const sessionSettingsStorageKey = "intercom-session-settings";
 const globalSettingsStorageKey = "intercom-global-settings";
+const favoritesStorageKey = "intercom-favorites";
 
 type SessionSettings = {
   username: string;
@@ -52,6 +53,12 @@ type GlobalSettings = {
   selectedInputDeviceId: string;
   selectedOutputDeviceId: string;
   enableDirectPpt: boolean;
+};
+
+type FavoriteSettings = {
+  pinnedRoomIds: string[];
+  pinnedUserIds: string[];
+  showPinnedOnly: boolean;
 };
 
 function loadSessionSettings(): SessionSettings {
@@ -89,9 +96,31 @@ function loadGlobalSettings(): GlobalSettings {
   }
 }
 
+function loadFavoriteSettings(): FavoriteSettings {
+  try {
+    const raw = localStorage.getItem(favoritesStorageKey);
+    if (!raw) {
+      return { pinnedRoomIds: [], pinnedUserIds: [], showPinnedOnly: false };
+    }
+    const parsed = JSON.parse(raw) as Partial<FavoriteSettings>;
+    return {
+      pinnedRoomIds: Array.isArray(parsed.pinnedRoomIds)
+        ? parsed.pinnedRoomIds.filter((value) => typeof value === "string")
+        : [],
+      pinnedUserIds: Array.isArray(parsed.pinnedUserIds)
+        ? parsed.pinnedUserIds.filter((value) => typeof value === "string")
+        : [],
+      showPinnedOnly: typeof parsed.showPinnedOnly === "boolean" ? parsed.showPinnedOnly : false
+    } satisfies FavoriteSettings;
+  } catch {
+    return { pinnedRoomIds: [], pinnedUserIds: [], showPinnedOnly: false };
+  }
+}
+
 export function App() {
   const initialSessionSettings = loadSessionSettings();
   const initialGlobalSettings = loadGlobalSettings();
+  const initialFavorites = loadFavoriteSettings();
   const hadStoredRoomMatrix =
     initialSessionSettings.listenRoomIds.length > 0 || initialSessionSettings.talkRoomIds.length > 0;
   const [publicData, setPublicData] = useState<PublicBootstrap | null>(null);
@@ -114,6 +143,9 @@ export function App() {
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState(initialGlobalSettings.selectedOutputDeviceId);
   const [enableDirectPpt, setEnableDirectPpt] = useState(initialGlobalSettings.enableDirectPpt);
+  const [pinnedRoomIds, setPinnedRoomIds] = useState<string[]>(initialFavorites.pinnedRoomIds);
+  const [pinnedUserIds, setPinnedUserIds] = useState<string[]>(initialFavorites.pinnedUserIds);
+  const [showPinnedOnly, setShowPinnedOnly] = useState<boolean>(initialFavorites.showPinnedOnly);
   const [selectedChannelId, setSelectedChannelId] = useState<string>("");
   const [inputLevel, setInputLevel] = useState(0);
   const [audioError, setAudioError] = useState<string>("");
@@ -217,6 +249,17 @@ export function App() {
   }, [selectedInputDeviceId, selectedOutputDeviceId, enableDirectPpt]);
 
   useEffect(() => {
+    localStorage.setItem(
+      favoritesStorageKey,
+      JSON.stringify({
+        pinnedRoomIds,
+        pinnedUserIds,
+        showPinnedOnly
+      } satisfies FavoriteSettings)
+    );
+  }, [pinnedRoomIds, pinnedUserIds, showPinnedOnly]);
+
+  useEffect(() => {
     if (!token) return;
     bootstrap(token)
       .then((data) => {
@@ -265,6 +308,12 @@ export function App() {
         setToken(null);
       });
   }, [token]);
+
+  useEffect(() => {
+    if (!appData) return;
+    setPinnedRoomIds((prev) => prev.filter((id) => appData.rooms.some((room) => room.id === id)));
+    setPinnedUserIds((prev) => prev.filter((id) => appData.users.some((user) => user.id === id)));
+  }, [appData]);
 
 
   const refreshAudioDevices = useCallback(async () => {
@@ -490,6 +539,14 @@ export function App() {
       return [roomId];
     });
   }
+
+  const togglePinnedRoom = useCallback((roomId: string) => {
+    setPinnedRoomIds((prev) => (prev.includes(roomId) ? prev.filter((id) => id !== roomId) : [...prev, roomId]));
+  }, []);
+
+  const togglePinnedUser = useCallback((userId: string) => {
+    setPinnedUserIds((prev) => (prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]));
+  }, []);
 
   function clearRoomSwitchTimer() {
     if (roomSwitchTimerRef.current !== null) {
@@ -1488,6 +1545,12 @@ export function App() {
         onChannelPptStart={handleChannelPttStart}
         onChannelPptStop={handleChannelPttStop}
         pptPressedChannelId={pttPressedChannelId}
+        pinnedRoomIds={pinnedRoomIds}
+        pinnedUserIds={pinnedUserIds}
+        showPinnedOnly={showPinnedOnly}
+        onTogglePinnedRoom={togglePinnedRoom}
+        onTogglePinnedUser={togglePinnedUser}
+        onShowPinnedOnlyChange={setShowPinnedOnly}
       />
       {attentionFlashOverlay}
     </>
