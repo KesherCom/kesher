@@ -1313,9 +1313,71 @@ button.secondary { background: transparent; }
 .station-modal-body {
   display: grid;
   gap: 0.85rem;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   align-items: start;
 }
+/* layout helpers for audio controls inside modal */
+.station-modal-body h4 {
+  margin: 0 0 0.25rem 0;
+  color: #dce7f8;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+/* audio controls stacked vertically inside modal */
+.station-modal-body .audio-section {
+  grid-column: 1 / -1;
+  margin-top: 1rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgba(255,255,255,0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.audio-box {
+  background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));
+  border: 1px solid rgba(255,255,255,0.02);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.audio-box-header { padding: 0.5rem 0.75rem; display: flex; justify-content: space-between; align-items: center; }
+.audio-box-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-weight: 800;
+}
+.audio-box-toggle:focus { outline: none; box-shadow: 0 6px 20px rgba(16,24,34,0.6); }
+.audio-box-body { padding: 0.75rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.audio-box .chev { margin-left: 0.5rem; transform: rotate(0deg); transition: transform 180ms ease; }
+.audio-box .chev.open { transform: rotate(-180deg); }
+.audio-box.collapsed .audio-box-body { display: none; }
+.station-modal-body .audio-left,
+.station-modal-body .audio-right {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.station-modal-body .audio-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+.station-modal-body .audio-row .mic-dropdown { flex: 1; }
+.station-modal-body .audio-row .meter { flex: 1; min-width: 120px; }
+.station-modal-body .mic-dropdown-trigger {
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));
+  border: 1px solid rgba(255,255,255,0.03);
+}
+.station-modal-body .mic-dropdown-menu { background: linear-gradient(180deg, #0f1720, #0b131b); }
+.station-modal-body small { color: var(--muted); }
 .station-setting {
   display: flex;
   align-items: center;
