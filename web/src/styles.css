@@ -18,28 +18,6 @@ body {
 }
 .root { max-width: 1520px; margin: 0 auto; padding: 1rem; }
 .login { max-width: 520px; display: grid; gap: 0.85rem; }
-.login-error {
-  margin: 0;
-  padding: 0.6rem 0.75rem;
-  border-radius: 10px;
-  border: 1px solid #7a2b2b;
-  background: #201017;
-  color: #ffb7b7;
-}
-.login-admin-card { display: grid; gap: 0.6rem; }
-.login-admin-head { display: flex; align-items: center; justify-content: space-between; }
-.login-admin-pin-hint { color: var(--muted); font-size: 0.85rem; }
-.login-admin-note { color: var(--muted); margin: 0; }
-.admin-shell { display: grid; gap: 1rem; }
-.admin-shell-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
-.admin-shell-actions { display: flex; gap: 0.65rem; }
-.admin-shell-user { margin: 0.2rem 0 0; color: var(--muted); }
-.admin-pin-panel { display: grid; gap: 0.6rem; }
-.admin-pin-grid { display: grid; grid-template-columns: 1fr auto; gap: 0.6rem; align-items: end; }
-.admin-pin-hint { color: var(--muted); margin: 0.2rem 0 0; }
-.admin-error { color: #ffb7b7; margin: 0; }
-.admin-success { color: #c9f7a4; margin: 0; }
-.admin-panel-wrapper { padding-top: 0.35rem; }
   .admin-block {
     min-height: 260px;
     display: flex;
@@ -268,6 +246,8 @@ button { cursor: pointer; }
   font-size: 0.95rem;
   color: #cfe1ff;
 }
+.admin-pin-note { margin-left: 0.5rem; color: #cfe1ff; font-size: 0.9rem; }
+.admin-grid input[type="password"] { width: 100%; }
 .admin-block-subtitle {
   margin: 0;
   color: var(--muted);
@@ -1006,6 +986,60 @@ button.secondary { background: transparent; }
   width: min(1100px, 100%);
   max-height: calc(100vh - 2rem);
   overflow: auto;
+}
+/* Enhanced user settings modal styling */
+.station-modal.panel {
+  background: linear-gradient(180deg, rgba(18,26,38,0.95), rgba(12,18,28,0.98));
+  border: 1px solid rgba(255,255,255,0.04);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 12px 40px rgba(2,8,20,0.7), inset 0 1px 0 rgba(255,255,255,0.02);
+}
+.station-top-admin {
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  border: 1px solid rgba(255,255,255,0.02);
+  color: var(--text);
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
+  font-weight: 700;
+}
+.station-top-admin:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,0.35); }
+
+.station-modal-body {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+}
+.station-setting {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: rgba(255,255,255,0.01);
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.02);
+}
+.station-setting span { color: var(--text); font-weight: 700; }
+.station-modal .station-modal-hint { grid-column: 1 / -1; color: var(--muted); margin-top: 0.25rem; }
+
+/* Make the checkboxes look nicer: compact and aligned */
+.station-setting input[type="checkbox"] {
+  width: 18px; height: 18px; margin: 0; accent-color: var(--accent);
+}
+
+.station-modal-close {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.03);
+  color: var(--muted);
+  padding: 0.36rem 0.5rem;
+  border-radius: 8px;
+}
+.station-modal-close:hover { color: var(--text); border-color: rgba(243,195,55,0.18); }
+
+@media (max-width: 780px) {
+  .station-modal-body { grid-template-columns: 1fr; }
+  .station-top-admin { padding: 0.35rem 0.5rem; }
 }
 .station-modal-header {
   display: flex;

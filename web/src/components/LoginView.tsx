@@ -7,10 +7,10 @@ type LoginViewProps = {
   onUsernameChange: (value: string) => void;
   onRoleChange: (roleId: string) => void;
   onLogin: () => void;
+  adminPin: string;
+  onAdminPinChange: (value: string) => void;
   onAdminLogin: () => void;
-  adminPinInput: string;
-  onAdminPinInputChange: (value: string) => void;
-  loginError: string;
+  adminError?: string;
 };
 
 export function LoginView({
@@ -20,10 +20,10 @@ export function LoginView({
   onUsernameChange,
   onRoleChange,
   onLogin,
+  adminPin,
+  onAdminPinChange,
   onAdminLogin,
-  adminPinInput,
-  onAdminPinInputChange,
-  loginError
+  adminError
 }: LoginViewProps) {
   return (
     <div className="root login">
@@ -44,32 +44,29 @@ export function LoginView({
           ))}
         </select>
       </label>
-      {loginError ? <p className="login-error">{loginError}</p> : null}
       <button onClick={onLogin} disabled={!username.trim() || !roleId}>
         Join Intercom
       </button>
-
       <div className="login-admin-card panel">
         <div className="login-admin-head">
-          <div>
-            <p className="variant-subtitle">Admin access</p>
-            <h3>Configuration</h3>
-          </div>
-          <span className="login-admin-pin-hint">PIN required</span>
+          <h3>Admin-Konsole</h3>
+          <span className="login-admin-pin-hint">PIN erforderlich</span>
         </div>
+        <p className="login-admin-note">Nur für Rollen- und Channel-Konfiguration.</p>
         <label>
-          Admin PIN
+          Admin-PIN
           <input
             type="password"
-            value={adminPinInput}
-            onChange={(e) => onAdminPinInputChange(e.target.value)}
-            placeholder="Enter admin PIN"
+            value={adminPin}
+            onChange={(e) => onAdminPinChange(e.target.value)}
+            placeholder="PIN"
+            autoComplete="off"
           />
         </label>
-        <button onClick={onAdminLogin} disabled={!username.trim() || !roleId || !adminPinInput.trim()}>
-          Admin login
+        {adminError ? <p className="login-error">{adminError}</p> : null}
+        <button onClick={onAdminLogin} disabled={!adminPin.trim() || !username.trim() || !roleId}>
+          Admin-Konsole öffnen
         </button>
-        <small className="login-admin-note">Only administrators should use this entry point.</small>
       </div>
     </div>
   );

@@ -18,11 +18,17 @@ type AdminPanelProps = {
   token: string;
   appData: Bootstrap;
   refreshBootstrapData: () => Promise<void>;
+  adminPin: string;
+  onUpdateAdminPin: (nextPin: string) => void;
 };
 
-export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelProps) {
+export function AdminPanel({ token, appData, refreshBootstrapData, adminPin, onUpdateAdminPin }: AdminPanelProps) {
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminError, setAdminError] = useState("");
+  const [pinCurrentInput, setPinCurrentInput] = useState("");
+  const [pinNewInput, setPinNewInput] = useState("");
+  const [pinConfirmInput, setPinConfirmInput] = useState("");
+  const [pinMessage, setPinMessage] = useState("");
 
   const [roleCreateId, setRoleCreateId] = useState("");
   const [roleCreateName, setRoleCreateName] = useState("");
@@ -240,6 +246,66 @@ export function AdminPanel({ token, appData, refreshBootstrapData }: AdminPanelP
     <div className="admin-panel">
       <h3>Admin · configuration</h3>
       {adminError ? <p className="admin-error">{adminError}</p> : null}
+
+      <div className="admin-block">
+        <div className="admin-block-header">
+          <h4>Admin PIN</h4>
+        </div>
+        <div className="admin-grid">
+          <input
+            type="password"
+            value={pinCurrentInput}
+            onChange={(e) => setPinCurrentInput(e.target.value)}
+            placeholder="Current PIN"
+          />
+          <input
+            type="password"
+            value={pinNewInput}
+            onChange={(e) => setPinNewInput(e.target.value)}
+            placeholder="New PIN"
+          />
+          <input
+            type="password"
+            value={pinConfirmInput}
+            onChange={(e) => setPinConfirmInput(e.target.value)}
+            placeholder="Confirm new PIN"
+          />
+        </div>
+        <div className="admin-form-actions">
+          <button
+            onClick={() => {
+              setPinMessage("");
+              setAdminError("");
+              if (pinCurrentInput.trim() !== adminPin) {
+                setPinMessage("Current PIN is incorrect.");
+                return;
+              }
+              if (!pinNewInput.trim()) {
+                setPinMessage("New PIN cannot be empty.");
+                return;
+              }
+              if (pinNewInput !== pinConfirmInput) {
+                setPinMessage("New PIN and confirmation do not match.");
+                return;
+              }
+              try {
+                onUpdateAdminPin(pinNewInput.trim());
+                setPinMessage("Admin PIN updated successfully.");
+                setPinCurrentInput("");
+                setPinNewInput("");
+                setPinConfirmInput("");
+              } catch (err) {
+                setPinMessage("Failed to update PIN.");
+              }
+            }}
+            className="secondary"
+            disabled={adminBusy}
+          >
+            Update PIN
+          </button>
+          {pinMessage ? <div className="admin-pin-note">{pinMessage}</div> : null}
+        </div>
+      </div>
 
       <div className="admin-tabs">
         <nav className="admin-tabs-nav">
