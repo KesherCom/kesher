@@ -955,6 +955,16 @@ button.secondary { background: transparent; }
   background: #1a2231;
   border: 1px solid #2f3f5f;
 }
+.station-ptt.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: #121724;
+  border-color: #1f2b40;
+  color: #4f5b72;
+}
+.station-ptt.disabled:active {
+  transform: none;
+}
 .station-ptt.active {
   background: #f3c337;
   border-color: #f3c337;
@@ -1169,6 +1179,16 @@ button.secondary { background: transparent; }
   border: 1px solid rgba(255,255,255,0.02);
 }
 .station-setting span { color: var(--text); font-weight: 700; }
+.station-setting.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.station-setting.disabled span {
+  color: #7d8ba5;
+}
+.station-setting.disabled input[type="checkbox"] {
+  cursor: not-allowed;
+}
 .station-modal .station-modal-hint { grid-column: 1 / -1; color: var(--muted); margin-top: 0.25rem; }
 
 /* Make the checkboxes look nicer: compact and aligned */

@@ -140,7 +140,9 @@ export function App() {
   const [message, setMessage] = useState("");
   const [chatMessages, setChatMessages] = useState<Array<{ from: string; body: string; at: string; room: string; self: boolean }>>([]);
   const [events, setEvents] = useState<Array<{ label: string; at: string }>>([]);
-  const [voiceMode, setVoiceMode] = useState<"always_on" | "ptt">("always_on");
+  const [voiceMode, setVoiceMode] = useState<"always_on" | "ptt">(
+    initialGlobalSettings.enableDirectPpt ? "ptt" : "always_on"
+  );
   const [connectionState, setConnectionState] = useState<"connecting" | "connected" | "reconnecting" | "offline">("offline");
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedInputDeviceId, setSelectedInputDeviceId] = useState(initialGlobalSettings.selectedInputDeviceId);
@@ -1309,6 +1311,18 @@ export function App() {
   }
 
   function setAlwaysOn(enabled: boolean) {
+    if (enableDirectPpt) {
+      if (voiceModeRef.current !== "ptt") {
+        setVoiceMode("ptt");
+        voiceModeRef.current = "ptt";
+      }
+      if (pttPressed) {
+        setPttPressed(false);
+      }
+      sendVoiceState("ptt_stop");
+      return;
+    }
+
     if (enabled) {
       setVoiceMode("always_on");
       voiceModeRef.current = "always_on";
@@ -1317,6 +1331,13 @@ export function App() {
       setVoiceMode("ptt");
       voiceModeRef.current = "ptt";
       sendVoiceState("ptt_stop");
+    }
+  }
+
+  function handleEnableDirectPptChange(enabled: boolean) {
+    setEnableDirectPpt(enabled);
+    if (enabled) {
+      setAlwaysOn(false);
     }
   }
 
@@ -1609,7 +1630,7 @@ export function App() {
         showDebug={showDebug}
         realtimeDebugBlock={realtimeDebugBlock}
         enableDirectPpt={enableDirectPpt}
-        onEnableDirectPptChange={setEnableDirectPpt}
+        onEnableDirectPptChange={handleEnableDirectPptChange}
         availableChannels={availableChannels}
         selectedChannelId={selectedChannelId}
         onSelectChannel={setSelectedChannelId}
