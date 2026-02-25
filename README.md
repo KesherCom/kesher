@@ -15,6 +15,7 @@ make dev-web       # terminal 2 — frontend on :5173 (proxies API to backend)
 ```
 
 Or serve everything from the backend:
+
 ```sh
 make run-backend   # builds frontend, then starts backend with embedded UI on :8080
 ```
@@ -23,13 +24,14 @@ Open `http://localhost:8080` (or `:5173` if using the Vite dev server).
 
 ## HTTPS options
 
-| Method | Command | Notes |
-|---|---|---|
-| Self-signed (dev/LAN) | `make run-backend-https LAN_IP=192.168.1.50` | Auto-generates certs if missing. Browsers will show a warning. |
-| Let's Encrypt (existing certs) | `make run-backend-le DOMAIN=intercom.example.org` | Reads certs from `/etc/letsencrypt/live/<domain>/` |
-| CertMagic (automated DNS-01) | `make run-backend-certmagic DOMAIN=intercom.example.org DNS_PROVIDER=cloudflare` | Issues/renews certs in-app. Providers: `cloudflare`, `hetzner`, `route53` |
+| Method                         | Command                                                                          | Notes                                                                     |
+| ------------------------------ | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Self-signed (dev/LAN)          | `make run-backend-https LAN_IP=192.168.1.50`                                     | Auto-generates certs if missing. Browsers will show a warning.            |
+| Let's Encrypt (existing certs) | `make run-backend-le DOMAIN=intercom.example.org`                                | Reads certs from `/etc/letsencrypt/live/<domain>/`                        |
+| CertMagic (automated DNS-01)   | `make run-backend-certmagic DOMAIN=intercom.example.org DNS_PROVIDER=cloudflare` | Issues/renews certs in-app. Providers: `cloudflare`, `hetzner`, `route53` |
 
 For production (HTTPS on `:443`, HTTP→HTTPS redirect on `:80`):
+
 ```sh
 make run-production-le DOMAIN=intercom.example.org
 # or
@@ -44,6 +46,7 @@ make docker-down   # stop
 ```
 
 For HTTPS with CertMagic:
+
 ```sh
 cp deploy/compose/.env.certmagic.example deploy/compose/.env.certmagic
 # edit deploy/compose/.env.certmagic with your domain + DNS provider credentials
@@ -53,11 +56,13 @@ docker compose -f deploy/compose/docker-compose.certmagic.yml --env-file deploy/
 ## LAN deployment with trusted HTTPS (no browser warnings)
 
 To give LAN clients a trusted `https://` URL without certificate warnings, you need:
+
 1. A domain you control (e.g. `intercom.example.org`)
 2. A local DNS override so that domain resolves to your server's LAN IP
 3. A publicly trusted certificate (e.g. from Let's Encrypt via DNS-01 challenge)
 
 Once you have the certificate and DNS in place:
+
 ```sh
 make run-production-le DOMAIN=intercom.example.org
 ```
@@ -77,11 +82,13 @@ make run-desktop-proxy UPSTREAM=http://192.168.1.50:8080
 ```
 
 For HTTPS upstreams with private/self-signed CAs:
+
 ```sh
 make run-desktop-proxy UPSTREAM=https://intercom.example.org CA_FILE=/path/to/ca.pem
 ```
 
 Cross-platform release builds:
+
 ```sh
 make package-desktop-proxy DESKTOP_PROXY_VERSION=v0.1.0
 # outputs to desktop-proxy/dist/v0.1.0/
@@ -104,33 +111,34 @@ Run `make help` for all available targets.
 
 ## Environment variables
 
-| Variable | Default | Description |
-|---|---|---|
-| `APP_ADDR` | `:8080` | Listen address |
-| `STATIC_DIR` | _(empty)_ | Path to built frontend assets; when empty, serves embedded assets |
-| `DB_PATH` | `intercom.db` | SQLite database file path |
-| `ALLOW_CORS` | `true` | Enable CORS headers |
-| `SESSION_TTL_MINUTES` | `720` | Session lifetime in minutes |
-| `TRUSTED_LAN_HTTP` | `true` | `true` = plain HTTP, `false` = HTTPS |
-| `TLS_MODE` | `file` | `file` (cert/key paths) or `certmagic` (in-app ACME) |
-| `TLS_CERT_FILE` | _(empty)_ | TLS certificate path (when `TRUSTED_LAN_HTTP=false`) |
-| `TLS_KEY_FILE` | _(empty)_ | TLS key path (when `TRUSTED_LAN_HTTP=false`) |
-| `PRODUCTION_MODE` | `false` | HTTPS on `:443` + HTTP redirect on `:80` |
-| `PRODUCTION_HTTPS_ADDR` | `:443` | HTTPS listen address in production mode |
-| `PRODUCTION_HTTP_REDIRECT_ADDR` | `:80` | HTTP redirect address in production mode |
+| Variable                        | Default       | Description                                                       |
+| ------------------------------- | ------------- | ----------------------------------------------------------------- |
+| `APP_ADDR`                      | `:8080`       | Listen address                                                    |
+| `STATIC_DIR`                    | _(empty)_     | Path to built frontend assets; when empty, serves embedded assets |
+| `DB_PATH`                       | `intercom.db` | SQLite database file path                                         |
+| `ALLOW_CORS`                    | `true`        | Enable CORS headers                                               |
+| `SESSION_TTL_MINUTES`           | `720`         | Session lifetime in minutes                                       |
+| `TRUSTED_LAN_HTTP`              | `true`        | `true` = plain HTTP, `false` = HTTPS                              |
+| `TLS_MODE`                      | `file`        | `file` (cert/key paths) or `certmagic` (in-app ACME)              |
+| `TLS_CERT_FILE`                 | _(empty)_     | TLS certificate path (when `TRUSTED_LAN_HTTP=false`)              |
+| `TLS_KEY_FILE`                  | _(empty)_     | TLS key path (when `TRUSTED_LAN_HTTP=false`)                      |
+| `PRODUCTION_MODE`               | `false`       | HTTPS on `:443` + HTTP redirect on `:80`                          |
+| `PRODUCTION_HTTPS_ADDR`         | `:443`        | HTTPS listen address in production mode                           |
+| `PRODUCTION_HTTP_REDIRECT_ADDR` | `:80`         | HTTP redirect address in production mode                          |
 
 ### CertMagic variables (when `TLS_MODE=certmagic`)
 
-| Variable | Default | Description |
-|---|---|---|
-| `CERTMAGIC_DOMAINS` | _(empty)_ | Comma-separated domain list (required) |
-| `CERTMAGIC_EMAIL` | _(empty)_ | ACME account email (recommended) |
-| `CERTMAGIC_CA` | Let's Encrypt production | ACME directory URL |
-| `CERTMAGIC_STORAGE_PATH` | `./certmagic-data` | Persistent storage for certs/account keys |
-| `CERTMAGIC_DNS_PROVIDER` | _(empty)_ | `cloudflare`, `hetzner`, or `route53` |
-| `CERTMAGIC_PROPAGATION_TIMEOUT_SECONDS` | `120` | Max wait for DNS propagation |
+| Variable                                | Default                  | Description                               |
+| --------------------------------------- | ------------------------ | ----------------------------------------- |
+| `CERTMAGIC_DOMAINS`                     | _(empty)_                | Comma-separated domain list (required)    |
+| `CERTMAGIC_EMAIL`                       | _(empty)_                | ACME account email (recommended)          |
+| `CERTMAGIC_CA`                          | Let's Encrypt production | ACME directory URL                        |
+| `CERTMAGIC_STORAGE_PATH`                | `./certmagic-data`       | Persistent storage for certs/account keys |
+| `CERTMAGIC_DNS_PROVIDER`                | _(empty)_                | `cloudflare`, `hetzner`, or `route53`     |
+| `CERTMAGIC_PROPAGATION_TIMEOUT_SECONDS` | `120`                    | Max wait for DNS propagation              |
 
 Provider-specific credentials:
+
 - **Cloudflare:** `CERTMAGIC_CLOUDFLARE_API_TOKEN` (optional: `CERTMAGIC_CLOUDFLARE_ZONE_TOKEN`)
 - **Hetzner:** `CERTMAGIC_HETZNER_API_TOKEN`
 - **Route53:** `CERTMAGIC_ROUTE53_REGION`, `CERTMAGIC_ROUTE53_ACCESS_KEY_ID`, `CERTMAGIC_ROUTE53_SECRET_ACCESS_KEY` (and optionally `_PROFILE`, `_SESSION_TOKEN`, `_HOSTED_ZONE_ID`)
@@ -183,5 +191,5 @@ Output constraints:
 - Explicitly call out where I must wait for DNS propagation and how to verify TXT/A records.
 - End with a concise maintenance checklist (renewal checks, DNS checks, cert expiry checks).
 ```
-</details>
 
+</details>

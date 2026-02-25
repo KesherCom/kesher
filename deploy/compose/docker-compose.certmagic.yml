@@ -45,7 +45,11 @@ services:
       - intercom_data:/app/data
       - intercom_certmagic:/app/certmagic
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/api/healthz >/dev/null 2>&1 || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:80/api/healthz >/dev/null 2>&1 || exit 1",
+        ]
       interval: 15s
       timeout: 3s
       retries: 5

@@ -33,20 +33,24 @@ export function SimpleIntercomView({
   onSelectedOutputDeviceIdChange,
   outputDevices,
   outputSelectionSupported,
-  simplePptTargetLabel
-  ,
-  doLogout
+  simplePptTargetLabel,
+  doLogout,
 }: SimpleIntercomViewProps) {
-  const [pressedButton, setPressedButton] = useState<"main" | "reply" | null>(null);
+  const [pressedButton, setPressedButton] = useState<"main" | "reply" | null>(
+    null,
+  );
 
-  const mainActive = pressedButton === "main" || (pttPressed && pressedButton == null);
+  const mainActive =
+    pressedButton === "main" || (pttPressed && pressedButton == null);
   const replyActive = pressedButton === "reply";
 
   return (
     <div className="root app simple-shell">
       <section className="simple-controls">
         <div className="simple-top-actions">
-          <button className="simple-logout" onClick={doLogout}>Logout</button>
+          <button className="simple-logout" onClick={doLogout}>
+            Logout
+          </button>
         </div>
         <button
           className={`simple-ptt ${mainActive ? "active" : ""}`}
@@ -95,7 +99,9 @@ export function SimpleIntercomView({
           }}
         >
           Reply to caller
-          <small>{replyTarget ? replyTarget.username : "No active caller"}</small>
+          <small>
+            {replyTarget ? replyTarget.username : "No active caller"}
+          </small>
         </button>
 
         <label className="simple-mic">
@@ -105,7 +111,9 @@ export function SimpleIntercomView({
             onChange={(e) => onSelectedInputDeviceIdChange(e.target.value)}
             disabled={inputDevices.length === 0}
           >
-            {inputDevices.length === 0 ? <option value="">No input devices</option> : null}
+            {inputDevices.length === 0 ? (
+              <option value="">No input devices</option>
+            ) : null}
             {inputDevices.map((d) => (
               <option key={`simple-mic-${d.deviceId}`} value={d.deviceId}>
                 {d.label || `Mic ${d.deviceId.slice(0, 6)}`}
@@ -121,7 +129,11 @@ export function SimpleIntercomView({
             disabled={outputDevices.length === 0}
           >
             <option value="">System default</option>
-            {outputDevices.length === 0 ? <option value="" disabled>No output devices</option> : null}
+            {outputDevices.length === 0 ? (
+              <option value="" disabled>
+                No output devices
+              </option>
+            ) : null}
             {outputDevices.map((d) => (
               <option key={`simple-out-${d.deviceId}`} value={d.deviceId}>
                 {d.label || `Output ${d.deviceId.slice(0, 6)}`}
@@ -129,7 +141,10 @@ export function SimpleIntercomView({
             ))}
           </select>
           {!outputSelectionSupported ? (
-            <small>Explicit speaker selection is not supported; using system default output.</small>
+            <small>
+              Explicit speaker selection is not supported; using system default
+              output.
+            </small>
           ) : null}
         </label>
       </section>

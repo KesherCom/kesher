@@ -3,7 +3,7 @@ import type { Bootstrap } from "../../types";
 import {
   createBroadcastGroup,
   deleteBroadcastGroup,
-  updateBroadcastGroup
+  updateBroadcastGroup,
 } from "../../api";
 import { RoleMultiSelect } from "./RoleMultiSelect";
 import { RoomMultiSelect } from "./RoomMultiSelect";
@@ -17,7 +17,7 @@ type AdminChannelsCardProps = {
 export function AdminChannelsCard({
   token,
   appData,
-  refreshBootstrapData
+  refreshBootstrapData,
 }: AdminChannelsCardProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [adminBusy, setAdminBusy] = useState(false);
@@ -26,12 +26,16 @@ export function AdminChannelsCard({
   const [groupCreateId, setGroupCreateId] = useState("");
   const [groupCreateName, setGroupCreateName] = useState("");
   const [groupCreateRoomIds, setGroupCreateRoomIds] = useState<string[]>([]);
-  const [groupCreateAllowedRoleIds, setGroupCreateAllowedRoleIds] = useState<string[]>([]);
+  const [groupCreateAllowedRoleIds, setGroupCreateAllowedRoleIds] = useState<
+    string[]
+  >([]);
   const [showGroupCreateForm, setShowGroupCreateForm] = useState(false);
   const [groupEditId, setGroupEditId] = useState<string | null>(null);
   const [groupEditName, setGroupEditName] = useState("");
   const [groupEditRoomIds, setGroupEditRoomIds] = useState<string[]>([]);
-  const [groupEditAllowedRoleIds, setGroupEditAllowedRoleIds] = useState<string[]>([]);
+  const [groupEditAllowedRoleIds, setGroupEditAllowedRoleIds] = useState<
+    string[]
+  >([]);
 
   async function runAdminAction(action: () => Promise<void>) {
     setAdminBusy(true);
@@ -40,7 +44,9 @@ export function AdminChannelsCard({
       await action();
       await refreshBootstrapData();
     } catch (error) {
-      setAdminError(error instanceof Error ? error.message : "admin operation failed");
+      setAdminError(
+        error instanceof Error ? error.message : "admin operation failed",
+      );
     } finally {
       setAdminBusy(false);
     }
@@ -69,7 +75,7 @@ export function AdminChannelsCard({
         id,
         name,
         roomIds: groupCreateRoomIds,
-        allowedRoleIds: groupCreateAllowedRoleIds
+        allowedRoleIds: groupCreateAllowedRoleIds,
       });
       resetGroupCreateForm();
       setShowGroupCreateForm(false);
@@ -84,7 +90,7 @@ export function AdminChannelsCard({
       await updateBroadcastGroup(token, groupEditId, {
         name,
         roomIds: groupEditRoomIds,
-        allowedRoleIds: groupEditAllowedRoleIds
+        allowedRoleIds: groupEditAllowedRoleIds,
       });
       resetGroupEditForm();
     });
@@ -102,7 +108,9 @@ export function AdminChannelsCard({
   return (
     <div className="admin-card">
       <div className="admin-card-header">
-        <div className="admin-card-title">Configuration · Broadcast Channels</div>
+        <div className="admin-card-title">
+          Configuration · Broadcast Channels
+        </div>
         <div className="admin-card-actions">
           <button
             className="admin-toggle-button"
@@ -152,7 +160,12 @@ export function AdminChannelsCard({
                   />
                   <button
                     onClick={createBroadcastGroupConfig}
-                    disabled={adminBusy || !groupCreateId.trim() || !groupCreateName.trim() || groupCreateRoomIds.length === 0}
+                    disabled={
+                      adminBusy ||
+                      !groupCreateId.trim() ||
+                      !groupCreateName.trim() ||
+                      groupCreateRoomIds.length === 0
+                    }
                   >
                     Create channel
                   </button>
@@ -189,13 +202,30 @@ export function AdminChannelsCard({
 
             {groupEditId ? (
               <div className="admin-edit-panel">
-                <div className="admin-edit-title">Editing channel: {groupEditId}</div>
+                <div className="admin-edit-title">
+                  Editing channel: {groupEditId}
+                </div>
                 <div className="admin-grid">
-                  <input value={groupEditName} onChange={(e) => setGroupEditName(e.target.value)} placeholder="Channel name" />
-                  <button onClick={saveGroupEdit} disabled={adminBusy || !groupEditName.trim() || groupEditRoomIds.length === 0}>
+                  <input
+                    value={groupEditName}
+                    onChange={(e) => setGroupEditName(e.target.value)}
+                    placeholder="Channel name"
+                  />
+                  <button
+                    onClick={saveGroupEdit}
+                    disabled={
+                      adminBusy ||
+                      !groupEditName.trim() ||
+                      groupEditRoomIds.length === 0
+                    }
+                  >
                     Save changes
                   </button>
-                  <button onClick={resetGroupEditForm} disabled={adminBusy} className="secondary">
+                  <button
+                    onClick={resetGroupEditForm}
+                    disabled={adminBusy}
+                    className="secondary"
+                  >
                     Cancel
                   </button>
                 </div>
@@ -236,7 +266,11 @@ export function AdminChannelsCard({
                   >
                     Edit
                   </button>
-                  <button onClick={() => removeBroadcastGroupConfig(group.id)} disabled={adminBusy} className="delete">
+                  <button
+                    onClick={() => removeBroadcastGroupConfig(group.id)}
+                    disabled={adminBusy}
+                    className="delete"
+                  >
                     Delete
                   </button>
                 </li>

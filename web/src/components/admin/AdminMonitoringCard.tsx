@@ -7,7 +7,7 @@ type AdminMonitoringCardProps = {
 
 export function AdminMonitoringCard({
   audioStats,
-  activeRoutesCount
+  activeRoutesCount,
 }: AdminMonitoringCardProps) {
   const [isOpen, setIsOpen] = React.useState(false);
 

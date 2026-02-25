@@ -26,7 +26,11 @@ services:
       - intercom_data:/app/data
       - intercom_certs:/app/certs
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://127.0.0.1:8443/api/healthz >/dev/null 2>&1 || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-check-certificate -qO- https://127.0.0.1:8443/api/healthz >/dev/null 2>&1 || exit 1",
+        ]
       interval: 15s
       timeout: 3s
       retries: 5

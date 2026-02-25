@@ -1,0 +1,47 @@
+# Pre-commit hooks configuration for live-production-intercom
+repos:
+  # Secret scanning
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.28.0
+    hooks:
+      - id: gitleaks
+
+  # Generic repository hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-case-conflict
+
+  # Go formatting (backend + desktop-proxy modules)
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+
+  # JS/TS/React formatting
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        files: ^(web/src/.*\.(js|jsx|ts|tsx|css)|companion/module-live-production-intercom/src/.*\.(js|ts)|.*\.(json|md|yml|yaml))$
+
+  # Project-specific builds/type checks
+  - repo: local
+    hooks:
+      - id: web-typescript-build
+        name: web-typescript-build
+        entry: npm --prefix web run build
+        language: system
+        pass_filenames: false
+        files: ^web/
+      - id: companion-typescript-build
+        name: companion-typescript-build
+        entry: npm --prefix companion/module-live-production-intercom run build
+        language: system
+        pass_filenames: false
+        files: ^companion/module-live-production-intercom/

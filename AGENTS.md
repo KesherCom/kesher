@@ -47,6 +47,7 @@ cd companion/module-live-production-intercom && npm run package
 ## High-level architecture
 
 This repository has four parts:
+
 - `backend/`: Go API + WebSocket event hub + embedded WebRTC SFU + SQLite persistence.
 - `web/`: React/Vite SPA for operator clients.
 - `desktop-proxy/`: Standalone Go binary that reverse-proxies a remote backend to `127.0.0.1`, giving desktop clients a localhost secure context for `getUserMedia()` without system-wide trust.
@@ -67,6 +68,7 @@ This repository has four parts:
 - `static_embedded.go`: `//go:embed` for `embedded_web/` directory so the backend binary can serve frontend assets without `STATIC_DIR`. `make sync-embedded-web` copies `web/dist` into this directory before build.
 
 Important coupling to understand before changing routing logic:
+
 - `Hub` and `MediaManager` are intentionally linked (`hub.SetMediaManager(media)`), and `MediaManager` reads hub client state while holding internal locks for routing decisions.
 - Authorization for room/broadcast access is enforced in both event handling (`server.go` + `hub.go`) and media forwarding (`media.go`), so behavior changes usually require updates in both places.
 - Store sentinel errors (`ErrInvalidInput`, `ErrConflict`, `ErrNotFound`) are mapped centrally in `writeStoreErr`.

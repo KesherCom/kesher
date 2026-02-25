@@ -29,4 +29,3 @@ ENV ALLOW_CORS=false
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 \
   CMD wget -qO- http://127.0.0.1:8080/api/healthz >/dev/null 2>&1 || exit 1
 CMD ["/app/server"]
-

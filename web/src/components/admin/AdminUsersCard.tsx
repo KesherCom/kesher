@@ -11,7 +11,7 @@ type AdminUsersCardProps = {
 export function AdminUsersCard({
   token,
   appData,
-  refreshBootstrapData
+  refreshBootstrapData,
 }: AdminUsersCardProps) {
   const [isOpen, setIsOpen] = useState(false);
 

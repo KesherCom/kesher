@@ -1,7 +1,9 @@
 # live-production-intercom Companion module
+
 Custom Bitfocus Companion module for controlling `live-production-intercom` browser sessions.
 
 ## What it does
+
 - Connects to backend bridge WebSocket: `/api/companion/ws?username=<username>`
 - Loads discovery data from: `/api/companion/discovery?username=<username>`
 - Exposes actions for:
@@ -20,24 +22,29 @@ Custom Bitfocus Companion module for controlling `live-production-intercom` brow
   - last command failed
 
 ## Develop/build
+
 ```sh
 npm install
 npm run build
 ```
 
 If you use Yarn 4:
+
 ```sh
 yarn
 yarn build
 ```
 
 ## Package for Companion local install
+
 ```sh
 npm run package
 ```
+
 This uses `companion-module-build` and produces a package artifact in this module directory.
 
 ## Install in Bitfocus Companion (local module)
+
 1. Build/package this module.
 2. In Companion, add a local custom module (or import local module package artifact).
 3. Configure:
@@ -47,5 +54,6 @@ This uses `companion-module-build` and produces a package artifact in this modul
 4. Add actions/presets to buttons.
 
 ## Notes
+
 - The module controls an existing browser session; it does not capture microphone audio itself.
 - Commands are acknowledged with command IDs and surfaced via `last_command_ok` / `last_command_error` variables and failure feedback.

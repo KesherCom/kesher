@@ -1,10 +1,6 @@
 import React, { useState } from "react";
 import type { Bootstrap } from "../../types";
-import {
-  createRoom,
-  deleteRoom,
-  updateRoom
-} from "../../api";
+import { createRoom, deleteRoom, updateRoom } from "../../api";
 import { RoleMultiSelect } from "./RoleMultiSelect";
 
 type AdminRoomsCardProps = {
@@ -16,7 +12,7 @@ type AdminRoomsCardProps = {
 export function AdminRoomsCard({
   token,
   appData,
-  refreshBootstrapData
+  refreshBootstrapData,
 }: AdminRoomsCardProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [adminBusy, setAdminBusy] = useState(false);
@@ -24,13 +20,21 @@ export function AdminRoomsCard({
 
   const [roomCreateId, setRoomCreateId] = useState("");
   const [roomCreateName, setRoomCreateName] = useState("");
-  const [roomCreateSenderRoleIds, setRoomCreateSenderRoleIds] = useState<string[]>([]);
-  const [roomCreateReceiverRoleIds, setRoomCreateReceiverRoleIds] = useState<string[]>([]);
+  const [roomCreateSenderRoleIds, setRoomCreateSenderRoleIds] = useState<
+    string[]
+  >([]);
+  const [roomCreateReceiverRoleIds, setRoomCreateReceiverRoleIds] = useState<
+    string[]
+  >([]);
   const [showRoomCreateForm, setShowRoomCreateForm] = useState(false);
   const [roomEditId, setRoomEditId] = useState<string | null>(null);
   const [roomEditName, setRoomEditName] = useState("");
-  const [roomEditSenderRoleIds, setRoomEditSenderRoleIds] = useState<string[]>([]);
-  const [roomEditReceiverRoleIds, setRoomEditReceiverRoleIds] = useState<string[]>([]);
+  const [roomEditSenderRoleIds, setRoomEditSenderRoleIds] = useState<string[]>(
+    [],
+  );
+  const [roomEditReceiverRoleIds, setRoomEditReceiverRoleIds] = useState<
+    string[]
+  >([]);
 
   async function runAdminAction(action: () => Promise<void>) {
     setAdminBusy(true);
@@ -39,7 +43,9 @@ export function AdminRoomsCard({
       await action();
       await refreshBootstrapData();
     } catch (error) {
-      setAdminError(error instanceof Error ? error.message : "admin operation failed");
+      setAdminError(
+        error instanceof Error ? error.message : "admin operation failed",
+      );
     } finally {
       setAdminBusy(false);
     }
@@ -68,7 +74,7 @@ export function AdminRoomsCard({
         id,
         name,
         senderRoleIds: roomCreateSenderRoleIds,
-        receiverRoleIds: roomCreateReceiverRoleIds
+        receiverRoleIds: roomCreateReceiverRoleIds,
       });
       resetRoomCreateForm();
       setShowRoomCreateForm(false);
@@ -83,7 +89,7 @@ export function AdminRoomsCard({
       await updateRoom(token, roomEditId, {
         name,
         senderRoleIds: roomEditSenderRoleIds,
-        receiverRoleIds: roomEditReceiverRoleIds
+        receiverRoleIds: roomEditReceiverRoleIds,
       });
       resetRoomEditForm();
     });
@@ -139,9 +145,24 @@ export function AdminRoomsCard({
               <div className="admin-edit-panel">
                 <div className="admin-edit-title">New room</div>
                 <div className="admin-grid">
-                  <input value={roomCreateId} onChange={(e) => setRoomCreateId(e.target.value)} placeholder="room-id" />
-                  <input value={roomCreateName} onChange={(e) => setRoomCreateName(e.target.value)} placeholder="Room name" />
-                  <button onClick={createRoomConfig} disabled={adminBusy || !roomCreateId.trim() || !roomCreateName.trim()}>
+                  <input
+                    value={roomCreateId}
+                    onChange={(e) => setRoomCreateId(e.target.value)}
+                    placeholder="room-id"
+                  />
+                  <input
+                    value={roomCreateName}
+                    onChange={(e) => setRoomCreateName(e.target.value)}
+                    placeholder="Room name"
+                  />
+                  <button
+                    onClick={createRoomConfig}
+                    disabled={
+                      adminBusy ||
+                      !roomCreateId.trim() ||
+                      !roomCreateName.trim()
+                    }
+                  >
                     Create room
                   </button>
                   <button
@@ -177,13 +198,26 @@ export function AdminRoomsCard({
 
             {roomEditId ? (
               <div className="admin-edit-panel">
-                <div className="admin-edit-title">Editing room: {roomEditId}</div>
+                <div className="admin-edit-title">
+                  Editing room: {roomEditId}
+                </div>
                 <div className="admin-grid">
-                  <input value={roomEditName} onChange={(e) => setRoomEditName(e.target.value)} placeholder="Room name" />
-                  <button onClick={saveRoomEdit} disabled={adminBusy || !roomEditName.trim()}>
+                  <input
+                    value={roomEditName}
+                    onChange={(e) => setRoomEditName(e.target.value)}
+                    placeholder="Room name"
+                  />
+                  <button
+                    onClick={saveRoomEdit}
+                    disabled={adminBusy || !roomEditName.trim()}
+                  >
                     Save changes
                   </button>
-                  <button onClick={resetRoomEditForm} disabled={adminBusy} className="secondary">
+                  <button
+                    onClick={resetRoomEditForm}
+                    disabled={adminBusy}
+                    className="secondary"
+                  >
                     Cancel
                   </button>
                 </div>
@@ -224,7 +258,11 @@ export function AdminRoomsCard({
                   >
                     Edit
                   </button>
-                  <button onClick={() => removeRoomConfig(room.id)} disabled={adminBusy} className="delete">
+                  <button
+                    onClick={() => removeRoomConfig(room.id)}
+                    disabled={adminBusy}
+                    className="delete"
+                  >
                     Delete
                   </button>
                 </li>

@@ -35,7 +35,7 @@ export function AudioPanel({
   setIsOutputMenuOpen,
   setSelectedOutputDeviceId,
   micMenuRef,
-  outputMenuRef
+  outputMenuRef,
 }: AudioPanelProps) {
   return (
     <>
@@ -119,9 +119,11 @@ export function AudioPanel({
         ) : null}
       </div>
       {!outputSelectionSupported ? (
-        <small>Explicit speaker selection is not supported by this browser; using system default output.</small>
+        <small>
+          Explicit speaker selection is not supported by this browser; using
+          system default output.
+        </small>
       ) : null}
     </>
   );
 }
-

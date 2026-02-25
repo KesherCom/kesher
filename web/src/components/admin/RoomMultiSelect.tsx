@@ -11,12 +11,22 @@ type RoomMultiSelectProps = {
 
 function toggleRoomInSelection(
   roomValue: string,
-  setState: Dispatch<SetStateAction<string[]>>
+  setState: Dispatch<SetStateAction<string[]>>,
 ) {
-  setState((prev) => (prev.includes(roomValue) ? prev.filter((entry) => entry !== roomValue) : [...prev, roomValue]));
+  setState((prev) =>
+    prev.includes(roomValue)
+      ? prev.filter((entry) => entry !== roomValue)
+      : [...prev, roomValue],
+  );
 }
 
-export function RoomMultiSelect({ label, selectedRoomIds, setState, keyPrefix, rooms }: RoomMultiSelectProps) {
+export function RoomMultiSelect({
+  label,
+  selectedRoomIds,
+  setState,
+  keyPrefix,
+  rooms,
+}: RoomMultiSelectProps) {
   return (
     <div className="role-multiselect">
       <details className="role-multiselect-details">
@@ -26,12 +36,20 @@ export function RoomMultiSelect({ label, selectedRoomIds, setState, keyPrefix, r
             {selectedRoomIds.length === 0
               ? "No rooms selected"
               : selectedRoomIds
-                  .map((roomEntryId) => rooms.find((room) => room.id === roomEntryId)?.name || roomEntryId)
+                  .map(
+                    (roomEntryId) =>
+                      rooms.find((room) => room.id === roomEntryId)?.name ||
+                      roomEntryId,
+                  )
                   .join(", ")}
           </span>
         </summary>
         <div className="role-multiselect-menu">
-          <button type="button" className="secondary role-multiselect-reset" onClick={() => setState([])}>
+          <button
+            type="button"
+            className="secondary role-multiselect-reset"
+            onClick={() => setState([])}
+          >
             Clear selection
           </button>
           <div className="role-multiselect-options">
@@ -45,7 +63,9 @@ export function RoomMultiSelect({ label, selectedRoomIds, setState, keyPrefix, r
                   checked={selectedRoomIds.includes(room.id)}
                   onChange={() => toggleRoomInSelection(room.id, setState)}
                 />
-                <span className="role-multiselect-option-text">{room.name}</span>
+                <span className="role-multiselect-option-text">
+                  {room.name}
+                </span>
               </label>
             ))}
           </div>
@@ -54,4 +74,3 @@ export function RoomMultiSelect({ label, selectedRoomIds, setState, keyPrefix, r
     </div>
   );
 }
-

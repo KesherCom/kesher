@@ -1,10 +1,6 @@
 import React, { useState } from "react";
 import type { Bootstrap } from "../../types";
-import {
-  createRole,
-  deleteRole,
-  updateRole
-} from "../../api";
+import { createRole, deleteRole, updateRole } from "../../api";
 
 type AdminRolesCardProps = {
   token: string;
@@ -15,7 +11,7 @@ type AdminRolesCardProps = {
 export function AdminRolesCard({
   token,
   appData,
-  refreshBootstrapData
+  refreshBootstrapData,
 }: AdminRolesCardProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [adminBusy, setAdminBusy] = useState(false);
@@ -24,14 +20,20 @@ export function AdminRolesCard({
   const [roleCreateId, setRoleCreateId] = useState("");
   const [roleCreateName, setRoleCreateName] = useState("");
   const [roleCreateDefaultRoomId, setRoleCreateDefaultRoomId] = useState("");
-  const [roleCreateDefaultVoiceMode, setRoleCreateDefaultVoiceMode] = useState<"always_on" | "ptt" | "">();
-  const [roleCreateDefaultSimpleView, setRoleCreateDefaultSimpleView] = useState(false);
+  const [roleCreateDefaultVoiceMode, setRoleCreateDefaultVoiceMode] = useState<
+    "always_on" | "ptt" | ""
+  >();
+  const [roleCreateDefaultSimpleView, setRoleCreateDefaultSimpleView] =
+    useState(false);
   const [showRoleCreateForm, setShowRoleCreateForm] = useState(false);
   const [roleEditId, setRoleEditId] = useState<string | null>(null);
   const [roleEditName, setRoleEditName] = useState("");
   const [roleEditDefaultRoomId, setRoleEditDefaultRoomId] = useState("");
-  const [roleEditDefaultVoiceMode, setRoleEditDefaultVoiceMode] = useState<"always_on" | "ptt" | "">();
-  const [roleEditDefaultSimpleView, setRoleEditDefaultSimpleView] = useState(false);
+  const [roleEditDefaultVoiceMode, setRoleEditDefaultVoiceMode] = useState<
+    "always_on" | "ptt" | ""
+  >();
+  const [roleEditDefaultSimpleView, setRoleEditDefaultSimpleView] =
+    useState(false);
 
   async function runAdminAction(action: () => Promise<void>) {
     setAdminBusy(true);
@@ -40,7 +42,9 @@ export function AdminRolesCard({
       await action();
       await refreshBootstrapData();
     } catch (error) {
-      setAdminError(error instanceof Error ? error.message : "admin operation failed");
+      setAdminError(
+        error instanceof Error ? error.message : "admin operation failed",
+      );
     } finally {
       setAdminBusy(false);
     }
@@ -72,7 +76,7 @@ export function AdminRolesCard({
         name,
         defaultRoomId: roleCreateDefaultRoomId.trim() || undefined,
         defaultVoiceMode: roleCreateDefaultVoiceMode || undefined,
-        defaultSimpleView: roleCreateDefaultSimpleView
+        defaultSimpleView: roleCreateDefaultSimpleView,
       });
       resetRoleCreateForm();
       setShowRoleCreateForm(false);
@@ -88,7 +92,7 @@ export function AdminRolesCard({
         name,
         defaultRoomId: roleEditDefaultRoomId.trim() || undefined,
         defaultVoiceMode: roleEditDefaultVoiceMode || undefined,
-        defaultSimpleView: roleEditDefaultSimpleView
+        defaultSimpleView: roleEditDefaultSimpleView,
       });
       resetRoleEditForm();
     });
@@ -144,8 +148,16 @@ export function AdminRolesCard({
               <div className="admin-edit-panel">
                 <div className="admin-edit-title">New role</div>
                 <div className="admin-grid">
-                  <input value={roleCreateId} onChange={(e) => setRoleCreateId(e.target.value)} placeholder="role-id" />
-                  <input value={roleCreateName} onChange={(e) => setRoleCreateName(e.target.value)} placeholder="Role name" />
+                  <input
+                    value={roleCreateId}
+                    onChange={(e) => setRoleCreateId(e.target.value)}
+                    placeholder="role-id"
+                  />
+                  <input
+                    value={roleCreateName}
+                    onChange={(e) => setRoleCreateName(e.target.value)}
+                    placeholder="Role name"
+                  />
                   <select
                     value={roleCreateDefaultRoomId}
                     onChange={(e) => setRoleCreateDefaultRoomId(e.target.value)}
@@ -160,7 +172,11 @@ export function AdminRolesCard({
                   </select>
                   <select
                     value={roleCreateDefaultVoiceMode}
-                    onChange={(e) => setRoleCreateDefaultVoiceMode(e.target.value as "always_on" | "ptt" | "")}
+                    onChange={(e) =>
+                      setRoleCreateDefaultVoiceMode(
+                        e.target.value as "always_on" | "ptt" | "",
+                      )
+                    }
                     aria-label="Default audio mode"
                   >
                     <option value="">Default audio mode…</option>
@@ -171,13 +187,22 @@ export function AdminRolesCard({
                     <input
                       type="checkbox"
                       checked={roleCreateDefaultSimpleView}
-                      onChange={(e) => setRoleCreateDefaultSimpleView(e.target.checked)}
+                      onChange={(e) =>
+                        setRoleCreateDefaultSimpleView(e.target.checked)
+                      }
                     />
                     <span>Default to simple mobile view</span>
                   </label>
                 </div>
                 <div className="admin-form-actions">
-                  <button onClick={createRoleConfig} disabled={adminBusy || !roleCreateId.trim() || !roleCreateName.trim()}>
+                  <button
+                    onClick={createRoleConfig}
+                    disabled={
+                      adminBusy ||
+                      !roleCreateId.trim() ||
+                      !roleCreateName.trim()
+                    }
+                  >
                     Create role
                   </button>
                   <button
@@ -197,9 +222,15 @@ export function AdminRolesCard({
 
             {roleEditId ? (
               <div className="admin-edit-panel">
-                <div className="admin-edit-title">Editing role: {roleEditId}</div>
+                <div className="admin-edit-title">
+                  Editing role: {roleEditId}
+                </div>
                 <div className="admin-grid">
-                  <input value={roleEditName} onChange={(e) => setRoleEditName(e.target.value)} placeholder="Role name" />
+                  <input
+                    value={roleEditName}
+                    onChange={(e) => setRoleEditName(e.target.value)}
+                    placeholder="Role name"
+                  />
                   <select
                     value={roleEditDefaultRoomId}
                     onChange={(e) => setRoleEditDefaultRoomId(e.target.value)}
@@ -214,7 +245,11 @@ export function AdminRolesCard({
                   </select>
                   <select
                     value={roleEditDefaultVoiceMode}
-                    onChange={(e) => setRoleEditDefaultVoiceMode(e.target.value as "always_on" | "ptt" | "")}
+                    onChange={(e) =>
+                      setRoleEditDefaultVoiceMode(
+                        e.target.value as "always_on" | "ptt" | "",
+                      )
+                    }
                     aria-label="Default audio mode"
                   >
                     <option value="">Default audio mode…</option>
@@ -225,16 +260,25 @@ export function AdminRolesCard({
                     <input
                       type="checkbox"
                       checked={roleEditDefaultSimpleView}
-                      onChange={(e) => setRoleEditDefaultSimpleView(e.target.checked)}
+                      onChange={(e) =>
+                        setRoleEditDefaultSimpleView(e.target.checked)
+                      }
                     />
                     <span>Default to simple mobile view</span>
                   </label>
                 </div>
                 <div className="admin-form-actions">
-                  <button onClick={saveRoleEdit} disabled={adminBusy || !roleEditName.trim()}>
+                  <button
+                    onClick={saveRoleEdit}
+                    disabled={adminBusy || !roleEditName.trim()}
+                  >
                     Save changes
                   </button>
-                  <button onClick={resetRoleEditForm} disabled={adminBusy} className="secondary">
+                  <button
+                    onClick={resetRoleEditForm}
+                    disabled={adminBusy}
+                    className="secondary"
+                  >
                     Cancel
                   </button>
                 </div>
@@ -254,13 +298,19 @@ export function AdminRolesCard({
                       setRoleEditId(role.id);
                       setRoleEditName(role.name);
                       setRoleEditDefaultRoomId(role.defaultRoomId || "");
-                      setRoleEditDefaultVoiceMode((role.defaultVoiceMode as "always_on" | "ptt") || "");
+                      setRoleEditDefaultVoiceMode(
+                        (role.defaultVoiceMode as "always_on" | "ptt") || "",
+                      );
                       setRoleEditDefaultSimpleView(!!role.defaultSimpleView);
                     }}
                   >
                     Edit
                   </button>
-                  <button onClick={() => removeRoleConfig(role.id)} disabled={adminBusy} className="delete">
+                  <button
+                    onClick={() => removeRoleConfig(role.id)}
+                    disabled={adminBusy}
+                    className="delete"
+                  >
                     Delete
                   </button>
                 </li>

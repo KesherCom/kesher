@@ -305,7 +305,7 @@ func NewServer(cfg Config) (*Server, error) {
 		sessions: NewSessionManager(cfg.SessionTTL),
 		hub:      NewHub(store, logger),
 		upgrader: websocket.Upgrader{
-			CheckOrigin:     func(r *http.Request) bool { return true },
+			CheckOrigin:      func(r *http.Request) bool { return true },
 			HandshakeTimeout: 10 * time.Second,
 		},
 	}

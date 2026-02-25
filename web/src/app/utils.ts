@@ -4,7 +4,10 @@ export function sourceUserIDFromTrackID(trackID: string): string {
   return trackID.slice(prefix.length);
 }
 
-export function sourceUserIDFromRemoteSDPMid(pc: RTCPeerConnection | null, mid: string | null | undefined): string {
+export function sourceUserIDFromRemoteSDPMid(
+  pc: RTCPeerConnection | null,
+  mid: string | null | undefined,
+): string {
   if (!pc || !mid) return "";
   const sdp = pc.remoteDescription?.sdp;
   if (!sdp) return "";

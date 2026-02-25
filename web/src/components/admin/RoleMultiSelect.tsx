@@ -11,12 +11,22 @@ type RoleMultiSelectProps = {
 
 function toggleRoleInSelection(
   roleValue: string,
-  setState: Dispatch<SetStateAction<string[]>>
+  setState: Dispatch<SetStateAction<string[]>>,
 ) {
-  setState((prev) => (prev.includes(roleValue) ? prev.filter((entry) => entry !== roleValue) : [...prev, roleValue]));
+  setState((prev) =>
+    prev.includes(roleValue)
+      ? prev.filter((entry) => entry !== roleValue)
+      : [...prev, roleValue],
+  );
 }
 
-export function RoleMultiSelect({ label, selectedRoleIds, setState, keyPrefix, roles }: RoleMultiSelectProps) {
+export function RoleMultiSelect({
+  label,
+  selectedRoleIds,
+  setState,
+  keyPrefix,
+  roles,
+}: RoleMultiSelectProps) {
   return (
     <div className="role-multiselect">
       <details className="role-multiselect-details">
@@ -25,11 +35,21 @@ export function RoleMultiSelect({ label, selectedRoleIds, setState, keyPrefix, r
           <span className="role-multiselect-value">
             {selectedRoleIds.length === 0
               ? "All roles"
-              : selectedRoleIds.map((roleEntryId) => roles.find((role) => role.id === roleEntryId)?.name || roleEntryId).join(", ")}
+              : selectedRoleIds
+                  .map(
+                    (roleEntryId) =>
+                      roles.find((role) => role.id === roleEntryId)?.name ||
+                      roleEntryId,
+                  )
+                  .join(", ")}
           </span>
         </summary>
         <div className="role-multiselect-menu">
-          <button type="button" className="secondary role-multiselect-reset" onClick={() => setState([])}>
+          <button
+            type="button"
+            className="secondary role-multiselect-reset"
+            onClick={() => setState([])}
+          >
             Clear (allow all)
           </button>
           <div className="role-multiselect-options">
@@ -43,7 +63,9 @@ export function RoleMultiSelect({ label, selectedRoleIds, setState, keyPrefix, r
                   checked={selectedRoleIds.includes(role.id)}
                   onChange={() => toggleRoleInSelection(role.id, setState)}
                 />
-                <span className="role-multiselect-option-text">{role.name}</span>
+                <span className="role-multiselect-option-text">
+                  {role.name}
+                </span>
               </label>
             ))}
           </div>
@@ -52,4 +74,3 @@ export function RoleMultiSelect({ label, selectedRoleIds, setState, keyPrefix, r
     </div>
   );
 }
-

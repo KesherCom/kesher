@@ -25,10 +25,10 @@ export function AdminMenu({
   adminPin,
   onUpdateAdminPin,
   audioStats,
-  activeRoutesCount
+  activeRoutesCount,
 }: AdminMenuProps) {
   if (!token) return null;
-  
+
   return (
     <div className="admin-stack">
       <AdminConfigCard
@@ -36,12 +36,9 @@ export function AdminMenu({
         appData={appData}
         refreshBootstrapData={refreshBootstrapData}
       />
-      
-      <AdminPinCard
-        adminPin={adminPin}
-        onUpdateAdminPin={onUpdateAdminPin}
-      />
-      
+
+      <AdminPinCard adminPin={adminPin} onUpdateAdminPin={onUpdateAdminPin} />
+
       <AdminMonitoringCard
         audioStats={audioStats}
         activeRoutesCount={activeRoutesCount}

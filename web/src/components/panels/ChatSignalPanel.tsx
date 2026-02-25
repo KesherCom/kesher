@@ -2,9 +2,20 @@ type ChatSignalPanelProps = {
   message: string;
   onMessageChange: (value: string) => void;
   onSendChat: () => void;
-  chatMessages: Array<{ from: string; body: string; at: string; room: string; self: boolean }>;
+  chatMessages: Array<{
+    from: string;
+    body: string;
+    at: string;
+    room: string;
+    self: boolean;
+  }>;
 };
-export function ChatSignalPanel({ message, onMessageChange, onSendChat, chatMessages }: ChatSignalPanelProps) {
+export function ChatSignalPanel({
+  message,
+  onMessageChange,
+  onSendChat,
+  chatMessages,
+}: ChatSignalPanelProps) {
   return (
     <>
       <div className="chat">
@@ -22,7 +33,10 @@ export function ChatSignalPanel({ message, onMessageChange, onSendChat, chatMess
         ) : (
           <ul className="chat-feed-list">
             {chatMessages.map((entry, index) => (
-              <li key={`${entry.at}-${entry.from}-${index}`} className={entry.self ? "self" : ""}>
+              <li
+                key={`${entry.at}-${entry.from}-${index}`}
+                className={entry.self ? "self" : ""}
+              >
                 <div className="chat-feed-meta">
                   <span>{entry.at}</span>
                   <strong>{entry.from}</strong>
@@ -37,4 +51,3 @@ export function ChatSignalPanel({ message, onMessageChange, onSendChat, chatMess
     </>
   );
 }
-

@@ -57,7 +57,11 @@ type StationIntercomViewProps = {
   directPttPressedUserId: string | null;
   startDirectPtt: (userId: string) => void;
   stopDirectPtt: (userId: string) => void;
-  sendScopedSignal: (scopeValue: "direct" | "room" | "broadcast", scopedTargetId: string, signal: string) => void;
+  sendScopedSignal: (
+    scopeValue: "direct" | "room" | "broadcast",
+    scopedTargetId: string,
+    signal: string,
+  ) => void;
   pttPressed: boolean;
   startPtt: () => void;
   stopPtt: () => void;
@@ -163,7 +167,7 @@ export function StationIntercomView({
   selectedOutputDeviceId,
   selectedOutputLabel,
   outputSelectionSupported,
-  setSelectedOutputDeviceId
+  setSelectedOutputDeviceId,
 }: StationIntercomViewProps) {
   const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
   const [isOutputMenuOpen, setIsOutputMenuOpen] = useState(false);
@@ -175,10 +179,16 @@ export function StationIntercomView({
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (micMenuRef.current && !micMenuRef.current.contains(event.target as Node)) {
+      if (
+        micMenuRef.current &&
+        !micMenuRef.current.contains(event.target as Node)
+      ) {
         setIsMicMenuOpen(false);
       }
-      if (outputMenuRef.current && !outputMenuRef.current.contains(event.target as Node)) {
+      if (
+        outputMenuRef.current &&
+        !outputMenuRef.current.contains(event.target as Node)
+      ) {
         setIsOutputMenuOpen(false);
       }
     };
@@ -188,33 +198,63 @@ export function StationIntercomView({
 
   const allDirectOnlineTargets = useMemo(() => {
     return presence
-      .filter((p) => p.userId !== appData.self.id && p.username.toLowerCase() !== "admin")
+      .filter(
+        (p) =>
+          p.userId !== appData.self.id && p.username.toLowerCase() !== "admin",
+      )
       .slice()
       .sort((a, b) => {
-        const roleA = (roleNameById.get(a.roleId) || a.roleId || "").toLowerCase();
-        const roleB = (roleNameById.get(b.roleId) || b.roleId || "").toLowerCase();
-        const byRole = roleA.localeCompare(roleB, undefined, { sensitivity: "base" });
+        const roleA = (
+          roleNameById.get(a.roleId) ||
+          a.roleId ||
+          ""
+        ).toLowerCase();
+        const roleB = (
+          roleNameById.get(b.roleId) ||
+          b.roleId ||
+          ""
+        ).toLowerCase();
+        const byRole = roleA.localeCompare(roleB, undefined, {
+          sensitivity: "base",
+        });
         if (byRole !== 0) return byRole;
-        return a.username.localeCompare(b.username, undefined, { sensitivity: "base" });
+        return a.username.localeCompare(b.username, undefined, {
+          sensitivity: "base",
+        });
       });
   }, [appData.self.id, presence, roleNameById]);
 
   const directOnlineTargets = useMemo(
-    () => (showPinnedOnly ? allDirectOnlineTargets.filter((p) => pinnedUserIds.includes(p.userId)) : allDirectOnlineTargets),
-    [allDirectOnlineTargets, pinnedUserIds, showPinnedOnly]
+    () =>
+      showPinnedOnly
+        ? allDirectOnlineTargets.filter((p) => pinnedUserIds.includes(p.userId))
+        : allDirectOnlineTargets,
+    [allDirectOnlineTargets, pinnedUserIds, showPinnedOnly],
   );
 
   const directGroups = useMemo(() => {
     if (!enableDirectTabs) return [];
 
-    const groups: Array<{ tabId: string; label: string; count: number; users: typeof allDirectOnlineTargets }> = [];
-    
+    const groups: Array<{
+      tabId: string;
+      label: string;
+      count: number;
+      users: typeof allDirectOnlineTargets;
+    }> = [];
+
     // When tabs are enabled, always use allDirectOnlineTargets (ignore showPinnedOnly)
-    
+
     // Favorites tab
-    const favorites = allDirectOnlineTargets.filter((p) => pinnedUserIds.includes(p.userId));
-    groups.push({ tabId: "favorites", label: "Favorites", count: favorites.length, users: favorites });
-    
+    const favorites = allDirectOnlineTargets.filter((p) =>
+      pinnedUserIds.includes(p.userId),
+    );
+    groups.push({
+      tabId: "favorites",
+      label: "Favorites",
+      count: favorites.length,
+      users: favorites,
+    });
+
     // Role-based tabs
     const roleGroups = new Map<string, typeof allDirectOnlineTargets>();
     for (const p of allDirectOnlineTargets) {
@@ -226,12 +266,22 @@ export function StationIntercomView({
     }
     for (const [roleId, users] of roleGroups) {
       const roleLabel = roleNameById.get(roleId) || roleId || "Unknown";
-      groups.push({ tabId: roleId, label: roleLabel, count: users.length, users });
+      groups.push({
+        tabId: roleId,
+        label: roleLabel,
+        count: users.length,
+        users,
+      });
     }
-    
+
     // All tab
-    groups.push({ tabId: "all", label: "All", count: allDirectOnlineTargets.length, users: allDirectOnlineTargets });
-    
+    groups.push({
+      tabId: "all",
+      label: "All",
+      count: allDirectOnlineTargets.length,
+      users: allDirectOnlineTargets,
+    });
+
     return groups;
   }, [enableDirectTabs, allDirectOnlineTargets, pinnedUserIds, roleNameById]);
 
@@ -252,11 +302,16 @@ export function StationIntercomView({
   }, [enableDirectTabs, directGroups, activeDirectTab]);
 
   const visibleRooms = useMemo(
-    () => (showPinnedOnly ? appData.rooms.filter((room) => pinnedRoomIds.includes(room.id)) : appData.rooms),
-    [appData.rooms, pinnedRoomIds, showPinnedOnly]
+    () =>
+      showPinnedOnly
+        ? appData.rooms.filter((room) => pinnedRoomIds.includes(room.id))
+        : appData.rooms,
+    [appData.rooms, pinnedRoomIds, showPinnedOnly],
   );
 
-  const replyTarget = allDirectOnlineTargets.find((p) => p.userId === lastDirectCallerUserId) || null;
+  const replyTarget =
+    allDirectOnlineTargets.find((p) => p.userId === lastDirectCallerUserId) ||
+    null;
   const replyTargetUserId = lastDirectCallerUserId;
 
   return (
@@ -267,7 +322,10 @@ export function StationIntercomView({
           Live: {appData.self.username.toUpperCase()}
         </div>
         <div className="station-top-actions">
-          <button className="station-top-admin" onClick={() => setIsUserSettingsOpen(true)}>
+          <button
+            className="station-top-admin"
+            onClick={() => setIsUserSettingsOpen(true)}
+          >
             User settings
           </button>
           <button className="station-top-logout" onClick={doLogout}>
@@ -279,17 +337,25 @@ export function StationIntercomView({
       <section className="station-block station-talk-section">
         <h3>Talk channels</h3>
         <div className="station-filter-bar small">
-          <span className="station-filter-hint">Pin rooms or users to keep focus when things get busy.</span>
+          <span className="station-filter-hint">
+            Pin rooms or users to keep focus when things get busy.
+          </span>
         </div>
-        {visibleRooms.length === 0 ? <p className="station-empty">No channels to show.</p> : null}
+        {visibleRooms.length === 0 ? (
+          <p className="station-empty">No channels to show.</p>
+        ) : null}
         <div className="station-talk-grid">
-              {visibleRooms.map((room) => {
+          {visibleRooms.map((room) => {
             const listening = listenRoomIds.includes(room.id);
             const talking = talkRoomIds.includes(room.id);
             const canTalk = canRoleSendToRoom(room.id, appData.self.roleId);
-            const canListen = canRoleReceiveFromRoom(room.id, appData.self.roleId);
-            const isPttPressed = enableDirectPpt && pptPressedChannelId === room.id;
-            
+            const canListen = canRoleReceiveFromRoom(
+              room.id,
+              appData.self.roleId,
+            );
+            const isPttPressed =
+              enableDirectPpt && pptPressedChannelId === room.id;
+
             const handleTalkPointerDown = () => {
               if (enableDirectPpt) {
                 onChannelPptStart(room.id);
@@ -297,13 +363,13 @@ export function StationIntercomView({
                 toggleTalkRoom(room.id);
               }
             };
-            
+
             const handleTalkPointerUp = () => {
               if (enableDirectPpt) {
                 onChannelPptStop(room.id);
               }
             };
-            
+
             return (
               <article key={`station-room-${room.id}`} className="station-card">
                 <button
@@ -315,28 +381,58 @@ export function StationIntercomView({
                     event.stopPropagation();
                     onTogglePinnedRoom(room.id);
                   }}
-                  title={pinnedRoomIds.includes(room.id) ? "Unpin channel" : "Pin channel"}
+                  title={
+                    pinnedRoomIds.includes(room.id)
+                      ? "Unpin channel"
+                      : "Pin channel"
+                  }
                 >
                   ★
                 </button>
                 <button
                   className={`station-card-head ${
-                    enableDirectPpt ? (isPttPressed ? "ppt-active" : "") : talking ? "selected" : ""
+                    enableDirectPpt
+                      ? isPttPressed
+                        ? "ppt-active"
+                        : ""
+                      : talking
+                        ? "selected"
+                        : ""
                   } ${canTalk ? "" : "disabled"}`}
                   onPointerDown={canTalk ? handleTalkPointerDown : undefined}
                   onPointerUp={canTalk ? handleTalkPointerUp : undefined}
-                  onPointerLeave={canTalk && enableDirectPpt && isPttPressed ? handleTalkPointerUp : undefined}
-                  onPointerCancel={canTalk && enableDirectPpt && isPttPressed ? handleTalkPointerUp : undefined}
-                  onClick={!enableDirectPpt && canTalk ? () => toggleTalkRoom(room.id) : undefined}
+                  onPointerLeave={
+                    canTalk && enableDirectPpt && isPttPressed
+                      ? handleTalkPointerUp
+                      : undefined
+                  }
+                  onPointerCancel={
+                    canTalk && enableDirectPpt && isPttPressed
+                      ? handleTalkPointerUp
+                      : undefined
+                  }
+                  onClick={
+                    !enableDirectPpt && canTalk
+                      ? () => toggleTalkRoom(room.id)
+                      : undefined
+                  }
                   disabled={!canTalk}
-                  title={canTalk ? "" : "Your role is not allowed to send to this room"}
+                  title={
+                    canTalk
+                      ? ""
+                      : "Your role is not allowed to send to this room"
+                  }
                 >
-                  {isReceivingRoom(room.id) ? <span className="station-receiving-badge">🔊</span> : null}
+                  {isReceivingRoom(room.id) ? (
+                    <span className="station-receiving-badge">🔊</span>
+                  ) : null}
                   <small>Talk</small>
                   <strong>{room.name}</strong>
                 </button>
                 <div className="station-gain-control">
-                  <label htmlFor={`room-gain-${room.id}`}>{gainToDbLabel(roomGainById[room.id] ?? 1)}</label>
+                  <label htmlFor={`room-gain-${room.id}`}>
+                    {gainToDbLabel(roomGainById[room.id] ?? 1)}
+                  </label>
                   <input
                     id={`room-gain-${room.id}`}
                     type="range"
@@ -344,11 +440,20 @@ export function StationIntercomView({
                     max={DB_MAX}
                     step={1}
                     value={gainToSlider(roomGainById[room.id] ?? 1)}
-                    style={{ "--fill": `${sliderFillPercent(roomGainById[room.id] ?? 1)}%` } as React.CSSProperties}
+                    style={
+                      {
+                        "--fill": `${sliderFillPercent(roomGainById[room.id] ?? 1)}%`,
+                      } as React.CSSProperties
+                    }
                     onPointerDown={(event) => event.stopPropagation()}
                     onPointerUp={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}
-                    onChange={(event) => onRoomGainChange(room.id, sliderToGain(Number(event.currentTarget.value)))}
+                    onChange={(event) =>
+                      onRoomGainChange(
+                        room.id,
+                        sliderToGain(Number(event.currentTarget.value)),
+                      )
+                    }
                   />
                 </div>
                 <div className="station-card-actions">
@@ -356,7 +461,11 @@ export function StationIntercomView({
                     className={`listen ${listening ? "on" : ""} ${canListen ? "" : "disabled"}`}
                     onClick={() => toggleListenRoom(room.id)}
                     disabled={!canListen}
-                    title={canListen ? "" : "Your role is not allowed to receive from this room"}
+                    title={
+                      canListen
+                        ? ""
+                        : "Your role is not allowed to receive from this room"
+                    }
                   >
                     Listen
                   </button>
@@ -364,7 +473,11 @@ export function StationIntercomView({
                     className={`call ${canTalk ? "" : "disabled"}`}
                     onClick={() => sendScopedSignal("room", room.id, "call")}
                     disabled={!canTalk}
-                    title={canTalk ? "" : "Your role is not allowed to send to this room"}
+                    title={
+                      canTalk
+                        ? ""
+                        : "Your role is not allowed to send to this room"
+                    }
                   >
                     Call
                   </button>
@@ -379,7 +492,11 @@ export function StationIntercomView({
         <h3>Direct communication</h3>
         {enableDirectTabs && directGroups.length > 0 ? (
           <>
-            <div className="station-direct-tabs" role="tablist" aria-label="Direct communication tabs">
+            <div
+              className="station-direct-tabs"
+              role="tablist"
+              aria-label="Direct communication tabs"
+            >
               {directGroups.map((group) => (
                 <button
                   key={`direct-tab-${group.tabId}`}
@@ -398,7 +515,10 @@ export function StationIntercomView({
             ) : (
               <div className="station-direct-grid">
                 {displayedDirectUsers.map((p) => (
-                  <article key={`station-direct-${p.userId}`} className="station-card station-direct-card">
+                  <article
+                    key={`station-direct-${p.userId}`}
+                    className="station-card station-direct-card"
+                  >
                     <button
                       type="button"
                       className={`station-pin-top ${pinnedUserIds.includes(p.userId) ? "active" : ""}`}
@@ -408,7 +528,11 @@ export function StationIntercomView({
                         event.stopPropagation();
                         onTogglePinnedUser(p.userId);
                       }}
-                      title={pinnedUserIds.includes(p.userId) ? "Unpin user" : "Pin user"}
+                      title={
+                        pinnedUserIds.includes(p.userId)
+                          ? "Unpin user"
+                          : "Pin user"
+                      }
                     >
                       ★
                     </button>
@@ -419,13 +543,21 @@ export function StationIntercomView({
                       onPointerLeave={() => stopDirectPtt(p.userId)}
                       onPointerCancel={() => stopDirectPtt(p.userId)}
                     >
-                      {isReceivingDirect(p.userId) ? <span className="station-receiving-badge">🔊</span> : null}
+                      {isReceivingDirect(p.userId) ? (
+                        <span className="station-receiving-badge">🔊</span>
+                      ) : null}
                       <small>Direct</small>
                       <strong>{p.username}</strong>
-                      <em>{roleNameById.get(p.roleId) || p.roleId || "Unknown role"}</em>
+                      <em>
+                        {roleNameById.get(p.roleId) ||
+                          p.roleId ||
+                          "Unknown role"}
+                      </em>
                     </button>
                     <div className="station-gain-control">
-                      <label htmlFor={`direct-gain-${p.userId}`}>{gainToDbLabel(directGainByUserId[p.userId] ?? 1)}</label>
+                      <label htmlFor={`direct-gain-${p.userId}`}>
+                        {gainToDbLabel(directGainByUserId[p.userId] ?? 1)}
+                      </label>
                       <input
                         id={`direct-gain-${p.userId}`}
                         type="range"
@@ -433,17 +565,28 @@ export function StationIntercomView({
                         max={DB_MAX}
                         step={1}
                         value={gainToSlider(directGainByUserId[p.userId] ?? 1)}
-                        style={{ "--fill": `${sliderFillPercent(directGainByUserId[p.userId] ?? 1)}%` } as React.CSSProperties}
+                        style={
+                          {
+                            "--fill": `${sliderFillPercent(directGainByUserId[p.userId] ?? 1)}%`,
+                          } as React.CSSProperties
+                        }
                         onPointerDown={(event) => event.stopPropagation()}
                         onPointerUp={(event) => event.stopPropagation()}
                         onClick={(event) => event.stopPropagation()}
-                        onChange={(event) => onDirectGainChange(p.userId, sliderToGain(Number(event.currentTarget.value)))}
+                        onChange={(event) =>
+                          onDirectGainChange(
+                            p.userId,
+                            sliderToGain(Number(event.currentTarget.value)),
+                          )
+                        }
                       />
                     </div>
                     <div className="station-card-actions single">
                       <button
                         className={`call ${/* disabled handled by class */ ""}`}
-                        onClick={() => sendScopedSignal("direct", p.userId, "call")}
+                        onClick={() =>
+                          sendScopedSignal("direct", p.userId, "call")
+                        }
                         title="Call user"
                       >
                         Call
@@ -455,11 +598,18 @@ export function StationIntercomView({
             )}
           </>
         ) : directOnlineTargets.length === 0 ? (
-          <p className="station-empty">{showPinnedOnly ? "No pinned users online." : "No other users online."}</p>
+          <p className="station-empty">
+            {showPinnedOnly
+              ? "No pinned users online."
+              : "No other users online."}
+          </p>
         ) : (
           <div className="station-direct-grid">
             {directOnlineTargets.map((p) => (
-              <article key={`station-direct-${p.userId}`} className="station-card station-direct-card">
+              <article
+                key={`station-direct-${p.userId}`}
+                className="station-card station-direct-card"
+              >
                 <button
                   type="button"
                   className={`station-pin-top ${pinnedUserIds.includes(p.userId) ? "active" : ""}`}
@@ -469,7 +619,9 @@ export function StationIntercomView({
                     event.stopPropagation();
                     onTogglePinnedUser(p.userId);
                   }}
-                  title={pinnedUserIds.includes(p.userId) ? "Unpin user" : "Pin user"}
+                  title={
+                    pinnedUserIds.includes(p.userId) ? "Unpin user" : "Pin user"
+                  }
                 >
                   ★
                 </button>
@@ -480,13 +632,19 @@ export function StationIntercomView({
                   onPointerLeave={() => stopDirectPtt(p.userId)}
                   onPointerCancel={() => stopDirectPtt(p.userId)}
                 >
-                  {isReceivingDirect(p.userId) ? <span className="station-receiving-badge">🔊</span> : null}
+                  {isReceivingDirect(p.userId) ? (
+                    <span className="station-receiving-badge">🔊</span>
+                  ) : null}
                   <small>Direct</small>
                   <strong>{p.username}</strong>
-                  <em>{roleNameById.get(p.roleId) || p.roleId || "Unknown role"}</em>
+                  <em>
+                    {roleNameById.get(p.roleId) || p.roleId || "Unknown role"}
+                  </em>
                 </button>
                 <div className="station-gain-control">
-                  <label htmlFor={`direct-gain-${p.userId}`}>{gainToDbLabel(directGainByUserId[p.userId] ?? 1)}</label>
+                  <label htmlFor={`direct-gain-${p.userId}`}>
+                    {gainToDbLabel(directGainByUserId[p.userId] ?? 1)}
+                  </label>
                   <input
                     id={`direct-gain-${p.userId}`}
                     type="range"
@@ -494,11 +652,20 @@ export function StationIntercomView({
                     max={DB_MAX}
                     step={1}
                     value={gainToSlider(directGainByUserId[p.userId] ?? 1)}
-                    style={{ "--fill": `${sliderFillPercent(directGainByUserId[p.userId] ?? 1)}%` } as React.CSSProperties}
+                    style={
+                      {
+                        "--fill": `${sliderFillPercent(directGainByUserId[p.userId] ?? 1)}%`,
+                      } as React.CSSProperties
+                    }
                     onPointerDown={(event) => event.stopPropagation()}
                     onPointerUp={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}
-                    onChange={(event) => onDirectGainChange(p.userId, sliderToGain(Number(event.currentTarget.value)))}
+                    onChange={(event) =>
+                      onDirectGainChange(
+                        p.userId,
+                        sliderToGain(Number(event.currentTarget.value)),
+                      )
+                    }
                   />
                 </div>
                 <div className="station-card-actions single">
@@ -526,23 +693,45 @@ export function StationIntercomView({
         >
           Hold to talk
         </button>
-        <label className={`station-always-on ${voiceMode === "always_on" ? "active" : ""}`}>
-          <input type="checkbox" checked={voiceMode === "always_on"} onChange={(e) => setAlwaysOn(e.target.checked)} />
+        <label
+          className={`station-always-on ${voiceMode === "always_on" ? "active" : ""}`}
+        >
+          <input
+            type="checkbox"
+            checked={voiceMode === "always_on"}
+            onChange={(e) => setAlwaysOn(e.target.checked)}
+          />
           <span>Always on</span>
         </label>
 
         <button
           className={`station-reply ${replyTargetUserId ? "" : "disabled"} ${
-            replyTargetUserId && directPttPressedUserId === replyTargetUserId ? "active" : ""
+            replyTargetUserId && directPttPressedUserId === replyTargetUserId
+              ? "active"
+              : ""
           }`}
           disabled={!replyTargetUserId}
-          onPointerDown={() => (replyTargetUserId ? startDirectPtt(replyTargetUserId) : undefined)}
-          onPointerUp={() => (replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined)}
-          onPointerLeave={() => (replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined)}
-          onPointerCancel={() => (replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined)}
+          onPointerDown={() =>
+            replyTargetUserId ? startDirectPtt(replyTargetUserId) : undefined
+          }
+          onPointerUp={() =>
+            replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined
+          }
+          onPointerLeave={() =>
+            replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined
+          }
+          onPointerCancel={() =>
+            replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined
+          }
         >
           Reply to caller
-          <small>{replyTarget ? replyTarget.username : replyTargetUserId ? "Recent caller" : "No active caller"}</small>
+          <small>
+            {replyTarget
+              ? replyTarget.username
+              : replyTargetUserId
+                ? "Recent caller"
+                : "No active caller"}
+          </small>
         </button>
       </section>
 
@@ -551,22 +740,40 @@ export function StationIntercomView({
           <h3>Broadcast channels</h3>
           <div className="station-broadcast-grid">
             {broadcastGroups.map((group) => {
-              const allowedRoleIds = Array.isArray(group.allowedRoleIds) ? group.allowedRoleIds : [];
-              const canSend = allowedRoleIds.length === 0 || allowedRoleIds.includes(appData.self.roleId);
+              const allowedRoleIds = Array.isArray(group.allowedRoleIds)
+                ? group.allowedRoleIds
+                : [];
+              const canSend =
+                allowedRoleIds.length === 0 ||
+                allowedRoleIds.includes(appData.self.roleId);
               return (
                 <button
                   key={group.id}
                   className={`station-broadcast-button ${broadcastPttPressed === group.id ? "active" : ""} ${
                     canSend ? "" : "disabled"
                   }`}
-                  onPointerDown={() => (canSend ? startBroadcastPtt(group.id) : undefined)}
-                  onPointerUp={() => (canSend ? stopBroadcastPtt(group.id) : undefined)}
-                  onPointerLeave={() => (canSend ? stopBroadcastPtt(group.id) : undefined)}
-                  onPointerCancel={() => (canSend ? stopBroadcastPtt(group.id) : undefined)}
+                  onPointerDown={() =>
+                    canSend ? startBroadcastPtt(group.id) : undefined
+                  }
+                  onPointerUp={() =>
+                    canSend ? stopBroadcastPtt(group.id) : undefined
+                  }
+                  onPointerLeave={() =>
+                    canSend ? stopBroadcastPtt(group.id) : undefined
+                  }
+                  onPointerCancel={() =>
+                    canSend ? stopBroadcastPtt(group.id) : undefined
+                  }
                   disabled={!canSend}
-                  title={canSend ? "" : "Your role is not allowed to send to this broadcast channel"}
+                  title={
+                    canSend
+                      ? ""
+                      : "Your role is not allowed to send to this broadcast channel"
+                  }
                 >
-                  {isReceivingBroadcast(group.id) ? <span className="station-broadcast-receiving">🔊</span> : null}
+                  {isReceivingBroadcast(group.id) ? (
+                    <span className="station-broadcast-receiving">🔊</span>
+                  ) : null}
                   {group.name}
                 </button>
               );
@@ -578,13 +785,24 @@ export function StationIntercomView({
       <section className="station-utility station-utility-section">
         <div className="panel">{chatAndSignalPanel}</div>
       </section>
-      {showDebug ? <section className="panel">{realtimeDebugBlock}</section> : null}
+      {showDebug ? (
+        <section className="panel">{realtimeDebugBlock}</section>
+      ) : null}
       {isUserSettingsOpen ? (
-        <div className="station-modal-backdrop" onClick={() => setIsUserSettingsOpen(false)}>
-          <section className="station-modal panel" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="station-modal-backdrop"
+          onClick={() => setIsUserSettingsOpen(false)}
+        >
+          <section
+            className="station-modal panel"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="station-modal-header">
               <h3>User settings</h3>
-              <button className="station-modal-close" onClick={() => setIsUserSettingsOpen(false)}>
+              <button
+                className="station-modal-close"
+                onClick={() => setIsUserSettingsOpen(false)}
+              >
                 Close
               </button>
             </div>
@@ -613,123 +831,139 @@ export function StationIntercomView({
                 />
                 <span>Show direct communication as tabs</span>
               </label>
-              
+
               <div className="audio-section">
-              <div className={`audio-box ${isAudioOpen ? "" : "collapsed"}`}>
-                <div className="audio-box-header">
-                  <button
-                    type="button"
-                    className="audio-box-toggle"
-                    onClick={() => setIsAudioOpen((v) => !v)}
-                    aria-expanded={isAudioOpen}
-                  >
-                    Sound settings
-                    <span className={`chev ${isAudioOpen ? "open" : ""}`}>▾</span>
-                  </button>
-                </div>
-                {isAudioOpen ? (
-                  <div className="audio-box-body">
-                    <div className="audio-left">
-                <h4>Microphone</h4>
-                <div className="audio-row audio-row-mic">
-                  <div className="mic-dropdown" ref={micMenuRef}>
+                <div className={`audio-box ${isAudioOpen ? "" : "collapsed"}`}>
+                  <div className="audio-box-header">
                     <button
                       type="button"
-                      className="mic-dropdown-trigger"
-                      onClick={() => setIsMicMenuOpen((v) => !v)}
-                      disabled={inputDevices.length === 0}
-                      aria-haspopup="listbox"
-                      aria-expanded={isMicMenuOpen}
+                      className="audio-box-toggle"
+                      onClick={() => setIsAudioOpen((v) => !v)}
+                      aria-expanded={isAudioOpen}
                     >
-                      <span>{selectedMicLabel}</span>
-                      <span>▾</span>
+                      Sound settings
+                      <span className={`chev ${isAudioOpen ? "open" : ""}`}>
+                        ▾
+                      </span>
                     </button>
-                    {isMicMenuOpen ? (
-                      <div className="mic-dropdown-menu" role="listbox">
-                        {inputDevices.map((d) => (
+                  </div>
+                  {isAudioOpen ? (
+                    <div className="audio-box-body">
+                      <div className="audio-left">
+                        <h4>Microphone</h4>
+                        <div className="audio-row audio-row-mic">
+                          <div className="mic-dropdown" ref={micMenuRef}>
+                            <button
+                              type="button"
+                              className="mic-dropdown-trigger"
+                              onClick={() => setIsMicMenuOpen((v) => !v)}
+                              disabled={inputDevices.length === 0}
+                              aria-haspopup="listbox"
+                              aria-expanded={isMicMenuOpen}
+                            >
+                              <span>{selectedMicLabel}</span>
+                              <span>▾</span>
+                            </button>
+                            {isMicMenuOpen ? (
+                              <div className="mic-dropdown-menu" role="listbox">
+                                {inputDevices.map((d) => (
+                                  <button
+                                    type="button"
+                                    key={d.deviceId}
+                                    className={`mic-dropdown-item ${d.deviceId === selectedInputDeviceId ? "active" : ""}`}
+                                    onClick={() => {
+                                      setSelectedInputDeviceId(d.deviceId);
+                                      setIsMicMenuOpen(false);
+                                    }}
+                                    title={
+                                      d.label || `Mic ${d.deviceId.slice(0, 6)}`
+                                    }
+                                  >
+                                    {d.label || `Mic ${d.deviceId.slice(0, 6)}`}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="input-level-row" aria-live="polite">
+                          <div className="input-level-head">
+                            <small>Input level</small>
+                            <strong>{inputLevel}%</strong>
+                          </div>
+                          <div className="meter">
+                            <div
+                              className="meter-bar"
+                              style={{ width: `${inputLevel}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="audio-right">
+                        <h4>Speaker output</h4>
+                        <div className="mic-dropdown" ref={outputMenuRef}>
                           <button
                             type="button"
-                            key={d.deviceId}
-                            className={`mic-dropdown-item ${d.deviceId === selectedInputDeviceId ? "active" : ""}`}
-                            onClick={() => {
-                              setSelectedInputDeviceId(d.deviceId);
-                              setIsMicMenuOpen(false);
-                            }}
-                            title={d.label || `Mic ${d.deviceId.slice(0, 6)}`}
+                            className="mic-dropdown-trigger"
+                            onClick={() => setIsOutputMenuOpen((v) => !v)}
+                            disabled={outputDevices.length === 0}
+                            aria-haspopup="listbox"
+                            aria-expanded={isOutputMenuOpen}
                           >
-                            {d.label || `Mic ${d.deviceId.slice(0, 6)}`}
+                            <span>{selectedOutputLabel}</span>
+                            <span>▾</span>
                           </button>
-                        ))}
+                          {isOutputMenuOpen ? (
+                            <div className="mic-dropdown-menu" role="listbox">
+                              <button
+                                type="button"
+                                className={`mic-dropdown-item ${selectedOutputDeviceId === "" ? "active" : ""}`}
+                                onClick={() => {
+                                  setSelectedOutputDeviceId("");
+                                  setIsOutputMenuOpen(false);
+                                }}
+                                title="System default"
+                              >
+                                System default
+                              </button>
+                              {outputDevices.map((d) => (
+                                <button
+                                  type="button"
+                                  key={d.deviceId}
+                                  className={`mic-dropdown-item ${d.deviceId === selectedOutputDeviceId ? "active" : ""}`}
+                                  onClick={() => {
+                                    setSelectedOutputDeviceId(d.deviceId);
+                                    setIsOutputMenuOpen(false);
+                                  }}
+                                  title={
+                                    d.label ||
+                                    `Output ${d.deviceId.slice(0, 6)}`
+                                  }
+                                >
+                                  {d.label ||
+                                    `Output ${d.deviceId.slice(0, 6)}`}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                        {!outputSelectionSupported ? (
+                          <small
+                            style={{ display: "block", marginTop: "0.5rem" }}
+                          >
+                            Explicit speaker selection is not supported by this
+                            browser; using system default output.
+                          </small>
+                        ) : null}
                       </div>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="input-level-row" aria-live="polite">
-                  <div className="input-level-head">
-                    <small>Input level</small>
-                    <strong>{inputLevel}%</strong>
-                  </div>
-                  <div className="meter">
-                    <div className="meter-bar" style={{ width: `${inputLevel}%` }} />
-                  </div>
-                </div>
-                    </div>
-                    <div className="audio-right">
-                      <h4>Speaker output</h4>
-                      <div className="mic-dropdown" ref={outputMenuRef}>
-                  <button
-                    type="button"
-                    className="mic-dropdown-trigger"
-                    onClick={() => setIsOutputMenuOpen((v) => !v)}
-                    disabled={outputDevices.length === 0}
-                    aria-haspopup="listbox"
-                    aria-expanded={isOutputMenuOpen}
-                  >
-                    <span>{selectedOutputLabel}</span>
-                    <span>▾</span>
-                  </button>
-                  {isOutputMenuOpen ? (
-                    <div className="mic-dropdown-menu" role="listbox">
-                      <button
-                        type="button"
-                        className={`mic-dropdown-item ${selectedOutputDeviceId === "" ? "active" : ""}`}
-                        onClick={() => {
-                          setSelectedOutputDeviceId("");
-                          setIsOutputMenuOpen(false);
-                        }}
-                        title="System default"
-                      >
-                        System default
-                      </button>
-                      {outputDevices.map((d) => (
-                        <button
-                          type="button"
-                          key={d.deviceId}
-                          className={`mic-dropdown-item ${d.deviceId === selectedOutputDeviceId ? "active" : ""}`}
-                          onClick={() => {
-                            setSelectedOutputDeviceId(d.deviceId);
-                            setIsOutputMenuOpen(false);
-                          }}
-                          title={d.label || `Output ${d.deviceId.slice(0, 6)}`}
-                        >
-                          {d.label || `Output ${d.deviceId.slice(0, 6)}`}
-                        </button>
-                      ))}
                     </div>
                   ) : null}
                 </div>
-                      {!outputSelectionSupported ? (
-                        <small style={{ display: "block", marginTop: "0.5rem" }}>
-                          Explicit speaker selection is not supported by this browser; using system default output.
-                        </small>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
               </div>
 
-              <p className="station-modal-hint">Preferences apply only to you on this device.</p>
+              <p className="station-modal-hint">
+                Preferences apply only to you on this device.
+              </p>
             </div>
           </section>
         </div>
@@ -737,4 +971,3 @@ export function StationIntercomView({
     </div>
   );
 }
-
