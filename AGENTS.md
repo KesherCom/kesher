@@ -32,9 +32,26 @@ cd backend && go test ./...
 cd backend && go test -run TestHubDirectRouting ./internal/app/
 cd desktop-proxy && go test ./...
 cd web && npm run build
+cd web && npm run test
+cd web && npm run test:watch
+cd web && npm run test:e2e
+cd web && npm run test:all
 ```
 
-There is no dedicated frontend test runner and no lint target in `Makefile`; validation is backend tests plus frontend TypeScript/Vite build.
+Frontend test tooling lives in `web/` (Vitest + Testing Library for unit/component tests, Playwright for E2E).
+If Playwright browsers are missing locally, run:
+
+```sh
+cd web && npx playwright install chromium
+```
+
+There is still no dedicated frontend lint target in `Makefile`; frontend validation is `npm run build` plus tests.
+
+## Pre-commit behavior
+
+- `.pre-commit-config.yaml` includes `web-quick-tests` (`npm --prefix web run test`) for fast frontend regression checks on commit.
+- It also runs `web-typescript-build` (`npm --prefix web run build`) and Prettier.
+- If hooks auto-format files, re-stage (`git add -A`) and re-run the same commit command.
 
 Companion module (Bitfocus) has its own npm project:
 
