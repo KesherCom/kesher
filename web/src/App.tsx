@@ -72,6 +72,7 @@ function clampGainValue(value: number): number {
   return Math.max(0, Math.min(2, value));
 }
 
+
 function sanitizeGainMap(value: unknown): Record<string, number> {
   if (!value || typeof value !== "object") return {};
   const entries = Object.entries(value as Record<string, unknown>)
@@ -803,6 +804,7 @@ export function App() {
     src.connect(analyser);
     analyserRef.current = analyser;
     const buf = new Uint8Array(analyser.frequencyBinCount);
+    let smoothed = 0;
     const tick = () => {
       analyser.getByteTimeDomainData(buf);
       let sum = 0;
@@ -811,7 +813,10 @@ export function App() {
         sum += centered * centered;
       }
       const rms = Math.sqrt(sum / buf.length);
-      setInputLevel(Math.min(100, Math.round(rms * 220)));
+      // sqrt-scale RMS for perceptual (log-like) meter, then smooth
+      const target = Math.sqrt(rms) * 150; // sqrt compresses loud, expands quiet
+      smoothed += (target - smoothed) * 0.3; // exponential smoothing
+      setInputLevel(Math.min(100, Math.max(0, Math.round(smoothed))));
       meterRafRef.current = requestAnimationFrame(tick);
     };
     meterRafRef.current = requestAnimationFrame(tick);
