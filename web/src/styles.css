@@ -1232,6 +1232,55 @@ button.secondary { background: transparent; }
   grid-template-columns: repeat(auto-fill, minmax(230px, 230px));
   gap: 0.65rem;
 }
+.station-direct-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.55rem;
+}
+.station-direct-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid #2b3a55;
+  background: #141d2b;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.64rem;
+  font-weight: 800;
+  color: #b9c8de;
+  flex: 1 1 140px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.station-direct-tab:hover {
+  background: #1a2537;
+  border-color: #364a6f;
+}
+.station-direct-tab.active {
+  background: var(--station-card-head-active-bg);
+  border-color: var(--station-card-head-active-bg);
+  color: #fff;
+}
+.station-direct-tab span {
+  text-align: left;
+}
+.station-direct-tab small {
+  border: 1px solid #385071;
+  border-radius: 999px;
+  padding: 0.08rem 0.42rem;
+  color: #d8e6ff;
+  font-size: 0.62rem;
+  min-width: 26px;
+  text-align: center;
+}
+.station-direct-tab.active small {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.15);
+}
 .station-card {
   border: 1px solid var(--border-medium);
   border-radius: 8px;
