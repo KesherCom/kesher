@@ -33,6 +33,12 @@ repos:
   # Project-specific builds/type checks
   - repo: local
     hooks:
+      - id: web-quick-tests
+        name: web-quick-tests
+        entry: npm --prefix web run test
+        language: system
+        pass_filenames: false
+        files: ^web/
       - id: web-typescript-build
         name: web-typescript-build
         entry: npm --prefix web run build
