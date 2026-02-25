@@ -1,1 +1,1 @@
-export const UpgradeScripts = []
+export const UpgradeScripts = [];

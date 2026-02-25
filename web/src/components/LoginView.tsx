@@ -24,7 +24,7 @@ export function LoginView({
   adminPin,
   onAdminPinChange,
   onAdminLogin,
-  adminError
+  adminError,
 }: LoginViewProps) {
   const [showAdmin, setShowAdmin] = useState(false);
   return (
@@ -37,11 +37,18 @@ export function LoginView({
         <div className="login-form">
           <label>
             <span className="login-label-text">Display name</span>
-            <input value={username} onChange={(e) => onUsernameChange(e.target.value)} placeholder="e.g. Tim FOH" />
+            <input
+              value={username}
+              onChange={(e) => onUsernameChange(e.target.value)}
+              placeholder="e.g. Tim FOH"
+            />
           </label>
           <label>
             <span className="login-label-text">Role</span>
-            <select value={roleId} onChange={(e) => onRoleChange(e.target.value)}>
+            <select
+              value={roleId}
+              onChange={(e) => onRoleChange(e.target.value)}
+            >
               <option value="">Select role</option>
               {publicData.roles.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -50,14 +57,21 @@ export function LoginView({
               ))}
             </select>
           </label>
-          <button className="primary" onClick={onLogin} disabled={!username.trim() || !roleId}>
+          <button
+            className="primary"
+            onClick={onLogin}
+            disabled={!username.trim() || !roleId}
+          >
             Join Intercom
           </button>
         </div>
 
         <div>
           {!showAdmin ? (
-            <button className="login-admin-toggle secondary" onClick={() => setShowAdmin(true)}>
+            <button
+              className="login-admin-toggle secondary"
+              onClick={() => setShowAdmin(true)}
+            >
               Show admin
             </button>
           ) : null}
@@ -68,7 +82,9 @@ export function LoginView({
                 <h3>Admin console</h3>
                 <span className="login-admin-pin-hint">PIN required</span>
               </div>
-              <p className="login-admin-note">For role and channel configuration only.</p>
+              <p className="login-admin-note">
+                For role and channel configuration only.
+              </p>
               <label>
                 <span className="login-label-text">Admin PIN</span>
                 <input
@@ -81,10 +97,19 @@ export function LoginView({
               </label>
               {adminError ? <p className="login-error">{adminError}</p> : null}
               <div className="login-admin-actions">
-                <button className="secondary" onClick={onAdminLogin} disabled={!adminPin.trim()}>
+                <button
+                  className="secondary"
+                  onClick={onAdminLogin}
+                  disabled={!adminPin.trim()}
+                >
                   Open admin console
                 </button>
-                <button className="secondary" onClick={() => setShowAdmin(false)}>Hide</button>
+                <button
+                  className="secondary"
+                  onClick={() => setShowAdmin(false)}
+                >
+                  Hide
+                </button>
               </div>
             </div>
           ) : null}
@@ -93,4 +118,3 @@ export function LoginView({
     </div>
   );
 }
-

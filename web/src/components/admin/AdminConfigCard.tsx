@@ -14,7 +14,7 @@ type AdminConfigCardProps = {
 export function AdminConfigCard({
   token,
   appData,
-  refreshBootstrapData
+  refreshBootstrapData,
 }: AdminConfigCardProps) {
   return (
     <>
@@ -23,19 +23,19 @@ export function AdminConfigCard({
         appData={appData}
         refreshBootstrapData={refreshBootstrapData}
       />
-      
+
       <AdminUsersCard
         token={token}
         appData={appData}
         refreshBootstrapData={refreshBootstrapData}
       />
-      
+
       <AdminRoomsCard
         token={token}
         appData={appData}
         refreshBootstrapData={refreshBootstrapData}
       />
-      
+
       <AdminChannelsCard
         token={token}
         appData={appData}

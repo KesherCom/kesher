@@ -20,7 +20,7 @@ export function ChannelSelector({
   enableDirectPpt,
   onChannelPttStart,
   onChannelPttStop,
-  pttPressedChannelId
+  pttPressedChannelId,
 }: ChannelSelectorProps) {
   const handleChannelPointerDown = (channelId: string) => {
     if (enableDirectPpt) {
@@ -75,7 +75,11 @@ export function ChannelSelector({
                 onPointerUp={() => handleChannelPointerUp(channel.id)}
                 onPointerLeave={() => handleChannelPointerLeave(channel.id)}
                 onPointerCancel={() => handleChannelPointerCancel(channel.id)}
-                title={enableDirectPpt ? "Press and hold to transmit" : "Click to select channel"}
+                title={
+                  enableDirectPpt
+                    ? "Press and hold to transmit"
+                    : "Click to select channel"
+                }
               >
                 <div className="channel-talk-label">TALK</div>
                 <div className="channel-name">{channel.label}</div>

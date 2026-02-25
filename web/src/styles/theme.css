@@ -1,13 +1,13 @@
 :root {
   color-scheme: dark;
   font-family: Inter, system-ui, sans-serif;
-  
+
   /* ==========================================
      THEME CUSTOMIZATION
      To change the color scheme, modify these variables below.
      All UI elements reference these colors.
      ========================================== */
-  
+
   /* Base Colors - Main palette */
   --bg: #0f1115;
   --surface: #0f1115;
@@ -19,18 +19,18 @@
   --p2p: #af52de;
   --text: #e2e8f0;
   --text-dim: #94a3b8;
-  
+
   /* Extended Base Colors */
   --accent-dark: #00a3cc;
   --surface-dark: #0f1115;
   --surface-darker: #060b14;
-  
+
   /* Semantic Colors - Status indicators */
   --color-success: #34c759;
   --color-error: #ff3b30;
   --color-warning: #ffcc00;
   --color-info: #00d1ff;
-  
+
   /* Text Colors - Hierarchical text levels */
   --text-primary: #e2e8f0;
   --text-secondary: #b7c8e3;
@@ -40,57 +40,57 @@
   --text-bright: #dce7f8;
   --text-bright-alt: #dcefff;
   --text-bright-alt2: #e4efff;
-  
+
   /* Border Colors - Various border shades */
-  --border: rgba(255,255,255,0.03);
+  --border: rgba(255, 255, 255, 0.03);
   --border-light: #2a3547;
   --border-medium: #2a364d;
   --border-strong: #2b3a55;
   --border-dim: #1b2538;
   --border-subtle: #223148;
-  
+
   /* Panel & Card Backgrounds */
   --panel: #1e2839;
   --panel-2: #2a3549;
   --card-bg: var(--surface);
-  
+
   /* Button States - Generic button colors */
   --btn-bg: var(--surface);
   --btn-bg-hover: #2a3751;
   --btn-bg-active: rgba(255, 255, 255, 0.16);
   --btn-disabled-bg: #141b28;
   --btn-disabled-text: #8a9ab4;
-  
+
   /* Interactive Element States */
   --hover-overlay: rgba(255, 255, 255, 0.1);
   --active-overlay: rgba(255, 255, 255, 0.2);
-  
+
   /* Delete Button */
   --delete-bg: #c1121f;
   --delete-bg-hover: #a70f1c;
   --delete-bg-active: #8b0a16;
   --delete-border: #a00;
-  
+
   /* Input Elements */
   --input-bg: #0f1720;
   --input-border: #2e415d;
   --input-border-hover: #476286;
-  
+
   /* Multiselect Option */
   --option-bg: var(--panel);
   --option-border: #2e415d;
   --option-border-hover: #476286;
-  
+
   /* Audio Meter */
   --meter-bg: var(--panel);
   --meter-low: #2ecc71;
   --meter-med: #f1c40f;
   --meter-high: #e74c3c;
-  
+
   /* Dropdown */
   --dropdown-bg: var(--surface-dark);
   --dropdown-hover: #2a3751;
-  
+
   /* Station Specific Colors */
   --station-pin-active-bg: #ffb43a;
   --station-pin-active-text: #1b2230;
@@ -125,11 +125,11 @@
   --station-direct-reply-active-badge: #9fb0cb;
   --station-ptt-border: #2c3a54;
   --station-reply-border: #273551;
-  
+
   /* Simple View Colors */
   --simple-ptt-bg: #1a2231;
   --simple-ptt-border: #2c3a54;
-  
+
   /* Admin Colors */
   --admin-title: #dcefff;
   --admin-error: #ffb3b3;
@@ -139,16 +139,18 @@
   --admin-modal-bg-from: #1b1114;
   --admin-modal-bg-to: #0f0a0c;
   --admin-modal-text: #ff6b6b;
-  
+
   /* Disconnected State Colors */
   --disconnected-bg: #dc3232;
   --disconnected-text-highlight: #ffe7e7;
-  
+
   /* Modal Backgrounds */
   --modal-dropdown-bg-from: #0f1720;
   --modal-dropdown-bg-to: #0b131b;
 }
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 body {
   margin: 0;
   background-color: var(--surface);
@@ -173,8 +175,14 @@ body {
   }
 
   @keyframes sheen {
-    0% { transform: translateX(-5%) rotate(-10deg); }
-    50% { transform: translateX(5%) rotate(-10deg); }
-    100% { transform: translateX(-5%) rotate(-10deg); }
+    0% {
+      transform: translateX(-5%) rotate(-10deg);
+    }
+    50% {
+      transform: translateX(5%) rotate(-10deg);
+    }
+    100% {
+      transform: translateX(-5%) rotate(-10deg);
+    }
   }
 }

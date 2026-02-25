@@ -7,14 +7,16 @@ type AdminPinCardProps = {
 
 export function AdminPinCard({
   adminPin,
-  onUpdateAdminPin
+  onUpdateAdminPin,
 }: AdminPinCardProps) {
   const [isOpen, setIsOpen] = React.useState(false);
   const [pinCurrentInput, setPinCurrentInput] = React.useState("");
   const [pinNewInput, setPinNewInput] = React.useState("");
   const [pinConfirmInput, setPinConfirmInput] = React.useState("");
   const [pinMessage, setPinMessage] = React.useState("");
-  const [pinMessageType, setPinMessageType] = React.useState<"success" | "error" | "">("");
+  const [pinMessageType, setPinMessageType] = React.useState<
+    "success" | "error" | ""
+  >("");
 
   const handleUpdatePin = () => {
     setPinMessage("");
@@ -96,14 +98,13 @@ export function AdminPinCard({
             </div>
           </div>
           <div className="admin-pin-actions">
-            <button
-              onClick={handleUpdatePin}
-              className="primary"
-            >
+            <button onClick={handleUpdatePin} className="primary">
               Update PIN
             </button>
             {pinMessage ? (
-              <div className={`admin-pin-message admin-pin-message-${pinMessageType}`}>
+              <div
+                className={`admin-pin-message admin-pin-message-${pinMessageType}`}
+              >
                 {pinMessage}
               </div>
             ) : null}

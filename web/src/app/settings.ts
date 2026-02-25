@@ -35,7 +35,10 @@ function sanitizeGainMap(value: unknown): Record<string, number> {
   if (!value || typeof value !== "object") return {};
   const entries = Object.entries(value as Record<string, unknown>)
     .filter(([key]) => typeof key === "string" && key.length > 0)
-    .map(([key, raw]) => [key, clampGainValue(typeof raw === "number" ? raw : 1)] as const);
+    .map(
+      ([key, raw]) =>
+        [key, clampGainValue(typeof raw === "number" ? raw : 1)] as const,
+    );
   return Object.fromEntries(entries);
 }
 
@@ -49,8 +52,12 @@ export function loadSessionSettings(): SessionSettings {
     return {
       username: typeof parsed.username === "string" ? parsed.username : "",
       roleId: typeof parsed.roleId === "string" ? parsed.roleId : "",
-      listenRoomIds: Array.isArray(parsed.listenRoomIds) ? parsed.listenRoomIds.filter((value) => typeof value === "string") : [],
-      talkRoomIds: Array.isArray(parsed.talkRoomIds) ? parsed.talkRoomIds.filter((value) => typeof value === "string") : []
+      listenRoomIds: Array.isArray(parsed.listenRoomIds)
+        ? parsed.listenRoomIds.filter((value) => typeof value === "string")
+        : [],
+      talkRoomIds: Array.isArray(parsed.talkRoomIds)
+        ? parsed.talkRoomIds.filter((value) => typeof value === "string")
+        : [],
     };
   } catch {
     return { username: "", roleId: "", listenRoomIds: [], talkRoomIds: [] };
@@ -67,17 +74,29 @@ export function loadGlobalSettings(): GlobalSettings {
         enableDirectPpt: false,
         enableDirectTabs: false,
         roomGainById: {},
-        directGainByUserId: {}
+        directGainByUserId: {},
       };
     }
     const parsed = JSON.parse(raw) as Partial<GlobalSettings>;
     return {
-      selectedInputDeviceId: typeof parsed.selectedInputDeviceId === "string" ? parsed.selectedInputDeviceId : "",
-      selectedOutputDeviceId: typeof parsed.selectedOutputDeviceId === "string" ? parsed.selectedOutputDeviceId : "",
-      enableDirectPpt: typeof parsed.enableDirectPpt === "boolean" ? parsed.enableDirectPpt : false,
-      enableDirectTabs: typeof parsed.enableDirectTabs === "boolean" ? parsed.enableDirectTabs : false,
+      selectedInputDeviceId:
+        typeof parsed.selectedInputDeviceId === "string"
+          ? parsed.selectedInputDeviceId
+          : "",
+      selectedOutputDeviceId:
+        typeof parsed.selectedOutputDeviceId === "string"
+          ? parsed.selectedOutputDeviceId
+          : "",
+      enableDirectPpt:
+        typeof parsed.enableDirectPpt === "boolean"
+          ? parsed.enableDirectPpt
+          : false,
+      enableDirectTabs:
+        typeof parsed.enableDirectTabs === "boolean"
+          ? parsed.enableDirectTabs
+          : false,
       roomGainById: sanitizeGainMap(parsed.roomGainById),
-      directGainByUserId: sanitizeGainMap(parsed.directGainByUserId)
+      directGainByUserId: sanitizeGainMap(parsed.directGainByUserId),
     };
   } catch {
     return {
@@ -86,7 +105,7 @@ export function loadGlobalSettings(): GlobalSettings {
       enableDirectPpt: false,
       enableDirectTabs: false,
       roomGainById: {},
-      directGainByUserId: {}
+      directGainByUserId: {},
     };
   }
 }
@@ -105,7 +124,10 @@ export function loadFavoriteSettings(): FavoriteSettings {
       pinnedUserIds: Array.isArray(parsed.pinnedUserIds)
         ? parsed.pinnedUserIds.filter((value) => typeof value === "string")
         : [],
-      showPinnedOnly: typeof parsed.showPinnedOnly === "boolean" ? parsed.showPinnedOnly : false
+      showPinnedOnly:
+        typeof parsed.showPinnedOnly === "boolean"
+          ? parsed.showPinnedOnly
+          : false,
     } satisfies FavoriteSettings;
   } catch {
     return { pinnedRoomIds: [], pinnedUserIds: [], showPinnedOnly: false };
