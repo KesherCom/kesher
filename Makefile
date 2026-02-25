@@ -51,6 +51,7 @@ run-backend-https: build-web
 	@mkdir -p backend/certs
 	@if [[ ! -f backend/certs/lan-cert.pem || ! -f backend/certs/lan-key.pem ]]; then \
 		echo "Generating self-signed certs for LAN_IP=$(LAN_IP)"; \
+		MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
 		openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
 			-keyout backend/certs/lan-key.pem \
 			-out backend/certs/lan-cert.pem \
