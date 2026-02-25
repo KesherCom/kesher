@@ -68,6 +68,8 @@ type StationIntercomViewProps = {
   realtimeDebugBlock: React.ReactNode;
   enableDirectPpt: boolean;
   onEnableDirectPptChange: (enabled: boolean) => void;
+  enableDirectTabs: boolean;
+  onEnableDirectTabsChange: (enabled: boolean) => void;
   availableChannels: Array<{ id: string; label: string }>;
   selectedChannelId: string;
   onSelectChannel: (channelId: string) => void;
@@ -132,6 +134,8 @@ export function StationIntercomView({
   realtimeDebugBlock,
   enableDirectPpt,
   onEnableDirectPptChange,
+  enableDirectTabs,
+  onEnableDirectTabsChange,
   availableChannels,
   selectedChannelId,
   onSelectChannel,
@@ -166,6 +170,7 @@ export function StationIntercomView({
   const micMenuRef = useRef<HTMLDivElement>(null);
   const outputMenuRef = useRef<HTMLDivElement>(null);
   const [isAudioOpen, setIsAudioOpen] = useState(true);
+  const [activeDirectTab, setActiveDirectTab] = useState<string>("all");
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -198,6 +203,53 @@ export function StationIntercomView({
     () => (showPinnedOnly ? allDirectOnlineTargets.filter((p) => pinnedUserIds.includes(p.userId)) : allDirectOnlineTargets),
     [allDirectOnlineTargets, pinnedUserIds, showPinnedOnly]
   );
+
+  const directGroups = useMemo(() => {
+    if (!enableDirectTabs) return [];
+
+    const groups: Array<{ tabId: string; label: string; count: number; users: typeof allDirectOnlineTargets }> = [];
+    
+    // When tabs are enabled, always use allDirectOnlineTargets (ignore showPinnedOnly)
+    
+    // Favorites tab
+    const favorites = allDirectOnlineTargets.filter((p) => pinnedUserIds.includes(p.userId));
+    groups.push({ tabId: "favorites", label: "Favorites", count: favorites.length, users: favorites });
+    
+    // Role-based tabs
+    const roleGroups = new Map<string, typeof allDirectOnlineTargets>();
+    for (const p of allDirectOnlineTargets) {
+      const roleLabel = roleNameById.get(p.roleId) || p.roleId || "Unknown";
+      if (!roleGroups.has(p.roleId)) {
+        roleGroups.set(p.roleId, []);
+      }
+      roleGroups.get(p.roleId)!.push(p);
+    }
+    for (const [roleId, users] of roleGroups) {
+      const roleLabel = roleNameById.get(roleId) || roleId || "Unknown";
+      groups.push({ tabId: roleId, label: roleLabel, count: users.length, users });
+    }
+    
+    // All tab
+    groups.push({ tabId: "all", label: "All", count: allDirectOnlineTargets.length, users: allDirectOnlineTargets });
+    
+    return groups;
+  }, [enableDirectTabs, allDirectOnlineTargets, pinnedUserIds, roleNameById]);
+
+  const displayedDirectUsers = useMemo(() => {
+    if (!enableDirectTabs) return directOnlineTargets;
+    const group = directGroups.find((g) => g.tabId === activeDirectTab);
+    return group ? group.users : [];
+  }, [enableDirectTabs, directGroups, activeDirectTab, directOnlineTargets]);
+
+  // Reset active tab if it no longer exists
+  useEffect(() => {
+    if (enableDirectTabs && directGroups.length > 0) {
+      const tabExists = directGroups.some((g) => g.tabId === activeDirectTab);
+      if (!tabExists) {
+        setActiveDirectTab("all");
+      }
+    }
+  }, [enableDirectTabs, directGroups, activeDirectTab]);
 
   const visibleRooms = useMemo(
     () => (showPinnedOnly ? appData.rooms.filter((room) => pinnedRoomIds.includes(room.id)) : appData.rooms),
@@ -325,7 +377,84 @@ export function StationIntercomView({
 
       <section className="station-block station-direct-section">
         <h3>Direct communication</h3>
-        {directOnlineTargets.length === 0 ? (
+        {enableDirectTabs && directGroups.length > 0 ? (
+          <>
+            <div className="station-direct-tabs" role="tablist" aria-label="Direct communication tabs">
+              {directGroups.map((group) => (
+                <button
+                  key={`direct-tab-${group.tabId}`}
+                  role="tab"
+                  className={`station-direct-tab ${activeDirectTab === group.tabId ? "active" : ""}`}
+                  aria-selected={activeDirectTab === group.tabId}
+                  onClick={() => setActiveDirectTab(group.tabId)}
+                >
+                  <span>{group.label}</span>
+                  <small>{group.count}</small>
+                </button>
+              ))}
+            </div>
+            {displayedDirectUsers.length === 0 ? (
+              <p className="station-empty">No users in this tab.</p>
+            ) : (
+              <div className="station-direct-grid">
+                {displayedDirectUsers.map((p) => (
+                  <article key={`station-direct-${p.userId}`} className="station-card station-direct-card">
+                    <button
+                      type="button"
+                      className={`station-pin-top ${pinnedUserIds.includes(p.userId) ? "active" : ""}`}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onPointerUp={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onTogglePinnedUser(p.userId);
+                      }}
+                      title={pinnedUserIds.includes(p.userId) ? "Unpin user" : "Pin user"}
+                    >
+                      ★
+                    </button>
+                    <button
+                      className={`station-card-head direct-ptt ${directPttPressedUserId === p.userId ? "active" : ""}`}
+                      onPointerDown={() => startDirectPtt(p.userId)}
+                      onPointerUp={() => stopDirectPtt(p.userId)}
+                      onPointerLeave={() => stopDirectPtt(p.userId)}
+                      onPointerCancel={() => stopDirectPtt(p.userId)}
+                    >
+                      {isReceivingDirect(p.userId) ? <span className="station-receiving-badge">🔊</span> : null}
+                      <small>Direct</small>
+                      <strong>{p.username}</strong>
+                      <em>{roleNameById.get(p.roleId) || p.roleId || "Unknown role"}</em>
+                    </button>
+                    <div className="station-gain-control">
+                      <label htmlFor={`direct-gain-${p.userId}`}>{gainToDbLabel(directGainByUserId[p.userId] ?? 1)}</label>
+                      <input
+                        id={`direct-gain-${p.userId}`}
+                        type="range"
+                        min={MUTE_POS}
+                        max={DB_MAX}
+                        step={1}
+                        value={gainToSlider(directGainByUserId[p.userId] ?? 1)}
+                        style={{ "--fill": `${sliderFillPercent(directGainByUserId[p.userId] ?? 1)}%` } as React.CSSProperties}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onPointerUp={(event) => event.stopPropagation()}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => onDirectGainChange(p.userId, sliderToGain(Number(event.currentTarget.value)))}
+                      />
+                    </div>
+                    <div className="station-card-actions single">
+                      <button
+                        className={`call ${/* disabled handled by class */ ""}`}
+                        onClick={() => sendScopedSignal("direct", p.userId, "call")}
+                        title="Call user"
+                      >
+                        Call
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </>
+        ) : directOnlineTargets.length === 0 ? (
           <p className="station-empty">{showPinnedOnly ? "No pinned users online." : "No other users online."}</p>
         ) : (
           <div className="station-direct-grid">
@@ -475,6 +604,14 @@ export function StationIntercomView({
                   onChange={(e) => onEnableDirectPptChange(e.target.checked)}
                 />
                 <span>Direct PTT Mode (press channel to talk)</span>
+              </label>
+              <label className="station-setting">
+                <input
+                  type="checkbox"
+                  checked={enableDirectTabs}
+                  onChange={(e) => onEnableDirectTabsChange(e.target.checked)}
+                />
+                <span>Show direct communication as tabs</span>
               </label>
               
               <div className="audio-section">

@@ -57,6 +57,7 @@ type GlobalSettings = {
   selectedInputDeviceId: string;
   selectedOutputDeviceId: string;
   enableDirectPpt: boolean;
+  enableDirectTabs: boolean;
   roomGainById: Record<string, number>;
   directGainByUserId: Record<string, number>;
 };
@@ -108,6 +109,7 @@ function loadGlobalSettings(): GlobalSettings {
         selectedInputDeviceId: "",
         selectedOutputDeviceId: "",
         enableDirectPpt: false,
+        enableDirectTabs: false,
         roomGainById: {},
         directGainByUserId: {}
       };
@@ -117,6 +119,7 @@ function loadGlobalSettings(): GlobalSettings {
       selectedInputDeviceId: typeof parsed.selectedInputDeviceId === "string" ? parsed.selectedInputDeviceId : "",
       selectedOutputDeviceId: typeof parsed.selectedOutputDeviceId === "string" ? parsed.selectedOutputDeviceId : "",
       enableDirectPpt: typeof parsed.enableDirectPpt === "boolean" ? parsed.enableDirectPpt : false,
+      enableDirectTabs: typeof parsed.enableDirectTabs === "boolean" ? parsed.enableDirectTabs : false,
       roomGainById: sanitizeGainMap(parsed.roomGainById),
       directGainByUserId: sanitizeGainMap(parsed.directGainByUserId)
     };
@@ -125,6 +128,7 @@ function loadGlobalSettings(): GlobalSettings {
       selectedInputDeviceId: "",
       selectedOutputDeviceId: "",
       enableDirectPpt: false,
+      enableDirectTabs: false,
       roomGainById: {},
       directGainByUserId: {}
     };
@@ -180,6 +184,7 @@ export function App() {
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState(initialGlobalSettings.selectedOutputDeviceId);
   const [enableDirectPpt, setEnableDirectPpt] = useState(initialGlobalSettings.enableDirectPpt);
+  const [enableDirectTabs, setEnableDirectTabs] = useState(initialGlobalSettings.enableDirectTabs);
   const [roomGainById, setRoomGainById] = useState<Record<string, number>>(initialGlobalSettings.roomGainById);
   const [directGainByUserId, setDirectGainByUserId] = useState<Record<string, number>>(initialGlobalSettings.directGainByUserId);
   const [pinnedRoomIds, setPinnedRoomIds] = useState<string[]>(initialFavorites.pinnedRoomIds);
@@ -299,11 +304,12 @@ export function App() {
         selectedInputDeviceId,
         selectedOutputDeviceId,
         enableDirectPpt,
+        enableDirectTabs,
         roomGainById,
         directGainByUserId
       } satisfies GlobalSettings)
     );
-  }, [selectedInputDeviceId, selectedOutputDeviceId, enableDirectPpt, roomGainById, directGainByUserId]);
+  }, [selectedInputDeviceId, selectedOutputDeviceId, enableDirectPpt, enableDirectTabs, roomGainById, directGainByUserId]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -1886,6 +1892,8 @@ export function App() {
         realtimeDebugBlock={realtimeDebugBlock}
         enableDirectPpt={enableDirectPpt}
         onEnableDirectPptChange={handleEnableDirectPptChange}
+        enableDirectTabs={enableDirectTabs}
+        onEnableDirectTabsChange={setEnableDirectTabs}
         availableChannels={availableChannels}
         selectedChannelId={selectedChannelId}
         onSelectChannel={setSelectedChannelId}
