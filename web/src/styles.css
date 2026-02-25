@@ -1355,6 +1355,24 @@ button.secondary { background: transparent; }
 .station-card-head.ppt-active small,
 .station-card-head.ppt-active em { color: var(--disconnected-text-highlight); }.station-card-actions { display: grid; grid-template-columns: 1fr 1fr; }
 .station-card-actions.single { grid-template-columns: 1fr; }
+.station-gain-control {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.45rem 0.6rem 0.5rem;
+  border-top: 1px solid var(--border-medium);
+  background: rgba(255, 255, 255, 0.015);
+}
+.station-gain-control label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.52rem;
+  color: var(--text-tertiary);
+  font-weight: 700;
+}
+.station-gain-control input[type="range"] {
+  width: 100%;
+  margin: 0;
+}
 .station-card-actions button {
   border-radius: 0;
   border: 0;
@@ -1632,11 +1650,12 @@ button.secondary { background: transparent; }
   background: rgba(2, 6, 12, 0.7);
   display: grid;
   place-items: center;
-  padding: 1rem;
+  padding: 0.25rem;
 }
 .station-modal {
   width: min(1100px, 100%);
-  max-height: calc(100vh - 2rem);
+  height: min(920px, calc(100vh - 0.5rem));
+  max-height: calc(100vh - 0.5rem);
   overflow: auto;
 }
 /* Enhanced user settings modal styling */
@@ -1686,7 +1705,7 @@ button.secondary { background: transparent; }
   background: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 10px;
-  overflow: hidden;
+  overflow: visible;
 }
 .audio-box-header { 
   padding: 0.6rem 0.85rem; 
@@ -1726,10 +1745,41 @@ button.secondary { background: transparent; }
 .station-modal-body .audio-row {
   display: flex;
   gap: 1rem;
-  align-items: center;
+  align-items: stretch;
 }
 .station-modal-body .audio-row .mic-dropdown { flex: 1; }
 .station-modal-body .audio-row .meter { flex: 1; min-width: 120px; }
+.station-modal-body .audio-row.audio-row-mic .mic-dropdown { flex: 1 1 auto; }
+.station-modal-body .input-level-row {
+  margin-top: 0.4rem;
+  display: grid;
+  gap: 0.35rem;
+}
+.station-modal-body .input-level-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.station-modal-body .input-level-head small {
+  margin: 0;
+}
+.station-modal-body .input-level-head strong {
+  font-size: 0.84rem;
+  color: #d9ecff;
+  letter-spacing: 0.02em;
+}
+.station-modal-body .input-level-row .meter {
+  margin-top: 0;
+  margin-bottom: 0;
+  height: 12px;
+  border-color: rgba(133, 176, 240, 0.28);
+  background: rgba(17, 35, 57, 0.75);
+}
+.station-modal-body .input-level-row .meter-bar {
+  background: linear-gradient(90deg, #4ec3ff 0%, #00e08f 100%);
+  box-shadow: 0 0 8px rgba(78, 195, 255, 0.35);
+}
 .station-modal-body .mic-dropdown-trigger {
   padding: 0.7rem 0.85rem;
   border-radius: 10px;

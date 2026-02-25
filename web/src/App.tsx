@@ -57,6 +57,8 @@ type GlobalSettings = {
   selectedInputDeviceId: string;
   selectedOutputDeviceId: string;
   enableDirectPpt: boolean;
+  roomGainById: Record<string, number>;
+  directGainByUserId: Record<string, number>;
 };
 
 type FavoriteSettings = {
@@ -64,6 +66,20 @@ type FavoriteSettings = {
   pinnedUserIds: string[];
   showPinnedOnly: boolean;
 };
+
+function clampGainValue(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(0, Math.min(2, value));
+}
+
+function sanitizeGainMap(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object") return {};
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => typeof key === "string" && key.length > 0)
+    .map(([key, raw]) => [key, clampGainValue(typeof raw === "number" ? raw : 1)] as const);
+  return Object.fromEntries(entries);
+}
+
 
 function loadSessionSettings(): SessionSettings {
   try {
@@ -87,16 +103,30 @@ function loadGlobalSettings(): GlobalSettings {
   try {
     const raw = localStorage.getItem(globalSettingsStorageKey);
     if (!raw) {
-      return { selectedInputDeviceId: "", selectedOutputDeviceId: "", enableDirectPpt: false };
+      return {
+        selectedInputDeviceId: "",
+        selectedOutputDeviceId: "",
+        enableDirectPpt: false,
+        roomGainById: {},
+        directGainByUserId: {}
+      };
     }
     const parsed = JSON.parse(raw) as Partial<GlobalSettings>;
     return {
       selectedInputDeviceId: typeof parsed.selectedInputDeviceId === "string" ? parsed.selectedInputDeviceId : "",
       selectedOutputDeviceId: typeof parsed.selectedOutputDeviceId === "string" ? parsed.selectedOutputDeviceId : "",
-      enableDirectPpt: typeof parsed.enableDirectPpt === "boolean" ? parsed.enableDirectPpt : false
+      enableDirectPpt: typeof parsed.enableDirectPpt === "boolean" ? parsed.enableDirectPpt : false,
+      roomGainById: sanitizeGainMap(parsed.roomGainById),
+      directGainByUserId: sanitizeGainMap(parsed.directGainByUserId)
     };
   } catch {
-    return { selectedInputDeviceId: "", selectedOutputDeviceId: "", enableDirectPpt: false };
+    return {
+      selectedInputDeviceId: "",
+      selectedOutputDeviceId: "",
+      enableDirectPpt: false,
+      roomGainById: {},
+      directGainByUserId: {}
+    };
   }
 }
 
@@ -149,6 +179,8 @@ export function App() {
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState(initialGlobalSettings.selectedOutputDeviceId);
   const [enableDirectPpt, setEnableDirectPpt] = useState(initialGlobalSettings.enableDirectPpt);
+  const [roomGainById, setRoomGainById] = useState<Record<string, number>>(initialGlobalSettings.roomGainById);
+  const [directGainByUserId, setDirectGainByUserId] = useState<Record<string, number>>(initialGlobalSettings.directGainByUserId);
   const [pinnedRoomIds, setPinnedRoomIds] = useState<string[]>(initialFavorites.pinnedRoomIds);
   const [pinnedUserIds, setPinnedUserIds] = useState<string[]>(initialFavorites.pinnedUserIds);
   const [showPinnedOnly, setShowPinnedOnly] = useState<boolean>(initialFavorites.showPinnedOnly);
@@ -183,6 +215,7 @@ export function App() {
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const remoteSourceUserIdRef = useRef<Map<string, string>>(new Map());
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const shouldReconnectRef = useRef(false);
@@ -190,7 +223,7 @@ export function App() {
   const activeVoiceRoutesRef = useRef<
     Map<string, { senderUserID: string; scope: "direct" | "room" | "broadcast"; targetID: string; label: string }>
   >(new Map());
-  const remoteAnalyserNodesRef = useRef<Map<string, { ctx: AudioContext; analyser: AnalyserNode; buf: Uint8Array }>>(new Map());
+  const remoteAnalyserNodesRef = useRef<Map<string, { ctx: AudioContext; analyser: AnalyserNode; gain: GainNode; buf: Uint8Array }>>(new Map());
   const remoteAudioMeterRafRef = useRef<number | null>(null);
   const incomingAudioOffTimeoutRef = useRef<number | null>(null);
   const incomingAttentionTimeoutRef = useRef<number | null>(null);
@@ -199,11 +232,14 @@ export function App() {
   const voiceModeRef = useRef(voiceMode);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const meterMonitorStreamRef = useRef<MediaStream | null>(null);
   const meterRafRef = useRef<number | null>(null);
   const statsIntervalRef = useRef<number | null>(null);
   const lastStatsRef = useRef<{ ts: number; inBytes: number; outBytes: number } | null>(null);
   const selectedInputDeviceIdRef = useRef(initialGlobalSettings.selectedInputDeviceId);
   const selectedOutputDeviceIdRef = useRef(initialGlobalSettings.selectedOutputDeviceId);
+  const roomGainByIdRef = useRef(initialGlobalSettings.roomGainById);
+  const directGainByUserIdRef = useRef(initialGlobalSettings.directGainByUserId);
   const listenRoomIdsRef = useRef<string[]>(listenRoomIds);
   const talkRoomIdsRef = useRef<string[]>(talkRoomIds);
   const prevChannelRef = useRef<string>("");
@@ -225,6 +261,12 @@ export function App() {
   useEffect(() => {
     selectedOutputDeviceIdRef.current = selectedOutputDeviceId;
   }, [selectedOutputDeviceId]);
+  useEffect(() => {
+    roomGainByIdRef.current = roomGainById;
+  }, [roomGainById]);
+  useEffect(() => {
+    directGainByUserIdRef.current = directGainByUserId;
+  }, [directGainByUserId]);
   useEffect(() => {
     listenRoomIdsRef.current = listenRoomIds;
   }, [listenRoomIds]);
@@ -255,10 +297,12 @@ export function App() {
       JSON.stringify({
         selectedInputDeviceId,
         selectedOutputDeviceId,
-        enableDirectPpt
+        enableDirectPpt,
+        roomGainById,
+        directGainByUserId
       } satisfies GlobalSettings)
     );
-  }, [selectedInputDeviceId, selectedOutputDeviceId, enableDirectPpt]);
+  }, [selectedInputDeviceId, selectedOutputDeviceId, enableDirectPpt, roomGainById, directGainByUserId]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -326,6 +370,132 @@ export function App() {
     setPinnedRoomIds((prev) => prev.filter((id) => appData.rooms.some((room) => room.id === id)));
     setPinnedUserIds((prev) => prev.filter((id) => appData.users.some((user) => user.id === id)));
   }, [appData]);
+
+  useEffect(() => {
+    if (!appData) return;
+    setRoomGainById((prev) => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([roomId]) => appData.rooms.some((room) => room.id === roomId)));
+      return next;
+    });
+    setDirectGainByUserId((prev) => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([userId]) => appData.users.some((user) => user.id === userId)));
+      return next;
+    });
+  }, [appData]);
+
+  function sourceUserIDFromTrackID(trackID: string): string {
+    const prefix = "audio-user-";
+    if (!trackID.startsWith(prefix)) return "";
+    return trackID.slice(prefix.length);
+  }
+
+  function sourceUserIDFromRemoteSDPMid(pc: RTCPeerConnection | null, mid: string | null | undefined): string {
+    if (!pc || !mid) return "";
+    const sdp = pc.remoteDescription?.sdp;
+    if (!sdp) return "";
+    const sections = sdp.split(/\r?\nm=/);
+    for (let i = 0; i < sections.length; i += 1) {
+      const section = i === 0 ? sections[i] : `m=${sections[i]}`;
+      if (!section.startsWith("m=audio")) continue;
+      const lines = section.split(/\r?\n/);
+      const midLine = lines.find((line) => line.startsWith("a=mid:"));
+      if (!midLine || midLine.slice("a=mid:".length).trim() !== mid) continue;
+      const msidLine = lines.find((line) => line.startsWith("a=msid:"));
+      if (!msidLine) return "";
+      const msidParts = msidLine.slice("a=msid:".length).trim().split(/\s+/);
+      if (msidParts.length < 2) return "";
+      return sourceUserIDFromTrackID(msidParts[1] || "");
+    }
+    return "";
+  }
+
+  function resolveGainForSourceUser(sourceUserID: string): number {
+    if (!appData) return 1;
+    const routes = Array.from(activeVoiceRoutesRef.current.values());
+    if (!sourceUserID) {
+      const directToSelfRoutes = routes.filter((route) => route.scope === "direct" && route.targetID === appData.self.id);
+      if (directToSelfRoutes.length > 0) {
+        let gain = 1;
+        for (const route of directToSelfRoutes) {
+          gain = Math.max(gain, clampGainValue(directGainByUserIdRef.current[route.senderUserID] ?? 1));
+        }
+        return gain;
+      }
+      let roomGain = 1;
+      for (const route of routes) {
+        if (route.scope !== "room") continue;
+        if (!listenRoomIdsRef.current.includes(route.targetID)) continue;
+        roomGain = Math.max(roomGain, clampGainValue(roomGainByIdRef.current[route.targetID] ?? 1));
+      }
+      if (roomGain !== 1) return roomGain;
+      for (const p of presence) {
+        if (p.userId === appData.self.id) continue;
+        if (p.voiceMode !== "always_on" || !p.micEnabled) continue;
+        for (const roomId of p.talkRooms || []) {
+          if (!listenRoomIdsRef.current.includes(roomId)) continue;
+          roomGain = Math.max(roomGain, clampGainValue(roomGainByIdRef.current[roomId] ?? 1));
+        }
+      }
+      const anchorRoomID = matrixAnchorRoomId(listenRoomIdsRef.current, talkRoomIdsRef.current);
+      if (anchorRoomID) {
+        return clampGainValue(roomGainByIdRef.current[anchorRoomID] ?? roomGain);
+      }
+      if (listenRoomIdsRef.current.length > 0) {
+        let fallbackRoomGain = roomGain;
+        for (const roomID of listenRoomIdsRef.current) {
+          fallbackRoomGain = Math.max(fallbackRoomGain, clampGainValue(roomGainByIdRef.current[roomID] ?? 1));
+        }
+        return fallbackRoomGain;
+      }
+      return roomGain;
+    }
+    const directToSelf = routes.some(
+      (route) => route.senderUserID === sourceUserID && route.scope === "direct" && route.targetID === appData.self.id
+    );
+    if (directToSelf) {
+      return clampGainValue(directGainByUserIdRef.current[sourceUserID] ?? 1);
+    }
+    const senderPresence = presence.find((p) => p.userId === sourceUserID);
+    if (senderPresence && Array.isArray(senderPresence.talkRooms) && senderPresence.talkRooms.length > 0) {
+      const listenedTalkRooms = senderPresence.talkRooms.filter((roomID) => listenRoomIdsRef.current.includes(roomID));
+      if (listenedTalkRooms.length > 0) {
+        const roomToUse =
+          senderPresence.activeRoom && listenedTalkRooms.includes(senderPresence.activeRoom)
+            ? senderPresence.activeRoom
+            : listenedTalkRooms[0];
+        return clampGainValue(roomGainByIdRef.current[roomToUse] ?? 1);
+      }
+    }
+    const routedRoom = routes.find(
+      (route) =>
+        route.senderUserID === sourceUserID &&
+        route.scope === "room" &&
+        listenRoomIdsRef.current.includes(route.targetID)
+    );
+    if (routedRoom) {
+      return clampGainValue(roomGainByIdRef.current[routedRoom.targetID] ?? 1);
+    }
+    return 1;
+  }
+
+  function applyVolumeToRemoteAudio(key: string) {
+    const sourceUserID = remoteSourceUserIdRef.current.get(key) || "";
+    const gainValue = resolveGainForSourceUser(sourceUserID);
+    const analyserNode = remoteAnalyserNodesRef.current.get(key);
+    if (analyserNode) {
+      analyserNode.gain.gain.value = gainValue;
+    }
+    const audio = remoteAudioRef.current.get(key);
+    if (audio) {
+      audio.volume = Math.min(1, Math.max(0, gainValue));
+    }
+  }
+
+  function applyVolumeToAllRemoteAudio() {
+    for (const key of remoteAudioRef.current.keys()) {
+      applyVolumeToRemoteAudio(key);
+    }
+  }
 
 
   const refreshAudioDevices = useCallback(async () => {
@@ -476,6 +646,7 @@ export function App() {
 
   function refreshActiveVoiceChannelState() {
     setActiveVoiceRoutes(Array.from(activeVoiceRoutesRef.current.values()));
+    applyVolumeToAllRemoteAudio();
   }
 
   function updateVoiceRoute(
@@ -602,6 +773,12 @@ export function App() {
       meterRafRef.current = null;
     }
     analyserRef.current = null;
+    if (meterMonitorStreamRef.current) {
+      for (const track of meterMonitorStreamRef.current.getTracks()) {
+        track.stop();
+      }
+      meterMonitorStreamRef.current = null;
+    }
     if (audioCtxRef.current) {
       void audioCtxRef.current.close();
       audioCtxRef.current = null;
@@ -613,9 +790,14 @@ export function App() {
     stopLevelMeter();
     const AudioCtx = window.AudioContext;
     if (!AudioCtx) return;
+    const sourceTrack = stream.getAudioTracks()[0];
+    if (!sourceTrack) return;
+    const monitorTrack = sourceTrack.clone();
+    const monitorStream = new MediaStream([monitorTrack]);
+    meterMonitorStreamRef.current = monitorStream;
     const ctx = new AudioCtx();
     audioCtxRef.current = ctx;
-    const src = ctx.createMediaStreamSource(stream);
+    const src = ctx.createMediaStreamSource(monitorStream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
     src.connect(analyser);
@@ -677,6 +859,10 @@ export function App() {
     }
   }
 
+
+  useEffect(() => {
+    applyVolumeToAllRemoteAudio();
+  }, [roomGainById, directGainByUserId]);
   function cleanupRealtimeResources() {
     if (wsRef.current) {
       wsRef.current.close();
@@ -691,6 +877,7 @@ export function App() {
       audio.srcObject = null;
     }
     remoteAudioRef.current.clear();
+    remoteSourceUserIdRef.current.clear();
     activeVoiceRoutesRef.current.clear();
     setActiveVoiceRoutes([]);
     if (localStreamRef.current) {
@@ -743,33 +930,42 @@ export function App() {
         };
         pc.ontrack = (event) => {
           const key = `${event.track.id}-${event.streams[0]?.id || "nostream"}`;
+          const sourceUserID =
+            sourceUserIDFromTrackID(event.track.id) ||
+            sourceUserIDFromRemoteSDPMid(pcRef.current, event.transceiver?.mid);
+          if (sourceUserID) {
+            remoteSourceUserIdRef.current.set(key, sourceUserID);
+          }
           let audio = remoteAudioRef.current.get(key);
           if (!audio) {
             audio = document.createElement("audio");
             audio.autoplay = true;
             audio.muted = false;
-            audio.volume = 1;
             remoteAudioRef.current.set(key, audio);
           }
           const stream = event.streams[0] ?? new MediaStream([event.track]);
-          audio.srcObject = stream;
-          const reapplyOutputDevice = () => {
-            void applyOutputDeviceToAudio(audio, selectedOutputDeviceIdRef.current);
-          };
-          reapplyOutputDevice();
+          const playbackStream: MediaStream = stream;
           if (!remoteAnalyserNodesRef.current.has(key)) {
             const AudioCtx = window.AudioContext;
             if (AudioCtx) {
               const ctx = new AudioCtx();
               const src = ctx.createMediaStreamSource(stream);
+              const gain = ctx.createGain();
               const analyser = ctx.createAnalyser();
               analyser.fftSize = 256;
-              src.connect(analyser);
+              src.connect(gain);
+              gain.connect(analyser);
               const analyserBuf = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
-              remoteAnalyserNodesRef.current.set(key, { ctx, analyser, buf: analyserBuf });
+              remoteAnalyserNodesRef.current.set(key, { ctx, analyser, gain, buf: analyserBuf });
               startRemoteAudioMeterLoop();
             }
           }
+          audio.srcObject = playbackStream;
+          applyVolumeToRemoteAudio(key);
+          const reapplyOutputDevice = () => {
+            void applyOutputDeviceToAudio(audio, selectedOutputDeviceIdRef.current);
+          };
+          reapplyOutputDevice();
           void audio
             .play()
             .then(() => {
@@ -1158,6 +1354,14 @@ export function App() {
       void applyOutputDeviceToAudio(audio, selectedOutputDeviceId);
     }
   }, [selectedOutputDeviceId]);
+
+  const onRoomGainChange = useCallback((roomId: string, gain: number) => {
+    setRoomGainById((prev) => ({ ...prev, [roomId]: clampGainValue(gain) }));
+  }, []);
+
+  const onDirectGainChange = useCallback((userId: string, gain: number) => {
+    setDirectGainByUserId((prev) => ({ ...prev, [userId]: clampGainValue(gain) }));
+  }, []);
 
   const currentTargets = useMemo(() => {
     if (!appData) return [];
@@ -1691,6 +1895,10 @@ export function App() {
         onShowPinnedOnlyChange={setShowPinnedOnly}
         isUserSettingsOpen={isUserSettingsOpen}
         setIsUserSettingsOpen={setIsUserSettingsOpen}
+        roomGainById={roomGainById}
+        directGainByUserId={directGainByUserId}
+        onRoomGainChange={onRoomGainChange}
+        onDirectGainChange={onDirectGainChange}
       />
       {attentionFlashOverlay}
     </>

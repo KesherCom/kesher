@@ -193,7 +193,7 @@ func (m *MediaManager) RemovePeer(token string) {
 }
 
 func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.TrackRemote) {
-	localTrack, err := webrtc.NewTrackLocalStaticRTP(remote.Codec().RTPCodecCapability, fmt.Sprintf("audio-%s", sourcePeer.token), "intercom")
+	localTrack, err := webrtc.NewTrackLocalStaticRTP(remote.Codec().RTPCodecCapability, fmt.Sprintf("audio-user-%s", sourcePeer.userID), "intercom")
 	if err != nil {
 		m.logger.Error("failed to create local track", "error", err)
 		return
