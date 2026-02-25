@@ -36,11 +36,11 @@ export function LoginView({
         </div>
         <div className="login-form">
           <label>
-            Display name
+            <span className="login-label-text">Display name</span>
             <input value={username} onChange={(e) => onUsernameChange(e.target.value)} placeholder="e.g. Tim FOH" />
           </label>
           <label>
-            Role
+            <span className="login-label-text">Role</span>
             <select value={roleId} onChange={(e) => onRoleChange(e.target.value)}>
               <option value="">Select role</option>
               {publicData.roles.map((r) => (
@@ -58,19 +58,19 @@ export function LoginView({
         <div>
           {!showAdmin ? (
             <button className="login-admin-toggle secondary" onClick={() => setShowAdmin(true)}>
-              Admin anzeigen
+              Show admin
             </button>
           ) : null}
 
           {showAdmin ? (
             <div className="login-admin-card">
               <div className="login-admin-head">
-                <h3>Admin-Konsole</h3>
-                <span className="login-admin-pin-hint">PIN erforderlich</span>
+                <h3>Admin console</h3>
+                <span className="login-admin-pin-hint">PIN required</span>
               </div>
-              <p className="login-admin-note">Nur für Rollen- und Channel-Konfiguration.</p>
+              <p className="login-admin-note">For role and channel configuration only.</p>
               <label>
-                Admin-PIN
+                <span className="login-label-text">Admin PIN</span>
                 <input
                   type="password"
                   value={adminPin}
@@ -80,11 +80,11 @@ export function LoginView({
                 />
               </label>
               {adminError ? <p className="login-error">{adminError}</p> : null}
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <div className="login-admin-actions">
                 <button className="secondary" onClick={onAdminLogin} disabled={!adminPin.trim()}>
-                  Admin-Konsole öffnen
+                  Open admin console
                 </button>
-                <button className="secondary" onClick={() => setShowAdmin(false)}>Verbergen</button>
+                <button className="secondary" onClick={() => setShowAdmin(false)}>Hide</button>
               </div>
             </div>
           ) : null}

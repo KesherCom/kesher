@@ -512,7 +512,7 @@ export function StationIntercomView({
               </div>
               </div>
 
-              <p className="station-modal-hint">Preferences gelten nur für dich auf diesem Gerät.</p>
+              <p className="station-modal-hint">Preferences apply only to you on this device.</p>
             </div>
           </section>
         </div>

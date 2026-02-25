@@ -109,7 +109,7 @@ export function AdminChannelsCard({
             onClick={() => setIsOpen((v) => !v)}
             aria-expanded={isOpen}
           >
-            {isOpen ? "Verbergen" : "Anzeigen"}
+            {isOpen ? "Hide" : "Show"}
           </button>
         </div>
       </div>
@@ -130,7 +130,7 @@ export function AdminChannelsCard({
                   }}
                   disabled={adminBusy}
                 >
-                  {showGroupCreateForm ? "Cancel create" : "Create channel"}
+                  {showGroupCreateForm ? "Cancel" : "Create channel"}
                 </button>
               ) : null}
             </div>
