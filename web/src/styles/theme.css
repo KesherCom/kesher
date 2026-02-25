@@ -1,0 +1,180 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, system-ui, sans-serif;
+  
+  /* ==========================================
+     THEME CUSTOMIZATION
+     To change the color scheme, modify these variables below.
+     All UI elements reference these colors.
+     ========================================== */
+  
+  /* Base Colors - Main palette */
+  --bg: #0f1115;
+  --surface: #0f1115;
+  --surface-light: #1a2030;
+  --accent: #00d1ff;
+  --talk: #ff3b30;
+  --listen: #34c759;
+  --call: #ffcc00;
+  --p2p: #af52de;
+  --text: #e2e8f0;
+  --text-dim: #94a3b8;
+  
+  /* Extended Base Colors */
+  --accent-dark: #00a3cc;
+  --surface-dark: #0f1115;
+  --surface-darker: #060b14;
+  
+  /* Semantic Colors - Status indicators */
+  --color-success: #34c759;
+  --color-error: #ff3b30;
+  --color-warning: #ffcc00;
+  --color-info: #00d1ff;
+  
+  /* Text Colors - Hierarchical text levels */
+  --text-primary: #e2e8f0;
+  --text-secondary: #b7c8e3;
+  --text-tertiary: #9fb0cb;
+  --text-muted: #7786a1;
+  --text-dark: #4f5b72;
+  --text-bright: #dce7f8;
+  --text-bright-alt: #dcefff;
+  --text-bright-alt2: #e4efff;
+  
+  /* Border Colors - Various border shades */
+  --border: rgba(255,255,255,0.03);
+  --border-light: #2a3547;
+  --border-medium: #2a364d;
+  --border-strong: #2b3a55;
+  --border-dim: #1b2538;
+  --border-subtle: #223148;
+  
+  /* Panel & Card Backgrounds */
+  --panel: #1e2839;
+  --panel-2: #2a3549;
+  --card-bg: var(--surface);
+  
+  /* Button States - Generic button colors */
+  --btn-bg: var(--surface);
+  --btn-bg-hover: #2a3751;
+  --btn-bg-active: rgba(255, 255, 255, 0.16);
+  --btn-disabled-bg: #141b28;
+  --btn-disabled-text: #8a9ab4;
+  
+  /* Interactive Element States */
+  --hover-overlay: rgba(255, 255, 255, 0.1);
+  --active-overlay: rgba(255, 255, 255, 0.2);
+  
+  /* Delete Button */
+  --delete-bg: #c1121f;
+  --delete-bg-hover: #a70f1c;
+  --delete-bg-active: #8b0a16;
+  --delete-border: #a00;
+  
+  /* Input Elements */
+  --input-bg: #0f1720;
+  --input-border: #2e415d;
+  --input-border-hover: #476286;
+  
+  /* Multiselect Option */
+  --option-bg: var(--panel);
+  --option-border: #2e415d;
+  --option-border-hover: #476286;
+  
+  /* Audio Meter */
+  --meter-bg: var(--panel);
+  --meter-low: #2ecc71;
+  --meter-med: #f1c40f;
+  --meter-high: #e74c3c;
+  
+  /* Dropdown */
+  --dropdown-bg: var(--surface-dark);
+  --dropdown-hover: #2a3751;
+  
+  /* Station Specific Colors */
+  --station-pin-active-bg: #ffb43a;
+  --station-pin-active-text: #1b2230;
+  --station-card-head-active-bg: #e3222a;
+  --station-card-head-ptt-active-bg: #c41c3b;
+  --station-listen-on-bg: #16a34a;
+  --station-call-bg: #171f2c;
+  --station-call-text: #f0c95d;
+  --station-call-active-bg: #f3c337;
+  --station-call-active-text: #1a1a1a;
+  --station-call-active-icon: #40330c;
+  --station-tab-bg: #141d2b;
+  --station-dock-bg: #171f2d;
+  --station-broadcast-border: #385071;
+  --station-broadcast-border-alt: #35527e;
+  --station-broadcast-bg: #13233b;
+  --station-broadcast-text: #d7e7ff;
+  --station-broadcast-active-border: #3e5b8d;
+  --station-broadcast-active-bg-from: #1a263a;
+  --station-broadcast-active-bg-to: #162031;
+  --station-broadcast-active-hover-bg: #1d3c6e;
+  --station-broadcast-active-hover-border: #4e79bb;
+  --station-broadcast-active-badge: #dbe8ff;
+  --station-direct-selected-bg: #162033;
+  --station-direct-selected-border: #34486c;
+  --station-direct-selected-text: #d5e4ff;
+  --station-direct-removed-bg: #221218;
+  --station-direct-removed-border: #4a2632;
+  --station-direct-removed-text: #ff6a6a;
+  --station-direct-reply-active-border: #425575;
+  --station-direct-reply-active-bg: #1b2433;
+  --station-direct-reply-active-badge: #9fb0cb;
+  --station-ptt-border: #2c3a54;
+  --station-reply-border: #273551;
+  
+  /* Simple View Colors */
+  --simple-ptt-bg: #1a2231;
+  --simple-ptt-border: #2c3a54;
+  
+  /* Admin Colors */
+  --admin-title: #dcefff;
+  --admin-error: #ffb3b3;
+  --admin-pin-note: #cfe1ff;
+  --admin-status-online: #4fff5c;
+  --admin-status-offline: #ff6b6b;
+  --admin-modal-bg-from: #1b1114;
+  --admin-modal-bg-to: #0f0a0c;
+  --admin-modal-text: #ff6b6b;
+  
+  /* Disconnected State Colors */
+  --disconnected-bg: #dc3232;
+  --disconnected-text-highlight: #ffe7e7;
+  
+  /* Modal Backgrounds */
+  --modal-dropdown-bg-from: #0f1720;
+  --modal-dropdown-bg-to: #0b131b;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background-color: var(--surface);
+  background-image: none;
+  color: var(--text);
+}
+
+/* subtle animated sheen on large screens */
+@media (min-width: 900px) {
+  body::after {
+    content: "";
+    position: fixed;
+    left: -20%;
+    top: -30%;
+    width: 160%;
+    height: 120%;
+    pointer-events: none;
+    background: transparent;
+    transform: rotate(-10deg);
+    animation: sheen 10s linear infinite;
+    mix-blend-mode: overlay;
+  }
+
+  @keyframes sheen {
+    0% { transform: translateX(-5%) rotate(-10deg); }
+    50% { transform: translateX(5%) rotate(-10deg); }
+    100% { transform: translateX(-5%) rotate(-10deg); }
+  }
+}

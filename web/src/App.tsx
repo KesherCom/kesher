@@ -13,6 +13,21 @@ import { AdminMenu } from "./components/admin/AdminMenu";
 import { AudioPanel } from "./components/panels/AudioPanel";
 import { ChatSignalPanel } from "./components/panels/ChatSignalPanel";
 import { RealtimeEventsPanel } from "./components/panels/RealtimeEventsPanel";
+import {
+  defaultAdminPin,
+  type FavoriteSettings,
+  type GlobalSettings,
+  loadFavoriteSettings,
+  loadGlobalSettings,
+  loadSessionSettings,
+  type SessionSettings,
+  tokenStorageKey,
+  clampGainValue,
+  sessionSettingsStorageKey,
+  globalSettingsStorageKey,
+  favoritesStorageKey
+} from "./app/settings";
+import { sameStringArray, sameStringSet, sourceUserIDFromRemoteSDPMid, sourceUserIDFromTrackID } from "./app/utils";
 import { matrixAnchorRoomId, roleAllowed, toggleRoomSelectionState } from "./lib/intercom";
 import type { Bootstrap, Presence, PublicBootstrap, RoutedEvent } from "./types";
 
@@ -38,123 +53,6 @@ type WsMessage =
     }
   | { type: "webrtc_offer"; data: { sdp: string } }
   | { type: "webrtc_ice_candidate"; data: { candidate: string; sdpMid?: string; sdpMLineIndex?: number } };
-
-const tokenStorageKey = "intercom-token";
-const sessionSettingsStorageKey = "intercom-session-settings";
-const globalSettingsStorageKey = "intercom-global-settings";
-const favoritesStorageKey = "intercom-favorites";
-// Admin PIN stored in component state so it can be changed from the admin UI.
-const defaultAdminPin = "123456";
-
-type SessionSettings = {
-  username: string;
-  roleId: string;
-  listenRoomIds: string[];
-  talkRoomIds: string[];
-};
-
-type GlobalSettings = {
-  selectedInputDeviceId: string;
-  selectedOutputDeviceId: string;
-  enableDirectPpt: boolean;
-  enableDirectTabs: boolean;
-  roomGainById: Record<string, number>;
-  directGainByUserId: Record<string, number>;
-};
-
-type FavoriteSettings = {
-  pinnedRoomIds: string[];
-  pinnedUserIds: string[];
-  showPinnedOnly: boolean;
-};
-
-function clampGainValue(value: number): number {
-  if (!Number.isFinite(value)) return 1;
-  return Math.max(0, Math.min(2, value));
-}
-
-
-function sanitizeGainMap(value: unknown): Record<string, number> {
-  if (!value || typeof value !== "object") return {};
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([key]) => typeof key === "string" && key.length > 0)
-    .map(([key, raw]) => [key, clampGainValue(typeof raw === "number" ? raw : 1)] as const);
-  return Object.fromEntries(entries);
-}
-
-
-function loadSessionSettings(): SessionSettings {
-  try {
-    const raw = localStorage.getItem(sessionSettingsStorageKey);
-    if (!raw) {
-      return { username: "", roleId: "", listenRoomIds: [], talkRoomIds: [] };
-    }
-    const parsed = JSON.parse(raw) as Partial<SessionSettings>;
-    return {
-      username: typeof parsed.username === "string" ? parsed.username : "",
-      roleId: typeof parsed.roleId === "string" ? parsed.roleId : "",
-      listenRoomIds: Array.isArray(parsed.listenRoomIds) ? parsed.listenRoomIds.filter((value) => typeof value === "string") : [],
-      talkRoomIds: Array.isArray(parsed.talkRoomIds) ? parsed.talkRoomIds.filter((value) => typeof value === "string") : []
-    };
-  } catch {
-    return { username: "", roleId: "", listenRoomIds: [], talkRoomIds: [] };
-  }
-}
-
-function loadGlobalSettings(): GlobalSettings {
-  try {
-    const raw = localStorage.getItem(globalSettingsStorageKey);
-    if (!raw) {
-      return {
-        selectedInputDeviceId: "",
-        selectedOutputDeviceId: "",
-        enableDirectPpt: false,
-        enableDirectTabs: false,
-        roomGainById: {},
-        directGainByUserId: {}
-      };
-    }
-    const parsed = JSON.parse(raw) as Partial<GlobalSettings>;
-    return {
-      selectedInputDeviceId: typeof parsed.selectedInputDeviceId === "string" ? parsed.selectedInputDeviceId : "",
-      selectedOutputDeviceId: typeof parsed.selectedOutputDeviceId === "string" ? parsed.selectedOutputDeviceId : "",
-      enableDirectPpt: typeof parsed.enableDirectPpt === "boolean" ? parsed.enableDirectPpt : false,
-      enableDirectTabs: typeof parsed.enableDirectTabs === "boolean" ? parsed.enableDirectTabs : false,
-      roomGainById: sanitizeGainMap(parsed.roomGainById),
-      directGainByUserId: sanitizeGainMap(parsed.directGainByUserId)
-    };
-  } catch {
-    return {
-      selectedInputDeviceId: "",
-      selectedOutputDeviceId: "",
-      enableDirectPpt: false,
-      enableDirectTabs: false,
-      roomGainById: {},
-      directGainByUserId: {}
-    };
-  }
-}
-
-function loadFavoriteSettings(): FavoriteSettings {
-  try {
-    const raw = localStorage.getItem(favoritesStorageKey);
-    if (!raw) {
-      return { pinnedRoomIds: [], pinnedUserIds: [], showPinnedOnly: false };
-    }
-    const parsed = JSON.parse(raw) as Partial<FavoriteSettings>;
-    return {
-      pinnedRoomIds: Array.isArray(parsed.pinnedRoomIds)
-        ? parsed.pinnedRoomIds.filter((value) => typeof value === "string")
-        : [],
-      pinnedUserIds: Array.isArray(parsed.pinnedUserIds)
-        ? parsed.pinnedUserIds.filter((value) => typeof value === "string")
-        : [],
-      showPinnedOnly: typeof parsed.showPinnedOnly === "boolean" ? parsed.showPinnedOnly : false
-    } satisfies FavoriteSettings;
-  } catch {
-    return { pinnedRoomIds: [], pinnedUserIds: [], showPinnedOnly: false };
-  }
-}
 
 export function App() {
   const initialSessionSettings = loadSessionSettings();
@@ -390,31 +288,6 @@ export function App() {
     });
   }, [appData]);
 
-  function sourceUserIDFromTrackID(trackID: string): string {
-    const prefix = "audio-user-";
-    if (!trackID.startsWith(prefix)) return "";
-    return trackID.slice(prefix.length);
-  }
-
-  function sourceUserIDFromRemoteSDPMid(pc: RTCPeerConnection | null, mid: string | null | undefined): string {
-    if (!pc || !mid) return "";
-    const sdp = pc.remoteDescription?.sdp;
-    if (!sdp) return "";
-    const sections = sdp.split(/\r?\nm=/);
-    for (let i = 0; i < sections.length; i += 1) {
-      const section = i === 0 ? sections[i] : `m=${sections[i]}`;
-      if (!section.startsWith("m=audio")) continue;
-      const lines = section.split(/\r?\n/);
-      const midLine = lines.find((line) => line.startsWith("a=mid:"));
-      if (!midLine || midLine.slice("a=mid:".length).trim() !== mid) continue;
-      const msidLine = lines.find((line) => line.startsWith("a=msid:"));
-      if (!msidLine) return "";
-      const msidParts = msidLine.slice("a=msid:".length).trim().split(/\s+/);
-      if (msidParts.length < 2) return "";
-      return sourceUserIDFromTrackID(msidParts[1] || "");
-    }
-    return "";
-  }
 
   function resolveGainForSourceUser(sourceUserID: string): number {
     if (!appData) return 1;
@@ -690,21 +563,6 @@ export function App() {
     if (!room) return false;
     return roleAllowed(room.receiverRoleIds, currentRoleId);
   }
-  function sameStringArray(a: string[], b: string[]) {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i += 1) {
-      if (a[i] !== b[i]) return false;
-    }
-    return true;
-  }
-
-  function sameStringSet(a: string[], b: string[]) {
-    if (a.length !== b.length) return false;
-    const sortedA = [...a].sort();
-    const sortedB = [...b].sort();
-    return sameStringArray(sortedA, sortedB);
-  }
-
 
   function toggleListenRoom(roomId: string) {
     if (!appData || !canRoleReceiveFromRoom(roomId, appData.self.roleId)) return;
