@@ -969,6 +969,9 @@ export function App() {
         if (msg.type === "signal" && msg.data.fromUser.id !== appData.self.id) {
           const incomingGroupCall = msg.data.scope === "room" && msg.data.signal === "call";
           const incomingDirectSignal = msg.data.scope === "direct" && msg.data.targetId === appData.self.id;
+          if (incomingDirectSignal && msg.data.signal === "call") {
+            setLastDirectCallerUserId(msg.data.fromUser.id);
+          }
           if (incomingGroupCall || incomingDirectSignal) {
             triggerIncomingAttention(msg.data);
           }

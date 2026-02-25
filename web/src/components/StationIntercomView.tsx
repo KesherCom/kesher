@@ -163,6 +163,7 @@ export function StationIntercomView({
   );
 
   const replyTarget = allDirectOnlineTargets.find((p) => p.userId === lastDirectCallerUserId) || null;
+  const replyTargetUserId = lastDirectCallerUserId;
 
   return (
     <div className="root app station-shell">
@@ -328,17 +329,17 @@ export function StationIntercomView({
         </label>
 
         <button
-          className={`station-reply ${replyTarget ? "" : "disabled"} ${
-            replyTarget && directPttPressedUserId === replyTarget.userId ? "active" : ""
+          className={`station-reply ${replyTargetUserId ? "" : "disabled"} ${
+            replyTargetUserId && directPttPressedUserId === replyTargetUserId ? "active" : ""
           }`}
-          disabled={!replyTarget}
-          onPointerDown={() => (replyTarget ? startDirectPtt(replyTarget.userId) : undefined)}
-          onPointerUp={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
-          onPointerLeave={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
-          onPointerCancel={() => (replyTarget ? stopDirectPtt(replyTarget.userId) : undefined)}
+          disabled={!replyTargetUserId}
+          onPointerDown={() => (replyTargetUserId ? startDirectPtt(replyTargetUserId) : undefined)}
+          onPointerUp={() => (replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined)}
+          onPointerLeave={() => (replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined)}
+          onPointerCancel={() => (replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined)}
         >
           Reply to caller
-          <small>{replyTarget ? replyTarget.username : "No active caller"}</small>
+          <small>{replyTarget ? replyTarget.username : replyTargetUserId ? "Recent caller" : "No active caller"}</small>
         </button>
       </section>
 
