@@ -48,6 +48,10 @@ type StationIntercomViewProps = {
   onShowPinnedOnlyChange: (value: boolean) => void;
   isUserSettingsOpen: boolean;
   setIsUserSettingsOpen: (value: boolean) => void;
+  roomGainById: Record<string, number>;
+  directGainByUserId: Record<string, number>;
+  onRoomGainChange: (roomId: string, gain: number) => void;
+  onDirectGainChange: (userId: string, gain: number) => void;
   // Audio device props
   inputDevices: MediaDeviceInfo[];
   selectedInputDeviceId: string;
@@ -108,6 +112,10 @@ export function StationIntercomView({
   onShowPinnedOnlyChange,
   isUserSettingsOpen,
   setIsUserSettingsOpen,
+  roomGainById,
+  directGainByUserId,
+  onRoomGainChange,
+  onDirectGainChange,
   inputDevices,
   selectedInputDeviceId,
   selectedMicLabel,
@@ -241,6 +249,21 @@ export function StationIntercomView({
                   <small>Talk</small>
                   <strong>{room.name}</strong>
                 </button>
+                <div className="station-gain-control">
+                  <label htmlFor={`room-gain-${room.id}`}>Volume {Math.round((roomGainById[room.id] ?? 1) * 100)}%</label>
+                  <input
+                    id={`room-gain-${room.id}`}
+                    type="range"
+                    min={0}
+                    max={200}
+                    step={5}
+                    value={Math.round((roomGainById[room.id] ?? 1) * 100)}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onPointerUp={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={(event) => onRoomGainChange(room.id, Number(event.currentTarget.value) / 100)}
+                  />
+                </div>
                 <div className="station-card-actions">
                   <button
                     className={`listen ${listening ? "on" : ""} ${canListen ? "" : "disabled"}`}
@@ -298,6 +321,21 @@ export function StationIntercomView({
                   <strong>{p.username}</strong>
                   <em>{roleNameById.get(p.roleId) || p.roleId || "Unknown role"}</em>
                 </button>
+                <div className="station-gain-control">
+                  <label htmlFor={`direct-gain-${p.userId}`}>Volume {Math.round((directGainByUserId[p.userId] ?? 1) * 100)}%</label>
+                  <input
+                    id={`direct-gain-${p.userId}`}
+                    type="range"
+                    min={0}
+                    max={200}
+                    step={5}
+                    value={Math.round((directGainByUserId[p.userId] ?? 1) * 100)}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onPointerUp={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={(event) => onDirectGainChange(p.userId, Number(event.currentTarget.value) / 100)}
+                  />
+                </div>
                 <div className="station-card-actions single">
                   <button
                     className={`call ${/* disabled handled by class */ ""}`}
@@ -420,7 +458,7 @@ export function StationIntercomView({
                   <div className="audio-box-body">
                     <div className="audio-left">
                 <h4>Microphone</h4>
-                <div className="audio-row">
+                <div className="audio-row audio-row-mic">
                   <div className="mic-dropdown" ref={micMenuRef}>
                     <button
                       type="button"
@@ -452,11 +490,16 @@ export function StationIntercomView({
                       </div>
                     ) : null}
                   </div>
-                  <div className="meter">
-                      <div className="meter-bar" style={{ width: `${inputLevel}%` }} />
-                    </div>
                 </div>
-                <small>Input level</small>
+                <div className="input-level-row" aria-live="polite">
+                  <div className="input-level-head">
+                    <small>Input level</small>
+                    <strong>{inputLevel}%</strong>
+                  </div>
+                  <div className="meter">
+                    <div className="meter-bar" style={{ width: `${inputLevel}%` }} />
+                  </div>
+                </div>
                     </div>
                     <div className="audio-right">
                       <h4>Speaker output</h4>
