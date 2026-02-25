@@ -34,13 +34,16 @@ export function RoleMultiSelect({ label, selectedRoleIds, setState, keyPrefix, r
           </button>
           <div className="role-multiselect-options">
             {roles.map((role) => (
-              <label key={`${keyPrefix}-${role.id}`} className="role-multiselect-option">
+              <label
+                key={`${keyPrefix}-${role.id}`}
+                className={`role-multiselect-option ${selectedRoleIds.includes(role.id) ? "selected" : ""}`}
+              >
                 <input
                   type="checkbox"
                   checked={selectedRoleIds.includes(role.id)}
                   onChange={() => toggleRoleInSelection(role.id, setState)}
                 />
-                <span>{role.name}</span>
+                <span className="role-multiselect-option-text">{role.name}</span>
               </label>
             ))}
           </div>

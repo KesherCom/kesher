@@ -1220,7 +1220,7 @@ export function App() {
 
   async function handleAdminLogin() {
     if (adminPinInput.trim() !== adminPinGuard) {
-      setAdminLoginError("Falscher Admin-PIN.");
+      setAdminLoginError("Incorrect admin PIN.");
       return;
     }
     setAdminLoginError("");
@@ -1229,7 +1229,7 @@ export function App() {
     // Use provided username/role if present, otherwise fall back to sensible defaults.
     const nextRoleId = roleId || publicData?.roles?.[0]?.id || "";
     if (!nextRoleId) {
-      setAdminLoginError("Keine Rolle verfügbar zum Anmelden.");
+      setAdminLoginError("No role available for admin login.");
       return;
     }
     // Perform a login using the reserved admin username, but don't overwrite the user's session settings.
@@ -1466,7 +1466,7 @@ export function App() {
   }
 
   if (!appData) {
-    return <div className="root">Lade Daten…</div>;
+    return <div className="root">Loading data…</div>;
   }
 
   // audioPanel is now integrated into the User Settings modal in StationIntercomView
@@ -1529,11 +1529,11 @@ export function App() {
       <div className="root admin-shell">
         <div className="admin-shell-header">
           <div>
-            <h1>Admin-Konsole</h1>
-            <p className="admin-shell-user">Angemeldet als {displayUsername} ({adminRoleLabel})</p>
+            <h1>Admin console</h1>
+            <p className="admin-shell-user">Signed in as {displayUsername} ({adminRoleLabel})</p>
           </div>
           <div className="admin-shell-actions">
-            <button onClick={() => void refreshBootstrapData()}>Neu laden</button>
+            <button onClick={() => void refreshBootstrapData()}>Refresh</button>
             <button className="station-top-logout" onClick={() => void doLogout()}>
               Logout / Lock
             </button>

@@ -113,7 +113,7 @@ export function AdminRolesCard({
             onClick={() => setIsOpen((v) => !v)}
             aria-expanded={isOpen}
           >
-            {isOpen ? "Verbergen" : "Anzeigen"}
+            {isOpen ? "Hide" : "Show"}
           </button>
         </div>
       </div>
@@ -134,7 +134,7 @@ export function AdminRolesCard({
                   }}
                   disabled={adminBusy}
                 >
-                  {showRoleCreateForm ? "Cancel create" : "Create role"}
+                  {showRoleCreateForm ? "Cancel" : "Create role"}
                 </button>
               ) : null}
             </div>

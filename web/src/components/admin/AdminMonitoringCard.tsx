@@ -21,7 +21,7 @@ export function AdminMonitoringCard({
             onClick={() => setIsOpen((v) => !v)}
             aria-expanded={isOpen}
           >
-            {isOpen ? "Verbergen" : "Anzeigen"}
+            {isOpen ? "Hide" : "Show"}
           </button>
         </div>
       </div>

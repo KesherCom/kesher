@@ -32,17 +32,20 @@ export function RoomMultiSelect({ label, selectedRoomIds, setState, keyPrefix, r
         </summary>
         <div className="role-multiselect-menu">
           <button type="button" className="secondary role-multiselect-reset" onClick={() => setState([])}>
-            Clear
+            Clear selection
           </button>
           <div className="role-multiselect-options">
             {rooms.map((room) => (
-              <label key={`${keyPrefix}-${room.id}`} className="role-multiselect-option">
+              <label
+                key={`${keyPrefix}-${room.id}`}
+                className={`role-multiselect-option ${selectedRoomIds.includes(room.id) ? "selected" : ""}`}
+              >
                 <input
                   type="checkbox"
                   checked={selectedRoomIds.includes(room.id)}
                   onChange={() => toggleRoomInSelection(room.id, setState)}
                 />
-                <span>{room.name}</span>
+                <span className="role-multiselect-option-text">{room.name}</span>
               </label>
             ))}
           </div>

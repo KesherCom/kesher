@@ -108,7 +108,7 @@ export function AdminRoomsCard({
             onClick={() => setIsOpen((v) => !v)}
             aria-expanded={isOpen}
           >
-            {isOpen ? "Verbergen" : "Anzeigen"}
+            {isOpen ? "Hide" : "Show"}
           </button>
         </div>
       </div>
@@ -129,7 +129,7 @@ export function AdminRoomsCard({
                   }}
                   disabled={adminBusy}
                 >
-                  {showRoomCreateForm ? "Cancel create" : "Create room"}
+                  {showRoomCreateForm ? "Cancel" : "Create room"}
                 </button>
               ) : null}
             </div>
