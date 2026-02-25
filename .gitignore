@@ -8,6 +8,7 @@ tmp
 *.db
 *.db-*
 backend/bin
+backend/certs/
 desktop-proxy/bin
 desktop-proxy/dist
 web/tsconfig.tsbuildinfo

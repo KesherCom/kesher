@@ -1,6 +1,40 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Bootstrap, BroadcastGroup, Presence } from "../types";
 
+const DB_MIN = -60;
+const DB_MAX = 6; // +6 dB ≈ gain 2.0
+const MUTE_POS = DB_MIN - 1; // sentinel slider position for mute
+
+/** Slider position (dB) → linear gain. Bottom-of-slider = mute. */
+function sliderToGain(sliderDb: number): number {
+  if (sliderDb <= MUTE_POS) return 0;
+  return Math.pow(10, Math.max(DB_MIN, Math.min(DB_MAX, sliderDb)) / 20);
+}
+
+/** Linear gain → slider position (dB). */
+function gainToSlider(gain: number): number {
+  if (gain <= 0) return MUTE_POS;
+  const db = 20 * Math.log10(gain);
+  if (db < DB_MIN) return MUTE_POS;
+  return Math.round(Math.max(DB_MIN, Math.min(DB_MAX, db)));
+}
+
+/** Gain → display label like "+6 db", "0 db", "-∞". */
+function gainToDbLabel(gain: number): string {
+  if (gain <= 0) return "-\u221E";
+  const db = 20 * Math.log10(gain);
+  if (db < DB_MIN) return "-\u221E";
+  const r = Math.round(db);
+  if (r === 0) return "0 db";
+  return `${r > 0 ? "+" : ""}${r} db`;
+}
+
+/** Slider fill percentage for CSS background gradient. */
+function sliderFillPercent(gain: number): number {
+  const pos = gainToSlider(gain);
+  return ((pos - MUTE_POS) / (DB_MAX - MUTE_POS)) * 100;
+}
+
 type StationIntercomViewProps = {
   appData: Bootstrap;
   doLogout: () => void;
@@ -250,18 +284,19 @@ export function StationIntercomView({
                   <strong>{room.name}</strong>
                 </button>
                 <div className="station-gain-control">
-                  <label htmlFor={`room-gain-${room.id}`}>Volume {Math.round((roomGainById[room.id] ?? 1) * 100)}%</label>
+                  <label htmlFor={`room-gain-${room.id}`}>{gainToDbLabel(roomGainById[room.id] ?? 1)}</label>
                   <input
                     id={`room-gain-${room.id}`}
                     type="range"
-                    min={0}
-                    max={200}
-                    step={5}
-                    value={Math.round((roomGainById[room.id] ?? 1) * 100)}
+                    min={MUTE_POS}
+                    max={DB_MAX}
+                    step={1}
+                    value={gainToSlider(roomGainById[room.id] ?? 1)}
+                    style={{ "--fill": `${sliderFillPercent(roomGainById[room.id] ?? 1)}%` } as React.CSSProperties}
                     onPointerDown={(event) => event.stopPropagation()}
                     onPointerUp={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}
-                    onChange={(event) => onRoomGainChange(room.id, Number(event.currentTarget.value) / 100)}
+                    onChange={(event) => onRoomGainChange(room.id, sliderToGain(Number(event.currentTarget.value)))}
                   />
                 </div>
                 <div className="station-card-actions">
@@ -322,18 +357,19 @@ export function StationIntercomView({
                   <em>{roleNameById.get(p.roleId) || p.roleId || "Unknown role"}</em>
                 </button>
                 <div className="station-gain-control">
-                  <label htmlFor={`direct-gain-${p.userId}`}>Volume {Math.round((directGainByUserId[p.userId] ?? 1) * 100)}%</label>
+                  <label htmlFor={`direct-gain-${p.userId}`}>{gainToDbLabel(directGainByUserId[p.userId] ?? 1)}</label>
                   <input
                     id={`direct-gain-${p.userId}`}
                     type="range"
-                    min={0}
-                    max={200}
-                    step={5}
-                    value={Math.round((directGainByUserId[p.userId] ?? 1) * 100)}
+                    min={MUTE_POS}
+                    max={DB_MAX}
+                    step={1}
+                    value={gainToSlider(directGainByUserId[p.userId] ?? 1)}
+                    style={{ "--fill": `${sliderFillPercent(directGainByUserId[p.userId] ?? 1)}%` } as React.CSSProperties}
                     onPointerDown={(event) => event.stopPropagation()}
                     onPointerUp={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}
-                    onChange={(event) => onDirectGainChange(p.userId, Number(event.currentTarget.value) / 100)}
+                    onChange={(event) => onDirectGainChange(p.userId, sliderToGain(Number(event.currentTarget.value)))}
                   />
                 </div>
                 <div className="station-card-actions single">
