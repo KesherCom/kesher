@@ -24,3 +24,25 @@ func TestSessionManagerCreateGetDelete(t *testing.T) {
 		t.Fatal("expected session to be deleted")
 	}
 }
+
+func TestSessionManagerGetUnknownToken(t *testing.T) {
+	m := NewSessionManager(time.Minute)
+	if _, ok := m.Get("missing"); ok {
+		t.Fatal("expected unknown token lookup to fail")
+	}
+}
+
+func TestSessionManagerExpiredSessionIsRejectedAndRemoved(t *testing.T) {
+	m := NewSessionManager(-1 * time.Second)
+	user := User{ID: "u1", Username: "tim", RoleID: "audio"}
+	session := m.Create(user)
+	if _, ok := m.Get(session.Token); ok {
+		t.Fatal("expected expired session to be rejected")
+	}
+	m.mu.RLock()
+	_, exists := m.sessions[session.Token]
+	m.mu.RUnlock()
+	if exists {
+		t.Fatal("expected expired session to be removed from store")
+	}
+}

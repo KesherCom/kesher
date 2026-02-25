@@ -4,7 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"reflect"
 	"testing"
+	"time"
 )
 
 func drain(ch chan WSOutbound) {
@@ -194,5 +196,113 @@ func TestHubBroadcastRouting(t *testing.T) {
 			t.Fatal("did not expect room outside broadcast group to receive broadcast")
 		}
 	default:
+	}
+}
+
+func TestHubDirectPTTUpdatesReplyTargetForLatestConnection(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	sender := &client{session: Session{Token: "sender"}, user: User{ID: "u1", Username: "sender", RoleID: "audio"}, send: make(chan WSOutbound, 4)}
+	oldConn := &client{session: Session{Token: "old"}, user: User{ID: "u2", Username: "target", RoleID: "video"}, send: make(chan WSOutbound, 4)}
+	newConn := &client{session: Session{Token: "new"}, user: User{ID: "u2", Username: "target", RoleID: "video"}, send: make(chan WSOutbound, 4)}
+	hub.Add(sender)
+	hub.Add(oldConn)
+	time.Sleep(2 * time.Millisecond)
+	hub.Add(newConn)
+	drain(sender.send)
+	drain(oldConn.send)
+	drain(newConn.send)
+
+	hub.RouteEvent("sender", "voice_state", RoutedEvent{Scope: "direct", TargetID: "u2", Body: "ptt_start"})
+
+	replyUserID, replyUsername, ok := hub.ReplyTargetForUsername("target")
+	if !ok {
+		t.Fatal("expected reply target to exist")
+	}
+	if replyUserID != "u1" || replyUsername != "sender" {
+		t.Fatalf("unexpected reply target: (%s, %s)", replyUserID, replyUsername)
+	}
+}
+
+func TestHubSignalStateForUsernameExpires(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	sender := &client{session: Session{Token: "sender"}, user: User{ID: "u1", Username: "sender", RoleID: "audio"}, send: make(chan WSOutbound, 4)}
+	target := &client{session: Session{Token: "target"}, user: User{ID: "u2", Username: "target", RoleID: "video"}, send: make(chan WSOutbound, 4)}
+	hub.Add(sender)
+	hub.Add(target)
+
+	hub.markDirectSignalIncoming("u2", sender.user, "call")
+	from, message, active := hub.SignalStateForUsername("target")
+	if !active {
+		t.Fatal("expected active signal state")
+	}
+	if from != "sender" || message != "call" {
+		t.Fatalf("unexpected signal state: from=%q message=%q", from, message)
+	}
+
+	hub.mu.Lock()
+	target.signalUntil = time.Now().Add(-time.Second)
+	hub.mu.Unlock()
+	if _, _, ok := hub.SignalStateForUsername("target"); ok {
+		t.Fatal("expected expired signal state to be inactive")
+	}
+}
+
+func TestHubSetVoiceStateTransitions(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	c := &client{session: Session{Token: "a"}, user: User{ID: "u1", Username: "a", RoleID: "audio"}, send: make(chan WSOutbound, 4)}
+	hub.Add(c)
+
+	hub.SetVoiceState("a", "always_on")
+	presence, ok := hub.PresenceForUsername("a")
+	if !ok || presence.VoiceMode != "always_on" || !presence.MicEnabled {
+		t.Fatalf("unexpected always_on presence: %+v", presence)
+	}
+	hub.SetVoiceState("a", "ptt_stop")
+	presence, ok = hub.PresenceForUsername("a")
+	if !ok || presence.VoiceMode != "ptt" || presence.MicEnabled {
+		t.Fatalf("unexpected ptt_stop presence: %+v", presence)
+	}
+}
+
+func TestHubRoomSelectionsReturnsSortedValues(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	c := &client{
+		session: Session{Token: "t1"},
+		user:    User{ID: "u1", Username: "user", RoleID: "audio"},
+		send:    make(chan WSOutbound, 4),
+	}
+	hub.Add(c)
+	hub.SetRoomMatrix("t1", []string{"stage", "foh"}, []string{"video-control", "foh"})
+
+	listen, talk := hub.roomSelections("t1")
+	if !reflect.DeepEqual(listen, []string{"foh", "stage"}) {
+		t.Fatalf("unexpected listen room selection: %v", listen)
+	}
+	if !reflect.DeepEqual(talk, []string{"foh", "video-control"}) {
+		t.Fatalf("unexpected talk room selection: %v", talk)
 	}
 }
