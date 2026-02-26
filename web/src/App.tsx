@@ -94,6 +94,8 @@ function normalizePresenceList(value: unknown): Presence[] {
 
 const defaultInputGainDeviceKey = "__default__";
 const meterDbFsFloor = -60;
+const adminPathname = "/admin";
+const loginPathname = "/login";
 
 function inputGainDeviceKey(deviceId: string): string {
   return deviceId || defaultInputGainDeviceKey;
@@ -105,6 +107,19 @@ function peakAmplitudeToDbFs(value: number): number {
   return Math.max(meterDbFsFloor, 20 * Math.log10(value));
 }
 
+function isAdminPathname(pathname: string): boolean {
+  return pathname === adminPathname;
+}
+function syncPathname(pathname: string, replace = false) {
+  if (window.location.pathname === pathname) return;
+  const method = replace ? "replaceState" : "pushState";
+  window.history[method](
+    window.history.state,
+    "",
+    `${pathname}${window.location.search}${window.location.hash}`,
+  );
+}
+
 export function App() {
   const initialSessionSettings = loadSessionSettings();
   const initialGlobalSettings = loadGlobalSettings();
@@ -114,6 +129,7 @@ export function App() {
     initialSessionSettings.talkRoomIds.length > 0;
   const [publicData, setPublicData] = useState<PublicBootstrap | null>(null);
   const [appData, setAppData] = useState<Bootstrap | null>(null);
+  const [pathname, setPathname] = useState(() => window.location.pathname);
   const [token, setToken] = useState<string | null>(() =>
     sessionStorage.getItem(tokenStorageKey),
   );
@@ -191,7 +207,9 @@ export function App() {
   const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
   const [isOutputMenuOpen, setIsOutputMenuOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"station" | "simple">("station");
-  const [authMode, setAuthMode] = useState<"operator" | "admin">("operator");
+  const [authMode, setAuthMode] = useState<"operator" | "admin">(() =>
+    isAdminPathname(window.location.pathname) ? "admin" : "operator",
+  );
   const [adminPinInput, setAdminPinInput] = useState("");
   const [adminLoginError, setAdminLoginError] = useState("");
   const [adminPinGuard, setAdminPinGuard] = useState<string>(defaultAdminPin);
@@ -1868,6 +1886,42 @@ export function App() {
       return currentTargets[0]?.id || "";
     });
   }, [currentTargets]);
+  useEffect(() => {
+    const onPopState = () => {
+      setPathname(window.location.pathname);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    if (isAdminPathname(pathname)) {
+      setAuthMode("admin");
+      return;
+    }
+    setAuthMode("operator");
+  }, [pathname, token]);
+
+  useEffect(() => {
+    if (!token) {
+      syncPathname(loginPathname, true);
+      setPathname(loginPathname);
+      return;
+    }
+    const targetPathname = authMode === "admin" ? adminPathname : "/";
+    if (pathname === loginPathname) {
+      syncPathname(targetPathname, true);
+      setPathname(targetPathname);
+      return;
+    }
+    if (pathname !== targetPathname) {
+      syncPathname(targetPathname);
+      setPathname(targetPathname);
+    }
+  }, [authMode, pathname, token]);
 
   async function doLogin(overrideUsername?: string, overrideRoleId?: string) {
     const useUsername =
