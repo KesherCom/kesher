@@ -76,6 +76,54 @@ describe("api helpers", () => {
     expect(data.self.id).toBe("u1");
   });
 
+  it("normalizes nullable list fields from bootstrap payloads", async () => {
+    server.use(
+      http.get("http://localhost/api/public-bootstrap", () =>
+        HttpResponse.json({
+          roles: null,
+          rooms: null,
+          broadcastGroups: null,
+        }),
+      ),
+      http.get("http://localhost/api/bootstrap", () =>
+        HttpResponse.json({
+          self: { id: "u1", username: "Tim", roleId: "op" },
+          users: null,
+          roles: null,
+          rooms: [
+            {
+              id: "r1",
+              name: "Room 1",
+              senderRoleIds: null,
+              receiverRoleIds: null,
+            },
+          ],
+          broadcastGroups: [
+            {
+              id: "bg1",
+              name: "All",
+              roomIds: null,
+              allowedRoleIds: null,
+            },
+          ],
+        }),
+      ),
+    );
+
+    const publicData = await getPublicBootstrap();
+    expect(publicData.roles).toEqual([]);
+    expect(publicData.rooms).toEqual([]);
+    expect(publicData.broadcastGroups).toEqual([]);
+
+    const appData = await bootstrap("token-123");
+    expect(appData.users).toEqual([]);
+    expect(appData.roles).toEqual([]);
+    expect(appData.rooms[0]?.senderRoleIds).toEqual([]);
+    expect(appData.rooms[0]?.receiverRoleIds).toEqual([]);
+    expect(appData.broadcastGroups[0]?.roomIds).toEqual([]);
+    expect(appData.broadcastGroups[0]?.allowedRoleIds).toEqual([]);
+  });
+
   it("can execute logout", async () => {
     await expect(logout("token-123")).resolves.toBeUndefined();
   });
