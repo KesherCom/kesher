@@ -66,6 +66,32 @@ type WsMessage =
       data: { candidate: string; sdpMid?: string; sdpMLineIndex?: number };
     };
 
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function normalizePresenceList(value: unknown): Presence[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => {
+    const record = (entry ?? {}) as Record<string, unknown>;
+    return {
+      ...record,
+      userId: typeof record.userId === "string" ? record.userId : "",
+      username: typeof record.username === "string" ? record.username : "",
+      roleId: typeof record.roleId === "string" ? record.roleId : "",
+      activeRoom:
+        typeof record.activeRoom === "string" ? record.activeRoom : "",
+      listenRooms: toStringArray(record.listenRooms),
+      talkRooms: toStringArray(record.talkRooms),
+      voiceMode:
+        typeof record.voiceMode === "string" ? record.voiceMode : "ptt",
+      micEnabled: Boolean(record.micEnabled),
+      broadcastActive: Boolean(record.broadcastActive),
+    };
+  });
+}
+
 const defaultInputGainDeviceKey = "__default__";
 const meterDbFsFloor = -60;
 
@@ -1269,7 +1295,7 @@ export function App() {
       ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data) as WsMessage;
         if (msg.type === "presence") {
-          setPresence(msg.data);
+          setPresence(normalizePresenceList(msg.data));
           return;
         }
         if (msg.type === "companion_command") {
