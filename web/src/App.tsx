@@ -66,6 +66,19 @@ type WsMessage =
       data: { candidate: string; sdpMid?: string; sdpMLineIndex?: number };
     };
 
+const defaultInputGainDeviceKey = "__default__";
+const meterDbFsFloor = -60;
+
+function inputGainDeviceKey(deviceId: string): string {
+  return deviceId || defaultInputGainDeviceKey;
+}
+
+function peakAmplitudeToDbFs(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return meterDbFsFloor;
+  if (value >= 1) return 0;
+  return Math.max(meterDbFsFloor, 20 * Math.log10(value));
+}
+
 export function App() {
   const initialSessionSettings = loadSessionSettings();
   const initialGlobalSettings = loadGlobalSettings();
@@ -122,6 +135,9 @@ export function App() {
   const [enableDirectTabs, setEnableDirectTabs] = useState(
     initialGlobalSettings.enableDirectTabs,
   );
+  const [inputGainByDeviceId, setInputGainByDeviceId] = useState<
+    Record<string, number>
+  >(initialGlobalSettings.inputGainByDeviceId ?? {});
   const [roomGainById, setRoomGainById] = useState<Record<string, number>>(
     initialGlobalSettings.roomGainById,
   );
@@ -138,7 +154,9 @@ export function App() {
     initialFavorites.showPinnedOnly,
   );
   const [selectedChannelId, setSelectedChannelId] = useState<string>("");
-  const [inputLevel, setInputLevel] = useState(0);
+  const [inputLevelDbFs, setInputLevelDbFs] = useState(meterDbFsFloor);
+  const [inputSamplePeakClipping, setInputSamplePeakClipping] = useState(false);
+  const [displayedInputClipping, setDisplayedInputClipping] = useState(false);
   const [audioError, setAudioError] = useState<string>("");
   const [webrtcState, setWebrtcState] = useState<string>("new");
   const [rtpStats, setRtpStats] = useState<{ inKbps: number; outKbps: number }>(
@@ -224,7 +242,12 @@ export function App() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const meterMonitorStreamRef = useRef<MediaStream | null>(null);
+  const inputCaptureStreamRef = useRef<MediaStream | null>(null);
+  const inputProcessingAudioCtxRef = useRef<AudioContext | null>(null);
+  const inputGainNodeRef = useRef<GainNode | null>(null);
   const meterRafRef = useRef<number | null>(null);
+  const inputClippingDisplayTimeoutRef = useRef<number | null>(null);
+  const micReinitGenerationRef = useRef(0);
   const statsIntervalRef = useRef<number | null>(null);
   const lastStatsRef = useRef<{
     ts: number;
@@ -238,6 +261,9 @@ export function App() {
     initialGlobalSettings.selectedOutputDeviceId,
   );
   const roomGainByIdRef = useRef(initialGlobalSettings.roomGainById);
+  const inputGainByDeviceIdRef = useRef(
+    initialGlobalSettings.inputGainByDeviceId ?? {},
+  );
   const directGainByUserIdRef = useRef(
     initialGlobalSettings.directGainByUserId,
   );
@@ -265,6 +291,9 @@ export function App() {
   useEffect(() => {
     roomGainByIdRef.current = roomGainById;
   }, [roomGainById]);
+  useEffect(() => {
+    inputGainByDeviceIdRef.current = inputGainByDeviceId;
+  }, [inputGainByDeviceId]);
   useEffect(() => {
     directGainByUserIdRef.current = directGainByUserId;
   }, [directGainByUserId]);
@@ -300,6 +329,7 @@ export function App() {
         selectedOutputDeviceId,
         enableDirectPpt,
         enableDirectTabs,
+        inputGainByDeviceId,
         roomGainById,
         directGainByUserId,
       } satisfies GlobalSettings),
@@ -309,6 +339,7 @@ export function App() {
     selectedOutputDeviceId,
     enableDirectPpt,
     enableDirectTabs,
+    inputGainByDeviceId,
     roomGainById,
     directGainByUserId,
   ]);
@@ -866,7 +897,57 @@ export function App() {
       void audioCtxRef.current.close();
       audioCtxRef.current = null;
     }
-    setInputLevel(0);
+    setInputLevelDbFs(meterDbFsFloor);
+    setInputSamplePeakClipping(false);
+  }
+
+  function stopInputProcessing() {
+    if (inputCaptureStreamRef.current) {
+      for (const track of inputCaptureStreamRef.current.getTracks()) {
+        track.stop();
+      }
+      inputCaptureStreamRef.current = null;
+    }
+    if (inputProcessingAudioCtxRef.current) {
+      void inputProcessingAudioCtxRef.current.close();
+      inputProcessingAudioCtxRef.current = null;
+    }
+    inputGainNodeRef.current = null;
+  }
+
+  function selectedInputGainFor(deviceId: string): number {
+    return clampGainValue(
+      inputGainByDeviceIdRef.current[inputGainDeviceKey(deviceId)] ?? 1,
+    );
+  }
+
+  function buildOutgoingMicStream(
+    sourceStream: MediaStream,
+    gainValue: number,
+  ): MediaStream {
+    const sourceTrack = sourceStream.getAudioTracks()[0];
+    if (!sourceTrack) return sourceStream;
+    const AudioCtx = window.AudioContext;
+    if (!AudioCtx) return sourceStream;
+    try {
+      const ctx = new AudioCtx();
+      const src = ctx.createMediaStreamSource(sourceStream);
+      const gain = ctx.createGain();
+      gain.gain.value = clampGainValue(gainValue);
+      const dest = ctx.createMediaStreamDestination();
+      src.connect(gain);
+      gain.connect(dest);
+      const processedTrack = dest.stream.getAudioTracks()[0];
+      if (!processedTrack) {
+        void ctx.close();
+        return sourceStream;
+      }
+      inputProcessingAudioCtxRef.current = ctx;
+      inputGainNodeRef.current = gain;
+      return new MediaStream([processedTrack]);
+    } catch {
+      return sourceStream;
+    }
   }
 
   function startLevelMeter(stream: MediaStream) {
@@ -881,24 +962,25 @@ export function App() {
     const ctx = new AudioCtx();
     audioCtxRef.current = ctx;
     const src = ctx.createMediaStreamSource(monitorStream);
+    const meterGain = ctx.createGain();
     const analyser = ctx.createAnalyser();
-    analyser.fftSize = 256;
-    src.connect(analyser);
+    analyser.fftSize = 2048;
+    src.connect(meterGain);
+    meterGain.connect(analyser);
     analyserRef.current = analyser;
-    const buf = new Uint8Array(analyser.frequencyBinCount);
-    let smoothed = 0;
+    const buf = new Float32Array(analyser.fftSize);
     const tick = () => {
-      analyser.getByteTimeDomainData(buf);
-      let sum = 0;
+      meterGain.gain.value = clampGainValue(
+        inputGainNodeRef.current?.gain.value ?? 1,
+      );
+      analyser.getFloatTimeDomainData(buf);
+      let peak = 0;
       for (const v of buf) {
-        const centered = (v - 128) / 128;
-        sum += centered * centered;
+        const abs = Math.abs(v);
+        if (abs > peak) peak = abs;
       }
-      const rms = Math.sqrt(sum / buf.length);
-      // sqrt-scale RMS for perceptual (log-like) meter, then smooth
-      const target = Math.sqrt(rms) * 150; // sqrt compresses loud, expands quiet
-      smoothed += (target - smoothed) * 0.3; // exponential smoothing
-      setInputLevel(Math.min(100, Math.max(0, Math.round(smoothed))));
+      setInputLevelDbFs(peakAmplitudeToDbFs(peak));
+      setInputSamplePeakClipping(peak >= 1);
       meterRafRef.current = requestAnimationFrame(tick);
     };
     meterRafRef.current = requestAnimationFrame(tick);
@@ -941,29 +1023,30 @@ export function App() {
       noiseSuppression: true,
       autoGainControl: true,
     };
-    if (!deviceId) {
-      return navigator.mediaDevices.getUserMedia({
-        audio: baseAudio,
-        video: false,
-      });
+    if (deviceId) {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: { ...baseAudio, deviceId: { exact: deviceId } },
+          video: false,
+        });
+      } catch {
+        return navigator.mediaDevices.getUserMedia({
+          audio: baseAudio,
+          video: false,
+        });
+      }
     }
-    try {
-      return await navigator.mediaDevices.getUserMedia({
-        audio: { ...baseAudio, deviceId: { exact: deviceId } },
-        video: false,
-      });
-    } catch {
-      return navigator.mediaDevices.getUserMedia({
-        audio: baseAudio,
-        video: false,
-      });
-    }
+    return navigator.mediaDevices.getUserMedia({
+      audio: baseAudio,
+      video: false,
+    });
   }
 
   useEffect(() => {
     applyVolumeToAllRemoteAudio();
   }, [roomGainById, directGainByUserId]);
   function cleanupRealtimeResources() {
+    micReinitGenerationRef.current += 1;
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -984,6 +1067,7 @@ export function App() {
       for (const track of localStreamRef.current.getTracks()) track.stop();
       localStreamRef.current = null;
     }
+    stopInputProcessing();
     pendingICERef.current = [];
     stopStatsLoop();
     stopLevelMeter();
@@ -1109,9 +1193,17 @@ export function App() {
           );
         };
         try {
-          const stream = await getMicStream(selectedInputDeviceIdRef.current);
+          const captureStream = await getMicStream(
+            selectedInputDeviceIdRef.current,
+          );
+          stopInputProcessing();
+          inputCaptureStreamRef.current = captureStream;
+          const stream = buildOutgoingMicStream(
+            captureStream,
+            selectedInputGainFor(selectedInputDeviceIdRef.current),
+          );
           localStreamRef.current = stream;
-          startLevelMeter(stream);
+          startLevelMeter(captureStream);
           void refreshAudioDevices();
           const initialEnabled = voiceModeRef.current === "always_on";
           for (const track of stream.getAudioTracks()) {
@@ -1571,12 +1663,23 @@ export function App() {
   }, [listenRoomIds, talkRoomIds]);
 
   useEffect(() => {
-    if (!token || !appData || !pcRef.current || !selectedInputDeviceId) return;
+    if (!token || !appData || !pcRef.current) return;
+    const generation = ++micReinitGenerationRef.current;
     void (async () => {
       const pc = pcRef.current;
       if (!pc) return;
       try {
-        const newStream = await getMicStream(selectedInputDeviceId);
+        const newCaptureStream = await getMicStream(selectedInputDeviceId);
+        if (generation !== micReinitGenerationRef.current) {
+          for (const t of newCaptureStream.getTracks()) t.stop();
+          return;
+        }
+        stopInputProcessing();
+        inputCaptureStreamRef.current = newCaptureStream;
+        const newStream = buildOutgoingMicStream(
+          newCaptureStream,
+          selectedInputGainFor(selectedInputDeviceId),
+        );
         const newTrack = newStream.getAudioTracks()[0];
         if (!newTrack) return;
         const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
@@ -1585,11 +1688,15 @@ export function App() {
         } else {
           pc.addTrack(newTrack, newStream);
         }
+        if (generation !== micReinitGenerationRef.current) {
+          for (const t of newStream.getTracks()) t.stop();
+          return;
+        }
         if (localStreamRef.current) {
           for (const t of localStreamRef.current.getTracks()) t.stop();
         }
         localStreamRef.current = newStream;
-        startLevelMeter(newStream);
+        startLevelMeter(newCaptureStream);
         applyVoiceModeToLocalTracks(voiceModeRef.current);
         setAudioError("");
       } catch (e) {
@@ -1598,7 +1705,19 @@ export function App() {
         );
       }
     })();
+    return () => {
+      if (generation === micReinitGenerationRef.current) {
+        micReinitGenerationRef.current += 1;
+      }
+    };
   }, [selectedInputDeviceId, token, appData]);
+
+  useEffect(() => {
+    const selectedGain = selectedInputGainFor(selectedInputDeviceId);
+    if (inputGainNodeRef.current) {
+      inputGainNodeRef.current.gain.value = selectedGain;
+    }
+  }, [selectedInputDeviceId, inputGainByDeviceId]);
 
   useEffect(() => {
     for (const audio of remoteAudioRef.current.values()) {
@@ -1614,6 +1733,14 @@ export function App() {
     setDirectGainByUserId((prev) => ({
       ...prev,
       [userId]: clampGainValue(gain),
+    }));
+  }, []);
+
+  const onInputGainChange = useCallback((deviceId: string, gain: number) => {
+    const key = inputGainDeviceKey(deviceId);
+    setInputGainByDeviceId((prev) => ({
+      ...prev,
+      [key]: clampGainValue(gain),
     }));
   }, []);
 
@@ -1648,6 +1775,40 @@ export function App() {
       "Select microphone"
     );
   }, [inputDevices, selectedInputDeviceId]);
+  const selectedInputGain = useMemo(
+    () =>
+      clampGainValue(
+        inputGainByDeviceId[inputGainDeviceKey(selectedInputDeviceId)] ?? 1,
+      ),
+    [selectedInputDeviceId, inputGainByDeviceId],
+  );
+  const inputClipping = inputSamplePeakClipping;
+  useEffect(() => {
+    if (displayedInputClipping === inputClipping) return;
+    if (inputClippingDisplayTimeoutRef.current !== null) {
+      window.clearTimeout(inputClippingDisplayTimeoutRef.current);
+      inputClippingDisplayTimeoutRef.current = null;
+    }
+    inputClippingDisplayTimeoutRef.current = window.setTimeout(() => {
+      inputClippingDisplayTimeoutRef.current = null;
+      setDisplayedInputClipping(inputClipping);
+    }, 2000);
+    return () => {
+      if (inputClippingDisplayTimeoutRef.current !== null) {
+        window.clearTimeout(inputClippingDisplayTimeoutRef.current);
+        inputClippingDisplayTimeoutRef.current = null;
+      }
+    };
+  }, [inputClipping, displayedInputClipping]);
+  useEffect(
+    () => () => {
+      if (inputClippingDisplayTimeoutRef.current !== null) {
+        window.clearTimeout(inputClippingDisplayTimeoutRef.current);
+        inputClippingDisplayTimeoutRef.current = null;
+      }
+    },
+    [],
+  );
   const outputSelectionSupported = useMemo(() => {
     type AudioWithSinkId = HTMLAudioElement & {
       setSinkId?: (sinkId: string) => Promise<void>;
@@ -2237,7 +2398,10 @@ export function App() {
         selectedInputDeviceId={selectedInputDeviceId}
         selectedMicLabel={selectedMicLabel}
         setSelectedInputDeviceId={setSelectedInputDeviceId}
-        inputLevel={inputLevel}
+        inputLevelDbFs={inputLevelDbFs}
+        inputGain={selectedInputGain}
+        inputClipping={displayedInputClipping}
+        onInputGainChange={onInputGainChange}
         outputDevices={outputDevices}
         selectedOutputDeviceId={selectedOutputDeviceId}
         selectedOutputLabel={selectedOutputLabel}

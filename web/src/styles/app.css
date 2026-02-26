@@ -2101,6 +2101,18 @@ button.secondary {
   background: linear-gradient(90deg, #4ec3ff 0%, #00e08f 100%);
   box-shadow: 0 0 8px rgba(78, 195, 255, 0.35);
 }
+.station-modal-body .input-level-row .input-level-status {
+  font-weight: 700;
+}
+.station-modal-body .input-level-row .input-level-status.is-ok {
+  color: #b7f0c7;
+}
+.station-modal-body .input-level-row .input-level-status.is-clipping {
+  color: #ffbdbd;
+}
+.station-modal-body .input-gain-control {
+  margin-top: 0.55rem;
+}
 .station-modal-body .mic-dropdown-trigger {
   padding: 0.7rem 0.85rem;
   border-radius: 10px;

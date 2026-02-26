@@ -35,6 +35,19 @@ function sliderFillPercent(gain: number): number {
   return ((pos - MUTE_POS) / (DB_MAX - MUTE_POS)) * 100;
 }
 
+const METER_DBFS_MIN = -60;
+
+function meterDbFsToPercent(dbFs: number): number {
+  const clamped = Math.max(METER_DBFS_MIN, Math.min(0, dbFs));
+  return ((clamped - METER_DBFS_MIN) / (0 - METER_DBFS_MIN)) * 100;
+}
+
+function formatDbFs(dbFs: number): string {
+  if (!Number.isFinite(dbFs) || dbFs <= METER_DBFS_MIN) return "-∞ dBFS";
+  if (Math.abs(dbFs) < 0.05) return "0.0 dBFS";
+  return `${dbFs.toFixed(1)} dBFS`;
+}
+
 type StationIntercomViewProps = {
   appData: Bootstrap;
   doLogout: () => void;
@@ -97,7 +110,10 @@ type StationIntercomViewProps = {
   selectedInputDeviceId: string;
   selectedMicLabel: string;
   setSelectedInputDeviceId: (value: string) => void;
-  inputLevel: number;
+  inputLevelDbFs: number;
+  inputGain: number;
+  inputClipping: boolean;
+  onInputGainChange: (deviceId: string, gain: number) => void;
   outputDevices: MediaDeviceInfo[];
   selectedOutputDeviceId: string;
   selectedOutputLabel: string;
@@ -162,7 +178,10 @@ export function StationIntercomView({
   selectedInputDeviceId,
   selectedMicLabel,
   setSelectedInputDeviceId,
-  inputLevel,
+  inputLevelDbFs,
+  inputGain,
+  inputClipping,
+  onInputGainChange,
   outputDevices,
   selectedOutputDeviceId,
   selectedOutputLabel,
@@ -889,14 +908,48 @@ export function StationIntercomView({
                         <div className="input-level-row" aria-live="polite">
                           <div className="input-level-head">
                             <small>Input level</small>
-                            <strong>{inputLevel}%</strong>
+                            <strong>{formatDbFs(inputLevelDbFs)}</strong>
                           </div>
                           <div className="meter">
                             <div
                               className="meter-bar"
-                              style={{ width: `${inputLevel}%` }}
+                              style={{
+                                width: `${meterDbFsToPercent(inputLevelDbFs)}%`,
+                              }}
                             />
                           </div>
+                          <small
+                            className={`input-level-status ${inputClipping ? "is-clipping" : "is-ok"}`}
+                          >
+                            {inputClipping
+                              ? "audio clipping"
+                              : "audio level ok"}
+                          </small>
+                        </div>
+                        <div className="station-gain-control input-gain-control">
+                          <label htmlFor="input-gain">
+                            {gainToDbLabel(inputGain)}
+                          </label>
+                          <input
+                            id="input-gain"
+                            type="range"
+                            min={MUTE_POS}
+                            max={DB_MAX}
+                            step={1}
+                            value={gainToSlider(inputGain)}
+                            style={
+                              {
+                                "--fill": `${sliderFillPercent(inputGain)}%`,
+                              } as React.CSSProperties
+                            }
+                            onChange={(event) =>
+                              onInputGainChange(
+                                selectedInputDeviceId,
+                                sliderToGain(Number(event.currentTarget.value)),
+                              )
+                            }
+                            aria-label="Input gain"
+                          />
                         </div>
                       </div>
                       <div className="audio-right">

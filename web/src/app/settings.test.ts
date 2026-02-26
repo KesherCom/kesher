@@ -48,6 +48,7 @@ describe("settings helpers", () => {
         selectedOutputDeviceId: "spk-1",
         enableDirectPpt: true,
         enableDirectTabs: false,
+        inputGainByDeviceId: { "mic-1": 0.9, broken: -3 },
         roomGainById: { a: 1.5, b: -2 },
         directGainByUserId: { u1: 5, u2: 0.5 },
       }),
@@ -58,6 +59,7 @@ describe("settings helpers", () => {
       selectedOutputDeviceId: "spk-1",
       enableDirectPpt: true,
       enableDirectTabs: false,
+      inputGainByDeviceId: { "mic-1": 0.9, broken: 0 },
       roomGainById: { a: 1.5, b: 0 },
       directGainByUserId: { u1: 2, u2: 0.5 },
     });

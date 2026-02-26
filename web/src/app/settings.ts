@@ -16,6 +16,7 @@ export type GlobalSettings = {
   selectedOutputDeviceId: string;
   enableDirectPpt: boolean;
   enableDirectTabs: boolean;
+  inputGainByDeviceId: Record<string, number>;
   roomGainById: Record<string, number>;
   directGainByUserId: Record<string, number>;
 };
@@ -73,6 +74,7 @@ export function loadGlobalSettings(): GlobalSettings {
         selectedOutputDeviceId: "",
         enableDirectPpt: false,
         enableDirectTabs: false,
+        inputGainByDeviceId: {},
         roomGainById: {},
         directGainByUserId: {},
       };
@@ -95,6 +97,7 @@ export function loadGlobalSettings(): GlobalSettings {
         typeof parsed.enableDirectTabs === "boolean"
           ? parsed.enableDirectTabs
           : false,
+      inputGainByDeviceId: sanitizeGainMap(parsed.inputGainByDeviceId),
       roomGainById: sanitizeGainMap(parsed.roomGainById),
       directGainByUserId: sanitizeGainMap(parsed.directGainByUserId),
     };
@@ -104,6 +107,7 @@ export function loadGlobalSettings(): GlobalSettings {
       selectedOutputDeviceId: "",
       enableDirectPpt: false,
       enableDirectTabs: false,
+      inputGainByDeviceId: {},
       roomGainById: {},
       directGainByUserId: {},
     };
