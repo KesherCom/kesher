@@ -71,6 +71,7 @@ type Hub struct {
 	logger              *slog.Logger
 	media               *MediaManager
 	presenceSubscribers map[chan []PresenceState]struct{}
+	chatSubscribers     map[chan RoutedEvent]struct{}
 }
 
 func NewHub(store *Store, logger *slog.Logger) *Hub {
@@ -79,6 +80,7 @@ func NewHub(store *Store, logger *slog.Logger) *Hub {
 		store:               store,
 		logger:              logger,
 		presenceSubscribers: make(map[chan []PresenceState]struct{}),
+		chatSubscribers:     make(map[chan RoutedEvent]struct{}),
 	}
 }
 
@@ -307,6 +309,9 @@ func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
 	default:
 		h.logger.Warn("unsupported routing scope", "scope", e.Scope)
 	}
+	if eventType == "chat" {
+		h.fanoutChatEvent(e)
+	}
 }
 
 func (h *Hub) sendToUser(userID string, msg WSOutbound) {
@@ -448,6 +453,53 @@ func (h *Hub) SubscribePresence() (chan []PresenceState, func()) {
 		h.mu.Unlock()
 	}
 	return ch, unsubscribe
+}
+
+// SubscribeChat returns a channel that receives every routed chat event and an
+// unsubscribe function that must be called when done.
+func (h *Hub) SubscribeChat() (chan RoutedEvent, func()) {
+	ch := make(chan RoutedEvent, 32)
+	h.mu.Lock()
+	h.chatSubscribers[ch] = struct{}{}
+	h.mu.Unlock()
+	return ch, func() {
+		h.mu.Lock()
+		if _, ok := h.chatSubscribers[ch]; ok {
+			delete(h.chatSubscribers, ch)
+			close(ch)
+		}
+		h.mu.Unlock()
+	}
+}
+
+// BroadcastChatToRoom delivers a chat message to all clients currently
+// listening in roomID without requiring a WebSocket session.  Passing nil
+// receiverRoles allows every role to receive the message.
+func (h *Hub) BroadcastChatToRoom(roomID string, fromUser User, body string) {
+	e := RoutedEvent{
+		Scope:     "room",
+		TargetID:  roomID,
+		Body:      body,
+		FromUser:  fromUser,
+		Timestamp: time.Now().UnixMilli(),
+	}
+	h.sendToRoom(roomID, nil, WSOutbound{Type: "chat", Data: e})
+}
+
+// fanoutChatEvent delivers a chat event to all registered chat subscribers.
+func (h *Hub) fanoutChatEvent(e RoutedEvent) {
+	h.mu.RLock()
+	subscribers := make([]chan RoutedEvent, 0, len(h.chatSubscribers))
+	for ch := range h.chatSubscribers {
+		subscribers = append(subscribers, ch)
+	}
+	h.mu.RUnlock()
+	for _, ch := range subscribers {
+		select {
+		case ch <- e:
+		default:
+		}
+	}
 }
 func (h *Hub) broadcastPresence() {
 	h.mu.RLock()

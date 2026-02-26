@@ -21,16 +21,18 @@ import (
 )
 
 type Server struct {
-	cfg         Config
-	logger      *slog.Logger
-	store       *Store
-	sessions    *SessionManager
-	hub         *Hub
-	media       *MediaManager
-	certMagic   tlsProvider
-	httpSrv     *http.Server
-	redirectSrv *http.Server
-	upgrader    websocket.Upgrader
+	cfg            Config
+	logger         *slog.Logger
+	store          *Store
+	sessions       *SessionManager
+	hub            *Hub
+	media          *MediaManager
+	certMagic      tlsProvider
+	httpSrv        *http.Server
+	redirectSrv    *http.Server
+	upgrader       websocket.Upgrader
+	telegramBridge *TelegramBridge
+	telegramCancel context.CancelFunc
 }
 
 type tlsProvider interface {
@@ -318,6 +320,10 @@ func NewServer(cfg Config) (*Server, error) {
 		}
 		s.certMagic = certMagicCfg
 	}
+	if cfg.TelegramBotToken != "" {
+		mappings := ParseTelegramRoomMap(cfg.TelegramRoomMap)
+		s.telegramBridge = NewTelegramBridge(cfg.TelegramBotToken, cfg.TelegramBotUsername, mappings, s.hub, logger)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/healthz", s.handleHealth)
 	mux.HandleFunc("/api/public-bootstrap", s.handlePublicBootstrap)
@@ -356,6 +362,7 @@ func NewServer(cfg Config) (*Server, error) {
 }
 
 func (s *Server) ListenAndServe() error {
+	s.startTelegramBridge()
 	if s.cfg.ProductionMode {
 		s.logger.Info(
 			"starting production servers",
@@ -399,6 +406,9 @@ func (s *Server) ListenAndServe() error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.telegramCancel != nil {
+		s.telegramCancel()
+	}
 	_ = s.store.Close()
 	var shutdownErr error
 	if s.redirectSrv != nil {
@@ -410,6 +420,15 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		shutdownErr = err
 	}
 	return shutdownErr
+}
+
+func (s *Server) startTelegramBridge() {
+	if s.telegramBridge == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.telegramCancel = cancel
+	go s.telegramBridge.Run(ctx)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {

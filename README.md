@@ -126,6 +126,16 @@ Run `make help` for all available targets.
 | `PRODUCTION_HTTPS_ADDR`         | `:443`        | HTTPS listen address in production mode                           |
 | `PRODUCTION_HTTP_REDIRECT_ADDR` | `:80`         | HTTP redirect address in production mode                          |
 
+### Telegram bot variables (optional)
+
+| Variable                 | Default         | Description                                                                   |
+| ------------------------ | --------------- | ----------------------------------------------------------------------------- |
+| `TELEGRAM_BOT_TOKEN`     | _(empty)_       | Bot API token from BotFather; when set, the Telegram bridge starts at boot    |
+| `TELEGRAM_ROOM_MAP`      | _(empty)_       | Comma-separated `roomId:chatId` pairs, e.g. `uuid1:-100123,uuid2:456`        |
+| `TELEGRAM_BOT_USERNAME`  | `telegram-bot`  | Display name shown in intercom chat for messages forwarded from Telegram      |
+
+See [TELEGRAM_BOT.md](TELEGRAM_BOT.md) for setup instructions.
+
 ### CertMagic variables (when `TLS_MODE=certmagic`)
 
 | Variable                                | Default                  | Description                               |

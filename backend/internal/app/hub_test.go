@@ -306,3 +306,119 @@ func TestHubRoomSelectionsReturnsSortedValues(t *testing.T) {
 		t.Fatalf("unexpected talk room selection: %v", talk)
 	}
 }
+
+func TestHubSubscribeChatReceivesRoutedChatEvents(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	sender := &client{
+		session:     Session{Token: "s1", RoleID: "audio"},
+		user:        User{ID: "u1", Username: "alice", RoleID: "audio"},
+		send:        make(chan WSOutbound, 4),
+		listenRooms: toRoomSet([]string{"foh"}),
+	}
+	hub.Add(sender)
+	drain(sender.send)
+
+	chatCh, unsubscribe := hub.SubscribeChat()
+	defer unsubscribe()
+
+	hub.RouteEvent("s1", "chat", RoutedEvent{Scope: "direct", TargetID: "u1", Body: "hello"})
+
+	select {
+	case e := <-chatCh:
+		if e.Body != "hello" {
+			t.Fatalf("unexpected chat body: %q", e.Body)
+		}
+		if e.FromUser.Username != "alice" {
+			t.Fatalf("unexpected fromUser: %q", e.FromUser.Username)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for chat event on subscriber channel")
+	}
+}
+
+func TestHubSubscribeChatDoesNotReceiveNonChatEvents(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	sender := &client{
+		session: Session{Token: "s1", RoleID: "audio"},
+		user:    User{ID: "u1", Username: "alice", RoleID: "audio"},
+		send:    make(chan WSOutbound, 4),
+	}
+	hub.Add(sender)
+	drain(sender.send)
+
+	chatCh, unsubscribe := hub.SubscribeChat()
+	defer unsubscribe()
+
+	hub.RouteEvent("s1", "signal", RoutedEvent{Scope: "direct", TargetID: "u1", Signal: "call"})
+
+	select {
+	case <-chatCh:
+		t.Fatal("did not expect non-chat event to appear on chat subscriber channel")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestHubBroadcastChatToRoomDeliveresToListeners(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	listener := &client{
+		session:     Session{Token: "l1", RoleID: "audio"},
+		user:        User{ID: "u1", Username: "bob", RoleID: "audio"},
+		send:        make(chan WSOutbound, 4),
+		listenRooms: toRoomSet([]string{"foh"}),
+	}
+	hub.Add(listener)
+	drain(listener.send)
+
+	hub.BroadcastChatToRoom("foh", User{Username: "telegram-bot"}, "[TG:charlie] hi")
+
+	select {
+	case msg := <-listener.send:
+		if msg.Type != "chat" {
+			t.Fatalf("expected chat type, got %q", msg.Type)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for BroadcastChatToRoom delivery")
+	}
+}
+
+func TestParseTelegramRoomMap(t *testing.T) {
+	cases := []struct {
+		input string
+		want  []TelegramRoomMapping
+	}{
+		{
+			input: "room1:123,room2:-100456",
+			want: []TelegramRoomMapping{
+				{RoomID: "room1", ChatID: "123"},
+				{RoomID: "room2", ChatID: "-100456"},
+			},
+		},
+		{input: "  ", want: nil},
+		{input: "nocolon", want: nil},
+		{input: ":onlychat", want: nil},
+	}
+	for _, tc := range cases {
+		got := ParseTelegramRoomMap(tc.input)
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("ParseTelegramRoomMap(%q) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}
