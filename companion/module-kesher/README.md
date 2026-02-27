@@ -1,6 +1,6 @@
-# live-production-intercom Companion module
+# Kesher Companion module
 
-Custom Bitfocus Companion module for controlling `live-production-intercom` browser sessions.
+Custom Bitfocus Companion module for controlling `Kesher` browser sessions.
 
 ## What it does
 

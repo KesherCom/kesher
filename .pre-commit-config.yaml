@@ -1,4 +1,4 @@
-# Pre-commit hooks configuration for live-production-intercom
+# Pre-commit hooks configuration for kesher
 repos:
   # Secret scanning
   - repo: https://github.com/gitleaks/gitleaks
@@ -28,7 +28,7 @@ repos:
     rev: v4.0.0-alpha.8
     hooks:
       - id: prettier
-        files: ^(web/src/.*\.(js|jsx|ts|tsx|css)|companion/module-live-production-intercom/src/.*\.(js|ts)|.*\.(json|md|yml|yaml))$
+        files: ^(web/src/.*\.(js|jsx|ts|tsx|css)|companion/module-kesher/src/.*\.(js|ts)|.*\.(json|md|yml|yaml))$
 
   # Project-specific builds/type checks
   - repo: local
@@ -47,7 +47,7 @@ repos:
         files: ^web/
       - id: companion-typescript-build
         name: companion-typescript-build
-        entry: npm --prefix companion/module-live-production-intercom run build
+        entry: npm --prefix companion/module-kesher run build
         language: system
         pass_filenames: false
-        files: ^companion/module-live-production-intercom/
+        files: ^companion/module-kesher/

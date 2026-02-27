@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/staubichsauger/live-production-intercom/backend/internal/app"
+	"github.com/KesherCom/kesher/backend/internal/app"
 )
 
 func main() {

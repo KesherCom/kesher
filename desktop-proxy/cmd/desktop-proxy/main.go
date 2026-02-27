@@ -20,8 +20,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/staubichsauger/live-production-intercom/desktop-proxy/internal/proxy"
-	"github.com/staubichsauger/live-production-intercom/desktop-proxy/internal/trust"
+	"github.com/KesherCom/kesher/desktop-proxy/internal/proxy"
+	"github.com/KesherCom/kesher/desktop-proxy/internal/trust"
 )
 
 const launchTokenCookieName = "lp_launch_token"

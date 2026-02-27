@@ -6,7 +6,7 @@ services:
       args:
         TARGETOS: ${TARGETOS:-linux}
         TARGETARCH: ${TARGETARCH:-amd64}
-    container_name: live-production-intercom-certmagic
+    container_name: kesher-certmagic
     ports:
       - "80:80"
       - "443:443"

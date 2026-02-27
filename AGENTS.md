@@ -56,9 +56,9 @@ There is still no dedicated frontend lint target in `Makefile`; frontend validat
 Companion module (Bitfocus) has its own npm project:
 
 ```sh
-cd companion/module-live-production-intercom && npm install
-cd companion/module-live-production-intercom && npm run build
-cd companion/module-live-production-intercom && npm run package
+cd companion/module-kesher && npm install
+cd companion/module-kesher && npm run build
+cd companion/module-kesher && npm run package
 ```
 
 ## High-level architecture
@@ -68,7 +68,7 @@ This repository has four parts:
 - `backend/`: Go API + WebSocket event hub + embedded WebRTC SFU + SQLite persistence.
 - `web/`: React/Vite SPA for operator clients.
 - `desktop-proxy/`: Standalone Go binary that reverse-proxies a remote backend to `127.0.0.1`, giving desktop clients a localhost secure context for `getUserMedia()` without system-wide trust.
-- `companion/module-live-production-intercom/`: Bitfocus Companion module that controls active browser sessions through backend companion endpoints.
+- `companion/module-kesher/`: Bitfocus Companion module that controls active browser sessions through backend companion endpoints.
 
 `backend/` and `desktop-proxy/` are separate Go modules (separate `go.mod` files). They share the same GitHub namespace but have no source-level dependency on each other.
 
@@ -127,7 +127,7 @@ All HTTP routes (including `/`, `/api/*`, `/ws`) are forwarded to the upstream b
 
 ## Module paths and runtime dependencies
 
-- Backend module: `github.com/staubichsauger/live-production-intercom/backend`
-- Desktop proxy module: `github.com/staubichsauger/live-production-intercom/desktop-proxy`
+- Backend module: `github.com/KesherCom/kesher/backend`
+- Desktop proxy module: `github.com/KesherCom/kesher/desktop-proxy`
 - SQLite driver is `modernc.org/sqlite` (pure Go, no CGO runtime dependency).
 - WebRTC SFU uses `github.com/pion/webrtc/v4`.

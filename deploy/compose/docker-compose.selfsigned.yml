@@ -6,7 +6,7 @@ services:
       args:
         TARGETOS: ${TARGETOS:-linux}
         TARGETARCH: ${TARGETARCH:-amd64}
-    container_name: live-production-intercom-selfsigned
+    container_name: kesher-selfsigned
     ports:
       - "${INTERCOM_HTTPS_PORT:-8443}:8443"
     environment:

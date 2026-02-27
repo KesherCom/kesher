@@ -13,7 +13,7 @@ test("shows login screen and primary controls", async ({ page }) => {
     });
   });
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Live Production Intercom" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Kesher" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Join Intercom" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Show admin" })).toBeVisible();
 });
