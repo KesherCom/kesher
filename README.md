@@ -26,7 +26,7 @@ Open `http://localhost:8080` (or `:5173` if using the Vite dev server).
 
 | Method                         | Command                                                                          | Notes                                                                     |
 | ------------------------------ | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Self-signed (dev/LAN)          | `make run-backend-https LAN_IP=192.168.1.50`                                     | Auto-generates certs if missing. Browsers will show a warning.            |
+| Self-signed (dev/LAN)          | `make run-backend-https`                                                         | Generates an internal cert at startup. Browsers will show a warning.      |
 | Let's Encrypt (existing certs) | `make run-backend-le DOMAIN=intercom.example.org`                                | Reads certs from `/etc/letsencrypt/live/<domain>/`                        |
 | CertMagic (automated DNS-01)   | `make run-backend-certmagic DOMAIN=intercom.example.org DNS_PROVIDER=cloudflare` | Issues/renews certs in-app. Providers: `cloudflare`, `hetzner`, `route53` |
 
@@ -128,7 +128,7 @@ db_path: "intercom.db"
 allow_cors: true
 session_ttl_minutes: 720
 trusted_lan_http: true
-tls_mode: "file"
+tls_mode: "internal"
 tls_cert_file: ""
 tls_key_file: ""
 production_mode: false
@@ -148,20 +148,20 @@ telegram_webhook_secret: ""
 telegram_mode: "polling"
 ```
 
-| Variable                        | Default       | Description                                                       |
-| ------------------------------- | ------------- | ----------------------------------------------------------------- |
-| `APP_ADDR`                      | `:8080`       | Listen address                                                    |
-| `STATIC_DIR`                    | _(empty)_     | Path to built frontend assets; when empty, serves embedded assets |
-| `DB_PATH`                       | `intercom.db` | SQLite database file path                                         |
-| `ALLOW_CORS`                    | `true`        | Enable CORS headers                                               |
-| `SESSION_TTL_MINUTES`           | `720`         | Session lifetime in minutes                                       |
-| `TRUSTED_LAN_HTTP`              | `true`        | `true` = plain HTTP, `false` = HTTPS                              |
-| `TLS_MODE`                      | `file`        | `file` (cert/key paths) or `certmagic` (in-app ACME)              |
-| `TLS_CERT_FILE`                 | _(empty)_     | TLS certificate path (when `TRUSTED_LAN_HTTP=false`)              |
-| `TLS_KEY_FILE`                  | _(empty)_     | TLS key path (when `TRUSTED_LAN_HTTP=false`)                      |
-| `PRODUCTION_MODE`               | `false`       | HTTPS on `:443` + HTTP redirect on `:80`                          |
-| `PRODUCTION_HTTPS_ADDR`         | `:443`        | HTTPS listen address in production mode                           |
-| `PRODUCTION_HTTP_REDIRECT_ADDR` | `:80`         | HTTP redirect address in production mode                          |
+| Variable                        | Default       | Description                                                                          |
+| ------------------------------- | ------------- | ------------------------------------------------------------------------------------ |
+| `APP_ADDR`                      | `:8080`       | Listen address                                                                       |
+| `STATIC_DIR`                    | _(empty)_     | Path to built frontend assets; when empty, serves embedded assets                    |
+| `DB_PATH`                       | `intercom.db` | SQLite database file path                                                            |
+| `ALLOW_CORS`                    | `true`        | Enable CORS headers                                                                  |
+| `SESSION_TTL_MINUTES`           | `720`         | Session lifetime in minutes                                                          |
+| `TRUSTED_LAN_HTTP`              | `true`        | `true` = plain HTTP, `false` = HTTPS                                                 |
+| `TLS_MODE`                      | `internal`    | `internal` (auto self-signed), `file` (cert/key paths), or `certmagic` (in-app ACME) |
+| `TLS_CERT_FILE`                 | _(empty)_     | TLS certificate path (required when `TLS_MODE=file`)                                 |
+| `TLS_KEY_FILE`                  | _(empty)_     | TLS key path (required when `TLS_MODE=file`)                                         |
+| `PRODUCTION_MODE`               | `false`       | HTTPS on `:443` + HTTP redirect on `:80`                                             |
+| `PRODUCTION_HTTPS_ADDR`         | `:443`        | HTTPS listen address in production mode                                              |
+| `PRODUCTION_HTTP_REDIRECT_ADDR` | `:80`         | HTTP redirect address in production mode                                             |
 
 ### CertMagic variables (when `TLS_MODE=certmagic`)
 

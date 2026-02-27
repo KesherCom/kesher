@@ -12,7 +12,7 @@ help:
 	@echo "  make dev-backend   - run Go backend in dev mode"
 	@echo "  make dev-web       - run React frontend dev server"
 	@echo "  make run-backend   - run backend serving built frontend assets"
-	@echo "  make run-backend-https - run backend with HTTPS; auto-generate self-signed certs if missing (LAN_IP=... optional)"
+	@echo "  make run-backend-https - run backend with HTTPS using internal self-signed certificates"
 	@echo "  make run-backend-le DOMAIN=... - run backend with HTTPS using Let's Encrypt certs from /etc/letsencrypt/live/\$$DOMAIN/"
 	@echo "  make run-backend-certmagic DOMAIN=... DNS_PROVIDER=... - run backend with CertMagic ACME DNS-01 automation"
 	@echo "  make run-production-le DOMAIN=... - production mode (HTTPS :443 + HTTP :80 redirect) with Let's Encrypt certs"
@@ -48,17 +48,7 @@ run-web: dev-web
 run-backend: build-web
 	@cd backend && STATIC_DIR=../web/dist go run ./cmd/server
 run-backend-https: build-web
-	@mkdir -p backend/certs
-	@if [[ ! -f backend/certs/lan-cert.pem || ! -f backend/certs/lan-key.pem ]]; then \
-		echo "Generating self-signed certs for LAN_IP=$(LAN_IP)"; \
-		MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
-		openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
-			-keyout backend/certs/lan-key.pem \
-			-out backend/certs/lan-cert.pem \
-			-subj "/CN=$(LAN_IP)" \
-			-addext "subjectAltName=IP:$(LAN_IP),DNS:localhost"; \
-	fi
-	@cd backend && STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false TLS_CERT_FILE=./certs/lan-cert.pem TLS_KEY_FILE=./certs/lan-key.pem go run ./cmd/server
+	@cd backend && STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false TLS_MODE=internal go run ./cmd/server
 
 run-backend-le: build-web
 	@if [[ -z "$(DOMAIN)" ]]; then \
