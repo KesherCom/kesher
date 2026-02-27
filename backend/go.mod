@@ -10,6 +10,7 @@ require (
 	github.com/libdns/hetzner v1.0.0
 	github.com/libdns/route53 v1.6.0
 	github.com/pion/webrtc/v4 v4.0.9
+	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.34.5
 )
 
