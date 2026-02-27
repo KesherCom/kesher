@@ -24,6 +24,26 @@ func TestFilterBroadcastGroupsForRole(t *testing.T) {
 	}
 }
 
+func TestEmbeddedStaticHandlerRootDoesNotRedirect(t *testing.T) {
+	if !embeddedStaticAvailable() {
+		t.Skip("embedded static assets not available")
+	}
+	s := &Server{cfg: Config{StaticDir: ""}}
+	h := s.embeddedStaticHandler()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for embedded root, got %d", rec.Code)
+	}
+	if location := rec.Header().Get("Location"); location != "" {
+		t.Fatalf("expected no redirect location header, got %q", location)
+	}
+	if rec.Body.Len() == 0 {
+		t.Fatal("expected embedded root response body to be non-empty")
+	}
+}
+
 func TestServerHandleAdminPinUpdateSuccess(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
