@@ -1,6 +1,6 @@
-# Kesher Companion module
+# kesher Companion module
 
-Custom Bitfocus Companion module for controlling `Kesher` browser sessions.
+Custom Bitfocus Companion module for controlling `kesher` browser sessions.
 
 ## What it does
 

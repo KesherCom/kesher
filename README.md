@@ -1,4 +1,4 @@
-# Kesher
+# kesher - Live Production Intercom
 
 On-prem, web-based intercom for church live productions. Built for 30–50 concurrent users on a trusted LAN.
 

@@ -17,7 +17,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 
 FROM alpine:3.21
 LABEL org.opencontainers.image.title="kesher"
-LABEL org.opencontainers.image.description="On-prem web-based intercom"
+LABEL org.opencontainers.image.description="On-prem web-based intercom for church live productions"
 LABEL org.opencontainers.image.source="https://github.com/KesherCom/kesher"
 WORKDIR /app
 COPY --from=go-build /out/server /app/server

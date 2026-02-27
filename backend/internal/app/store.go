@@ -16,6 +16,8 @@ var (
 	ErrNotFound     = errors.New("not found")
 )
 
+const defaultAdminPIN = "123456"
+
 type Store struct {
 	db *sql.DB
 }
@@ -31,6 +33,28 @@ func (s *Store) validateRolesExistWithTx(ctx context.Context, tx *sql.Tx, roleID
 		}
 	}
 	return nil
+}
+
+func (s *Store) GetAdminPIN(ctx context.Context) (string, error) {
+	var pin string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM app_settings WHERE key = 'admin_pin'`).Scan(&pin)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	return pin, nil
+}
+
+func (s *Store) SetAdminPIN(ctx context.Context, pin string) error {
+	pin = strings.TrimSpace(pin)
+	if pin == "" {
+		return ErrInvalidInput
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO app_settings (key, value) VALUES ('admin_pin', ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value`, pin)
+	return err
 }
 
 func (s *Store) replaceRoomRoleMappingsWithTx(ctx context.Context, tx *sql.Tx, table, roomID string, roleIDs []string) error {
@@ -205,6 +229,10 @@ func (s *Store) migrate(ctx context.Context) error {
 			username TEXT NOT NULL UNIQUE,
 			role_id TEXT NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS app_settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
@@ -279,6 +307,9 @@ func (s *Store) seed(ctx context.Context) error {
 				return err
 			}
 		}
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO app_settings (key, value) VALUES ('admin_pin', ?)`, defaultAdminPIN); err != nil {
+		return err
 	}
 	return nil
 }
