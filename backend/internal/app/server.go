@@ -314,7 +314,7 @@ func NewServer(cfg Config) (*Server, error) {
 	s.media = NewMediaManager(s.hub, logger)
 	s.hub.SetMediaManager(s.media)
 	if cfg.TelegramBotToken != "" {
-		s.telegram = NewTelegramBot(cfg.TelegramBotToken, cfg.TelegramWebhookSecret, store, s.hub, logger)
+		s.telegram = NewTelegramBot(cfg.TelegramBotToken, cfg.TelegramWebhookSecret, cfg.TelegramMode, store, s.hub, logger)
 	}
 	if strings.EqualFold(cfg.TLSMode, "certmagic") {
 		certMagicCfg, err := newCertMagicConfig(cfg)
@@ -364,6 +364,13 @@ func NewServer(cfg Config) (*Server, error) {
 }
 
 func (s *Server) ListenAndServe() error {
+	// Start Telegram long polling if configured
+	if s.telegram != nil && s.telegram.Mode() == "polling" {
+		if err := s.telegram.DeleteWebhook(); err != nil {
+			s.logger.Warn("failed to delete telegram webhook before polling", "error", err)
+		}
+		s.telegram.StartPolling()
+	}
 	if s.cfg.ProductionMode {
 		s.logger.Info(
 			"starting production servers",
@@ -407,6 +414,9 @@ func (s *Server) ListenAndServe() error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.telegram != nil {
+		s.telegram.StopPolling()
+	}
 	_ = s.store.Close()
 	var shutdownErr error
 	if s.redirectSrv != nil {
@@ -785,8 +795,13 @@ func (s *Server) handleAdminTelegram(w http.ResponseWriter, r *http.Request, ses
 		if mappings == nil {
 			mappings = []TelegramMapping{}
 		}
+		mode := ""
+		if s.telegram != nil {
+			mode = s.telegram.Mode()
+		}
 		s.writeJSON(w, http.StatusOK, TelegramStatusResponse{
 			BotConfigured: s.telegram != nil,
+			Mode:          mode,
 			Mappings:      mappings,
 		})
 	case http.MethodPost:

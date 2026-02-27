@@ -50,6 +50,7 @@ export type TelegramMapping = {
 
 export type TelegramStatus = {
   botConfigured: boolean;
+  mode: "polling" | "webhook" | "";
   mappings: TelegramMapping[];
 };
 
