@@ -1,5 +1,7 @@
 import type { Bootstrap, PublicBootstrap, TelegramStatus, User } from "./types";
 
+const adminPinHeaderName = "X-Admin-Pin";
+
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string");
@@ -111,12 +113,14 @@ async function apiMutation(
   url: string,
   token: string,
   method: "POST" | "PUT" | "DELETE",
+  adminPin: string,
   body?: unknown,
 ): Promise<void> {
   const res = await fetch(url, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
       ...(body ? { "Content-Type": "application/json" } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -128,6 +132,7 @@ async function apiMutation(
 
 export async function createRole(
   token: string,
+  adminPin: string,
   payload: {
     id: string;
     name: string;
@@ -136,10 +141,11 @@ export async function createRole(
     defaultSimpleView?: boolean;
   },
 ): Promise<void> {
-  await apiMutation("/api/admin/roles", token, "POST", payload);
+  await apiMutation("/api/admin/roles", token, "POST", adminPin, payload);
 }
 export async function updateRole(
   token: string,
+  adminPin: string,
   roleId: string,
   payload: {
     name: string;
@@ -152,20 +158,27 @@ export async function updateRole(
     `/api/admin/roles/${encodeURIComponent(roleId)}`,
     token,
     "PUT",
+    adminPin,
     payload,
   );
 }
 
-export async function deleteRole(token: string, roleId: string): Promise<void> {
+export async function deleteRole(
+  token: string,
+  adminPin: string,
+  roleId: string,
+): Promise<void> {
   await apiMutation(
     `/api/admin/roles/${encodeURIComponent(roleId)}`,
     token,
     "DELETE",
+    adminPin,
   );
 }
 
 export async function createRoom(
   token: string,
+  adminPin: string,
   payload: {
     id: string;
     name: string;
@@ -173,10 +186,11 @@ export async function createRoom(
     receiverRoleIds?: string[];
   },
 ): Promise<void> {
-  await apiMutation("/api/admin/rooms", token, "POST", payload);
+  await apiMutation("/api/admin/rooms", token, "POST", adminPin, payload);
 }
 export async function updateRoom(
   token: string,
+  adminPin: string,
   roomId: string,
   payload: {
     name: string;
@@ -188,20 +202,27 @@ export async function updateRoom(
     `/api/admin/rooms/${encodeURIComponent(roomId)}`,
     token,
     "PUT",
+    adminPin,
     payload,
   );
 }
 
-export async function deleteRoom(token: string, roomId: string): Promise<void> {
+export async function deleteRoom(
+  token: string,
+  adminPin: string,
+  roomId: string,
+): Promise<void> {
   await apiMutation(
     `/api/admin/rooms/${encodeURIComponent(roomId)}`,
     token,
     "DELETE",
+    adminPin,
   );
 }
 
 export async function createBroadcastGroup(
   token: string,
+  adminPin: string,
   payload: {
     id: string;
     name: string;
@@ -209,11 +230,18 @@ export async function createBroadcastGroup(
     allowedRoleIds?: string[];
   },
 ): Promise<void> {
-  await apiMutation("/api/admin/broadcast-groups", token, "POST", payload);
+  await apiMutation(
+    "/api/admin/broadcast-groups",
+    token,
+    "POST",
+    adminPin,
+    payload,
+  );
 }
 
 export async function updateBroadcastGroup(
   token: string,
+  adminPin: string,
   groupId: string,
   payload: { name: string; roomIds: string[]; allowedRoleIds?: string[] },
 ): Promise<void> {
@@ -221,26 +249,33 @@ export async function updateBroadcastGroup(
     `/api/admin/broadcast-groups/${encodeURIComponent(groupId)}`,
     token,
     "PUT",
+    adminPin,
     payload,
   );
 }
 
 export async function deleteBroadcastGroup(
   token: string,
+  adminPin: string,
   groupId: string,
 ): Promise<void> {
   await apiMutation(
     `/api/admin/broadcast-groups/${encodeURIComponent(groupId)}`,
     token,
     "DELETE",
+    adminPin,
   );
 }
 
 export async function getTelegramStatus(
   token: string,
+  adminPin: string,
 ): Promise<TelegramStatus> {
   const res = await fetch("/api/admin/telegram", {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+    },
   });
   if (!res.ok) throw new Error("failed to load telegram status");
   return res.json() as Promise<TelegramStatus>;
@@ -248,13 +283,15 @@ export async function getTelegramStatus(
 
 export async function createTelegramMapping(
   token: string,
+  adminPin: string,
   payload: { chatId: string; label: string; roomId: string },
 ): Promise<void> {
-  await apiMutation("/api/admin/telegram", token, "POST", payload);
+  await apiMutation("/api/admin/telegram", token, "POST", adminPin, payload);
 }
 
 export async function updateTelegramMapping(
   token: string,
+  adminPin: string,
   id: string,
   payload: { chatId: string; label: string; roomId: string },
 ): Promise<void> {
@@ -262,17 +299,30 @@ export async function updateTelegramMapping(
     `/api/admin/telegram/${encodeURIComponent(id)}`,
     token,
     "PUT",
+    adminPin,
     payload,
   );
 }
 
 export async function deleteTelegramMapping(
   token: string,
+  adminPin: string,
   id: string,
 ): Promise<void> {
   await apiMutation(
     `/api/admin/telegram/${encodeURIComponent(id)}`,
     token,
     "DELETE",
+    adminPin,
   );
+}
+
+export async function updateAdminPin(
+  token: string,
+  currentAdminPin: string,
+  newPin: string,
+): Promise<void> {
+  await apiMutation("/api/admin/pin", token, "PUT", currentAdminPin, {
+    newPin,
+  });
 }

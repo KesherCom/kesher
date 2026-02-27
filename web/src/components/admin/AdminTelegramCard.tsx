@@ -10,10 +10,15 @@ import type { TelegramMapping } from "../../types";
 
 type AdminTelegramCardProps = {
   token: string;
+  adminPin: string;
   appData: Bootstrap;
 };
 
-export function AdminTelegramCard({ token, appData }: AdminTelegramCardProps) {
+export function AdminTelegramCard({
+  token,
+  adminPin,
+  appData,
+}: AdminTelegramCardProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [botConfigured, setBotConfigured] = useState(false);
   const [mappings, setMappings] = useState<TelegramMapping[]>([]);
@@ -32,7 +37,7 @@ export function AdminTelegramCard({ token, appData }: AdminTelegramCardProps) {
 
   async function loadStatus() {
     try {
-      const status = await getTelegramStatus(token);
+      const status = await getTelegramStatus(token, adminPin);
       setBotConfigured(status.botConfigured);
       setMappings(status.mappings);
     } catch {
@@ -79,7 +84,7 @@ export function AdminTelegramCard({ token, appData }: AdminTelegramCardProps) {
     const roomId = createRoomId.trim();
     if (!chatId || !label || !roomId) return;
     void runAction(async () => {
-      await createTelegramMapping(token, { chatId, label, roomId });
+      await createTelegramMapping(token, adminPin, { chatId, label, roomId });
       resetCreateForm();
       setShowCreateForm(false);
     });
@@ -92,14 +97,18 @@ export function AdminTelegramCard({ token, appData }: AdminTelegramCardProps) {
     const roomId = editRoomId.trim();
     if (!chatId || !label || !roomId) return;
     void runAction(async () => {
-      await updateTelegramMapping(token, editId, { chatId, label, roomId });
+      await updateTelegramMapping(token, adminPin, editId, {
+        chatId,
+        label,
+        roomId,
+      });
       resetEditForm();
     });
   }
 
   function handleDelete(id: string) {
     void runAction(async () => {
-      await deleteTelegramMapping(token, id);
+      await deleteTelegramMapping(token, adminPin, id);
       if (editId === id) resetEditForm();
     });
   }
@@ -139,8 +148,7 @@ export function AdminTelegramCard({ token, appData }: AdminTelegramCardProps) {
                 <code className="admin-code">{webhookUrl}</code>
                 <br />
                 <small>
-                  Set this URL in BotFather via{" "}
-                  <code>/setwebhook</code>.
+                  Set this URL in BotFather via <code>/setwebhook</code>.
                 </small>
               </p>
             ) : null}
@@ -294,10 +302,7 @@ export function AdminTelegramCard({ token, appData }: AdminTelegramCardProps) {
                         )
                       </small>
                     </span>
-                    <button
-                      onClick={() => handleDelete(m.id)}
-                      disabled={busy}
-                    >
+                    <button onClick={() => handleDelete(m.id)} disabled={busy}>
                       Delete
                     </button>
                   </li>

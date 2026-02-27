@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { bootstrap, getPublicBootstrap, login, logout } from "./api";
+import {
+  bootstrap,
+  getPublicBootstrap,
+  login,
+  logout,
+  updateAdminPin,
+} from "./api";
 import { LoginView } from "./components/LoginView";
 import { SimpleIntercomView } from "./components/SimpleIntercomView";
 import { StationIntercomView } from "./components/StationIntercomView";
@@ -2345,7 +2351,11 @@ export function App() {
           appData={appData}
           refreshBootstrapData={refreshBootstrapData}
           adminPin={adminPinGuard}
-          onUpdateAdminPin={(next) => setAdminPinGuard(next)}
+          onUpdateAdminPin={async (currentPin, newPin) => {
+            if (!token) throw new Error("not authenticated");
+            await updateAdminPin(token, currentPin, newPin);
+            setAdminPinGuard(newPin);
+          }}
           audioStats={rtpStats}
           activeRoutesCount={activeVoiceRoutes.length}
         />

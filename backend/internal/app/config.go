@@ -12,6 +12,8 @@ type Config struct {
 	StaticDir                   string
 	DBPath                      string
 	AllowCORS                   bool
+	AdminPIN                    string
+	AdminPINFromEnv             bool
 	SessionTTL                  time.Duration
 	TrustedLANHTTP              bool
 	TLSMode                     string
@@ -33,12 +35,23 @@ type Config struct {
 	TelegramWebhookSecret       string
 }
 
+func getEnvWithPresence(k, fallback string) (string, bool) {
+	v, ok := os.LookupEnv(k)
+	if !ok {
+		return fallback, false
+	}
+	return v, true
+}
+
 func LoadConfig() Config {
+	adminPIN, adminPINFromEnv := getEnvWithPresence("ADMIN_PIN", "123456")
 	return Config{
 		Addr:                       getEnv("APP_ADDR", ":8080"),
 		StaticDir:                  getEnv("STATIC_DIR", ""),
 		DBPath:                     getEnv("DB_PATH", "intercom.db"),
 		AllowCORS:                  getEnv("ALLOW_CORS", "true") == "true",
+		AdminPIN:                   adminPIN,
+		AdminPINFromEnv:            adminPINFromEnv,
 		SessionTTL:                 time.Duration(getEnvInt("SESSION_TTL_MINUTES", 720)) * time.Minute,
 		TrustedLANHTTP:             getEnv("TRUSTED_LAN_HTTP", "true") == "true",
 		TLSMode:                    getEnv("TLS_MODE", "file"),
@@ -57,7 +70,7 @@ func LoadConfig() Config {
 		CertMagicPropagationTimeout: time.Duration(
 			getEnvInt("CERTMAGIC_PROPAGATION_TIMEOUT_SECONDS", 120),
 		) * time.Second,
-		CertMagicResolvers: splitCSV(getEnv("CERTMAGIC_DNS_RESOLVERS", "")),
+		CertMagicResolvers:    splitCSV(getEnv("CERTMAGIC_DNS_RESOLVERS", "")),
 		TelegramBotToken:      getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramWebhookSecret: getEnv("TELEGRAM_WEBHOOK_SECRET", ""),
 	}

@@ -34,6 +34,7 @@ describe("AdminChannelsCard", () => {
     render(
       <AdminChannelsCard
         token="token-123"
+        adminPin="1234"
         appData={appData}
         refreshBootstrapData={vi.fn()}
       />,
@@ -62,6 +63,7 @@ describe("AdminChannelsCard", () => {
     render(
       <AdminChannelsCard
         token="token-123"
+        adminPin="1234"
         appData={appData}
         refreshBootstrapData={refreshBootstrapData}
       />,
@@ -77,6 +79,7 @@ describe("AdminChannelsCard", () => {
     await waitFor(() => {
       expect(updateBroadcastGroup).toHaveBeenCalledWith(
         "token-123",
+        "1234",
         "bg1",
         expect.objectContaining({
           name: "Stage Call",
@@ -94,6 +97,7 @@ describe("AdminChannelsCard", () => {
     render(
       <AdminChannelsCard
         token="token-123"
+        adminPin="1234"
         appData={appData}
         refreshBootstrapData={refreshBootstrapData}
       />,
@@ -103,7 +107,11 @@ describe("AdminChannelsCard", () => {
     await user.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => {
-      expect(deleteBroadcastGroup).toHaveBeenCalledWith("token-123", "bg1");
+      expect(deleteBroadcastGroup).toHaveBeenCalledWith(
+        "token-123",
+        "1234",
+        "bg1",
+      );
     });
     expect(refreshBootstrapData).toHaveBeenCalledTimes(1);
   });
