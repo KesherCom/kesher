@@ -111,6 +111,43 @@ Run `make help` for all available targets.
 
 ## Environment variables
 
+You can also use a `config.yaml` (or `config.yml`) in the backend working directory instead of environment variables.
+To specify a custom path, set `APP_CONFIG_FILE` (or `CONFIG_FILE`).
+If a config file is present, it is used as the config source; otherwise env vars are used.
+Start from the provided example with:
+
+```sh
+cp config.yaml.example config.yaml
+```
+
+Example:
+
+```yaml
+app_addr: ":8080"
+db_path: "intercom.db"
+allow_cors: true
+session_ttl_minutes: 720
+trusted_lan_http: true
+tls_mode: "file"
+tls_cert_file: ""
+tls_key_file: ""
+production_mode: false
+production_https_addr: ":443"
+production_http_redirect_addr: ":80"
+certmagic_domains: []
+certmagic_email: ""
+certmagic_ca: "https://acme-v02.api.letsencrypt.org/directory"
+certmagic_storage_path: "./certmagic-data"
+certmagic_challenge: "dns-01"
+certmagic_dns_provider: ""
+certmagic_propagation_delay_seconds: 0
+certmagic_propagation_timeout_seconds: 120
+certmagic_dns_resolvers: []
+telegram_bot_token: ""
+telegram_webhook_secret: ""
+telegram_mode: "polling"
+```
+
 | Variable                        | Default       | Description                                                       |
 | ------------------------------- | ------------- | ----------------------------------------------------------------- |
 | `APP_ADDR`                      | `:8080`       | Listen address                                                    |
