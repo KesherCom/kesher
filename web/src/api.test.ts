@@ -46,8 +46,10 @@ const server = setupServer(
   ),
   http.post("http://localhost/api/admin/roles", async ({ request }) => {
     const auth = request.headers.get("authorization");
+    const adminPin = request.headers.get("x-admin-pin");
     const body = (await request.json()) as { id?: string; name?: string };
     if (!auth) return new HttpResponse("unauthorized", { status: 401 });
+    if (!adminPin) return new HttpResponse("forbidden", { status: 403 });
     if (!body.id || !body.name)
       return new HttpResponse("invalid", { status: 400 });
     return new HttpResponse(null, { status: 204 });
@@ -135,7 +137,7 @@ describe("api helpers", () => {
       }),
     );
     await expect(
-      createRole("token-123", { id: "op", name: "Operator" }),
+      createRole("token-123", "1234", { id: "op", name: "Operator" }),
     ).rejects.toThrow("role exists");
   });
 });

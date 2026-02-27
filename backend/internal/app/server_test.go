@@ -24,6 +24,64 @@ func TestFilterBroadcastGroupsForRole(t *testing.T) {
 	}
 }
 
+func TestServerHandleAdminPinUpdateSuccess(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute)}
+	session := s.sessions.Create(User{ID: "u1", Username: "tim", RoleID: "audio"})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/admin/pin", bytes.NewBufferString(`{"newPin":"654321"}`))
+	req.Header.Set("X-Admin-Pin", "123456")
+	rec := httptest.NewRecorder()
+	s.handleAdminPin(rec, req, session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	pin, err := store.GetAdminPIN(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pin != "654321" {
+		t.Fatalf("expected updated pin, got %q", pin)
+	}
+}
+
+func TestServerHandleAdminPinUpdateWrongCurrentPINForbidden(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute)}
+	session := s.sessions.Create(User{ID: "u1", Username: "tim", RoleID: "audio"})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/admin/pin", bytes.NewBufferString(`{"newPin":"654321"}`))
+	req.Header.Set("X-Admin-Pin", "bad-pin")
+	rec := httptest.NewRecorder()
+	s.handleAdminPin(rec, req, session)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+}
+
+func TestServerHandleAdminRolesMissingPINForbidden(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, cfg: Config{AdminPIN: "123456"}}
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/roles", bytes.NewBufferString(`{"id":"qa","name":"QA"}`))
+	rec := httptest.NewRecorder()
+	s.handleAdminRoles(rec, req, Session{RoleID: "audio"})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+}
+
 func TestServerHandleLoginMethodNotAllowed(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
@@ -99,7 +157,7 @@ func TestServerHandlePublicBootstrapMethodNotAllowed(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	s := &Server{store: store}
+	s := &Server{store: store, cfg: Config{AdminPIN: "123456"}}
 	req := httptest.NewRequest(http.MethodPost, "/api/public-bootstrap", nil)
 	rec := httptest.NewRecorder()
 	s.handlePublicBootstrap(rec, req)
@@ -114,8 +172,9 @@ func TestServerHandleAdminRolesMethodNotAllowed(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	s := &Server{store: store}
+	s := &Server{store: store, cfg: Config{AdminPIN: "123456"}}
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/roles", nil)
+	req.Header.Set("X-Admin-Pin", "123456")
 	rec := httptest.NewRecorder()
 	s.handleAdminRoles(rec, req, Session{RoleID: "audio"})
 	if rec.Code != http.StatusMethodNotAllowed {
@@ -129,8 +188,9 @@ func TestServerHandleAdminRolesInvalidJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	s := &Server{store: store}
+	s := &Server{store: store, cfg: Config{AdminPIN: "123456"}}
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/roles", bytes.NewBufferString("{"))
+	req.Header.Set("X-Admin-Pin", "123456")
 	rec := httptest.NewRecorder()
 	s.handleAdminRoles(rec, req, Session{RoleID: "audio"})
 	if rec.Code != http.StatusBadRequest {
@@ -144,9 +204,10 @@ func TestServerHandleAdminRolesCreateSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	s := &Server{store: store, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s := &Server{store: store, cfg: Config{AdminPIN: "123456"}, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	reqBody := bytes.NewBufferString("{\"id\":\"qa\",\"name\":\"QA\",\"defaultRoomId\":\"foh\",\"defaultVoiceMode\":\"ptt\",\"defaultSimpleView\":true}")
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/roles", reqBody)
+	req.Header.Set("X-Admin-Pin", "123456")
 	rec := httptest.NewRecorder()
 	s.handleAdminRoles(rec, req, Session{RoleID: "audio"})
 	if rec.Code != http.StatusCreated {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -300,6 +301,11 @@ func NewServer(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg.AdminPINFromEnv {
+		if err := store.SetAdminPIN(context.Background(), cfg.AdminPIN); err != nil {
+			return nil, err
+		}
+	}
 	s := &Server{
 		cfg:      cfg,
 		logger:   logger,
@@ -335,6 +341,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/rooms/", s.withAuth(s.handleAdminRoomByID))
 	mux.HandleFunc("/api/admin/broadcast-groups", s.withAuth(s.handleAdminBroadcastGroups))
 	mux.HandleFunc("/api/admin/broadcast-groups/", s.withAuth(s.handleAdminBroadcastGroupByID))
+	mux.HandleFunc("/api/admin/pin", s.withAuth(s.handleAdminPin))
 	mux.HandleFunc("/api/companion/discovery", s.handleCompanionDiscovery)
 	mux.HandleFunc("/api/companion/ws", s.handleCompanionWS)
 	mux.HandleFunc("/api/telegram/webhook", s.handleTelegramWebhook)
@@ -578,7 +585,7 @@ type upsertBroadcastGroupRequest struct {
 }
 
 func (s *Server) handleAdminRoles(w http.ResponseWriter, r *http.Request, session Session) {
-	if !s.requireAdmin(w, session) {
+	if !s.requireAdmin(w, r, session) {
 		return
 	}
 	switch r.Method {
@@ -602,7 +609,7 @@ func (s *Server) handleAdminRoles(w http.ResponseWriter, r *http.Request, sessio
 }
 
 func (s *Server) handleAdminRoleByID(w http.ResponseWriter, r *http.Request, session Session) {
-	if !s.requireAdmin(w, session) {
+	if !s.requireAdmin(w, r, session) {
 		return
 	}
 	roleID := strings.TrimPrefix(r.URL.Path, "/api/admin/roles/")
@@ -640,7 +647,7 @@ func (s *Server) handleAdminRoleByID(w http.ResponseWriter, r *http.Request, ses
 }
 
 func (s *Server) handleAdminRooms(w http.ResponseWriter, r *http.Request, session Session) {
-	if !s.requireAdmin(w, session) {
+	if !s.requireAdmin(w, r, session) {
 		return
 	}
 	switch r.Method {
@@ -664,7 +671,7 @@ func (s *Server) handleAdminRooms(w http.ResponseWriter, r *http.Request, sessio
 }
 
 func (s *Server) handleAdminRoomByID(w http.ResponseWriter, r *http.Request, session Session) {
-	if !s.requireAdmin(w, session) {
+	if !s.requireAdmin(w, r, session) {
 		return
 	}
 	roomID := strings.TrimPrefix(r.URL.Path, "/api/admin/rooms/")
@@ -702,7 +709,7 @@ func (s *Server) handleAdminRoomByID(w http.ResponseWriter, r *http.Request, ses
 }
 
 func (s *Server) handleAdminBroadcastGroups(w http.ResponseWriter, r *http.Request, session Session) {
-	if !s.requireAdmin(w, session) {
+	if !s.requireAdmin(w, r, session) {
 		return
 	}
 	switch r.Method {
@@ -726,7 +733,7 @@ func (s *Server) handleAdminBroadcastGroups(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleAdminBroadcastGroupByID(w http.ResponseWriter, r *http.Request, session Session) {
-	if !s.requireAdmin(w, session) {
+	if !s.requireAdmin(w, r, session) {
 		return
 	}
 	groupID := strings.TrimPrefix(r.URL.Path, "/api/admin/broadcast-groups/")
@@ -763,8 +770,45 @@ func (s *Server) handleAdminBroadcastGroupByID(w http.ResponseWriter, r *http.Re
 	}
 }
 
-func (s *Server) requireAdmin(_ http.ResponseWriter, _ Session) bool {
+func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request, _ Session) bool {
+	configuredPIN, err := s.store.GetAdminPIN(r.Context())
+	if err != nil || strings.TrimSpace(configuredPIN) == "" {
+		http.Error(w, "admin pin unavailable", http.StatusForbidden)
+		return false
+	}
+	presentedPIN := strings.TrimSpace(r.Header.Get("X-Admin-Pin"))
+	if subtle.ConstantTimeCompare([]byte(presentedPIN), []byte(configuredPIN)) != 1 {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
 	return true
+}
+
+type updateAdminPINRequest struct {
+	NewPIN string `json:"newPin"`
+}
+
+func (s *Server) handleAdminPin(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	if r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req updateAdminPINRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.SetAdminPIN(r.Context(), req.NewPIN); err != nil {
+		if s.writeStoreErr(w, err) {
+			return
+		}
+		s.internalErr(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
@@ -782,7 +826,7 @@ type upsertTelegramMappingRequest struct {
 }
 
 func (s *Server) handleAdminTelegram(w http.ResponseWriter, r *http.Request, session Session) {
-	if !s.requireAdmin(w, session) {
+	if !s.requireAdmin(w, r, session) {
 		return
 	}
 	switch r.Method {
@@ -825,7 +869,7 @@ func (s *Server) handleAdminTelegram(w http.ResponseWriter, r *http.Request, ses
 }
 
 func (s *Server) handleAdminTelegramByID(w http.ResponseWriter, r *http.Request, session Session) {
-	if !s.requireAdmin(w, session) {
+	if !s.requireAdmin(w, r, session) {
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/admin/telegram/")

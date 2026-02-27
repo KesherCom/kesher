@@ -10,12 +10,14 @@ import { RoomMultiSelect } from "./RoomMultiSelect";
 
 type AdminChannelsCardProps = {
   token: string;
+  adminPin: string;
   appData: Bootstrap;
   refreshBootstrapData: () => Promise<void>;
 };
 
 export function AdminChannelsCard({
   token,
+  adminPin,
   appData,
   refreshBootstrapData,
 }: AdminChannelsCardProps) {
@@ -71,7 +73,7 @@ export function AdminChannelsCard({
     const name = groupCreateName.trim();
     if (!id || !name || groupCreateRoomIds.length === 0) return;
     void runAdminAction(async () => {
-      await createBroadcastGroup(token, {
+      await createBroadcastGroup(token, adminPin, {
         id,
         name,
         roomIds: groupCreateRoomIds,
@@ -87,7 +89,7 @@ export function AdminChannelsCard({
     const name = groupEditName.trim();
     if (!name || groupEditRoomIds.length === 0) return;
     void runAdminAction(async () => {
-      await updateBroadcastGroup(token, groupEditId, {
+      await updateBroadcastGroup(token, adminPin, groupEditId, {
         name,
         roomIds: groupEditRoomIds,
         allowedRoleIds: groupEditAllowedRoleIds,
@@ -98,7 +100,7 @@ export function AdminChannelsCard({
 
   function removeBroadcastGroupConfig(id: string) {
     void runAdminAction(async () => {
-      await deleteBroadcastGroup(token, id);
+      await deleteBroadcastGroup(token, adminPin, id);
       if (groupEditId === id) {
         resetGroupEditForm();
       }

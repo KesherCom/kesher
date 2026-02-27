@@ -32,6 +32,7 @@ describe("AdminRolesCard", () => {
     render(
       <AdminRolesCard
         token="token-123"
+        adminPin="1234"
         appData={appData}
         refreshBootstrapData={vi.fn()}
       />,
@@ -55,6 +56,7 @@ describe("AdminRolesCard", () => {
     render(
       <AdminRolesCard
         token="token-123"
+        adminPin="1234"
         appData={appData}
         refreshBootstrapData={refreshBootstrapData}
       />,
@@ -69,6 +71,7 @@ describe("AdminRolesCard", () => {
     await waitFor(() => {
       expect(createRole).toHaveBeenCalledWith(
         "token-123",
+        "1234",
         expect.objectContaining({ id: "editor", name: "Editor" }),
       );
     });
@@ -82,6 +85,7 @@ describe("AdminRolesCard", () => {
     render(
       <AdminRolesCard
         token="token-123"
+        adminPin="1234"
         appData={appData}
         refreshBootstrapData={refreshBootstrapData}
       />,
@@ -97,6 +101,7 @@ describe("AdminRolesCard", () => {
     await waitFor(() => {
       expect(updateRole).toHaveBeenCalledWith(
         "token-123",
+        "1234",
         "op",
         expect.objectContaining({ name: "Operator Team" }),
       );

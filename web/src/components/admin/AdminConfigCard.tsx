@@ -8,12 +8,14 @@ import { AdminTelegramCard } from "./AdminTelegramCard";
 
 type AdminConfigCardProps = {
   token: string;
+  adminPin: string;
   appData: Bootstrap;
   refreshBootstrapData: () => Promise<void>;
 };
 
 export function AdminConfigCard({
   token,
+  adminPin,
   appData,
   refreshBootstrapData,
 }: AdminConfigCardProps) {
@@ -21,6 +23,7 @@ export function AdminConfigCard({
     <>
       <AdminRolesCard
         token={token}
+        adminPin={adminPin}
         appData={appData}
         refreshBootstrapData={refreshBootstrapData}
       />
@@ -33,17 +36,18 @@ export function AdminConfigCard({
 
       <AdminRoomsCard
         token={token}
+        adminPin={adminPin}
         appData={appData}
         refreshBootstrapData={refreshBootstrapData}
       />
 
       <AdminChannelsCard
         token={token}
+        adminPin={adminPin}
         appData={appData}
         refreshBootstrapData={refreshBootstrapData}
       />
-
-      <AdminTelegramCard token={token} appData={appData} />
+      <AdminTelegramCard token={token} adminPin={adminPin} appData={appData} />
     </>
   );
 }
