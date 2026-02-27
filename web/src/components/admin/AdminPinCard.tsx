@@ -1,14 +1,10 @@
 import React from "react";
 
 type AdminPinCardProps = {
-  adminPin: string;
-  onUpdateAdminPin: (next: string) => void;
+  onUpdateAdminPin: (currentPin: string, newPin: string) => Promise<void>;
 };
 
-export function AdminPinCard({
-  adminPin,
-  onUpdateAdminPin,
-}: AdminPinCardProps) {
+export function AdminPinCard({ onUpdateAdminPin }: AdminPinCardProps) {
   const [isOpen, setIsOpen] = React.useState(false);
   const [pinCurrentInput, setPinCurrentInput] = React.useState("");
   const [pinNewInput, setPinNewInput] = React.useState("");
@@ -17,15 +13,11 @@ export function AdminPinCard({
   const [pinMessageType, setPinMessageType] = React.useState<
     "success" | "error" | ""
   >("");
+  const [pinBusy, setPinBusy] = React.useState(false);
 
-  const handleUpdatePin = () => {
+  const handleUpdatePin = async () => {
     setPinMessage("");
     setPinMessageType("");
-    if (pinCurrentInput.trim() !== adminPin) {
-      setPinMessage("Current PIN is incorrect.");
-      setPinMessageType("error");
-      return;
-    }
     if (!pinNewInput.trim()) {
       setPinMessage("New PIN cannot be empty.");
       setPinMessageType("error");
@@ -36,16 +28,19 @@ export function AdminPinCard({
       setPinMessageType("error");
       return;
     }
+    setPinBusy(true);
     try {
-      onUpdateAdminPin(pinNewInput.trim());
+      await onUpdateAdminPin(pinCurrentInput.trim(), pinNewInput.trim());
       setPinMessage("✓ Admin PIN updated successfully.");
       setPinMessageType("success");
       setPinCurrentInput("");
       setPinNewInput("");
       setPinConfirmInput("");
-    } catch (err) {
+    } catch {
       setPinMessage("✗ Failed to update PIN.");
       setPinMessageType("error");
+    } finally {
+      setPinBusy(false);
     }
   };
 
@@ -98,7 +93,13 @@ export function AdminPinCard({
             </div>
           </div>
           <div className="admin-pin-actions">
-            <button onClick={handleUpdatePin} className="primary">
+            <button
+              onClick={() => {
+                void handleUpdatePin();
+              }}
+              className="primary"
+              disabled={pinBusy}
+            >
               Update PIN
             </button>
             {pinMessage ? (

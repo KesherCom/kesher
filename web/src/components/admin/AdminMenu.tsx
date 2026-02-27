@@ -11,7 +11,7 @@ type AdminMenuProps = {
   appData: Bootstrap;
   refreshBootstrapData: () => Promise<void>;
   adminPin: string;
-  onUpdateAdminPin: (next: string) => void;
+  onUpdateAdminPin: (currentPin: string, newPin: string) => Promise<void>;
   audioStats: { inKbps: number; outKbps: number };
   activeRoutesCount: number;
 };
@@ -33,11 +33,12 @@ export function AdminMenu({
     <div className="admin-stack">
       <AdminConfigCard
         token={token}
+        adminPin={adminPin}
         appData={appData}
         refreshBootstrapData={refreshBootstrapData}
       />
 
-      <AdminPinCard adminPin={adminPin} onUpdateAdminPin={onUpdateAdminPin} />
+      <AdminPinCard onUpdateAdminPin={onUpdateAdminPin} />
 
       <AdminMonitoringCard
         audioStats={audioStats}

@@ -35,6 +35,7 @@ describe("AdminRoomsCard", () => {
     render(
       <AdminRoomsCard
         token="token-123"
+        adminPin="1234"
         appData={appData}
         refreshBootstrapData={vi.fn()}
       />,
@@ -58,6 +59,7 @@ describe("AdminRoomsCard", () => {
     render(
       <AdminRoomsCard
         token="token-123"
+        adminPin="1234"
         appData={appData}
         refreshBootstrapData={refreshBootstrapData}
       />,
@@ -72,6 +74,7 @@ describe("AdminRoomsCard", () => {
     await waitFor(() => {
       expect(createRoom).toHaveBeenCalledWith(
         "token-123",
+        "1234",
         expect.objectContaining({
           id: "new-room",
           name: "New Room",
@@ -90,6 +93,7 @@ describe("AdminRoomsCard", () => {
     render(
       <AdminRoomsCard
         token="token-123"
+        adminPin="1234"
         appData={appData}
         refreshBootstrapData={refreshBootstrapData}
       />,
@@ -105,6 +109,7 @@ describe("AdminRoomsCard", () => {
     await waitFor(() => {
       expect(updateRoom).toHaveBeenCalledWith(
         "token-123",
+        "1234",
         "r1",
         expect.objectContaining({
           name: "Main Stage",

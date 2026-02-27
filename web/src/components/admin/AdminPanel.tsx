@@ -17,6 +17,7 @@ import { RoomMultiSelect } from "./RoomMultiSelect";
 
 type AdminPanelProps = {
   token: string;
+  adminPin: string;
   appData: Bootstrap;
   refreshBootstrapData: () => Promise<void>;
   activeSection?: "roles" | "users" | "rooms" | "channels" | null;
@@ -26,6 +27,7 @@ type AdminPanelProps = {
 
 export function AdminPanel({
   token,
+  adminPin,
   appData,
   refreshBootstrapData,
   activeSection,
@@ -160,7 +162,7 @@ export function AdminPanel({
     const name = roleCreateName.trim();
     if (!id || !name) return;
     void runAdminAction(async () => {
-      await createRole(token, {
+      await createRole(token, adminPin, {
         id,
         name,
         defaultRoomId: roleCreateDefaultRoomId.trim() || undefined,
@@ -177,7 +179,7 @@ export function AdminPanel({
     const name = roleEditName.trim();
     if (!name) return;
     void runAdminAction(async () => {
-      await updateRole(token, roleEditId, {
+      await updateRole(token, adminPin, roleEditId, {
         name,
         defaultRoomId: roleEditDefaultRoomId.trim() || undefined,
         defaultVoiceMode: roleEditDefaultVoiceMode || undefined,
@@ -189,7 +191,7 @@ export function AdminPanel({
 
   function removeRoleConfig(id: string) {
     void runAdminAction(async () => {
-      await deleteRole(token, id);
+      await deleteRole(token, adminPin, id);
       if (roleEditId === id) {
         resetRoleEditForm();
       }
@@ -201,7 +203,7 @@ export function AdminPanel({
     const name = roomCreateName.trim();
     if (!id || !name) return;
     void runAdminAction(async () => {
-      await createRoom(token, {
+      await createRoom(token, adminPin, {
         id,
         name,
         senderRoleIds: roomCreateSenderRoleIds,
@@ -217,7 +219,7 @@ export function AdminPanel({
     const name = roomEditName.trim();
     if (!name) return;
     void runAdminAction(async () => {
-      await updateRoom(token, roomEditId, {
+      await updateRoom(token, adminPin, roomEditId, {
         name,
         senderRoleIds: roomEditSenderRoleIds,
         receiverRoleIds: roomEditReceiverRoleIds,
@@ -228,7 +230,7 @@ export function AdminPanel({
 
   function removeRoomConfig(id: string) {
     void runAdminAction(async () => {
-      await deleteRoom(token, id);
+      await deleteRoom(token, adminPin, id);
       if (roomEditId === id) {
         resetRoomEditForm();
       }
@@ -240,7 +242,7 @@ export function AdminPanel({
     const name = groupCreateName.trim();
     if (!id || !name || groupCreateRoomIds.length === 0) return;
     void runAdminAction(async () => {
-      await createBroadcastGroup(token, {
+      await createBroadcastGroup(token, adminPin, {
         id,
         name,
         roomIds: groupCreateRoomIds,
@@ -256,7 +258,7 @@ export function AdminPanel({
     const name = groupEditName.trim();
     if (!name || groupEditRoomIds.length === 0) return;
     void runAdminAction(async () => {
-      await updateBroadcastGroup(token, groupEditId, {
+      await updateBroadcastGroup(token, adminPin, groupEditId, {
         name,
         roomIds: groupEditRoomIds,
         allowedRoleIds: groupEditAllowedRoleIds,
@@ -267,7 +269,7 @@ export function AdminPanel({
 
   function removeBroadcastGroupConfig(id: string) {
     void runAdminAction(async () => {
-      await deleteBroadcastGroup(token, id);
+      await deleteBroadcastGroup(token, adminPin, id);
       if (groupEditId === id) {
         resetGroupEditForm();
       }

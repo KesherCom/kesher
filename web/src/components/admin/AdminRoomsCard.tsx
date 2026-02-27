@@ -5,12 +5,14 @@ import { RoleMultiSelect } from "./RoleMultiSelect";
 
 type AdminRoomsCardProps = {
   token: string;
+  adminPin: string;
   appData: Bootstrap;
   refreshBootstrapData: () => Promise<void>;
 };
 
 export function AdminRoomsCard({
   token,
+  adminPin,
   appData,
   refreshBootstrapData,
 }: AdminRoomsCardProps) {
@@ -70,7 +72,7 @@ export function AdminRoomsCard({
     const name = roomCreateName.trim();
     if (!id || !name) return;
     void runAdminAction(async () => {
-      await createRoom(token, {
+      await createRoom(token, adminPin, {
         id,
         name,
         senderRoleIds: roomCreateSenderRoleIds,
@@ -86,7 +88,7 @@ export function AdminRoomsCard({
     const name = roomEditName.trim();
     if (!name) return;
     void runAdminAction(async () => {
-      await updateRoom(token, roomEditId, {
+      await updateRoom(token, adminPin, roomEditId, {
         name,
         senderRoleIds: roomEditSenderRoleIds,
         receiverRoleIds: roomEditReceiverRoleIds,
@@ -97,7 +99,7 @@ export function AdminRoomsCard({
 
   function removeRoomConfig(id: string) {
     void runAdminAction(async () => {
-      await deleteRoom(token, id);
+      await deleteRoom(token, adminPin, id);
       if (roomEditId === id) {
         resetRoomEditForm();
       }

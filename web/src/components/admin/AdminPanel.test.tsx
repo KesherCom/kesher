@@ -29,6 +29,7 @@ describe("AdminPanel", () => {
     render(
       <AdminPanel
         token="token-123"
+        adminPin="1234"
         appData={appData}
         refreshBootstrapData={vi.fn()}
         showHeading={false}
@@ -46,6 +47,7 @@ describe("AdminPanel", () => {
     render(
       <AdminPanel
         token="token-123"
+        adminPin="1234"
         appData={appData}
         refreshBootstrapData={vi.fn()}
       />,
@@ -64,6 +66,7 @@ describe("AdminPanel", () => {
     const { rerender } = render(
       <AdminPanel
         token="token-123"
+        adminPin="1234"
         appData={appData}
         refreshBootstrapData={vi.fn()}
         activeSection="users"
@@ -75,6 +78,7 @@ describe("AdminPanel", () => {
     rerender(
       <AdminPanel
         token="token-123"
+        adminPin="1234"
         appData={appData}
         refreshBootstrapData={vi.fn()}
         activeSection="roles"

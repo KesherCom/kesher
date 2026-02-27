@@ -4,25 +4,26 @@ import { createRole, deleteRole, updateRole } from "../../api";
 
 type AdminRolesCardProps = {
   token: string;
+  adminPin: string;
   appData: Bootstrap;
   refreshBootstrapData: () => Promise<void>;
 };
 
 export function AdminRolesCard({
   token,
+  adminPin,
   appData,
   refreshBootstrapData,
 }: AdminRolesCardProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminError, setAdminError] = useState("");
-
   const [roleCreateId, setRoleCreateId] = useState("");
   const [roleCreateName, setRoleCreateName] = useState("");
   const [roleCreateDefaultRoomId, setRoleCreateDefaultRoomId] = useState("");
   const [roleCreateDefaultVoiceMode, setRoleCreateDefaultVoiceMode] = useState<
     "always_on" | "ptt" | ""
-  >();
+  >("");
   const [roleCreateDefaultSimpleView, setRoleCreateDefaultSimpleView] =
     useState(false);
   const [showRoleCreateForm, setShowRoleCreateForm] = useState(false);
@@ -31,7 +32,7 @@ export function AdminRolesCard({
   const [roleEditDefaultRoomId, setRoleEditDefaultRoomId] = useState("");
   const [roleEditDefaultVoiceMode, setRoleEditDefaultVoiceMode] = useState<
     "always_on" | "ptt" | ""
-  >();
+  >("");
   const [roleEditDefaultSimpleView, setRoleEditDefaultSimpleView] =
     useState(false);
 
@@ -71,7 +72,7 @@ export function AdminRolesCard({
     const name = roleCreateName.trim();
     if (!id || !name) return;
     void runAdminAction(async () => {
-      await createRole(token, {
+      await createRole(token, adminPin, {
         id,
         name,
         defaultRoomId: roleCreateDefaultRoomId.trim() || undefined,
@@ -88,7 +89,7 @@ export function AdminRolesCard({
     const name = roleEditName.trim();
     if (!name) return;
     void runAdminAction(async () => {
-      await updateRole(token, roleEditId, {
+      await updateRole(token, adminPin, roleEditId, {
         name,
         defaultRoomId: roleEditDefaultRoomId.trim() || undefined,
         defaultVoiceMode: roleEditDefaultVoiceMode || undefined,
@@ -100,7 +101,7 @@ export function AdminRolesCard({
 
   function removeRoleConfig(id: string) {
     void runAdminAction(async () => {
-      await deleteRole(token, id);
+      await deleteRole(token, adminPin, id);
       if (roleEditId === id) {
         resetRoleEditForm();
       }
@@ -131,9 +132,7 @@ export function AdminRolesCard({
                   type="button"
                   className="secondary"
                   onClick={() => {
-                    if (showRoleCreateForm) {
-                      resetRoleCreateForm();
-                    }
+                    if (showRoleCreateForm) resetRoleCreateForm();
                     setShowRoleCreateForm((prev) => !prev);
                   }}
                   disabled={adminBusy}
@@ -143,7 +142,6 @@ export function AdminRolesCard({
               ) : null}
             </div>
             {adminError ? <p className="admin-error">{adminError}</p> : null}
-
             {showRoleCreateForm && !roleEditId ? (
               <div className="admin-edit-panel">
                 <div className="admin-edit-title">New role</div>
@@ -219,7 +217,6 @@ export function AdminRolesCard({
                 </div>
               </div>
             ) : null}
-
             {roleEditId ? (
               <div className="admin-edit-panel">
                 <div className="admin-edit-title">
@@ -284,7 +281,6 @@ export function AdminRolesCard({
                 </div>
               </div>
             ) : null}
-
             <ul className="admin-list">
               {appData.roles.map((role) => (
                 <li key={role.id}>
