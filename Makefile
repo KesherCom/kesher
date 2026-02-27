@@ -142,7 +142,7 @@ run-desktop-proxy:
 
 
 build-web:
-	@cd web && npm run build
+	@cd web && npm install && npm run build
 
 sync-embedded-web: build-web
 	@mkdir -p backend/internal/app/embedded_web
