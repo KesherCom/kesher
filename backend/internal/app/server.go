@@ -1234,7 +1234,7 @@ func (s *Server) embeddedStaticHandler() http.Handler {
 			return
 		}
 		if r.URL.Path == "/" {
-			serveEmbeddedFile(fileServer, w, r, "/index.html")
+			http.ServeFileFS(w, r, assets, "index.html")
 			return
 		}
 		requestedPath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
@@ -1242,16 +1242,8 @@ func (s *Server) embeddedStaticHandler() http.Handler {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-		serveEmbeddedFile(fileServer, w, r, "/index.html")
+		http.ServeFileFS(w, r, assets, "index.html")
 	})
-}
-
-func serveEmbeddedFile(fileServer http.Handler, w http.ResponseWriter, r *http.Request, requestedPath string) {
-	cloned := r.Clone(r.Context())
-	urlCopy := *r.URL
-	urlCopy.Path = requestedPath
-	cloned.URL = &urlCopy
-	fileServer.ServeHTTP(w, cloned)
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, status int, v any) {
