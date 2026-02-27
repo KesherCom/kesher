@@ -223,6 +223,14 @@ func (s *Store) migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `UPDATE roles SET default_voice_mode = 'ptt' WHERE default_voice_mode = 'listen_only'`); err != nil {
 		return err
 	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS telegram_mappings (
+		id TEXT PRIMARY KEY,
+		chat_id TEXT NOT NULL UNIQUE,
+		label TEXT NOT NULL,
+		room_id TEXT NOT NULL
+	)`); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -878,4 +886,108 @@ func normalizeIDs(ids []string) []string {
 
 func isUniqueConstraintErr(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "unique")
+}
+
+func (s *Store) CreateTelegramMapping(ctx context.Context, id, chatID, label, roomID string) error {
+	id = strings.TrimSpace(id)
+	chatID = strings.TrimSpace(chatID)
+	label = strings.TrimSpace(label)
+	roomID = strings.TrimSpace(roomID)
+	if id == "" || chatID == "" || label == "" || roomID == "" {
+		return ErrInvalidInput
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO telegram_mappings (id, chat_id, label, room_id) VALUES (?, ?, ?, ?)`,
+		id, chatID, label, roomID); err != nil {
+		if isUniqueConstraintErr(err) {
+			return ErrConflict
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Store) UpdateTelegramMapping(ctx context.Context, id, chatID, label, roomID string) error {
+	id = strings.TrimSpace(id)
+	chatID = strings.TrimSpace(chatID)
+	label = strings.TrimSpace(label)
+	roomID = strings.TrimSpace(roomID)
+	if id == "" || chatID == "" || label == "" || roomID == "" {
+		return ErrInvalidInput
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE telegram_mappings SET chat_id = ?, label = ?, room_id = ? WHERE id = ?`,
+		chatID, label, roomID, id)
+	if err != nil {
+		if isUniqueConstraintErr(err) {
+			return ErrConflict
+		}
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteTelegramMapping(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrInvalidInput
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM telegram_mappings WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) ListTelegramMappings(ctx context.Context) ([]TelegramMapping, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, chat_id, label, room_id FROM telegram_mappings ORDER BY label`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var mappings []TelegramMapping
+	for rows.Next() {
+		var m TelegramMapping
+		if err := rows.Scan(&m.ID, &m.ChatID, &m.Label, &m.RoomID); err != nil {
+			return nil, err
+		}
+		mappings = append(mappings, m)
+	}
+	return mappings, nil
+}
+
+func (s *Store) FindTelegramMappingByChatID(ctx context.Context, chatID string) (TelegramMapping, error) {
+	var m TelegramMapping
+	err := s.db.QueryRowContext(ctx, `SELECT id, chat_id, label, room_id FROM telegram_mappings WHERE chat_id = ?`, chatID).
+		Scan(&m.ID, &m.ChatID, &m.Label, &m.RoomID)
+	return m, err
+}
+
+func (s *Store) FindTelegramMappingsByRoomID(ctx context.Context, roomID string) ([]TelegramMapping, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, chat_id, label, room_id FROM telegram_mappings WHERE room_id = ?`, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var mappings []TelegramMapping
+	for rows.Next() {
+		var m TelegramMapping
+		if err := rows.Scan(&m.ID, &m.ChatID, &m.Label, &m.RoomID); err != nil {
+			return nil, err
+		}
+		mappings = append(mappings, m)
+	}
+	return mappings, nil
 }
