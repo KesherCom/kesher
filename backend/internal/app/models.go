@@ -155,3 +155,38 @@ type CompanionBridgeState struct {
 	SignalFrom          string         `json:"signalFrom,omitempty"`
 	SignalMessage       string         `json:"signalMessage,omitempty"`
 }
+
+type TelegramMapping struct {
+	ID     string `json:"id"`
+	ChatID string `json:"chatId"`
+	Label  string `json:"label"`
+	RoomID string `json:"roomId"`
+}
+
+type TelegramStatusResponse struct {
+	BotConfigured bool              `json:"botConfigured"`
+	Mappings      []TelegramMapping `json:"mappings"`
+}
+
+type TelegramUpdate struct {
+	UpdateID int64            `json:"update_id"`
+	Message  *TelegramMessage `json:"message,omitempty"`
+}
+
+type TelegramMessage struct {
+	MessageID int64        `json:"message_id"`
+	From      *TelegramUser `json:"from,omitempty"`
+	Chat      TelegramChat `json:"chat"`
+	Text      string       `json:"text,omitempty"`
+}
+
+type TelegramUser struct {
+	ID        int64  `json:"id"`
+	FirstName string `json:"first_name"`
+	Username  string `json:"username,omitempty"`
+}
+
+type TelegramChat struct {
+	ID   int64  `json:"id"`
+	Type string `json:"type"`
+}

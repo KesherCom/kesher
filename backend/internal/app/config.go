@@ -29,6 +29,8 @@ type Config struct {
 	CertMagicPropagationDelay   time.Duration
 	CertMagicPropagationTimeout time.Duration
 	CertMagicResolvers          []string
+	TelegramBotToken            string
+	TelegramWebhookSecret       string
 }
 
 func LoadConfig() Config {
@@ -56,6 +58,8 @@ func LoadConfig() Config {
 			getEnvInt("CERTMAGIC_PROPAGATION_TIMEOUT_SECONDS", 120),
 		) * time.Second,
 		CertMagicResolvers: splitCSV(getEnv("CERTMAGIC_DNS_RESOLVERS", "")),
+		TelegramBotToken:      getEnv("TELEGRAM_BOT_TOKEN", ""),
+		TelegramWebhookSecret: getEnv("TELEGRAM_WEBHOOK_SECRET", ""),
 	}
 }
 

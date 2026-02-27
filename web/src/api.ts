@@ -1,4 +1,4 @@
-import type { Bootstrap, PublicBootstrap, User } from "./types";
+import type { Bootstrap, PublicBootstrap, TelegramStatus, User } from "./types";
 
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -231,6 +231,47 @@ export async function deleteBroadcastGroup(
 ): Promise<void> {
   await apiMutation(
     `/api/admin/broadcast-groups/${encodeURIComponent(groupId)}`,
+    token,
+    "DELETE",
+  );
+}
+
+export async function getTelegramStatus(
+  token: string,
+): Promise<TelegramStatus> {
+  const res = await fetch("/api/admin/telegram", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("failed to load telegram status");
+  return res.json() as Promise<TelegramStatus>;
+}
+
+export async function createTelegramMapping(
+  token: string,
+  payload: { chatId: string; label: string; roomId: string },
+): Promise<void> {
+  await apiMutation("/api/admin/telegram", token, "POST", payload);
+}
+
+export async function updateTelegramMapping(
+  token: string,
+  id: string,
+  payload: { chatId: string; label: string; roomId: string },
+): Promise<void> {
+  await apiMutation(
+    `/api/admin/telegram/${encodeURIComponent(id)}`,
+    token,
+    "PUT",
+    payload,
+  );
+}
+
+export async function deleteTelegramMapping(
+  token: string,
+  id: string,
+): Promise<void> {
+  await apiMutation(
+    `/api/admin/telegram/${encodeURIComponent(id)}`,
     token,
     "DELETE",
   );

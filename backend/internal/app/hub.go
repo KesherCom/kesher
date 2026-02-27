@@ -71,6 +71,7 @@ type Hub struct {
 	logger              *slog.Logger
 	media               *MediaManager
 	presenceSubscribers map[chan []PresenceState]struct{}
+	chatHook            func(eventType string, e RoutedEvent)
 }
 
 func NewHub(store *Store, logger *slog.Logger) *Hub {
@@ -136,6 +137,26 @@ func (h *Hub) markRoomSignalIncoming(roomID string, receiverRoles map[string]str
 
 func (h *Hub) SetMediaManager(m *MediaManager) {
 	h.media = m
+}
+
+func (h *Hub) SetChatHook(fn func(eventType string, e RoutedEvent)) {
+	h.mu.Lock()
+	h.chatHook = fn
+	h.mu.Unlock()
+}
+
+func (h *Hub) SendChatToRoom(roomID string, e RoutedEvent) {
+	msg := WSOutbound{Type: "chat", Data: e}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, c := range h.clients {
+		if _, ok := c.listenRooms[roomID]; ok {
+			select {
+			case c.send <- msg:
+			default:
+			}
+		}
+	}
 }
 
 func (h *Hub) Add(c *client) {
@@ -306,6 +327,15 @@ func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
 		h.sendToRooms(allowedRooms, receiverRolesByRoom, out)
 	default:
 		h.logger.Warn("unsupported routing scope", "scope", e.Scope)
+	}
+
+	if eventType == "chat" {
+		h.mu.RLock()
+		hook := h.chatHook
+		h.mu.RUnlock()
+		if hook != nil {
+			hook(eventType, e)
+		}
 	}
 }
 

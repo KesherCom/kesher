@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -27,6 +28,7 @@ type Server struct {
 	sessions    *SessionManager
 	hub         *Hub
 	media       *MediaManager
+	telegram    *TelegramBot
 	certMagic   tlsProvider
 	httpSrv     *http.Server
 	redirectSrv *http.Server
@@ -311,6 +313,9 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 	s.media = NewMediaManager(s.hub, logger)
 	s.hub.SetMediaManager(s.media)
+	if cfg.TelegramBotToken != "" {
+		s.telegram = NewTelegramBot(cfg.TelegramBotToken, cfg.TelegramWebhookSecret, store, s.hub, logger)
+	}
 	if strings.EqualFold(cfg.TLSMode, "certmagic") {
 		certMagicCfg, err := newCertMagicConfig(cfg)
 		if err != nil {
@@ -332,6 +337,9 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/broadcast-groups/", s.withAuth(s.handleAdminBroadcastGroupByID))
 	mux.HandleFunc("/api/companion/discovery", s.handleCompanionDiscovery)
 	mux.HandleFunc("/api/companion/ws", s.handleCompanionWS)
+	mux.HandleFunc("/api/telegram/webhook", s.handleTelegramWebhook)
+	mux.HandleFunc("/api/admin/telegram", s.withAuth(s.handleAdminTelegram))
+	mux.HandleFunc("/api/admin/telegram/", s.withAuth(s.handleAdminTelegramByID))
 	mux.HandleFunc("/ws", s.handleWS)
 	if cfg.StaticDir != "" || embeddedStaticAvailable() {
 		mux.Handle("/", s.staticHandler())
@@ -749,6 +757,96 @@ func (s *Server) requireAdmin(_ http.ResponseWriter, _ Session) bool {
 	return true
 }
 
+func (s *Server) handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
+	if s.telegram == nil {
+		http.Error(w, "telegram bot not configured", http.StatusServiceUnavailable)
+		return
+	}
+	s.telegram.HandleWebhook(w, r)
+}
+
+type upsertTelegramMappingRequest struct {
+	ChatID string `json:"chatId"`
+	Label  string `json:"label"`
+	RoomID string `json:"roomId"`
+}
+
+func (s *Server) handleAdminTelegram(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, session) {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		mappings, err := s.store.ListTelegramMappings(r.Context())
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		if mappings == nil {
+			mappings = []TelegramMapping{}
+		}
+		s.writeJSON(w, http.StatusOK, TelegramStatusResponse{
+			BotConfigured: s.telegram != nil,
+			Mappings:      mappings,
+		})
+	case http.MethodPost:
+		var req upsertTelegramMappingRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		id := newID()
+		if err := s.store.CreateTelegramMapping(r.Context(), id, req.ChatID, req.Label, req.RoomID); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleAdminTelegramByID(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, session) {
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/admin/telegram/")
+	if id == "" || strings.Contains(id, "/") {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var req upsertTelegramMappingRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.UpdateTelegramMapping(r.Context(), id, req.ChatID, req.Label, req.RoomID); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	case http.MethodDelete:
+		if err := s.store.DeleteTelegramMapping(r.Context(), id); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 func (s *Server) writeStoreErr(w http.ResponseWriter, err error) bool {
 	switch {
 	case errors.Is(err, ErrInvalidInput):
@@ -1129,4 +1227,8 @@ func firstNonEmpty(primary []string, secondary []string, fallback string) string
 		}
 	}
 	return fallback
+}
+
+func newID() string {
+	return uuid.NewString()
 }
