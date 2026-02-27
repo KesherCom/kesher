@@ -3,7 +3,9 @@ package app
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -79,8 +81,13 @@ func (t *TelegramBot) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	chatID := strconv.FormatInt(update.Message.Chat.ID, 10)
 	mapping, err := t.store.FindTelegramMappingByChatID(r.Context(), chatID)
 	if err != nil {
-		t.logger.Info("telegram message from unmapped chat", "chatId", chatID)
-		w.WriteHeader(http.StatusOK)
+		if errors.Is(err, sql.ErrNoRows) {
+			t.logger.Info("telegram message from unmapped chat", "chatId", chatID)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		t.logger.Error("failed to lookup telegram mapping", "chatId", chatID, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	senderName := "Telegram"
