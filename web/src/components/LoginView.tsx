@@ -31,7 +31,7 @@ export function LoginView({
     <div className="root login">
       <div className="login-card panel">
         <div className="login-card-head">
-          <h1>Live Production Intercom</h1>
+          <h1>Kesher</h1>
           <p className="variant-subtitle">Station Deck</p>
         </div>
         <div className="login-form">
