@@ -41,6 +41,18 @@ export type Bootstrap = PublicBootstrap & {
   users: User[];
 };
 
+export type TelegramMapping = {
+  id: string;
+  chatId: string;
+  label: string;
+  roomId: string;
+};
+
+export type TelegramStatus = {
+  botConfigured: boolean;
+  mappings: TelegramMapping[];
+};
+
 export type RoutedEvent = {
   scope: "direct" | "room" | "broadcast";
   targetId: string;
