@@ -43,6 +43,16 @@ type tlsProvider interface {
 
 func (s *Server) listenAndServeHTTPS() error {
 	switch strings.ToLower(strings.TrimSpace(s.cfg.TLSMode)) {
+	case "internal":
+		tlsCfg, err := newInternalTLSConfig(s.httpSrv.Addr)
+		if err != nil {
+			return fmt.Errorf("failed to generate internal tls certificate: %w", err)
+		}
+		ln, err := net.Listen("tcp", s.httpSrv.Addr)
+		if err != nil {
+			return err
+		}
+		return s.httpSrv.Serve(tls.NewListener(ln, tlsCfg))
 	case "", "file":
 		if s.cfg.TLSCertFile == "" || s.cfg.TLSKeyFile == "" {
 			return errors.New("file TLS mode requires TLS_CERT_FILE and TLS_KEY_FILE")
