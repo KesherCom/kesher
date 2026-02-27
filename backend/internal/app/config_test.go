@@ -16,6 +16,16 @@ func TestSplitCSV(t *testing.T) {
 	}
 }
 
+func TestLoadConfigFromEnvDefaultsToInternalTLSMode(t *testing.T) {
+	t.Setenv("APP_CONFIG_FILE", "")
+	t.Setenv("CONFIG_FILE", "")
+	t.Setenv("TLS_MODE", "")
+	cfg := loadConfigFromEnv()
+	if cfg.TLSMode != "internal" {
+		t.Fatalf("expected default TLS mode to be internal, got %q", cfg.TLSMode)
+	}
+}
+
 func TestGetEnvIntFallbackOnInvalidValue(t *testing.T) {
 	t.Setenv("TEST_ENV_INT", "not-a-number")
 	if got := getEnvInt("TEST_ENV_INT", 42); got != 42 {

@@ -5,7 +5,7 @@ allow_cors: true
 admin_pin: "123456"
 session_ttl_minutes: 720
 trusted_lan_http: true
-tls_mode: "file"
+tls_mode: "internal"
 tls_cert_file: ""
 tls_key_file: ""
 production_mode: false
