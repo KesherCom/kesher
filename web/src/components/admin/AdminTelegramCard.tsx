@@ -16,6 +16,7 @@ type AdminTelegramCardProps = {
 export function AdminTelegramCard({ token, appData }: AdminTelegramCardProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [botConfigured, setBotConfigured] = useState(false);
+  const [mode, setMode] = useState<"polling" | "webhook" | "">("")
   const [mappings, setMappings] = useState<TelegramMapping[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -34,6 +35,7 @@ export function AdminTelegramCard({ token, appData }: AdminTelegramCardProps) {
     try {
       const status = await getTelegramStatus(token);
       setBotConfigured(status.botConfigured);
+      setMode(status.mode);
       setMappings(status.mappings);
     } catch {
       // ignore if not yet configured
@@ -134,15 +136,36 @@ export function AdminTelegramCard({ token, appData }: AdminTelegramCardProps) {
               )}
             </p>
             {botConfigured ? (
-              <p>
-                <strong>Webhook URL:</strong>{" "}
-                <code className="admin-code">{webhookUrl}</code>
-                <br />
-                <small>
-                  Set this URL in BotFather via{" "}
-                  <code>/setwebhook</code>.
-                </small>
-              </p>
+              <>
+                <p>
+                  <strong>Mode:</strong>{" "}
+                  {mode === "polling" ? (
+                    <span className="admin-status-ok">
+                      Polling (server fetches updates from Telegram)
+                    </span>
+                  ) : (
+                    <span>Webhook</span>
+                  )}
+                </p>
+                {mode === "webhook" ? (
+                  <p>
+                    <strong>Webhook URL:</strong>{" "}
+                    <code className="admin-code">{webhookUrl}</code>
+                    <br />
+                    <small>
+                      Set this URL in BotFather via{" "}
+                      <code>/setwebhook</code>.
+                    </small>
+                  </p>
+                ) : (
+                  <p>
+                    <small>
+                      The server polls the Telegram API for new messages. No
+                      public IP or webhook URL required.
+                    </small>
+                  </p>
+                )}
+              </>
             ) : null}
           </div>
           <div className="admin-block">

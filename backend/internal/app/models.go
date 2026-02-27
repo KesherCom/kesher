@@ -165,6 +165,7 @@ type TelegramMapping struct {
 
 type TelegramStatusResponse struct {
 	BotConfigured bool              `json:"botConfigured"`
+	Mode          string            `json:"mode"` // "polling" or "webhook"
 	Mappings      []TelegramMapping `json:"mappings"`
 }
 

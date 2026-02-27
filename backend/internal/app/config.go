@@ -31,6 +31,7 @@ type Config struct {
 	CertMagicResolvers          []string
 	TelegramBotToken            string
 	TelegramWebhookSecret       string
+	TelegramMode                string // "polling" (default) or "webhook"
 }
 
 func LoadConfig() Config {
@@ -60,6 +61,7 @@ func LoadConfig() Config {
 		CertMagicResolvers: splitCSV(getEnv("CERTMAGIC_DNS_RESOLVERS", "")),
 		TelegramBotToken:      getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramWebhookSecret: getEnv("TELEGRAM_WEBHOOK_SECRET", ""),
+		TelegramMode:          getEnv("TELEGRAM_MODE", "polling"),
 	}
 }
 
