@@ -1900,9 +1900,7 @@ export function App() {
     if (!token) return;
     if (isAdminPathname(pathname)) {
       setAuthMode("admin");
-      return;
     }
-    setAuthMode("operator");
   }, [pathname, token]);
 
   useEffect(() => {
@@ -1937,7 +1935,13 @@ export function App() {
   async function handleOperatorLogin() {
     setAuthMode("operator");
     setAdminLoginError("");
-    await doLogin();
+    try {
+      await doLogin();
+    } catch (error) {
+      setAdminLoginError(
+        error instanceof Error ? error.message : "Login failed.",
+      );
+    }
   }
 
   async function handleAdminLogin() {
@@ -1946,7 +1950,6 @@ export function App() {
       return;
     }
     setAdminLoginError("");
-    setAuthMode("admin");
     // Allow direct admin login even when no username/role selected.
     // Use provided username/role if present, otherwise fall back to sensible defaults.
     const nextRoleId = roleId || publicData?.roles?.[0]?.id || "";
@@ -1954,9 +1957,18 @@ export function App() {
       setAdminLoginError("No role available for admin login.");
       return;
     }
-    // Perform a login using the reserved admin username, but don't overwrite the user's session settings.
-    await doLogin("admin", nextRoleId);
-    setAdminOverrideActive(true);
+    // Set authMode before doLogin so the pathname sync effect navigates
+    // to /admin as soon as the token arrives, avoiding a fight between effects.
+    setAuthMode("admin");
+    try {
+      await doLogin("admin", nextRoleId);
+      setAdminOverrideActive(true);
+    } catch (error) {
+      setAuthMode("operator");
+      setAdminLoginError(
+        error instanceof Error ? error.message : "Admin login failed.",
+      );
+    }
   }
 
   async function doLogout() {
