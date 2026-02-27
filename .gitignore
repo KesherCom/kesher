@@ -4,6 +4,7 @@ dist
 coverage
 .env
 .env.local
+config.yaml
 tmp
 *.db
 *.db-*
