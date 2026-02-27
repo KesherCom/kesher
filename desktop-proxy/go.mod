@@ -1,4 +1,4 @@
-module github.com/staubichsauger/live-production-intercom/desktop-proxy
+module github.com/KesherCom/kesher/desktop-proxy
 
 go 1.25
 

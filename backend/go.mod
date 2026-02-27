@@ -1,4 +1,4 @@
-module github.com/staubichsauger/live-production-intercom/backend
+module github.com/KesherCom/kesher/backend
 
 go 1.25
 

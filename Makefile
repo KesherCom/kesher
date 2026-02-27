@@ -72,7 +72,7 @@ run-backend-le: build-web
 		echo "  /etc/letsencrypt/live/$(DOMAIN)/privkey.pem"; \
 		exit 1; \
 	fi
-	@TMP_CERT_DIR="/tmp/live-production-intercom-certs/$(DOMAIN)"; \
+	@TMP_CERT_DIR="/tmp/kesher-certs/$(DOMAIN)"; \
 	TMP_CERT_FILE="$$TMP_CERT_DIR/fullchain.pem"; \
 	TMP_KEY_FILE="$$TMP_CERT_DIR/privkey.pem"; \
 	echo "Copying certs to $$TMP_CERT_DIR via sudo..."; \
@@ -99,7 +99,7 @@ run-production-le: build-web
 		echo "DOMAIN is required. Example: make run-production-le DOMAIN=intercom.example.org"; \
 		exit 1; \
 	fi
-	@TMP_CERT_DIR="/tmp/live-production-intercom-certs/$(DOMAIN)"; \
+	@TMP_CERT_DIR="/tmp/kesher-certs/$(DOMAIN)"; \
 	TMP_CERT_FILE="$$TMP_CERT_DIR/fullchain.pem"; \
 	TMP_KEY_FILE="$$TMP_CERT_DIR/privkey.pem"; \
 	if [[ -f "$$TMP_CERT_FILE" && -f "$$TMP_KEY_FILE" ]]; then \

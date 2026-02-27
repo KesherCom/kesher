@@ -1,12 +1,12 @@
 {
-  "id": "live-production-intercom",
-  "name": "live-production-intercom",
+  "id": "kesher",
+  "name": "kesher",
   "shortname": "intercom",
-  "description": "Control live-production-intercom browser sessions via Companion",
+  "description": "Control kesher browser sessions via Companion",
   "version": "0.1.0",
   "license": "MIT",
-  "repository": "git+https://github.com/staubichsauger/live-production-intercom.git",
-  "bugs": "https://github.com/staubichsauger/live-production-intercom/issues",
+  "repository": "git+https://github.com/KesherCom/kesher.git",
+  "bugs": "https://github.com/KesherCom/kesher/issues",
   "maintainers": [
     {
       "name": "Tim Schweikert"
@@ -20,6 +20,6 @@
   },
   "legacyIds": [],
   "manufacturer": "staubichsauger",
-  "products": ["live-production-intercom"],
+  "products": ["kesher"],
   "keywords": ["intercom", "ptt", "churchtools"]
 }
