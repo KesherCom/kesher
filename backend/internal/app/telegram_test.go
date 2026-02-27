@@ -307,6 +307,7 @@ func TestTelegramStatusIncludesMode(t *testing.T) {
 	session, _ := s.sessions.Get(loginResp.Token)
 
 	req = httptest.NewRequest(http.MethodGet, "/api/admin/telegram", nil)
+	req.Header.Set("X-Admin-Pin", "123456")
 	rec = httptest.NewRecorder()
 	s.handleAdminTelegram(rec, req, session)
 	if rec.Code != http.StatusOK {
