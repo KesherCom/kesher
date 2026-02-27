@@ -70,7 +70,7 @@ jobs:
           ext=""
           if [ "${GOOS}" = "windows" ]; then ext=".exe"; fi
           bin="kesher-${GOOS}-${GOARCH}${ext}"
-          archive="live-production-intercom-${GOOS}-${GOARCH}"
+          archive="kesher-${GOOS}-${GOARCH}"
 
           (
             cd backend
