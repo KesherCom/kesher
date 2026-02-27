@@ -2,8 +2,10 @@ package app
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestSplitCSV(t *testing.T) {
@@ -34,5 +36,54 @@ func TestGetEnvUsesFallbackWhenUnset(t *testing.T) {
 	_ = os.Unsetenv(key)
 	if got := getEnv(key, "fallback"); got != "fallback" {
 		t.Fatalf("expected fallback, got %q", got)
+	}
+}
+
+func TestLoadConfigPrefersConfigFileOverEnv(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+	content := []byte(`
+app_addr: ":9999"
+allow_cors: false
+session_ttl_minutes: 10
+certmagic_domains:
+  - intercom.example.org
+`)
+	if err := os.WriteFile(configPath, content, 0o644); err != nil {
+		t.Fatalf("failed to write temp config: %v", err)
+	}
+
+	t.Setenv("APP_CONFIG_FILE", configPath)
+	t.Setenv("APP_ADDR", ":8080")
+	t.Setenv("ALLOW_CORS", "true")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("expected config load to succeed, got: %v", err)
+	}
+	if cfg.Addr != ":9999" {
+		t.Fatalf("expected addr from yaml, got %q", cfg.Addr)
+	}
+	if cfg.AllowCORS {
+		t.Fatalf("expected allow_cors=false from yaml")
+	}
+	if cfg.SessionTTL != 10*time.Minute {
+		t.Fatalf("expected session ttl to be 10m, got %s", cfg.SessionTTL)
+	}
+	if !reflect.DeepEqual(cfg.CertMagicDomains, []string{"intercom.example.org"}) {
+		t.Fatalf("unexpected certmagic domains: %v", cfg.CertMagicDomains)
+	}
+}
+
+func TestLoadConfigFallsBackToEnvWhenNoConfigFile(t *testing.T) {
+	t.Setenv("APP_CONFIG_FILE", "")
+	t.Setenv("CONFIG_FILE", "")
+	t.Setenv("APP_ADDR", ":7010")
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("expected config load to succeed, got: %v", err)
+	}
+	if cfg.Addr != ":7010" {
+		t.Fatalf("expected addr from env, got %q", cfg.Addr)
 	}
 }
