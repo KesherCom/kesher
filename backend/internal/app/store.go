@@ -896,6 +896,13 @@ func (s *Store) CreateTelegramMapping(ctx context.Context, id, chatID, label, ro
 	if id == "" || chatID == "" || label == "" || roomID == "" {
 		return ErrInvalidInput
 	}
+	var roomExists int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM rooms WHERE id = ?`, roomID).Scan(&roomExists); err != nil {
+		return err
+	}
+	if roomExists == 0 {
+		return ErrInvalidInput
+	}
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO telegram_mappings (id, chat_id, label, room_id) VALUES (?, ?, ?, ?)`,
 		id, chatID, label, roomID); err != nil {
 		if isUniqueConstraintErr(err) {
@@ -912,6 +919,13 @@ func (s *Store) UpdateTelegramMapping(ctx context.Context, id, chatID, label, ro
 	label = strings.TrimSpace(label)
 	roomID = strings.TrimSpace(roomID)
 	if id == "" || chatID == "" || label == "" || roomID == "" {
+		return ErrInvalidInput
+	}
+	var roomExists int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM rooms WHERE id = ?`, roomID).Scan(&roomExists); err != nil {
+		return err
+	}
+	if roomExists == 0 {
 		return ErrInvalidInput
 	}
 	res, err := s.db.ExecContext(ctx, `UPDATE telegram_mappings SET chat_id = ?, label = ?, room_id = ? WHERE id = ?`,

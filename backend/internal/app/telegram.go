@@ -3,7 +3,9 @@ package app
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -226,7 +228,48 @@ func (t *TelegramBot) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
+<<<<<<< HEAD
 	t.processUpdate(update)
+=======
+	if update.Message == nil || strings.TrimSpace(update.Message.Text) == "" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	chatID := strconv.FormatInt(update.Message.Chat.ID, 10)
+	mapping, err := t.store.FindTelegramMappingByChatID(r.Context(), chatID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			t.logger.Info("telegram message from unmapped chat", "chatId", chatID)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		t.logger.Error("failed to lookup telegram mapping", "chatId", chatID, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	senderName := "Telegram"
+	if update.Message.From != nil {
+		if update.Message.From.Username != "" {
+			senderName = "@" + update.Message.From.Username
+		} else if update.Message.From.FirstName != "" {
+			senderName = update.Message.From.FirstName
+		}
+	}
+	fromUser := User{
+		ID:       "telegram:" + chatID,
+		Username: senderName,
+		RoleID:   "",
+	}
+	e := RoutedEvent{
+		Scope:     "room",
+		TargetID:  mapping.RoomID,
+		Body:      update.Message.Text,
+		FromUser:  fromUser,
+		Timestamp: time.Now().UnixMilli(),
+	}
+	t.hub.SendChatToRoom(mapping.RoomID, e)
+	t.logger.Info("telegram message forwarded to room", "chatId", chatID, "room", mapping.RoomID, "sender", senderName)
+>>>>>>> 61900f9330bcfa6a717b29b4fe59a880e93ad57a
 	w.WriteHeader(http.StatusOK)
 }
 
