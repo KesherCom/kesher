@@ -731,6 +731,10 @@ button {
   opacity: 0.45;
   cursor: not-allowed;
 }
+.routing-matrix-toggle.unavailable {
+  opacity: 0.25;
+  pointer-events: none;
+}
 .routing-matrix-talk.active {
   background: var(--talk);
   color: #fff;

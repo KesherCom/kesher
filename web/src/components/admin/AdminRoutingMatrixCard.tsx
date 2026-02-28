@@ -96,10 +96,22 @@ export function AdminRoutingMatrixCard({
       setLocalMatrix((prev) => {
         const next = { ...prev };
         next[roleId] = { ...next[roleId] };
-        next[roleId][roomId] = {
-          ...next[roleId][roomId],
-          [field]: !next[roleId][roomId][field],
-        };
+        const cur = next[roleId][roomId];
+        const updated = { ...cur };
+
+        if (field === "forced") {
+          updated.forced = !cur.forced;
+          // Turning on forced → also enable listen
+          if (updated.forced) updated.listen = true;
+        } else if (field === "listen") {
+          updated.listen = !cur.listen;
+          // Turning off listen → also disable forced
+          if (!updated.listen) updated.forced = false;
+        } else {
+          updated.talk = !cur.talk;
+        }
+
+        next[roleId][roomId] = updated;
         return next;
       });
     },
@@ -206,13 +218,13 @@ export function AdminRoutingMatrixCard({
                           </button>
                           <button
                             type="button"
-                            className={`routing-matrix-toggle routing-matrix-forced${cell.forced ? " active" : ""}`}
+                            className={`routing-matrix-toggle routing-matrix-forced${cell.forced ? " active" : ""}${!cell.listen ? " unavailable" : ""}`}
                             onClick={() =>
                               toggleCell(role.id, room.id, "forced")
                             }
-                            disabled={adminBusy}
+                            disabled={adminBusy || !cell.listen}
                             aria-label={`Forced listen ${role.name} → ${room.name}: ${cell.forced ? "on" : "off"}`}
-                            title={`Forced listen: ${cell.forced ? "ON" : "off"}`}
+                            title={cell.listen ? `Forced listen: ${cell.forced ? "ON" : "off"}` : "Enable Listen first"}
                           >
                             F
                           </button>

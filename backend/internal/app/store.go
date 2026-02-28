@@ -685,6 +685,8 @@ func (s *Store) CreateRoom(ctx context.Context, id, name string, senderRoleIDs, 
 	senderRoleIDs = normalizeIDs(senderRoleIDs)
 	receiverRoleIDs = normalizeIDs(receiverRoleIDs)
 	forcedListenRoleIDs = normalizeIDs(forcedListenRoleIDs)
+	// Forced listen implies listen — merge forced into receivers.
+	receiverRoleIDs = mergeUnique(receiverRoleIDs, forcedListenRoleIDs)
 	if id == "" || name == "" {
 		return ErrInvalidInput
 	}
@@ -735,6 +737,8 @@ func (s *Store) UpdateRoom(ctx context.Context, id, name string, senderRoleIDs, 
 	senderRoleIDs = normalizeIDs(senderRoleIDs)
 	receiverRoleIDs = normalizeIDs(receiverRoleIDs)
 	forcedListenRoleIDs = normalizeIDs(forcedListenRoleIDs)
+	// Forced listen implies listen — merge forced into receivers.
+	receiverRoleIDs = mergeUnique(receiverRoleIDs, forcedListenRoleIDs)
 	if id == "" || name == "" {
 		return ErrInvalidInput
 	}
@@ -822,6 +826,9 @@ func (s *Store) BulkUpdateRoomPermissions(ctx context.Context, entries []RoomPer
 		}
 		senderIDs := normalizeIDs(entry.SenderRoleIDs)
 		receiverIDs := normalizeIDs(entry.ReceiverRoleIDs)
+		forcedListenIDs := normalizeIDs(entry.ForcedListenRoleIDs)
+		// Forced listen implies listen — merge forced into receivers.
+		receiverIDs = mergeUnique(receiverIDs, forcedListenIDs)
 		if err := s.validateRolesExistWithTx(ctx, tx, senderIDs); err != nil {
 			_ = tx.Rollback()
 			return err
@@ -838,7 +845,6 @@ func (s *Store) BulkUpdateRoomPermissions(ctx context.Context, entries []RoomPer
 			_ = tx.Rollback()
 			return err
 		}
-		forcedListenIDs := normalizeIDs(entry.ForcedListenRoleIDs)
 		if err := s.validateRolesExistWithTx(ctx, tx, forcedListenIDs); err != nil {
 			_ = tx.Rollback()
 			return err
@@ -1075,6 +1081,21 @@ func normalizeIDs(ids []string) []string {
 		out = append(out, trimmed)
 	}
 	return out
+}
+
+// mergeUnique appends elements from extra into base, skipping duplicates.
+func mergeUnique(base, extra []string) []string {
+	seen := make(map[string]struct{}, len(base))
+	for _, id := range base {
+		seen[id] = struct{}{}
+	}
+	for _, id := range extra {
+		if _, ok := seen[id]; !ok {
+			base = append(base, id)
+			seen[id] = struct{}{}
+		}
+	}
+	return base
 }
 
 func isUniqueConstraintErr(err error) bool {
