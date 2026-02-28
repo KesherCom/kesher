@@ -32,6 +32,7 @@ export function normalizePublicBootstrap(data: unknown): PublicBootstrap {
         name: typeof entry.name === "string" ? entry.name : "",
         senderRoleIds: toStringArray(entry.senderRoleIds),
         receiverRoleIds: toStringArray(entry.receiverRoleIds),
+        forcedListenRoleIds: toStringArray(entry.forcedListenRoleIds),
       };
     }),
     broadcastGroups: broadcastGroups.map((group) => {
@@ -184,6 +185,7 @@ export async function createRoom(
     name: string;
     senderRoleIds?: string[];
     receiverRoleIds?: string[];
+    forcedListenRoleIds?: string[];
   },
 ): Promise<void> {
   await apiMutation("/api/admin/rooms", token, "POST", adminPin, payload);
@@ -196,6 +198,7 @@ export async function updateRoom(
     name: string;
     senderRoleIds?: string[];
     receiverRoleIds?: string[];
+    forcedListenRoleIds?: string[];
   },
 ): Promise<void> {
   await apiMutation(
@@ -331,6 +334,7 @@ export type RoutingMatrixEntry = {
   roomId: string;
   senderRoleIds: string[];
   receiverRoleIds: string[];
+  forcedListenRoleIds: string[];
 };
 
 export async function updateRoutingMatrix(

@@ -258,7 +258,7 @@ func TestServerIsInboundAllowedRoomScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"video"}); err != nil {
+	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"video"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	s := &Server{store: store}
@@ -278,7 +278,7 @@ func TestServerIsInboundAllowedBroadcastScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"video"}); err != nil {
+	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"video"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.CreateBroadcastGroup(context.Background(), "audio-bg", "Audio BG", []string{"foh"}, []string{"audio"}); err != nil {
@@ -301,7 +301,7 @@ func TestServerRouteInboundAllowedRoutesToHub(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"video"}); err != nil {
+	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"video"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -403,10 +403,10 @@ func TestServerFilterAllowedRoomsForRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"audio", "video"}); err != nil {
+	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"audio", "video"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpdateRoom(context.Background(), "stage", "Stage", []string{"video"}, []string{"video"}); err != nil {
+	if err := store.UpdateRoom(context.Background(), "stage", "Stage", []string{"video"}, []string{"video"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	s := &Server{store: store}

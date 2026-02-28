@@ -425,7 +425,13 @@ export function App() {
         });
         pendingInitialRoomRestoreRef.current = hadStoredRoomMatrix;
         if (hadStoredRoomMatrix) {
-          setListenRoomIds(sanitizedListen);
+          setListenRoomIds(
+            mergeForcedListenRooms(
+              sanitizedListen,
+              data.rooms,
+              data.self.roleId,
+            ),
+          );
           setTalkRoomIds(sanitizedTalk);
         } else {
           let initialRoom = "";
@@ -453,7 +459,13 @@ export function App() {
               initialRoomConfig?.senderRoleIds,
               data.self.roleId,
             );
-            setListenRoomIds(initialCanListen ? [initialRoom] : []);
+            setListenRoomIds(
+              mergeForcedListenRooms(
+                initialCanListen ? [initialRoom] : [],
+                data.rooms,
+                data.self.roleId,
+              ),
+            );
             setTalkRoomIds(initialCanTalk ? [initialRoom] : []);
           }
         }
@@ -845,9 +857,35 @@ export function App() {
     return roleAllowed(room.receiverRoleIds, currentRoleId);
   }
 
+  function isRoomForcedListen(roomId: string, currentRoleId: string) {
+    const room = appData?.rooms.find((entry) => entry.id === roomId);
+    if (!room) return false;
+    return (room.forcedListenRoleIds ?? []).includes(currentRoleId);
+  }
+
+  /** Ensure forced-listen rooms for the given role are included in a listen-room set. */
+  function mergeForcedListenRooms(
+    prev: string[],
+    rooms: { id: string; forcedListenRoleIds?: string[] }[],
+    roleId: string,
+  ): string[] {
+    const forced = rooms
+      .filter((r) => (r.forcedListenRoleIds ?? []).includes(roleId))
+      .map((r) => r.id);
+    if (forced.length === 0) return prev;
+    const existing = new Set(prev);
+    const merged = [...prev];
+    for (const id of forced) {
+      if (!existing.has(id)) merged.push(id);
+    }
+    return merged;
+  }
+
   function toggleListenRoom(roomId: string) {
     if (!appData || !canRoleReceiveFromRoom(roomId, appData.self.roleId))
       return;
+    // Prevent deselecting a forced-listen room
+    if (isRoomForcedListen(roomId, appData.self.roleId)) return;
     setListenRoomIds((prev) => toggleRoomSelectionState(prev, roomId));
   }
 
@@ -1329,12 +1367,13 @@ export function App() {
           setPublicData(updated);
           // Remove listen/talk selections that the user's role no longer has access to
           const selfRoleId = appData?.self?.roleId ?? "";
-          setListenRoomIds((prev) =>
-            prev.filter((id) => {
+          setListenRoomIds((prev) => {
+            const filtered = prev.filter((id) => {
               const room = updated.rooms.find((r) => r.id === id);
               return !!room && roleAllowed(room.receiverRoleIds, selfRoleId);
-            }),
-          );
+            });
+            return mergeForcedListenRooms(filtered, updated.rooms, selfRoleId);
+          });
           setTalkRoomIds((prev) =>
             prev.filter((id) => {
               const room = updated.rooms.find((r) => r.id === id);
@@ -2033,10 +2072,11 @@ export function App() {
       broadcastGroups: data.broadcastGroups,
     });
     setListenRoomIds((prev) => {
-      return prev.filter((roomId) => {
+      const filtered = prev.filter((roomId) => {
         const room = data.rooms.find((entry) => entry.id === roomId);
         return !!room && roleAllowed(room.receiverRoleIds, data.self.roleId);
       });
+      return mergeForcedListenRooms(filtered, data.rooms, data.self.roleId);
     });
     setTalkRoomIds((prev) => {
       return prev.filter((roomId) => {

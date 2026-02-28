@@ -10,6 +10,7 @@ export type Room = {
   name: string;
   senderRoleIds: string[];
   receiverRoleIds: string[];
+  forcedListenRoleIds: string[];
 };
 export type BroadcastGroup = {
   id: string;

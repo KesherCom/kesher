@@ -297,6 +297,25 @@ func (s *Server) filterAllowedRoomsForRole(ctx context.Context, roleID string, r
 	return out
 }
 
+// mergeForcedListenRooms adds any forced-listen rooms for the role that are not
+// already present in the listen set.
+func (s *Server) mergeForcedListenRooms(ctx context.Context, roleID string, listenRooms []string) []string {
+	forced, err := s.store.ForcedListenRoomIDs(ctx, roleID)
+	if err != nil || len(forced) == 0 {
+		return listenRooms
+	}
+	existing := make(map[string]struct{}, len(listenRooms))
+	for _, r := range listenRooms {
+		existing[r] = struct{}{}
+	}
+	for _, r := range forced {
+		if _, ok := existing[r]; !ok {
+			listenRooms = append(listenRooms, r)
+		}
+	}
+	return listenRooms
+}
+
 func isRoleAllowed(allowedRoles map[string]struct{}, roleID string) bool {
 	if len(allowedRoles) == 0 {
 		return false
@@ -582,10 +601,11 @@ type upsertRoleRequest struct {
 }
 
 type upsertRoomRequest struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	SenderRoleIDs   []string `json:"senderRoleIds"`
-	ReceiverRoleIDs []string `json:"receiverRoleIds"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	SenderRoleIDs       []string `json:"senderRoleIds"`
+	ReceiverRoleIDs     []string `json:"receiverRoleIds"`
+	ForcedListenRoleIDs []string `json:"forcedListenRoleIds"`
 }
 
 type upsertBroadcastGroupRequest struct {
@@ -668,7 +688,7 @@ func (s *Server) handleAdminRooms(w http.ResponseWriter, r *http.Request, sessio
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		if err := s.store.CreateRoom(r.Context(), req.ID, req.Name, req.SenderRoleIDs, req.ReceiverRoleIDs); err != nil {
+		if err := s.store.CreateRoom(r.Context(), req.ID, req.Name, req.SenderRoleIDs, req.ReceiverRoleIDs, req.ForcedListenRoleIDs); err != nil {
 			if s.writeStoreErr(w, err) {
 				return
 			}
@@ -697,7 +717,7 @@ func (s *Server) handleAdminRoomByID(w http.ResponseWriter, r *http.Request, ses
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		if err := s.store.UpdateRoom(r.Context(), roomID, req.Name, req.SenderRoleIDs, req.ReceiverRoleIDs); err != nil {
+		if err := s.store.UpdateRoom(r.Context(), roomID, req.Name, req.SenderRoleIDs, req.ReceiverRoleIDs, req.ForcedListenRoleIDs); err != nil {
 			if s.writeStoreErr(w, err) {
 				return
 			}
@@ -1116,6 +1136,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			var e ActiveRoomEvent
 			_ = json.Unmarshal(raw, &e)
 			allowedListen := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, []string{e.RoomID}, false)
+			allowedListen = s.mergeForcedListenRooms(r.Context(), session.RoleID, allowedListen)
 			allowedTalk := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, []string{e.RoomID}, true)
 			currentRoom = firstNonEmpty(allowedTalk, allowedListen, "")
 			s.hub.SetActiveRoom(session.Token, currentRoom)
@@ -1128,6 +1149,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			var e RoomMatrixEvent
 			_ = json.Unmarshal(raw, &e)
 			allowedListen := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, e.ListenRoomIDs, false)
+			allowedListen = s.mergeForcedListenRooms(r.Context(), session.RoleID, allowedListen)
 			allowedTalk := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, e.TalkRoomIDs, true)
 			if e.ActiveRoomID != "" {
 				activeTalk := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, []string{e.ActiveRoomID}, true)

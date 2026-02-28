@@ -9,9 +9,9 @@ type AdminRoutingMatrixCardProps = {
   refreshBootstrapData: () => Promise<void>;
 };
 
-type CellState = { talk: boolean; listen: boolean };
+type CellState = { talk: boolean; listen: boolean; forced: boolean };
 
-/** Build a map of roleId → roomId → { talk, listen } from the current bootstrap data. */
+/** Build a map of roleId → roomId → { talk, listen, forced } from the current bootstrap data. */
 function buildMatrix(
   roles: Role[],
   rooms: Room[],
@@ -23,6 +23,7 @@ function buildMatrix(
       matrix[role.id][room.id] = {
         talk: (room.senderRoleIds ?? []).includes(role.id),
         listen: (room.receiverRoleIds ?? []).includes(role.id),
+        forced: (room.forcedListenRoleIds ?? []).includes(role.id),
       };
     }
   }
@@ -38,12 +39,14 @@ function matrixToEntries(
   return rooms.map((room) => {
     const senderRoleIds: string[] = [];
     const receiverRoleIds: string[] = [];
+    const forcedListenRoleIds: string[] = [];
     for (const role of roles) {
       const cell = matrix[role.id]?.[room.id];
       if (cell?.talk) senderRoleIds.push(role.id);
       if (cell?.listen) receiverRoleIds.push(role.id);
+      if (cell?.forced) forcedListenRoleIds.push(role.id);
     }
-    return { roomId: room.id, senderRoleIds, receiverRoleIds };
+    return { roomId: room.id, senderRoleIds, receiverRoleIds, forcedListenRoleIds };
   });
 }
 
@@ -81,7 +84,7 @@ export function AdminRoutingMatrixCard({
         const local = localMatrix[role.id]?.[room.id];
         const server = serverMatrix[role.id]?.[room.id];
         if (!local || !server) continue;
-        if (local.talk !== server.talk || local.listen !== server.listen)
+        if (local.talk !== server.talk || local.listen !== server.listen || local.forced !== server.forced)
           return true;
       }
     }
@@ -89,7 +92,7 @@ export function AdminRoutingMatrixCard({
   }, [localMatrix, serverMatrix, appData.roles, appData.rooms]);
 
   const toggleCell = useCallback(
-    (roleId: string, roomId: string, field: "talk" | "listen") => {
+    (roleId: string, roomId: string, field: "talk" | "listen" | "forced") => {
       setLocalMatrix((prev) => {
         const next = { ...prev };
         next[roleId] = { ...next[roleId] };
@@ -150,9 +153,10 @@ export function AdminRoutingMatrixCard({
           {adminError ? <p className="admin-error">{adminError}</p> : null}
 
           <p className="routing-matrix-hint">
-            Click <strong>T</strong>&thinsp;(Talk) or{" "}
-            <strong>L</strong>&thinsp;(Listen) to toggle permissions for each
-            role/room combination.
+            Click <strong>T</strong>&thinsp;(Talk),{" "}
+            <strong>L</strong>&thinsp;(Listen), or{" "}
+            <strong>F</strong>&thinsp;(Forced listen) to toggle permissions for
+            each role/room combination.
           </p>
 
           <div className="routing-matrix-wrapper">
@@ -200,6 +204,18 @@ export function AdminRoutingMatrixCard({
                           >
                             L
                           </button>
+                          <button
+                            type="button"
+                            className={`routing-matrix-toggle routing-matrix-forced${cell.forced ? " active" : ""}`}
+                            onClick={() =>
+                              toggleCell(role.id, room.id, "forced")
+                            }
+                            disabled={adminBusy}
+                            aria-label={`Forced listen ${role.name} → ${room.name}: ${cell.forced ? "on" : "off"}`}
+                            title={`Forced listen: ${cell.forced ? "ON" : "off"}`}
+                          >
+                            F
+                          </button>
                         </td>
                       );
                     })}
@@ -217,6 +233,10 @@ export function AdminRoutingMatrixCard({
             <span className="routing-matrix-legend-item">
               <span className="routing-matrix-swatch routing-matrix-swatch-listen" />{" "}
               Listen
+            </span>
+            <span className="routing-matrix-legend-item">
+              <span className="routing-matrix-swatch routing-matrix-swatch-forced" />{" "}
+              Forced listen
             </span>
           </div>
 

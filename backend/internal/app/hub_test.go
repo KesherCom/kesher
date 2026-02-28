@@ -25,7 +25,7 @@ func TestHubRoomRoutingRespectsReceiverRoleRestrictions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio", "video", "lighting"}, []string{"video"}); err != nil {
+	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio", "video", "lighting"}, []string{"video"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -83,10 +83,10 @@ func TestHubBroadcastRoutingFiltersRoomsBySenderRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"audio", "lighting"}); err != nil {
+	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"audio", "lighting"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpdateRoom(context.Background(), "stage", "Stage", []string{"video"}, []string{"audio", "lighting"}); err != nil {
+	if err := store.UpdateRoom(context.Background(), "stage", "Stage", []string{"video"}, []string{"audio", "lighting"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	_, _ = store.db.ExecContext(context.Background(), `INSERT OR IGNORE INTO broadcast_groups (id,name) VALUES ('split-bg','Split BG')`)

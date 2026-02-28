@@ -383,6 +383,9 @@ export function StationIntercomView({
               room.id,
               appData.self.roleId,
             );
+            const isForced = (room.forcedListenRoleIds ?? []).includes(
+              appData.self.roleId,
+            );
             const isPttPressed =
               enableDirectPpt && pptPressedChannelId === room.id;
 
@@ -494,16 +497,18 @@ export function StationIntercomView({
                 </div>
                 <div className="station-card-actions">
                   <button
-                    className={`listen ${listening && canListen ? "on" : ""} ${canListen ? "" : "disabled"}`}
+                    className={`listen ${listening && canListen ? "on" : ""} ${canListen ? "" : "disabled"} ${isForced ? "forced" : ""}`}
                     onClick={() => toggleListenRoom(room.id)}
-                    disabled={!canListen}
+                    disabled={!canListen || isForced}
                     title={
-                      canListen
-                        ? ""
-                        : "Your role is not allowed to receive from this room"
+                      isForced
+                        ? "Forced listen — cannot be deselected"
+                        : canListen
+                          ? ""
+                          : "Your role is not allowed to receive from this room"
                     }
                   >
-                    Listen
+                    {isForced ? "🔒 Listen" : "Listen"}
                   </button>
                   <button
                     className={`call ${canTalk ? "" : "disabled"}`}

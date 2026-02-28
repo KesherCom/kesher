@@ -26,10 +26,11 @@ type CompanionDiscoveryResponse struct {
 }
 
 type Room struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	SenderRoleIDs   []string `json:"senderRoleIds"`
-	ReceiverRoleIDs []string `json:"receiverRoleIds"`
+	ID                   string   `json:"id"`
+	Name                 string   `json:"name"`
+	SenderRoleIDs        []string `json:"senderRoleIds"`
+	ReceiverRoleIDs      []string `json:"receiverRoleIds"`
+	ForcedListenRoleIDs  []string `json:"forcedListenRoleIds"`
 }
 
 type BroadcastGroup struct {
