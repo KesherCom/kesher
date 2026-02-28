@@ -11,6 +11,8 @@ type ChannelSelectorProps = {
   onChannelPttStart: (channelId: string) => void;
   onChannelPttStop: (channelId: string) => void;
   pttPressedChannelId: string | null;
+  /** Optional map of channelId → listener count for presence display. */
+  presenceCountByChannelId?: Map<string, number>;
 };
 
 export function ChannelSelector({
@@ -21,6 +23,7 @@ export function ChannelSelector({
   onChannelPttStart,
   onChannelPttStop,
   pttPressedChannelId,
+  presenceCountByChannelId,
 }: ChannelSelectorProps) {
   const handleChannelPointerDown = (channelId: string) => {
     if (enableDirectPpt) {
@@ -83,6 +86,12 @@ export function ChannelSelector({
               >
                 <div className="channel-talk-label">TALK</div>
                 <div className="channel-name">{channel.label}</div>
+                {presenceCountByChannelId && (presenceCountByChannelId.get(channel.id) || 0) > 0 ? (
+                  <div className="channel-presence-badge" title={`${presenceCountByChannelId.get(channel.id)} listener(s)`}>
+                    <span className="channel-presence-dot" />
+                    {presenceCountByChannelId.get(channel.id)}
+                  </div>
+                ) : null}
               </button>
             );
           })}
