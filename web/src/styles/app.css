@@ -1112,8 +1112,11 @@ button {
   display: grid;
   gap: 0.62rem;
 }
+.role-multiselect-actions {
+  display: flex;
+  gap: 0.5rem;
+}
 .role-multiselect-reset {
-  justify-self: start;
   min-height: 34px;
   padding: 0.35rem 0.72rem;
   font-size: 0.78rem;
