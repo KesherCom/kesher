@@ -1981,7 +1981,60 @@ button.secondary {
   flex-wrap: wrap;
   gap: 0.75rem;
   margin: 1rem 0;
+  padding: 0.6rem 0.85rem;
+  border-radius: 14px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  transition:
+    border-color 200ms ease,
+    background 200ms ease,
+    box-shadow 200ms ease;
 }
+.station-controls.transmitting {
+  border-color: var(--station-call-active-bg);
+  background: linear-gradient(135deg, rgba(243, 195, 55, 0.06) 0%, rgba(243, 195, 55, 0.02) 100%);
+  box-shadow: 0 0 18px rgba(243, 195, 55, 0.08), inset 0 0 12px rgba(243, 195, 55, 0.03);
+}
+
+/* ── Transmitting banner ── */
+/* ── Talk-armed & Talk-live card-head states ── */
+/* Selected for talk but not actively transmitting → red border around whole card */
+.station-card-head.talk-armed {
+  border: 2px solid var(--talk);
+  border-radius: 0;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+}
+/* Actively transmitting → only the header turns red */
+.station-card-head.talk-live {
+  background: var(--talk);
+  color: #fff;
+  box-shadow:
+    0 0 20px rgba(255, 59, 48, 0.45),
+    inset 0 0 12px rgba(0, 0, 0, 0.15);
+  animation: talk-live-head-glow 1.8s ease-in-out infinite;
+}
+.station-card-head.talk-live small {
+  color: rgba(255, 220, 220, 0.95);
+}
+.station-card-head.talk-live strong {
+  color: #fff;
+}
+@keyframes talk-live-head-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 20px rgba(255, 59, 48, 0.45),
+      inset 0 0 12px rgba(0, 0, 0, 0.15);
+  }
+  50% {
+    box-shadow:
+      0 0 30px rgba(255, 59, 48, 0.6),
+      inset 0 0 16px rgba(0, 0, 0, 0.10);
+  }
+}
+
 .station-ptt {
   min-width: 220px;
   min-height: 54px;
