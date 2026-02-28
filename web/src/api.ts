@@ -326,3 +326,23 @@ export async function updateAdminPin(
     newPin,
   });
 }
+
+export type RoutingMatrixEntry = {
+  roomId: string;
+  senderRoleIds: string[];
+  receiverRoleIds: string[];
+};
+
+export async function updateRoutingMatrix(
+  token: string,
+  adminPin: string,
+  entries: RoutingMatrixEntry[],
+): Promise<void> {
+  await apiMutation(
+    "/api/admin/routing-matrix",
+    token,
+    "PUT",
+    adminPin,
+    entries,
+  );
+}

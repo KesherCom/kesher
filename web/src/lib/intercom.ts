@@ -9,7 +9,7 @@ export function roleAllowed(
   roleIDs: string[] | undefined,
   currentRoleId: string,
 ): boolean {
-  if (!roleIDs || roleIDs.length === 0) return true;
+  if (!roleIDs || roleIDs.length === 0) return false;
   return roleIDs.includes(currentRoleId);
 }
 

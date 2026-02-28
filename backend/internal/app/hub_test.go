@@ -25,7 +25,7 @@ func TestHubRoomRoutingRespectsReceiverRoleRestrictions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{}, []string{"video"}); err != nil {
+	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio", "video", "lighting"}, []string{"video"}); err != nil {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -83,16 +83,18 @@ func TestHubBroadcastRoutingFiltersRoomsBySenderRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{}); err != nil {
+	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"audio", "lighting"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpdateRoom(context.Background(), "stage", "Stage", []string{"video"}, []string{}); err != nil {
+	if err := store.UpdateRoom(context.Background(), "stage", "Stage", []string{"video"}, []string{"audio", "lighting"}); err != nil {
 		t.Fatal(err)
 	}
 	_, _ = store.db.ExecContext(context.Background(), `INSERT OR IGNORE INTO broadcast_groups (id,name) VALUES ('split-bg','Split BG')`)
 	_, _ = store.db.ExecContext(context.Background(), `DELETE FROM broadcast_group_rooms WHERE broadcast_group_id = 'split-bg'`)
 	_, _ = store.db.ExecContext(context.Background(), `INSERT OR IGNORE INTO broadcast_group_rooms (broadcast_group_id, room_id) VALUES ('split-bg','foh')`)
 	_, _ = store.db.ExecContext(context.Background(), `INSERT OR IGNORE INTO broadcast_group_rooms (broadcast_group_id, room_id) VALUES ('split-bg','stage')`)
+	_, _ = store.db.ExecContext(context.Background(), `INSERT OR IGNORE INTO broadcast_group_roles (broadcast_group_id, role_id) VALUES ('split-bg','audio')`)
+	_, _ = store.db.ExecContext(context.Background(), `INSERT OR IGNORE INTO broadcast_group_roles (broadcast_group_id, role_id) VALUES ('split-bg','video')`)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	hub := NewHub(store, logger)
@@ -173,14 +175,21 @@ func TestHubBroadcastRouting(t *testing.T) {
 	defer store.Close()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	hub := NewHub(store, logger)
-	c1 := &client{session: Session{Token: "a"}, user: User{ID: "u1", Username: "a", RoleID: "audio"}, send: make(chan WSOutbound, 2), activeRoom: "foh"}
-	c2 := &client{session: Session{Token: "b"}, user: User{ID: "u2", Username: "b", RoleID: "video"}, send: make(chan WSOutbound, 2), activeRoom: "stage"}
+	c1 := &client{session: Session{Token: "a", RoleID: "audio"}, user: User{ID: "u1", Username: "a", RoleID: "audio"}, send: make(chan WSOutbound, 2), activeRoom: "foh"}
+	c2 := &client{session: Session{Token: "b", RoleID: "video"}, user: User{ID: "u2", Username: "b", RoleID: "video"}, send: make(chan WSOutbound, 2), activeRoom: "stage"}
 	hub.Add(c1)
 	hub.Add(c2)
 	drain(c1.send)
 	drain(c2.send)
-	_, _ = store.db.ExecContext(context.Background(), `INSERT OR IGNORE INTO broadcast_groups (id,name) VALUES ('test-bg','Test BG')`)
-	_, _ = store.db.ExecContext(context.Background(), `INSERT OR IGNORE INTO broadcast_group_rooms (broadcast_group_id, room_id) VALUES ('test-bg','foh')`)
+	if _, err := store.db.ExecContext(context.Background(), `INSERT OR IGNORE INTO broadcast_groups (id,name) VALUES ('test-bg','Test BG')`); err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+	if _, err := store.db.ExecContext(context.Background(), `INSERT OR IGNORE INTO broadcast_group_rooms (broadcast_group_id, room_id) VALUES ('test-bg','foh')`); err != nil {
+		t.Fatalf("insert room: %v", err)
+	}
+	if _, err := store.db.ExecContext(context.Background(), `INSERT OR IGNORE INTO broadcast_group_roles (broadcast_group_id, role_id) VALUES ('test-bg','audio')`); err != nil {
+		t.Fatalf("insert role: %v", err)
+	}
 	hub.RouteEvent("a", "signal", RoutedEvent{Scope: "broadcast", TargetID: "test-bg", Signal: "attention"})
 	select {
 	case got := <-c1.send:

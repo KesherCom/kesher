@@ -297,6 +297,40 @@ func (s *Store) seed(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO broadcast_groups (id, name) VALUES ('all-tech', 'All Tech')`); err != nil {
 		return err
 	}
+	// Seed room role mappings: grant all roles sender+receiver access to all rooms.
+	// With the "empty = nobody" policy, rooms without mappings would be inaccessible.
+	allRoleIDs := make([]string, len(roles))
+	for i, r := range roles {
+		allRoleIDs[i] = r.ID
+	}
+	allRoomIDs := make([]string, len(rooms))
+	for i, r := range rooms {
+		allRoomIDs[i] = r.ID
+	}
+	for _, roomID := range allRoomIDs {
+		var hasSenders int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM room_sender_roles WHERE room_id = ?`, roomID).Scan(&hasSenders); err != nil {
+			return err
+		}
+		if hasSenders == 0 {
+			for _, roleID := range allRoleIDs {
+				if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO room_sender_roles (room_id, role_id) VALUES (?, ?)`, roomID, roleID); err != nil {
+					return err
+				}
+			}
+		}
+		var hasReceivers int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM room_receiver_roles WHERE room_id = ?`, roomID).Scan(&hasReceivers); err != nil {
+			return err
+		}
+		if hasReceivers == 0 {
+			for _, roleID := range allRoleIDs {
+				if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO room_receiver_roles (room_id, role_id) VALUES (?, ?)`, roomID, roleID); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	var allTechRooms int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM broadcast_group_rooms WHERE broadcast_group_id = 'all-tech'`).Scan(&allTechRooms); err != nil {
 		return err
@@ -310,6 +344,18 @@ func (s *Store) seed(ctx context.Context) error {
 	}
 	if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO app_settings (key, value) VALUES ('admin_pin', ?)`, defaultAdminPIN); err != nil {
 		return err
+	}
+	// Seed broadcast group role mappings: grant all roles access to all-tech.
+	var allTechRoles int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM broadcast_group_roles WHERE broadcast_group_id = 'all-tech'`).Scan(&allTechRoles); err != nil {
+		return err
+	}
+	if allTechRoles == 0 {
+		for _, roleID := range allRoleIDs {
+			if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO broadcast_group_roles (broadcast_group_id, role_id) VALUES ('all-tech', ?)`, roleID); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -691,6 +737,58 @@ func (s *Store) UpdateRoom(ctx context.Context, id, name string, senderRoleIDs, 
 		return err
 	}
 	return nil
+}
+
+// RoomPermissionEntry describes the sender/receiver role mapping for one room.
+type RoomPermissionEntry struct {
+	RoomID          string   `json:"roomId"`
+	SenderRoleIDs   []string `json:"senderRoleIds"`
+	ReceiverRoleIDs []string `json:"receiverRoleIds"`
+}
+
+// BulkUpdateRoomPermissions updates sender/receiver role mappings for multiple rooms
+// in a single transaction. It only touches role mappings — room names are left unchanged.
+func (s *Store) BulkUpdateRoomPermissions(ctx context.Context, entries []RoomPermissionEntry) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		roomID := strings.TrimSpace(entry.RoomID)
+		if roomID == "" {
+			_ = tx.Rollback()
+			return ErrInvalidInput
+		}
+		// verify room exists
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM rooms WHERE id = ?`, roomID).Scan(&n); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if n == 0 {
+			_ = tx.Rollback()
+			return ErrNotFound
+		}
+		senderIDs := normalizeIDs(entry.SenderRoleIDs)
+		receiverIDs := normalizeIDs(entry.ReceiverRoleIDs)
+		if err := s.validateRolesExistWithTx(ctx, tx, senderIDs); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err := s.validateRolesExistWithTx(ctx, tx, receiverIDs); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err := s.replaceRoomRoleMappingsWithTx(ctx, tx, "room_sender_roles", roomID, senderIDs); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err := s.replaceRoomRoleMappingsWithTx(ctx, tx, "room_receiver_roles", roomID, receiverIDs); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) DeleteRoom(ctx context.Context, id string) error {

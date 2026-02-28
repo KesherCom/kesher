@@ -19,8 +19,11 @@ func TestFilterBroadcastGroupsForRole(t *testing.T) {
 		{ID: "video-only", Name: "Video", AllowedRoleIDs: []string{"video"}},
 	}
 	filtered := filterBroadcastGroupsForRole("audio", groups)
-	if len(filtered) != 2 {
-		t.Fatalf("expected 2 groups for audio role, got %d", len(filtered))
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 group for audio role, got %d", len(filtered))
+	}
+	if filtered[0].ID != "audio-only" {
+		t.Fatalf("expected audio-only group, got %s", filtered[0].ID)
 	}
 }
 

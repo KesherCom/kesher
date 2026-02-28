@@ -16,9 +16,9 @@ describe("intercom utility helpers", () => {
     expect(matrixAnchorRoomId(["listen-1", "listen-2"], [])).toBe("listen-1");
   });
 
-  it("allows everyone when no role restriction exists", () => {
-    expect(roleAllowed(undefined, "op")).toBe(true);
-    expect(roleAllowed([], "op")).toBe(true);
+  it("denies access when no role restriction exists", () => {
+    expect(roleAllowed(undefined, "op")).toBe(false);
+    expect(roleAllowed([], "op")).toBe(false);
   });
 
   it("enforces role restriction when role IDs are provided", () => {
