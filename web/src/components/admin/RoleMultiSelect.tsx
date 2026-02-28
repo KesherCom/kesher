@@ -34,8 +34,10 @@ export function RoleMultiSelect({
           <span className="role-multiselect-label">{label}</span>
           <span className="role-multiselect-value">
             {selectedRoleIds.length === 0
-              ? "All roles"
-              : selectedRoleIds
+              ? "No roles selected"
+              : selectedRoleIds.length === roles.length
+                ? "All roles"
+                : selectedRoleIds
                   .map(
                     (roleEntryId) =>
                       roles.find((role) => role.id === roleEntryId)?.name ||
@@ -45,13 +47,22 @@ export function RoleMultiSelect({
           </span>
         </summary>
         <div className="role-multiselect-menu">
-          <button
-            type="button"
-            className="secondary role-multiselect-reset"
-            onClick={() => setState([])}
-          >
-            Clear (allow all)
-          </button>
+          <div className="role-multiselect-actions">
+            <button
+              type="button"
+              className="secondary role-multiselect-reset"
+              onClick={() => setState(roles.map((r) => r.id))}
+            >
+              Select all
+            </button>
+            <button
+              type="button"
+              className="secondary role-multiselect-reset"
+              onClick={() => setState([])}
+            >
+              Clear all
+            </button>
+          </div>
           <div className="role-multiselect-options">
             {roles.map((role) => (
               <label

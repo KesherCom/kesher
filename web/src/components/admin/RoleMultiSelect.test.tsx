@@ -23,6 +23,14 @@ function RoleMultiSelectHarness() {
 describe("RoleMultiSelect", () => {
   it("shows default summary when nothing is selected", () => {
     render(<RoleMultiSelectHarness />);
+    expect(screen.getByText("No roles selected")).toBeVisible();
+  });
+
+  it("selects all roles via Select all button", async () => {
+    const user = userEvent.setup();
+    render(<RoleMultiSelectHarness />);
+
+    await user.click(screen.getByRole("button", { name: "Select all" }));
     expect(screen.getByText("All roles")).toBeVisible();
   });
 
@@ -32,9 +40,9 @@ describe("RoleMultiSelect", () => {
 
     await user.click(screen.getByLabelText("Operator"));
     expect(screen.getAllByText("Operator").length).toBeGreaterThan(0);
-    expect(screen.queryByText("All roles")).not.toBeInTheDocument();
+    expect(screen.queryByText("No roles selected")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Clear (allow all)" }));
-    expect(screen.getByText("All roles")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Clear all" }));
+    expect(screen.getByText("No roles selected")).toBeVisible();
   });
 });
