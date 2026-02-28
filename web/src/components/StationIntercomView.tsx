@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Bootstrap, BroadcastGroup, Presence } from "../types";
+import type { KeyboardShortcutSettings } from "../app/settings";
+import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
 
 const DB_MIN = -60;
 const DB_MAX = 6; // +6 dB ≈ gain 2.0
@@ -106,6 +108,10 @@ type StationIntercomViewProps = {
   directGainByUserId: Record<string, number>;
   onRoomGainChange: (roomId: string, gain: number) => void;
   onDirectGainChange: (userId: string, gain: number) => void;
+  // Keyboard shortcuts
+  keyboardShortcuts: KeyboardShortcutSettings;
+  onKeyboardShortcutsChange: (next: KeyboardShortcutSettings) => void;
+  onRecordingShortcutChange: (recording: boolean) => void;
   // Audio device props
   inputDevices: MediaDeviceInfo[];
   selectedInputDeviceId: string;
@@ -176,6 +182,9 @@ export function StationIntercomView({
   directGainByUserId,
   onRoomGainChange,
   onDirectGainChange,
+  keyboardShortcuts,
+  onKeyboardShortcutsChange,
+  onRecordingShortcutChange,
   inputDevices,
   selectedInputDeviceId,
   selectedMicLabel,
@@ -890,6 +899,12 @@ export function StationIntercomView({
                 />
                 <span>Show direct communication as tabs</span>
               </label>
+
+              <KeyboardShortcutsSettings
+                shortcuts={keyboardShortcuts}
+                onShortcutsChange={onKeyboardShortcutsChange}
+                onRecordingChange={onRecordingShortcutChange}
+              />
 
               <div className="audio-section">
                 <div className={`audio-box ${isAudioOpen ? "" : "collapsed"}`}>
