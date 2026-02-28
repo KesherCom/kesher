@@ -355,6 +355,10 @@ export function StationIntercomView({
     null;
   const replyTargetUserId = lastDirectCallerUserId;
 
+  // Is user actively sending audio on their main talk rooms?
+  const isSendingOnTalkRooms =
+    pttPressed || voiceMode === "always_on";
+
   return (
     <div className="root app station-shell">
       {connectionState !== "connected" && (
@@ -431,7 +435,10 @@ export function StationIntercomView({
             const listenerCount = roomListenerCount.get(room.id) || 0;
 
             return (
-              <article key={`station-room-${room.id}`} className="station-card">
+              <article
+                key={`station-room-${room.id}`}
+                className="station-card"
+              >
                 {listenerCount > 0 ? (
                   <span className="station-presence-badge" title={`${listenerCount} listener(s)`}>
                     <span className="station-presence-dot" />
@@ -461,10 +468,8 @@ export function StationIntercomView({
                       ? isPttPressed && canTalk
                         ? "ppt-active"
                         : ""
-                      : talking && canTalk
-                        ? "selected"
-                        : ""
-                  } ${canTalk ? "" : "disabled"}`}
+                      : ""
+                  } ${canTalk ? "" : "disabled"}${talking && canTalk ? " talk-armed" : ""}${talking && canTalk && isSendingOnTalkRooms ? " talk-live" : ""}`}
                   onPointerDown={canTalk && enableDirectPpt ? handleTalkPointerDown : undefined}
                   onPointerUp={canTalk ? handleTalkPointerUp : undefined}
                   onPointerLeave={
@@ -751,7 +756,7 @@ export function StationIntercomView({
         )}
       </section>
 
-      <section className="station-controls">
+      <section className={`station-controls ${isSendingOnTalkRooms ? "transmitting" : ""}`}>
         <button
           className={`station-ptt ${pttPressed ? "active" : ""}`}
           onPointerDown={startPtt}
@@ -771,7 +776,6 @@ export function StationIntercomView({
           />
           <span>Always on</span>
         </label>
-
         <button
           className={`station-reply ${replyTargetUserId ? "" : "disabled"} ${
             replyTargetUserId && directPttPressedUserId === replyTargetUserId
