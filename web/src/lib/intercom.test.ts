@@ -26,9 +26,9 @@ describe("intercom utility helpers", () => {
     expect(roleAllowed(["admin", "operator"], "guest")).toBe(false);
   });
 
-  it("removes selected room only when more than one room exists", () => {
+  it("removes selected room even when it is the last one", () => {
     expect(toggleRoomSelectionState(["a", "b"], "a")).toEqual(["b"]);
-    expect(toggleRoomSelectionState(["only"], "only")).toEqual(["only"]);
+    expect(toggleRoomSelectionState(["only"], "only")).toEqual([]);
   });
 
   it("adds unselected room to existing selection", () => {

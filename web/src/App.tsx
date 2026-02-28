@@ -2012,15 +2012,10 @@ export function App() {
       broadcastGroups: data.broadcastGroups,
     });
     setListenRoomIds((prev) => {
-      const next = prev.filter((roomId) => {
+      return prev.filter((roomId) => {
         const room = data.rooms.find((entry) => entry.id === roomId);
         return !!room && roleAllowed(room.receiverRoleIds, data.self.roleId);
       });
-      if (next.length > 0) return next;
-      const firstAllowed = data.rooms.find((room) =>
-        roleAllowed(room.receiverRoleIds, data.self.roleId),
-      );
-      return firstAllowed ? [firstAllowed.id] : [];
     });
     setTalkRoomIds((prev) => {
       const next = prev.filter((roomId) => {
