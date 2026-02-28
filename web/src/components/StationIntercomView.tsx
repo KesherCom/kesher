@@ -49,6 +49,7 @@ function formatDbFs(dbFs: number): string {
 }
 
 type StationIntercomViewProps = {
+  connectionState: "connecting" | "connected" | "reconnecting" | "offline";
   appData: Bootstrap;
   doLogout: () => void;
   listenRoomIds: string[];
@@ -122,6 +123,7 @@ type StationIntercomViewProps = {
 };
 
 export function StationIntercomView({
+  connectionState,
   appData,
   doLogout,
   listenRoomIds,
@@ -346,9 +348,25 @@ export function StationIntercomView({
 
   return (
     <div className="root app station-shell">
+      {connectionState !== "connected" && (
+        <div className="connection-offline-banner">
+          <span className="connection-offline-icon" />
+          {connectionState === "reconnecting"
+            ? "Reconnecting…"
+            : connectionState === "connecting"
+              ? "Connecting…"
+              : "Offline"}
+        </div>
+      )}
       <div className="station-topbar">
         <div className="station-live">
-          <span className="station-live-dot" />
+          <span
+            className={`station-live-dot ${
+              connectionState === "connected"
+                ? "connected"
+                : "disconnected"
+            }`}
+          />
           Live: {appData.self.username.toUpperCase()}
         </div>
         <div className="station-top-actions">

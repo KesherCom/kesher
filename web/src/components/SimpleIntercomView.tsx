@@ -6,6 +6,7 @@ type DirectReplyTarget = {
 };
 
 type SimpleIntercomViewProps = {
+  connectionState: "connecting" | "connected" | "reconnecting" | "offline";
   pttPressed: boolean;
   onStartPpt: () => void;
   onStopPpt: () => void;
@@ -22,6 +23,7 @@ type SimpleIntercomViewProps = {
 };
 
 export function SimpleIntercomView({
+  connectionState,
   pttPressed,
   onStartPpt,
   onStopPpt,
@@ -46,6 +48,16 @@ export function SimpleIntercomView({
 
   return (
     <div className="root app simple-shell">
+      {connectionState !== "connected" && (
+        <div className="connection-offline-banner">
+          <span className="connection-offline-icon" />
+          {connectionState === "reconnecting"
+            ? "Reconnecting\u2026"
+            : connectionState === "connecting"
+              ? "Connecting\u2026"
+              : "Offline"}
+        </div>
+      )}
       <section className="simple-controls">
         <div className="simple-top-actions">
           <button className="simple-logout" onClick={doLogout}>
