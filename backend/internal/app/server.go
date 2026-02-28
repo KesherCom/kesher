@@ -935,6 +935,19 @@ func (s *Server) handleAdminRoutingMatrix(w http.ResponseWriter, r *http.Request
 			s.internalErr(w, err)
 			return
 		}
+		// Broadcast updated config to all connected clients so they
+		// see permission changes immediately without refreshing.
+		if roles, err := s.store.ListRoles(r.Context()); err == nil {
+			if rooms, err := s.store.ListRooms(r.Context()); err == nil {
+				if groups, err := s.store.ListBroadcastGroups(r.Context()); err == nil {
+					s.hub.BroadcastConfigUpdate(PublicBootstrapResponse{
+						Roles:           roles,
+						Rooms:           rooms,
+						BroadcastGroups: groups,
+					})
+				}
+			}
+		}
 		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

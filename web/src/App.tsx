@@ -4,6 +4,7 @@ import {
   getPublicBootstrap,
   login,
   logout,
+  normalizePublicBootstrap,
   updateAdminPin,
 } from "./api";
 import { LoginView } from "./components/LoginView";
@@ -71,7 +72,8 @@ type WsMessage =
   | {
       type: "webrtc_ice_candidate";
       data: { candidate: string; sdpMid?: string; sdpMLineIndex?: number };
-    };
+    }
+  | { type: "config_updated"; data: unknown };
 
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -1316,6 +1318,29 @@ export function App() {
         const msg = JSON.parse(ev.data) as WsMessage;
         if (msg.type === "presence") {
           setPresence(normalizePresenceList(msg.data));
+          return;
+        }
+        if (msg.type === "config_updated") {
+          const updated = normalizePublicBootstrap(msg.data);
+          setAppData((prev) => {
+            if (!prev) return prev;
+            return { ...prev, roles: updated.roles, rooms: updated.rooms, broadcastGroups: updated.broadcastGroups };
+          });
+          setPublicData(updated);
+          // Remove listen/talk selections that the user's role no longer has access to
+          const selfRoleId = appData?.self?.roleId ?? "";
+          setListenRoomIds((prev) =>
+            prev.filter((id) => {
+              const room = updated.rooms.find((r) => r.id === id);
+              return !!room && roleAllowed(room.receiverRoleIds, selfRoleId);
+            }),
+          );
+          setTalkRoomIds((prev) =>
+            prev.filter((id) => {
+              const room = updated.rooms.find((r) => r.id === id);
+              return !!room && roleAllowed(room.senderRoleIds, selfRoleId);
+            }),
+          );
           return;
         }
         if (msg.type === "companion_command") {
