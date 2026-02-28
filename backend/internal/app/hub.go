@@ -515,6 +515,18 @@ func (h *Hub) broadcastPresence() {
 	}
 }
 
+func (h *Hub) BroadcastConfigUpdate(data PublicBootstrapResponse) {
+	msg := WSOutbound{Type: "config_updated", Data: data}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, c := range h.clients {
+		select {
+		case c.send <- msg:
+		default:
+		}
+	}
+}
+
 func toRoomSet(roomIDs []string) map[string]struct{} {
 	set := make(map[string]struct{}, len(roomIDs))
 	for _, roomID := range roomIDs {

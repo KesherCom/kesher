@@ -7,7 +7,7 @@ function toStringArray(value: unknown): string[] {
   return value.filter((entry): entry is string => typeof entry === "string");
 }
 
-function normalizePublicBootstrap(data: unknown): PublicBootstrap {
+export function normalizePublicBootstrap(data: unknown): PublicBootstrap {
   const raw = (data ?? {}) as Record<string, unknown>;
   const roles = Array.isArray(raw.roles) ? raw.roles : [];
   const rooms = Array.isArray(raw.rooms) ? raw.rooms : [];
