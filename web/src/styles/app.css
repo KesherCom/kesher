@@ -743,6 +743,12 @@ button {
   border-color: var(--listen);
   box-shadow: 0 0 6px rgba(52, 199, 89, 0.35);
 }
+.routing-matrix-forced.active {
+  background: var(--forced, #af52de);
+  color: #fff;
+  border-color: var(--forced, #af52de);
+  box-shadow: 0 0 6px rgba(175, 82, 222, 0.35);
+}
 
 /* Legend */
 .routing-matrix-legend {
@@ -769,6 +775,9 @@ button {
 }
 .routing-matrix-swatch-listen {
   background: var(--listen);
+}
+.routing-matrix-swatch-forced {
+  background: var(--forced, #af52de);
 }
 
 .admin-metric {
@@ -1837,12 +1846,23 @@ button.secondary {
   background: var(--station-listen-on-bg);
   color: #fff;
 }
+.station-card-actions .listen.forced {
+  background: var(--station-listen-on-bg);
+  color: #fff;
+  opacity: 0.85;
+  cursor: not-allowed;
+}
 .station-card-actions .listen.disabled,
 .station-card-actions .listen:disabled {
   opacity: 0.45;
   background: var(--btn-disabled-bg);
   color: var(--btn-disabled-text);
   cursor: not-allowed;
+}
+.station-card-actions .listen.forced:disabled {
+  opacity: 0.85;
+  background: var(--station-listen-on-bg);
+  color: #fff;
 }
 .station-card-actions .call {
   background: var(--station-call-bg);

@@ -109,6 +109,24 @@ func (s *Store) RoomRolePolicies(ctx context.Context, roomID string) (map[string
 	return toStringSet(senderRoleIDs), toStringSet(receiverRoleIDs), nil
 }
 
+// ForcedListenRoomIDs returns the list of room IDs that the given role must listen to.
+func (s *Store) ForcedListenRoomIDs(ctx context.Context, roleID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT room_id FROM room_forced_listen_roles WHERE role_id = ?`, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func toStringSet(values []string) map[string]struct{} {
 	out := make(map[string]struct{}, len(values))
 	for _, value := range values {
@@ -206,6 +224,11 @@ func (s *Store) migrate(ctx context.Context) error {
 			PRIMARY KEY (room_id, role_id)
 		);`,
 		`CREATE TABLE IF NOT EXISTS room_receiver_roles (
+			room_id TEXT NOT NULL,
+			role_id TEXT NOT NULL,
+			PRIMARY KEY (room_id, role_id)
+		);`,
+		`CREATE TABLE IF NOT EXISTS room_forced_listen_roles (
 			room_id TEXT NOT NULL,
 			role_id TEXT NOT NULL,
 			PRIMARY KEY (room_id, role_id)
@@ -450,8 +473,13 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 		if err != nil {
 			return nil, err
 		}
+		forcedListenRoleIDs, err := s.roomRoleIDs(ctx, "room_forced_listen_roles", r.ID)
+		if err != nil {
+			return nil, err
+		}
 		r.SenderRoleIDs = senderRoleIDs
 		r.ReceiverRoleIDs = receiverRoleIDs
+		r.ForcedListenRoleIDs = forcedListenRoleIDs
 		rooms = append(rooms, r)
 	}
 	return rooms, nil
@@ -623,6 +651,10 @@ func (s *Store) DeleteRole(ctx context.Context, id string) error {
 		_ = tx.Rollback()
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM room_forced_listen_roles WHERE role_id = ?`, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM broadcast_group_roles WHERE role_id = ?`, id); err != nil {
 		_ = tx.Rollback()
 		return err
@@ -647,11 +679,12 @@ func (s *Store) DeleteRole(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *Store) CreateRoom(ctx context.Context, id, name string, senderRoleIDs, receiverRoleIDs []string) error {
+func (s *Store) CreateRoom(ctx context.Context, id, name string, senderRoleIDs, receiverRoleIDs, forcedListenRoleIDs []string) error {
 	id = strings.TrimSpace(id)
 	name = strings.TrimSpace(name)
 	senderRoleIDs = normalizeIDs(senderRoleIDs)
 	receiverRoleIDs = normalizeIDs(receiverRoleIDs)
+	forcedListenRoleIDs = normalizeIDs(forcedListenRoleIDs)
 	if id == "" || name == "" {
 		return ErrInvalidInput
 	}
@@ -664,6 +697,10 @@ func (s *Store) CreateRoom(ctx context.Context, id, name string, senderRoleIDs, 
 		return err
 	}
 	if err := s.validateRolesExistWithTx(ctx, tx, receiverRoleIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := s.validateRolesExistWithTx(ctx, tx, forcedListenRoleIDs); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -682,17 +719,22 @@ func (s *Store) CreateRoom(ctx context.Context, id, name string, senderRoleIDs, 
 		_ = tx.Rollback()
 		return err
 	}
+	if err := s.replaceRoomRoleMappingsWithTx(ctx, tx, "room_forced_listen_roles", id, forcedListenRoleIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *Store) UpdateRoom(ctx context.Context, id, name string, senderRoleIDs, receiverRoleIDs []string) error {
+func (s *Store) UpdateRoom(ctx context.Context, id, name string, senderRoleIDs, receiverRoleIDs, forcedListenRoleIDs []string) error {
 	id = strings.TrimSpace(id)
 	name = strings.TrimSpace(name)
 	senderRoleIDs = normalizeIDs(senderRoleIDs)
 	receiverRoleIDs = normalizeIDs(receiverRoleIDs)
+	forcedListenRoleIDs = normalizeIDs(forcedListenRoleIDs)
 	if id == "" || name == "" {
 		return ErrInvalidInput
 	}
@@ -705,6 +747,10 @@ func (s *Store) UpdateRoom(ctx context.Context, id, name string, senderRoleIDs, 
 		return err
 	}
 	if err := s.validateRolesExistWithTx(ctx, tx, receiverRoleIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := s.validateRolesExistWithTx(ctx, tx, forcedListenRoleIDs); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -733,17 +779,22 @@ func (s *Store) UpdateRoom(ctx context.Context, id, name string, senderRoleIDs, 
 		_ = tx.Rollback()
 		return err
 	}
+	if err := s.replaceRoomRoleMappingsWithTx(ctx, tx, "room_forced_listen_roles", id, forcedListenRoleIDs); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 	return nil
 }
 
-// RoomPermissionEntry describes the sender/receiver role mapping for one room.
+// RoomPermissionEntry describes the sender/receiver/forced-listen role mapping for one room.
 type RoomPermissionEntry struct {
-	RoomID          string   `json:"roomId"`
-	SenderRoleIDs   []string `json:"senderRoleIds"`
-	ReceiverRoleIDs []string `json:"receiverRoleIds"`
+	RoomID              string   `json:"roomId"`
+	SenderRoleIDs       []string `json:"senderRoleIds"`
+	ReceiverRoleIDs     []string `json:"receiverRoleIds"`
+	ForcedListenRoleIDs []string `json:"forcedListenRoleIds"`
 }
 
 // BulkUpdateRoomPermissions updates sender/receiver role mappings for multiple rooms
@@ -787,6 +838,15 @@ func (s *Store) BulkUpdateRoomPermissions(ctx context.Context, entries []RoomPer
 			_ = tx.Rollback()
 			return err
 		}
+		forcedListenIDs := normalizeIDs(entry.ForcedListenRoleIDs)
+		if err := s.validateRolesExistWithTx(ctx, tx, forcedListenIDs); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err := s.replaceRoomRoleMappingsWithTx(ctx, tx, "room_forced_listen_roles", roomID, forcedListenIDs); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -809,6 +869,10 @@ func (s *Store) DeleteRoom(ctx context.Context, id string) error {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM room_receiver_roles WHERE room_id = ?`, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM room_forced_listen_roles WHERE room_id = ?`, id); err != nil {
 		_ = tx.Rollback()
 		return err
 	}

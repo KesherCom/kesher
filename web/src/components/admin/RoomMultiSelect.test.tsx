@@ -13,8 +13,8 @@ function RoomMultiSelectHarness() {
       setState={setSelectedRoomIds}
       keyPrefix="room-test"
       rooms={[
-        { id: "r1", name: "Room 1", senderRoleIds: [], receiverRoleIds: [] },
-        { id: "r2", name: "Room 2", senderRoleIds: [], receiverRoleIds: [] },
+        { id: "r1", name: "Room 1", senderRoleIds: [], receiverRoleIds: [], forcedListenRoleIds: [] },
+        { id: "r2", name: "Room 2", senderRoleIds: [], receiverRoleIds: [], forcedListenRoleIds: [] },
       ]}
     />
   );
