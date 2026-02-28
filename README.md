@@ -22,6 +22,41 @@ make run-backend   # builds frontend, then starts backend with embedded UI on :8
 
 Open `http://localhost:8080` (or `:5173` if using the Vite dev server).
 
+## Downloadable builds
+
+Prebuilt binaries are published in GitHub Releases:
+
+- https://github.com/KesherCom/kesher/releases
+
+Release assets are named like:
+
+- `kesher-darwin-arm64.tar.gz`
+- `kesher-darwin-amd64.tar.gz`
+- `kesher-windows-amd64.zip`
+- `kesher-windows-arm64.zip`
+
+Each archive contains a single backend binary (`kesher-<os>-<arch>` or `kesher-<os>-<arch>.exe`) with the web UI already embedded.
+
+### Running unsigned binaries (macOS / Windows)
+
+Some environments block unsigned binaries by default.
+
+- **macOS (Gatekeeper):**
+  1. Try to run the binary once from Terminal.
+  2. If blocked, open **System Settings → Privacy & Security** and allow the app anyway.
+  3. Run again.
+  4. Optional CLI alternative: `xattr -d com.apple.quarantine ./kesher-darwin-arm64` (adjust filename as needed).
+- **Windows (SmartScreen/Defender):**
+  1. Run the `.exe`.
+  2. If SmartScreen warns, click **More info** → **Run anyway**.
+  3. If Defender quarantines it, restore/allow the file in Windows Security, then run again.
+
+If you need a desktop proxy binary package, you can build cross-platform archives locally:
+
+```sh
+make package-desktop-proxy DESKTOP_PROXY_VERSION=v0.1.0
+```
+
 ## HTTPS options
 
 | Method                         | Command                                                                          | Notes                                                                     |
