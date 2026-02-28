@@ -18,7 +18,6 @@ export function toggleRoomSelectionState(
   roomId: string,
 ): string[] {
   if (prev.includes(roomId)) {
-    if (prev.length === 1) return prev;
     return prev.filter((id) => id !== roomId);
   }
   return [...prev, roomId];
