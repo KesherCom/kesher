@@ -11,6 +11,10 @@ export type SessionSettings = {
   talkRoomIds: string[];
 };
 
+export function hasStoredSessionSettings(): boolean {
+  return localStorage.getItem(sessionSettingsStorageKey) !== null;
+}
+
 export type GlobalSettings = {
   selectedInputDeviceId: string;
   selectedOutputDeviceId: string;

@@ -389,8 +389,6 @@ export function StationIntercomView({
             const handleTalkPointerDown = () => {
               if (enableDirectPpt) {
                 onChannelPptStart(room.id);
-              } else {
-                toggleTalkRoom(room.id);
               }
             };
 
@@ -437,7 +435,7 @@ export function StationIntercomView({
                         ? "selected"
                         : ""
                   } ${canTalk ? "" : "disabled"}`}
-                  onPointerDown={canTalk ? handleTalkPointerDown : undefined}
+                  onPointerDown={canTalk && enableDirectPpt ? handleTalkPointerDown : undefined}
                   onPointerUp={canTalk ? handleTalkPointerUp : undefined}
                   onPointerLeave={
                     canTalk && enableDirectPpt && isPttPressed
