@@ -2486,6 +2486,7 @@ export function App() {
     return (
       <>
         <SimpleIntercomView
+          connectionState={connectionState}
           pttPressed={pttPressed}
           onStartPpt={startPtt}
           onStopPpt={stopPtt}
@@ -2516,6 +2517,7 @@ export function App() {
   return (
     <>
       <StationIntercomView
+        connectionState={connectionState}
         appData={appData}
         doLogout={() => {
           void doLogout();
