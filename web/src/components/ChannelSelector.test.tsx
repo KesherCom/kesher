@@ -85,4 +85,31 @@ describe("ChannelSelector", () => {
     expect(onChannelPttStop).toHaveBeenCalledWith("cam-2");
     expect(onSelectChannel).not.toHaveBeenCalled();
   });
+
+  it("shows presence count when presenceCountByChannelId is provided", () => {
+    const presenceMap = new Map([
+      ["cam-1", 3],
+      ["cam-2", 0],
+    ]);
+
+    render(
+      <ChannelSelector
+        channels={channels}
+        selectedChannelId="cam-1"
+        onSelectChannel={vi.fn()}
+        enableDirectPpt={false}
+        onChannelPttStart={vi.fn()}
+        onChannelPttStop={vi.fn()}
+        pttPressedChannelId={null}
+        presenceCountByChannelId={presenceMap}
+      />,
+    );
+
+    // cam-1 should show "3"
+    expect(screen.getByTitle("3 listener(s)")).toBeVisible();
+    expect(screen.getByTitle("3 listener(s)")).toHaveTextContent("3");
+
+    // cam-2 has 0 users, so no badge should appear
+    expect(screen.queryByTitle("0 listener(s)")).toBeNull();
+  });
 });

@@ -1532,6 +1532,58 @@ button.secondary {
   font-size: 0.64rem;
   color: var(--text-tertiary);
 }
+
+/* Presence indicator badge – top-right corner of station-card */
+.station-presence-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+.station-presence-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4caf50;
+  box-shadow: 0 0 4px rgba(76, 175, 80, 0.55);
+  flex-shrink: 0;
+}
+
+/* Presence badge for ChannelSelector */
+.channel-button {
+  position: relative;
+}
+.channel-presence-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+.channel-presence-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4caf50;
+  box-shadow: 0 0 4px rgba(76, 175, 80, 0.55);
+  flex-shrink: 0;
+}
+
 .station-card-head.selected {
   background: var(--station-card-head-active-bg);
   color: #fff;

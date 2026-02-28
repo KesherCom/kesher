@@ -320,6 +320,17 @@ export function StationIntercomView({
     }
   }, [enableDirectTabs, directGroups, activeDirectTab]);
 
+  /** Map roomId → number of users listening to that room. */
+  const roomListenerCount = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of presence) {
+      for (const r of p.listenRooms) {
+        counts.set(r, (counts.get(r) || 0) + 1);
+      }
+    }
+    return counts;
+  }, [presence]);
+
   const visibleRooms = useMemo(
     () =>
       showPinnedOnly
@@ -389,8 +400,16 @@ export function StationIntercomView({
               }
             };
 
+            const listenerCount = roomListenerCount.get(room.id) || 0;
+
             return (
               <article key={`station-room-${room.id}`} className="station-card">
+                {listenerCount > 0 ? (
+                  <span className="station-presence-badge" title={`${listenerCount} listener(s)`}>
+                    <span className="station-presence-dot" />
+                    {listenerCount}
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   className={`station-pin-top ${pinnedRoomIds.includes(room.id) ? "active" : ""}`}
