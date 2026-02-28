@@ -469,7 +469,7 @@ export function StationIntercomView({
                         ? "ppt-active"
                         : ""
                       : ""
-                  } ${canTalk ? "" : "disabled"}${talking && canTalk ? " talk-armed" : ""}${talking && canTalk && isSendingOnTalkRooms ? " talk-live" : ""}`}
+                  } ${canTalk ? "" : "disabled"}${!enableDirectPpt && talking && canTalk ? " talk-armed" : ""}${!enableDirectPpt && talking && canTalk && isSendingOnTalkRooms ? " talk-live" : ""}`}
                   onPointerDown={canTalk && enableDirectPpt ? handleTalkPointerDown : undefined}
                   onPointerUp={canTalk ? handleTalkPointerUp : undefined}
                   onPointerLeave={
