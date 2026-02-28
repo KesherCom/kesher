@@ -1990,11 +1990,6 @@ button.secondary {
     background 200ms ease,
     box-shadow 200ms ease;
 }
-.station-controls.transmitting {
-  border-color: var(--station-call-active-bg);
-  background: linear-gradient(135deg, rgba(243, 195, 55, 0.06) 0%, rgba(243, 195, 55, 0.02) 100%);
-  box-shadow: 0 0 18px rgba(243, 195, 55, 0.08), inset 0 0 12px rgba(243, 195, 55, 0.03);
-}
 
 /* ── Transmitting banner ── */
 /* ── Talk-armed & Talk-live card-head states ── */

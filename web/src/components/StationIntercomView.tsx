@@ -356,8 +356,11 @@ export function StationIntercomView({
   const replyTargetUserId = lastDirectCallerUserId;
 
   // Is user actively sending audio on their main talk rooms?
+  // Not when direct PTT or broadcast PTT is active (audio goes there instead).
   const isSendingOnTalkRooms =
-    pttPressed || voiceMode === "always_on";
+    (pttPressed || voiceMode === "always_on") &&
+    !directPttPressedUserId &&
+    !broadcastPttPressed;
 
   return (
     <div className="root app station-shell">
@@ -471,7 +474,7 @@ export function StationIntercomView({
                       : ""
                   } ${canTalk ? "" : "disabled"}${!enableDirectPpt && talking && canTalk ? " talk-armed" : ""}${!enableDirectPpt && talking && canTalk && isSendingOnTalkRooms ? " talk-live" : ""}`}
                   onPointerDown={canTalk && enableDirectPpt ? handleTalkPointerDown : undefined}
-                  onPointerUp={canTalk ? handleTalkPointerUp : undefined}
+                  onPointerUp={canTalk && enableDirectPpt ? handleTalkPointerUp : undefined}
                   onPointerLeave={
                     canTalk && enableDirectPpt && isPttPressed
                       ? handleTalkPointerUp
@@ -756,7 +759,7 @@ export function StationIntercomView({
         )}
       </section>
 
-      <section className={`station-controls ${isSendingOnTalkRooms ? "transmitting" : ""}`}>
+      <section className="station-controls">
         <button
           className={`station-ptt ${pttPressed ? "active" : ""}`}
           onPointerDown={startPtt}
