@@ -27,6 +27,7 @@ import {
   sessionSettingsStorageKey,
   globalSettingsStorageKey,
   favoritesStorageKey,
+  hasStoredSessionSettings,
 } from "./app/settings";
 import {
   sameStringArray,
@@ -130,9 +131,7 @@ export function App() {
   const initialSessionSettings = loadSessionSettings();
   const initialGlobalSettings = loadGlobalSettings();
   const initialFavorites = loadFavoriteSettings();
-  const hadStoredRoomMatrix =
-    initialSessionSettings.listenRoomIds.length > 0 ||
-    initialSessionSettings.talkRoomIds.length > 0;
+  const hadStoredRoomMatrix = hasStoredSessionSettings();
   const [publicData, setPublicData] = useState<PublicBootstrap | null>(null);
   const [appData, setAppData] = useState<Bootstrap | null>(null);
   const [pathname, setPathname] = useState(() => window.location.pathname);
@@ -422,9 +421,8 @@ export function App() {
           const room = data.rooms.find((entry) => entry.id === roomId);
           return !!room && roleAllowed(room.senderRoleIds, data.self.roleId);
         });
-        pendingInitialRoomRestoreRef.current =
-          sanitizedListen.length > 0 || sanitizedTalk.length > 0;
-        if (sanitizedListen.length > 0 || sanitizedTalk.length > 0) {
+        pendingInitialRoomRestoreRef.current = hadStoredRoomMatrix;
+        if (hadStoredRoomMatrix) {
           setListenRoomIds(sanitizedListen);
           setTalkRoomIds(sanitizedTalk);
         } else {
@@ -854,7 +852,7 @@ export function App() {
   function toggleTalkRoom(roomId: string) {
     if (!appData || !canRoleSendToRoom(roomId, appData.self.roleId)) return;
     setTalkRoomIds((prev) => {
-      if (prev[0] === roomId && prev.length === 1) return prev;
+      if (prev.includes(roomId)) return prev.filter((id) => id !== roomId);
       return [roomId];
     });
   }
@@ -1136,9 +1134,7 @@ export function App() {
       setConnectionState(
         reconnectAttemptsRef.current > 0 ? "reconnecting" : "connecting",
       );
-      pendingInitialRoomRestoreRef.current =
-        listenRoomIdsRef.current.length > 0 ||
-        talkRoomIdsRef.current.length > 0;
+      pendingInitialRoomRestoreRef.current = true;
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(
         `${proto}//${window.location.host}/ws?token=${encodeURIComponent(token)}`,
@@ -2018,15 +2014,10 @@ export function App() {
       });
     });
     setTalkRoomIds((prev) => {
-      const next = prev.filter((roomId) => {
+      return prev.filter((roomId) => {
         const room = data.rooms.find((entry) => entry.id === roomId);
         return !!room && roleAllowed(room.senderRoleIds, data.self.roleId);
       });
-      if (next.length > 0) return next;
-      const firstAllowed = data.rooms.find((room) =>
-        roleAllowed(room.senderRoleIds, data.self.roleId),
-      );
-      return firstAllowed ? [firstAllowed.id] : [];
     });
   }
 
