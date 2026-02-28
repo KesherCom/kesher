@@ -428,10 +428,10 @@ export function StationIntercomView({
                 <button
                   className={`station-card-head ${
                     enableDirectPpt
-                      ? isPttPressed
+                      ? isPttPressed && canTalk
                         ? "ppt-active"
                         : ""
-                      : talking
+                      : talking && canTalk
                         ? "selected"
                         : ""
                   } ${canTalk ? "" : "disabled"}`}
@@ -494,7 +494,7 @@ export function StationIntercomView({
                 </div>
                 <div className="station-card-actions">
                   <button
-                    className={`listen ${listening ? "on" : ""} ${canListen ? "" : "disabled"}`}
+                    className={`listen ${listening && canListen ? "on" : ""} ${canListen ? "" : "disabled"}`}
                     onClick={() => toggleListenRoom(room.id)}
                     disabled={!canListen}
                     title={

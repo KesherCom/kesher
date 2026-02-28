@@ -96,3 +96,100 @@ func TestBroadcastGroupRoomSetErrorsForEmptyGroup(t *testing.T) {
 		t.Fatal("expected error for empty broadcast group room set")
 	}
 }
+
+func TestBulkUpdateRoomPermissions(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// Seed data provides roles: audio, video, lighting, ... and rooms: foh, stage, ...
+	// Update permissions in bulk for foh and stage
+	entries := []RoomPermissionEntry{
+		{RoomID: "foh", SenderRoleIDs: []string{"audio", "video"}, ReceiverRoleIDs: []string{"audio", "lighting"}},
+		{RoomID: "stage", SenderRoleIDs: []string{"lighting"}, ReceiverRoleIDs: []string{"video", "lighting"}},
+	}
+	if err := store.BulkUpdateRoomPermissions(ctx, entries); err != nil {
+		t.Fatalf("BulkUpdateRoomPermissions failed: %v", err)
+	}
+
+	// Verify foh permissions via RoomRolePolicies
+	fohSenders, fohReceivers, err := store.RoomRolePolicies(ctx, "foh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := fohSenders["audio"]; !ok {
+		t.Fatal("foh should have audio as sender")
+	}
+	if _, ok := fohSenders["video"]; !ok {
+		t.Fatal("foh should have video as sender")
+	}
+	if len(fohSenders) != 2 {
+		t.Fatalf("foh senders: expected 2 got %d", len(fohSenders))
+	}
+	if _, ok := fohReceivers["audio"]; !ok {
+		t.Fatal("foh should have audio as receiver")
+	}
+	if _, ok := fohReceivers["lighting"]; !ok {
+		t.Fatal("foh should have lighting as receiver")
+	}
+	if len(fohReceivers) != 2 {
+		t.Fatalf("foh receivers: expected 2 got %d", len(fohReceivers))
+	}
+
+	// Verify stage permissions
+	stageSenders, stageReceivers, err := store.RoomRolePolicies(ctx, "stage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := stageSenders["lighting"]; !ok {
+		t.Fatal("stage should have lighting as sender")
+	}
+	if len(stageSenders) != 1 {
+		t.Fatalf("stage senders: expected 1 got %d", len(stageSenders))
+	}
+	if _, ok := stageReceivers["video"]; !ok {
+		t.Fatal("stage should have video as receiver")
+	}
+	if _, ok := stageReceivers["lighting"]; !ok {
+		t.Fatal("stage should have lighting as receiver")
+	}
+	if len(stageReceivers) != 2 {
+		t.Fatalf("stage receivers: expected 2 got %d", len(stageReceivers))
+	}
+}
+
+func TestBulkUpdateRoomPermissionsRejectsUnknownRoom(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	entries := []RoomPermissionEntry{
+		{RoomID: "nonexistent", SenderRoleIDs: []string{"audio"}, ReceiverRoleIDs: []string{}},
+	}
+	err = store.BulkUpdateRoomPermissions(context.Background(), entries)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestBulkUpdateRoomPermissionsRejectsUnknownRole(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	entries := []RoomPermissionEntry{
+		{RoomID: "foh", SenderRoleIDs: []string{"nonexistent-role"}, ReceiverRoleIDs: []string{}},
+	}
+	err = store.BulkUpdateRoomPermissions(context.Background(), entries)
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+}

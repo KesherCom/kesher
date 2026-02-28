@@ -299,7 +299,7 @@ func (s *Server) filterAllowedRoomsForRole(ctx context.Context, roleID string, r
 
 func isRoleAllowed(allowedRoles map[string]struct{}, roleID string) bool {
 	if len(allowedRoles) == 0 {
-		return true
+		return false
 	}
 	_, ok := allowedRoles[roleID]
 	return ok
@@ -352,6 +352,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/broadcast-groups", s.withAuth(s.handleAdminBroadcastGroups))
 	mux.HandleFunc("/api/admin/broadcast-groups/", s.withAuth(s.handleAdminBroadcastGroupByID))
 	mux.HandleFunc("/api/admin/pin", s.withAuth(s.handleAdminPin))
+	mux.HandleFunc("/api/admin/routing-matrix", s.withAuth(s.handleAdminRoutingMatrix))
 	mux.HandleFunc("/api/companion/discovery", s.handleCompanionDiscovery)
 	mux.HandleFunc("/api/companion/ws", s.handleCompanionWS)
 	mux.HandleFunc("/api/telegram/webhook", s.handleTelegramWebhook)
@@ -904,6 +905,30 @@ func (s *Server) handleAdminTelegramByID(w http.ResponseWriter, r *http.Request,
 		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	case http.MethodDelete:
 		if err := s.store.DeleteTelegramMapping(r.Context(), id); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleAdminRoutingMatrix(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var entries []RoomPermissionEntry
+		if err := json.NewDecoder(r.Body).Decode(&entries); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.BulkUpdateRoomPermissions(r.Context(), entries); err != nil {
 			if s.writeStoreErr(w, err) {
 				return
 			}
