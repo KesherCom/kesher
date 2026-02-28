@@ -2422,6 +2422,107 @@ button.secondary {
   margin-top: 0.25rem;
 }
 
+/* ── Keyboard shortcuts settings ────────────────────────────────── */
+.keyboard-shortcuts-settings {
+  grid-column: 1 / -1;
+  margin-top: 1rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.keyboard-shortcuts-settings h4 {
+  margin: 0 0 0.5rem 0;
+  color: #fff;
+  font-size: 1.02rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.shortcuts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.shortcuts-table th {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.shortcuts-table td {
+  padding: 0.4rem 0.5rem;
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.shortcut-type-hint {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.shortcut-key {
+  display: inline-block;
+  padding: 0.15em 0.5em;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  color: #fff;
+  min-width: 2.5em;
+  text-align: center;
+}
+
+.shortcut-recording {
+  color: var(--accent);
+  font-style: italic;
+  animation: shortcut-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes shortcut-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.shortcut-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.shortcut-btn {
+  padding: 0.2em 0.6em;
+  font-size: 0.82rem;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.shortcut-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.shortcut-btn-clear {
+  color: var(--muted);
+}
+
+.shortcuts-hint {
+  display: block;
+  margin-top: 0.4rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 /* Make the checkboxes look nicer: compact and aligned */
 .station-setting input[type="checkbox"] {
   width: 18px;

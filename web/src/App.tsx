@@ -19,8 +19,10 @@ import {
   defaultAdminPin,
   type FavoriteSettings,
   type GlobalSettings,
+  type KeyboardShortcutSettings,
   loadFavoriteSettings,
   loadGlobalSettings,
+  loadKeyboardShortcuts,
   loadSessionSettings,
   type SessionSettings,
   tokenStorageKey,
@@ -28,8 +30,13 @@ import {
   sessionSettingsStorageKey,
   globalSettingsStorageKey,
   favoritesStorageKey,
+  keyboardShortcutsStorageKey,
   hasStoredSessionSettings,
 } from "./app/settings";
+import {
+  useKeyboardShortcuts,
+  type ShortcutCallbacks,
+} from "./app/useKeyboardShortcuts";
 import {
   sameStringArray,
   sameStringSet,
@@ -133,6 +140,7 @@ export function App() {
   const initialSessionSettings = loadSessionSettings();
   const initialGlobalSettings = loadGlobalSettings();
   const initialFavorites = loadFavoriteSettings();
+  const initialKeyboardShortcuts = loadKeyboardShortcuts();
   const hadStoredRoomMatrix = hasStoredSessionSettings();
   const [publicData, setPublicData] = useState<PublicBootstrap | null>(null);
   const [appData, setAppData] = useState<Bootstrap | null>(null);
@@ -202,6 +210,9 @@ export function App() {
   const [showPinnedOnly, setShowPinnedOnly] = useState<boolean>(
     initialFavorites.showPinnedOnly,
   );
+  const [keyboardShortcuts, setKeyboardShortcuts] =
+    useState<KeyboardShortcutSettings>(initialKeyboardShortcuts);
+  const [isRecordingShortcut, setIsRecordingShortcut] = useState(false);
   const [selectedChannelId, setSelectedChannelId] = useState<string>("");
   const [inputLevelDbFs, setInputLevelDbFs] = useState(meterDbFsFloor);
   const [inputSamplePeakClipping, setInputSamplePeakClipping] = useState(false);
@@ -405,6 +416,13 @@ export function App() {
       } satisfies FavoriteSettings),
     );
   }, [pinnedRoomIds, pinnedUserIds, showPinnedOnly]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      keyboardShortcutsStorageKey,
+      JSON.stringify(keyboardShortcuts),
+    );
+  }, [keyboardShortcuts]);
 
   useEffect(() => {
     if (!token) return;
@@ -2239,6 +2257,26 @@ export function App() {
     sendDirectVoiceState(userId, "ptt_stop");
   }
 
+  // ── Keyboard shortcuts ──────────────────────────────────────────────
+  const shortcutCallbacks = useMemo<ShortcutCallbacks>(
+    () => ({
+      ptt: { onStart: startPtt, onStop: stopPtt },
+      toggleAlwaysOn: {
+        onToggle: () => setAlwaysOn(voiceModeRef.current !== "always_on"),
+      },
+    }),
+    // startPtt / stopPtt / setAlwaysOn are stable function declarations
+    // inside the component body – they close over refs so this is safe.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  useKeyboardShortcuts(
+    keyboardShortcuts,
+    shortcutCallbacks,
+    !isRecordingShortcut,
+  );
+
   function handleChannelPttStart(channelId: string) {
     if (!appData || !channelId) return;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -2587,6 +2625,9 @@ export function App() {
         directGainByUserId={directGainByUserId}
         onRoomGainChange={onRoomGainChange}
         onDirectGainChange={onDirectGainChange}
+        keyboardShortcuts={keyboardShortcuts}
+        onKeyboardShortcutsChange={setKeyboardShortcuts}
+        onRecordingShortcutChange={setIsRecordingShortcut}
       />
       {attentionFlashOverlay}
     </>
