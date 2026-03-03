@@ -54,6 +54,45 @@ export type TelegramStatus = {
   mode: "polling" | "webhook" | "";
   mappings: TelegramMapping[];
 };
+export type HubRealtimeStats = {
+  connectedClients: number;
+  normalQueueDepthTotal: number;
+  normalQueueDepthMax: number;
+  priorityQueueDepthTotal: number;
+  priorityQueueDepthMax: number;
+  droppedCriticalMessages: number;
+  droppedNormalMessages: number;
+  droppedMessagesByType: Record<string, number>;
+  presenceBroadcasts: number;
+  presenceBroadcastsMerged: number;
+};
+
+export type MediaRealtimeStats = {
+  peers: number;
+  sources: number;
+  syncRequests: number;
+  syncRuns: number;
+  syncRequestsCoalesced: number;
+  renegotiations: number;
+};
+
+export type StorePolicyCacheStats = {
+  roomPolicyHits: number;
+  roomPolicyMisses: number;
+  broadcastAllowedHits: number;
+  broadcastAllowedMisses: number;
+  broadcastRoomHits: number;
+  broadcastRoomMisses: number;
+  forcedListenHits: number;
+  forcedListenMisses: number;
+};
+
+export type RealtimeStatsResponse = {
+  hub: HubRealtimeStats;
+  media: MediaRealtimeStats;
+  storePolicyCache: StorePolicyCacheStats;
+  timestampUnixMs: number;
+};
 
 export type RoutedEvent = {
   scope: "direct" | "room" | "broadcast";

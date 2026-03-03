@@ -5,12 +5,23 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 )
 
 type mediaSourceTrack struct {
 	track *webrtc.TrackLocalStaticRTP
+}
+
+type MediaRealtimeStats struct {
+	Peers                 int    `json:"peers"`
+	Sources               int    `json:"sources"`
+	SyncRequests          uint64 `json:"syncRequests"`
+	SyncRuns              uint64 `json:"syncRuns"`
+	SyncRequestsCoalesced uint64 `json:"syncRequestsCoalesced"`
+	Renegotiations        uint64 `json:"renegotiations"`
 }
 
 type mediaPeer struct {
@@ -31,6 +42,11 @@ type MediaManager struct {
 	sources         map[string]*mediaSourceTrack   // sourceToken -> track
 	broadcastActive map[string]map[string]struct{} // sourceToken -> broadcastGroupID set
 	directActive    map[string]string              // sourceToken -> targetUserID
+	syncScheduled   bool
+	syncRequests    atomic.Uint64
+	syncRuns        atomic.Uint64
+	syncMerged      atomic.Uint64
+	renegotiations  atomic.Uint64
 }
 
 func NewMediaManager(hub *Hub, logger *slog.Logger) *MediaManager {
@@ -95,9 +111,36 @@ func (m *MediaManager) EnsurePeer(token string, user User) error {
 }
 
 func (m *MediaManager) SyncRouting() {
+	m.syncRequests.Add(1)
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.recomputeAllSourcesLocked()
+	if m.syncScheduled {
+		m.syncMerged.Add(1)
+		m.mu.Unlock()
+		return
+	}
+	m.syncScheduled = true
+	m.mu.Unlock()
+	time.AfterFunc(35*time.Millisecond, func() {
+		m.mu.Lock()
+		m.syncScheduled = false
+		m.syncRuns.Add(1)
+		m.recomputeAllSourcesLocked()
+		m.mu.Unlock()
+	})
+}
+
+func (m *MediaManager) RealtimeStats() MediaRealtimeStats {
+	m.mu.Lock()
+	stats := MediaRealtimeStats{
+		Peers:                 len(m.peers),
+		Sources:               len(m.sources),
+		SyncRequests:          m.syncRequests.Load(),
+		SyncRuns:              m.syncRuns.Load(),
+		SyncRequestsCoalesced: m.syncMerged.Load(),
+		Renegotiations:        m.renegotiations.Load(),
+	}
+	m.mu.Unlock()
+	return stats
 }
 
 func (m *MediaManager) EnsureNegotiation(token string) {
@@ -230,13 +273,21 @@ func (m *MediaManager) SetBroadcastGroupActive(sourceToken, groupID string, enab
 		if _, ok := m.broadcastActive[sourceToken]; !ok {
 			m.broadcastActive[sourceToken] = make(map[string]struct{})
 		}
+		if _, alreadyActive := m.broadcastActive[sourceToken][groupID]; alreadyActive {
+			return
+		}
 		m.broadcastActive[sourceToken][groupID] = struct{}{}
 	} else {
 		if groups, ok := m.broadcastActive[sourceToken]; ok {
+			if _, existed := groups[groupID]; !existed {
+				return
+			}
 			delete(groups, groupID)
 			if len(groups) == 0 {
 				delete(m.broadcastActive, sourceToken)
 			}
+		} else {
+			return
 		}
 	}
 	m.recomputeSourceRoutingLocked(sourceToken)
@@ -246,11 +297,18 @@ func (m *MediaManager) SetDirectTargetActive(sourceToken, targetUserID string, e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if enabled {
+		if currentTarget, ok := m.directActive[sourceToken]; ok && currentTarget == targetUserID {
+			return
+		}
 		m.directActive[sourceToken] = targetUserID
 	} else if currentTarget, ok := m.directActive[sourceToken]; ok {
 		if currentTarget == targetUserID || targetUserID == "" {
 			delete(m.directActive, sourceToken)
+		} else {
+			return
 		}
+	} else {
+		return
 	}
 	m.recomputeSourceRoutingLocked(sourceToken)
 }
@@ -433,6 +491,7 @@ func (m *MediaManager) renegotiateLocked(peer *mediaPeer) {
 		m.logger.Warn("set local description failed", "token", peer.token, "error", err)
 		return
 	}
+	m.renegotiations.Add(1)
 	m.sendWS(peer.token, WSOutbound{
 		Type: "webrtc_offer",
 		Data: WebRTCOffer{SDP: offer.SDP},
@@ -446,10 +505,7 @@ func (m *MediaManager) sendWS(token string, msg WSOutbound) {
 	if !ok {
 		return
 	}
-	select {
-	case c.send <- msg:
-	default:
-	}
+	m.hub.enqueueOutbound(c, msg)
 }
 
 func derefString(s *string) string {

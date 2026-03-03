@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	_ "modernc.org/sqlite"
 )
@@ -20,6 +22,73 @@ const defaultAdminPIN = "123456"
 
 type Store struct {
 	db *sql.DB
+
+	policyCacheMu               sync.RWMutex
+	roomPolicyCache             map[string]cachedRoomPolicy
+	broadcastAllowedRoleCache   map[string]map[string]struct{}
+	broadcastRoomSetCache       map[string]map[string]struct{}
+	forcedListenRoomIDsByRole   map[string][]string
+	roomPolicyCacheHits         atomic.Uint64
+	roomPolicyCacheMisses       atomic.Uint64
+	broadcastAllowedCacheHits   atomic.Uint64
+	broadcastAllowedCacheMisses atomic.Uint64
+	broadcastRoomCacheHits      atomic.Uint64
+	broadcastRoomCacheMisses    atomic.Uint64
+	forcedListenCacheHits       atomic.Uint64
+	forcedListenCacheMisses     atomic.Uint64
+}
+
+type cachedRoomPolicy struct {
+	senderRoles   map[string]struct{}
+	receiverRoles map[string]struct{}
+}
+
+type PolicyCacheStats struct {
+	RoomPolicyHits         uint64 `json:"roomPolicyHits"`
+	RoomPolicyMisses       uint64 `json:"roomPolicyMisses"`
+	BroadcastAllowedHits   uint64 `json:"broadcastAllowedHits"`
+	BroadcastAllowedMisses uint64 `json:"broadcastAllowedMisses"`
+	BroadcastRoomHits      uint64 `json:"broadcastRoomHits"`
+	BroadcastRoomMisses    uint64 `json:"broadcastRoomMisses"`
+	ForcedListenHits       uint64 `json:"forcedListenHits"`
+	ForcedListenMisses     uint64 `json:"forcedListenMisses"`
+}
+
+func copyStringSet(in map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(in))
+	for key := range in {
+		out[key] = struct{}{}
+	}
+	return out
+}
+
+func copyStringSlice(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	return append([]string(nil), in...)
+}
+
+func (s *Store) resetPolicyCaches() {
+	s.policyCacheMu.Lock()
+	s.roomPolicyCache = make(map[string]cachedRoomPolicy)
+	s.broadcastAllowedRoleCache = make(map[string]map[string]struct{})
+	s.broadcastRoomSetCache = make(map[string]map[string]struct{})
+	s.forcedListenRoomIDsByRole = make(map[string][]string)
+	s.policyCacheMu.Unlock()
+}
+
+func (s *Store) PolicyCacheStats() PolicyCacheStats {
+	return PolicyCacheStats{
+		RoomPolicyHits:         s.roomPolicyCacheHits.Load(),
+		RoomPolicyMisses:       s.roomPolicyCacheMisses.Load(),
+		BroadcastAllowedHits:   s.broadcastAllowedCacheHits.Load(),
+		BroadcastAllowedMisses: s.broadcastAllowedCacheMisses.Load(),
+		BroadcastRoomHits:      s.broadcastRoomCacheHits.Load(),
+		BroadcastRoomMisses:    s.broadcastRoomCacheMisses.Load(),
+		ForcedListenHits:       s.forcedListenCacheHits.Load(),
+		ForcedListenMisses:     s.forcedListenCacheMisses.Load(),
+	}
 }
 
 func (s *Store) validateRolesExistWithTx(ctx context.Context, tx *sql.Tx, roleIDs []string) error {
@@ -98,6 +167,14 @@ func (s *Store) roomRoleIDs(ctx context.Context, table, roomID string) ([]string
 }
 
 func (s *Store) RoomRolePolicies(ctx context.Context, roomID string) (map[string]struct{}, map[string]struct{}, error) {
+	s.policyCacheMu.RLock()
+	if cached, ok := s.roomPolicyCache[roomID]; ok {
+		s.roomPolicyCacheHits.Add(1)
+		s.policyCacheMu.RUnlock()
+		return copyStringSet(cached.senderRoles), copyStringSet(cached.receiverRoles), nil
+	}
+	s.policyCacheMu.RUnlock()
+	s.roomPolicyCacheMisses.Add(1)
 	senderRoleIDs, err := s.roomRoleIDs(ctx, "room_sender_roles", roomID)
 	if err != nil {
 		return nil, nil, err
@@ -106,11 +183,28 @@ func (s *Store) RoomRolePolicies(ctx context.Context, roomID string) (map[string
 	if err != nil {
 		return nil, nil, err
 	}
-	return toStringSet(senderRoleIDs), toStringSet(receiverRoleIDs), nil
+	senderSet := toStringSet(senderRoleIDs)
+	receiverSet := toStringSet(receiverRoleIDs)
+
+	s.policyCacheMu.Lock()
+	s.roomPolicyCache[roomID] = cachedRoomPolicy{
+		senderRoles:   copyStringSet(senderSet),
+		receiverRoles: copyStringSet(receiverSet),
+	}
+	s.policyCacheMu.Unlock()
+	return senderSet, receiverSet, nil
 }
 
 // ForcedListenRoomIDs returns the list of room IDs that the given role must listen to.
 func (s *Store) ForcedListenRoomIDs(ctx context.Context, roleID string) ([]string, error) {
+	s.policyCacheMu.RLock()
+	if cached, ok := s.forcedListenRoomIDsByRole[roleID]; ok {
+		s.forcedListenCacheHits.Add(1)
+		s.policyCacheMu.RUnlock()
+		return copyStringSlice(cached), nil
+	}
+	s.policyCacheMu.RUnlock()
+	s.forcedListenCacheMisses.Add(1)
 	rows, err := s.db.QueryContext(ctx, `SELECT room_id FROM room_forced_listen_roles WHERE role_id = ?`, roleID)
 	if err != nil {
 		return nil, err
@@ -124,7 +218,13 @@ func (s *Store) ForcedListenRoomIDs(ctx context.Context, roleID string) ([]strin
 		}
 		ids = append(ids, id)
 	}
-	return ids, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	s.policyCacheMu.Lock()
+	s.forcedListenRoomIDsByRole[roleID] = copyStringSlice(ids)
+	s.policyCacheMu.Unlock()
+	return ids, nil
 }
 
 func toStringSet(values []string) map[string]struct{} {
@@ -197,6 +297,7 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{db: db}
+	s.resetPolicyCaches()
 	if err := s.migrate(context.Background()); err != nil {
 		return nil, err
 	}
@@ -532,6 +633,14 @@ func (s *Store) ListBroadcastGroups(ctx context.Context) ([]BroadcastGroup, erro
 }
 
 func (s *Store) BroadcastGroupRoomSet(ctx context.Context, groupID string) (map[string]struct{}, error) {
+	s.policyCacheMu.RLock()
+	if cached, ok := s.broadcastRoomSetCache[groupID]; ok {
+		s.broadcastRoomCacheHits.Add(1)
+		s.policyCacheMu.RUnlock()
+		return copyStringSet(cached), nil
+	}
+	s.policyCacheMu.RUnlock()
+	s.broadcastRoomCacheMisses.Add(1)
 	rows, err := s.db.QueryContext(ctx, `SELECT room_id FROM broadcast_group_rooms WHERE broadcast_group_id = ?`, groupID)
 	if err != nil {
 		return nil, err
@@ -548,9 +657,20 @@ func (s *Store) BroadcastGroupRoomSet(ctx context.Context, groupID string) (map[
 	if len(out) == 0 {
 		return nil, fmt.Errorf("broadcast group not found or empty")
 	}
+	s.policyCacheMu.Lock()
+	s.broadcastRoomSetCache[groupID] = copyStringSet(out)
+	s.policyCacheMu.Unlock()
 	return out, nil
 }
 func (s *Store) BroadcastGroupAllowedRoleSet(ctx context.Context, groupID string) (map[string]struct{}, error) {
+	s.policyCacheMu.RLock()
+	if cached, ok := s.broadcastAllowedRoleCache[groupID]; ok {
+		s.broadcastAllowedCacheHits.Add(1)
+		s.policyCacheMu.RUnlock()
+		return copyStringSet(cached), nil
+	}
+	s.policyCacheMu.RUnlock()
+	s.broadcastAllowedCacheMisses.Add(1)
 	var groupCount int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM broadcast_groups WHERE id = ?`, groupID).Scan(&groupCount); err != nil {
 		return nil, err
@@ -571,6 +691,9 @@ func (s *Store) BroadcastGroupAllowedRoleSet(ctx context.Context, groupID string
 		}
 		allowed[roleID] = struct{}{}
 	}
+	s.policyCacheMu.Lock()
+	s.broadcastAllowedRoleCache[groupID] = copyStringSet(allowed)
+	s.policyCacheMu.Unlock()
 	return allowed, nil
 }
 
@@ -594,6 +717,7 @@ func (s *Store) CreateRole(ctx context.Context, id, name, defaultRoomID, default
 		}
 		return err
 	}
+	s.resetPolicyCaches()
 	return nil
 }
 func (s *Store) UpdateRole(ctx context.Context, id, name, defaultRoomID, defaultVoiceMode string, defaultSimpleView bool) error {
@@ -624,6 +748,7 @@ func (s *Store) UpdateRole(ctx context.Context, id, name, defaultRoomID, default
 	if rows == 0 {
 		return ErrNotFound
 	}
+	s.resetPolicyCaches()
 	return nil
 }
 
@@ -676,6 +801,7 @@ func (s *Store) DeleteRole(ctx context.Context, id string) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.resetPolicyCaches()
 	return nil
 }
 
@@ -728,6 +854,7 @@ func (s *Store) CreateRoom(ctx context.Context, id, name string, senderRoleIDs, 
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.resetPolicyCaches()
 	return nil
 }
 
@@ -790,6 +917,7 @@ func (s *Store) UpdateRoom(ctx context.Context, id, name string, senderRoleIDs, 
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.resetPolicyCaches()
 	return nil
 }
 
@@ -854,7 +982,11 @@ func (s *Store) BulkUpdateRoomPermissions(ctx context.Context, entries []RoomPer
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.resetPolicyCaches()
+	return nil
 }
 
 func (s *Store) DeleteRoom(ctx context.Context, id string) error {
@@ -913,6 +1045,7 @@ func (s *Store) DeleteRoom(ctx context.Context, id string) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.resetPolicyCaches()
 	return nil
 }
 
@@ -956,6 +1089,7 @@ func (s *Store) CreateBroadcastGroup(ctx context.Context, id, name string, roomI
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.resetPolicyCaches()
 	return nil
 }
 
@@ -1013,6 +1147,7 @@ func (s *Store) UpdateBroadcastGroup(ctx context.Context, id, name string, roomI
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.resetPolicyCaches()
 	return nil
 }
 
@@ -1050,6 +1185,7 @@ func (s *Store) DeleteBroadcastGroup(ctx context.Context, id string) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.resetPolicyCaches()
 	return nil
 }
 

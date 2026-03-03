@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -24,9 +25,24 @@ type client struct {
 	micEnabled      bool
 	broadcastGroups map[string]struct{}
 	send            chan WSOutbound
+	sendPriority    chan WSOutbound
 }
 
 const incomingSignalAttentionWindow = 2200 * time.Millisecond
+const presenceBroadcastDebounce = 75 * time.Millisecond
+
+type HubRealtimeStats struct {
+	ConnectedClients         int               `json:"connectedClients"`
+	NormalQueueDepthTotal    int               `json:"normalQueueDepthTotal"`
+	NormalQueueDepthMax      int               `json:"normalQueueDepthMax"`
+	PriorityQueueDepthTotal  int               `json:"priorityQueueDepthTotal"`
+	PriorityQueueDepthMax    int               `json:"priorityQueueDepthMax"`
+	DroppedCriticalMessages  uint64            `json:"droppedCriticalMessages"`
+	DroppedNormalMessages    uint64            `json:"droppedNormalMessages"`
+	DroppedMessagesByType    map[string]uint64 `json:"droppedMessagesByType"`
+	PresenceBroadcasts       uint64            `json:"presenceBroadcasts"`
+	PresenceBroadcastsMerged uint64            `json:"presenceBroadcastsMerged"`
+}
 
 func (h *Hub) ReplyTargetForUsername(username string) (string, string, bool) {
 	h.mu.RLock()
@@ -72,6 +88,14 @@ type Hub struct {
 	media               *MediaManager
 	presenceSubscribers map[chan []PresenceState]struct{}
 	chatHook            func(eventType string, e RoutedEvent)
+	presenceCoalesceMu  sync.Mutex
+	presencePending     bool
+	droppedCritical     atomic.Uint64
+	droppedNormal       atomic.Uint64
+	presenceBroadcasts  atomic.Uint64
+	presenceMerged      atomic.Uint64
+	droppedByTypeMu     sync.Mutex
+	droppedByType       map[string]uint64
 }
 
 func NewHub(store *Store, logger *slog.Logger) *Hub {
@@ -80,7 +104,107 @@ func NewHub(store *Store, logger *slog.Logger) *Hub {
 		store:               store,
 		logger:              logger,
 		presenceSubscribers: make(map[chan []PresenceState]struct{}),
+		droppedByType:       make(map[string]uint64),
 	}
+}
+
+func isCriticalOutboundType(msgType string) bool {
+	switch msgType {
+	case "webrtc_offer", "webrtc_ice_candidate", "voice_state", "signal", "companion_command":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *Hub) recordDroppedMessage(msgType string, critical bool) {
+	if critical {
+		h.droppedCritical.Add(1)
+	} else {
+		h.droppedNormal.Add(1)
+	}
+	key := msgType
+	if critical {
+		key = "critical:" + msgType
+	}
+	h.droppedByTypeMu.Lock()
+	h.droppedByType[key]++
+	h.droppedByTypeMu.Unlock()
+}
+
+func (h *Hub) enqueueOutbound(c *client, msg WSOutbound) bool {
+	critical := isCriticalOutboundType(msg.Type)
+	var ch chan WSOutbound
+	if critical && c.sendPriority != nil {
+		ch = c.sendPriority
+	} else if c.send != nil {
+		ch = c.send
+	} else {
+		ch = c.sendPriority
+	}
+	if ch == nil {
+		return false
+	}
+	select {
+	case ch <- msg:
+		return true
+	default:
+		h.recordDroppedMessage(msg.Type, critical)
+		return false
+	}
+}
+
+func (h *Hub) requestPresenceBroadcast() {
+	h.presenceCoalesceMu.Lock()
+	if h.presencePending {
+		h.presenceMerged.Add(1)
+		h.presenceCoalesceMu.Unlock()
+		return
+	}
+	h.presencePending = true
+	h.presenceCoalesceMu.Unlock()
+	time.AfterFunc(presenceBroadcastDebounce, func() {
+		h.presenceCoalesceMu.Lock()
+		h.presencePending = false
+		h.presenceCoalesceMu.Unlock()
+		h.broadcastPresence()
+	})
+}
+
+func (h *Hub) RealtimeStats() HubRealtimeStats {
+	h.mu.RLock()
+	stats := HubRealtimeStats{
+		ConnectedClients: len(h.clients),
+	}
+	for _, c := range h.clients {
+		if c.send != nil {
+			depth := len(c.send)
+			stats.NormalQueueDepthTotal += depth
+			if depth > stats.NormalQueueDepthMax {
+				stats.NormalQueueDepthMax = depth
+			}
+		}
+		if c.sendPriority != nil {
+			depth := len(c.sendPriority)
+			stats.PriorityQueueDepthTotal += depth
+			if depth > stats.PriorityQueueDepthMax {
+				stats.PriorityQueueDepthMax = depth
+			}
+		}
+	}
+	h.mu.RUnlock()
+
+	stats.DroppedCriticalMessages = h.droppedCritical.Load()
+	stats.DroppedNormalMessages = h.droppedNormal.Load()
+	stats.PresenceBroadcasts = h.presenceBroadcasts.Load()
+	stats.PresenceBroadcastsMerged = h.presenceMerged.Load()
+	h.droppedByTypeMu.Lock()
+	stats.DroppedMessagesByType = make(map[string]uint64, len(h.droppedByType))
+	for key, count := range h.droppedByType {
+		stats.DroppedMessagesByType[key] = count
+	}
+	h.droppedByTypeMu.Unlock()
+	return stats
 }
 
 func (h *Hub) markDirectSignalIncoming(targetUserID string, fromUser User, signal string) {
@@ -151,10 +275,7 @@ func (h *Hub) SendChatToRoom(roomID string, e RoutedEvent) {
 	defer h.mu.RUnlock()
 	for _, c := range h.clients {
 		if _, ok := c.listenRooms[roomID]; ok {
-			select {
-			case c.send <- msg:
-			default:
-			}
+			h.enqueueOutbound(c, msg)
 		}
 	}
 }
@@ -195,7 +316,7 @@ func (h *Hub) SetBroadcastActive(token, groupID string, enabled bool) {
 		}
 	}
 	h.mu.Unlock()
-	h.broadcastPresence()
+	h.requestPresenceBroadcast()
 }
 
 func (h *Hub) SetVoiceState(token, state string) {
@@ -217,13 +338,18 @@ func (h *Hub) SetVoiceState(token, state string) {
 		}
 	}
 	h.mu.Unlock()
-	h.broadcastPresence()
+	h.requestPresenceBroadcast()
 }
 
 func (h *Hub) Remove(token string) {
 	h.mu.Lock()
 	if c, ok := h.clients[token]; ok {
-		close(c.send)
+		if c.send != nil {
+			close(c.send)
+		}
+		if c.sendPriority != nil && c.sendPriority != c.send {
+			close(c.sendPriority)
+		}
 		delete(h.clients, token)
 	}
 	h.mu.Unlock()
@@ -239,7 +365,7 @@ func (h *Hub) SetActiveRoom(token, roomID string) {
 		c.activeRoom = roomID
 	}
 	h.mu.Unlock()
-	h.broadcastPresence()
+	h.requestPresenceBroadcast()
 }
 
 func (h *Hub) SetRoomMatrix(token string, listenRooms []string, talkRooms []string) {
@@ -249,7 +375,7 @@ func (h *Hub) SetRoomMatrix(token string, listenRooms []string, talkRooms []stri
 		c.talkRooms = toRoomSet(talkRooms)
 	}
 	h.mu.Unlock()
-	h.broadcastPresence()
+	h.requestPresenceBroadcast()
 }
 
 func (h *Hub) roomSelections(token string) (listenRooms []string, talkRooms []string) {
@@ -344,10 +470,7 @@ func (h *Hub) sendToUser(userID string, msg WSOutbound) {
 	defer h.mu.RUnlock()
 	for _, c := range h.clients {
 		if c.user.ID == userID {
-			select {
-			case c.send <- msg:
-			default:
-			}
+			h.enqueueOutbound(c, msg)
 		}
 	}
 }
@@ -359,10 +482,7 @@ func (h *Hub) sendToToken(token string, msg WSOutbound) {
 	if !ok {
 		return
 	}
-	select {
-	case c.send <- msg:
-	default:
-	}
+	h.enqueueOutbound(c, msg)
 }
 
 func (h *Hub) sendToRoom(roomID string, receiverRoles map[string]struct{}, msg WSOutbound) {
@@ -373,10 +493,7 @@ func (h *Hub) sendToRoom(roomID string, receiverRoles map[string]struct{}, msg W
 			if !isRoleAllowed(receiverRoles, c.session.RoleID) {
 				continue
 			}
-			select {
-			case c.send <- msg:
-			default:
-			}
+			h.enqueueOutbound(c, msg)
 		}
 	}
 }
@@ -392,10 +509,7 @@ func (h *Hub) sendToRooms(roomSet map[string]struct{}, receiverRolesByRoom map[s
 			if !isRoleAllowed(receiverRolesByRoom[roomID], c.session.RoleID) {
 				continue
 			}
-			select {
-			case c.send <- msg:
-			default:
-			}
+			h.enqueueOutbound(c, msg)
 			break
 		}
 	}
@@ -456,12 +570,7 @@ func (h *Hub) SendToToken(token string, msg WSOutbound) bool {
 	if !ok {
 		return false
 	}
-	select {
-	case c.send <- msg:
-		return true
-	default:
-		return false
-	}
+	return h.enqueueOutbound(c, msg)
 }
 
 func (h *Hub) SubscribePresence() (chan []PresenceState, func()) {
@@ -480,6 +589,7 @@ func (h *Hub) SubscribePresence() (chan []PresenceState, func()) {
 	return ch, unsubscribe
 }
 func (h *Hub) broadcastPresence() {
+	h.presenceBroadcasts.Add(1)
 	h.mu.RLock()
 	var list []PresenceState
 	for _, c := range h.clients {
@@ -501,10 +611,7 @@ func (h *Hub) broadcastPresence() {
 		subscribers = append(subscribers, ch)
 	}
 	for _, c := range h.clients {
-		select {
-		case c.send <- msg:
-		default:
-		}
+		h.enqueueOutbound(c, msg)
 	}
 	h.mu.RUnlock()
 	for _, ch := range subscribers {
@@ -520,10 +627,7 @@ func (h *Hub) BroadcastConfigUpdate(data PublicBootstrapResponse) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for _, c := range h.clients {
-		select {
-		case c.send <- msg:
-		default:
-		}
+		h.enqueueOutbound(c, msg)
 	}
 }
 

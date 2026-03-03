@@ -1,4 +1,10 @@
-import type { Bootstrap, PublicBootstrap, TelegramStatus, User } from "./types";
+import type {
+  Bootstrap,
+  PublicBootstrap,
+  RealtimeStatsResponse,
+  TelegramStatus,
+  User,
+} from "./types";
 
 const adminPinHeaderName = "X-Admin-Pin";
 
@@ -108,6 +114,16 @@ export async function logout(token: string): Promise<void> {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
+}
+
+export async function getRealtimeStats(
+  token: string,
+): Promise<RealtimeStatsResponse> {
+  const res = await fetch("/api/realtime-stats", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("failed to load realtime stats");
+  return res.json() as Promise<RealtimeStatsResponse>;
 }
 
 async function apiMutation(

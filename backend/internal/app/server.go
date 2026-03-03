@@ -377,6 +377,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/telegram/webhook", s.handleTelegramWebhook)
 	mux.HandleFunc("/api/admin/telegram", s.withAuth(s.handleAdminTelegram))
 	mux.HandleFunc("/api/admin/telegram/", s.withAuth(s.handleAdminTelegramByID))
+	mux.HandleFunc("/api/realtime-stats", s.withAuth(s.handleRealtimeStats))
 	mux.HandleFunc("/ws", s.handleWS)
 	if cfg.StaticDir != "" || embeddedStaticAvailable() {
 		mux.Handle("/", s.staticHandler())
@@ -469,6 +470,38 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type RealtimeStatsResponse struct {
+	Hub              HubRealtimeStats   `json:"hub"`
+	Media            MediaRealtimeStats `json:"media"`
+	StorePolicyCache PolicyCacheStats   `json:"storePolicyCache"`
+	TimestampUnixMs  int64              `json:"timestampUnixMs"`
+}
+
+func (s *Server) handleRealtimeStats(w http.ResponseWriter, r *http.Request, _ Session) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	hubStats := HubRealtimeStats{}
+	if s.hub != nil {
+		hubStats = s.hub.RealtimeStats()
+	}
+	mediaStats := MediaRealtimeStats{}
+	if s.media != nil {
+		mediaStats = s.media.RealtimeStats()
+	}
+	storeCacheStats := PolicyCacheStats{}
+	if s.store != nil {
+		storeCacheStats = s.store.PolicyCacheStats()
+	}
+	s.writeJSON(w, http.StatusOK, RealtimeStatsResponse{
+		Hub:              hubStats,
+		Media:            mediaStats,
+		StorePolicyCache: storeCacheStats,
+		TimestampUnixMs:  time.Now().UnixMilli(),
+	})
 }
 
 func (s *Server) handlePublicBootstrap(w http.ResponseWriter, r *http.Request) {
@@ -1086,7 +1119,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		voiceMode:       initialVoiceMode,
 		micEnabled:      initialMicEnabled,
 		broadcastGroups: make(map[string]struct{}),
-		send:            make(chan WSOutbound, 32),
+		send:            make(chan WSOutbound, 128),
+		sendPriority:    make(chan WSOutbound, 128),
 	}
 	s.hub.Add(c)
 	if err := s.media.EnsurePeer(session.Token, user); err != nil {
@@ -1097,8 +1131,37 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	mediaReady := false
 
 	go func() {
-		for msg := range c.send {
-			_ = conn.WriteJSON(msg)
+		write := func(msg WSOutbound) bool {
+			return conn.WriteJSON(msg) == nil
+		}
+		for {
+			select {
+			case msg, ok := <-c.sendPriority:
+				if !ok {
+					return
+				}
+				if !write(msg) {
+					return
+				}
+				continue
+			default:
+			}
+			select {
+			case msg, ok := <-c.sendPriority:
+				if !ok {
+					return
+				}
+				if !write(msg) {
+					return
+				}
+			case msg, ok := <-c.send:
+				if !ok {
+					return
+				}
+				if !write(msg) {
+					return
+				}
+			}
 		}
 	}()
 
@@ -1175,14 +1238,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			s.hub.SetVoiceState(session.Token, e.Body)
-			if e.Scope == "room" {
-				if e.Body == "ptt_start" {
-					s.media.SyncRouting()
-				}
-				if e.Body == "ptt_stop" {
-					s.media.SyncRouting()
-				}
-			}
 			if e.Scope == "direct" {
 				if e.Body == "ptt_start" {
 					s.media.SetDirectTargetActive(session.Token, e.TargetID, true)
