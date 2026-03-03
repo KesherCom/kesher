@@ -18,6 +18,6 @@ web/playwright-report/
 web/blob-report/
 backend/internal/app/embedded_web/*
 !backend/internal/app/embedded_web/_placeholder.txt
-.pem
+*.pem
 certs/*
 backend/app
