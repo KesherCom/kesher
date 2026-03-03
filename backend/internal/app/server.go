@@ -244,15 +244,19 @@ func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request
 	groups = filterBroadcastGroupsForRole(targetUser.RoleID, groups)
 	roomDiscovery := make([]CompanionRoomDiscovery, 0, len(rooms))
 	for _, room := range rooms {
-		senderRoles, receiverRoles, err := s.store.RoomRolePolicies(r.Context(), room.ID)
+		canTalk, err := s.store.RoomAllowsSenderRole(r.Context(), room.ID, targetUser.RoleID)
+		if err != nil {
+			continue
+		}
+		canListen, err := s.store.RoomAllowsReceiverRole(r.Context(), room.ID, targetUser.RoleID)
 		if err != nil {
 			continue
 		}
 		roomDiscovery = append(roomDiscovery, CompanionRoomDiscovery{
 			ID:        room.ID,
 			Name:      room.Name,
-			CanTalk:   isRoleAllowed(senderRoles, targetUser.RoleID),
-			CanListen: isRoleAllowed(receiverRoles, targetUser.RoleID),
+			CanTalk:   canTalk,
+			CanListen: canListen,
 		})
 	}
 	s.writeJSON(w, http.StatusOK, CompanionDiscoveryResponse{
@@ -276,17 +280,16 @@ func (s *Server) filterAllowedRoomsForRole(ctx context.Context, roleID string, r
 	normalized := normalizeIDs(roomIDs)
 	out := make([]string, 0, len(normalized))
 	for _, roomID := range normalized {
-		senderRoles, receiverRoles, err := s.store.RoomRolePolicies(ctx, roomID)
-		if err != nil {
-			continue
-		}
-		allowed := false
+		var (
+			allowed bool
+			err     error
+		)
 		if forSend {
-			allowed = isRoleAllowed(senderRoles, roleID)
+			allowed, err = s.store.RoomAllowsSenderRole(ctx, roomID, roleID)
 		} else {
-			allowed = isRoleAllowed(receiverRoles, roleID)
+			allowed, err = s.store.RoomAllowsReceiverRole(ctx, roomID, roleID)
 		}
-		if allowed {
+		if err == nil && allowed {
 			out = append(out, roomID)
 		}
 	}
@@ -1312,23 +1315,20 @@ func (s *Server) routeInbound(ctx context.Context, sender Session, in WSInbound,
 func (s *Server) isInboundAllowed(ctx context.Context, sender Session, e RoutedEvent) bool {
 	switch e.Scope {
 	case "room":
-		senderRoles, _, err := s.store.RoomRolePolicies(ctx, e.TargetID)
-		return err == nil && isRoleAllowed(senderRoles, sender.RoleID)
+		allowed, err := s.store.RoomAllowsSenderRole(ctx, e.TargetID, sender.RoleID)
+		return err == nil && allowed
 	case "broadcast":
-		allowedRoles, err := s.store.BroadcastGroupAllowedRoleSet(ctx, e.TargetID)
-		if err != nil || !isRoleAllowed(allowedRoles, sender.RoleID) {
+		allowed, err := s.store.BroadcastGroupAllowsRole(ctx, e.TargetID, sender.RoleID)
+		if err != nil || !allowed {
 			return false
 		}
-		roomSet, err := s.store.BroadcastGroupRoomSet(ctx, e.TargetID)
+		roomIDs, err := s.store.BroadcastGroupRoomIDs(ctx, e.TargetID)
 		if err != nil {
 			return false
 		}
-		for roomID := range roomSet {
-			senderRoles, _, err := s.store.RoomRolePolicies(ctx, roomID)
-			if err != nil {
-				continue
-			}
-			if isRoleAllowed(senderRoles, sender.RoleID) {
+		for _, roomID := range roomIDs {
+			canSend, err := s.store.RoomAllowsSenderRole(ctx, roomID, sender.RoleID)
+			if err == nil && canSend {
 				return true
 			}
 		}

@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +33,9 @@ type mediaPeer struct {
 	senders              map[string]*webrtc.RTPSender
 	renegotiating        bool
 	pendingRenegotiate   bool
+	lastSenderSetHash    uint64
+	lastSenderSetHashSet bool
+	renegotiateTimer     *time.Timer
 	pendingICECandidates []webrtc.ICECandidateInit
 }
 
@@ -48,6 +53,8 @@ type MediaManager struct {
 	syncMerged      atomic.Uint64
 	renegotiations  atomic.Uint64
 }
+
+const renegotiationDebounce = 60 * time.Millisecond
 
 func NewMediaManager(hub *Hub, logger *slog.Logger) *MediaManager {
 	return &MediaManager{
@@ -150,7 +157,7 @@ func (m *MediaManager) EnsureNegotiation(token string) {
 	if !ok {
 		return
 	}
-	m.renegotiateLocked(peer)
+	m.requestRenegotiationLocked(peer)
 }
 
 func (m *MediaManager) HandleAnswer(token string, sdp string) error {
@@ -174,8 +181,10 @@ func (m *MediaManager) HandleAnswer(token string, sdp string) error {
 	peer.pendingICECandidates = nil
 	peer.renegotiating = false
 	if peer.pendingRenegotiate {
-		peer.pendingRenegotiate = false
-		m.renegotiateLocked(peer)
+		m.maybeRenegotiateLocked(peer)
+		if peer.pendingRenegotiate {
+			m.scheduleRenegotiationLocked(peer.token)
+		}
 	}
 	return nil
 }
@@ -211,6 +220,10 @@ func (m *MediaManager) RemovePeer(token string) {
 	if !ok {
 		return
 	}
+	if peer.renegotiateTimer != nil {
+		peer.renegotiateTimer.Stop()
+		peer.renegotiateTimer = nil
+	}
 	_ = peer.pc.Close()
 	delete(m.peers, token)
 	delete(m.broadcastActive, token)
@@ -227,7 +240,7 @@ func (m *MediaManager) RemovePeer(token string) {
 
 	for _, p := range m.peers {
 		if m.removeSenderLocked(p, token) {
-			m.renegotiateLocked(p)
+			m.requestRenegotiationLocked(p)
 		}
 	}
 	for _, sourceToken := range affectedSources {
@@ -245,13 +258,14 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 	m.sources[sourcePeer.token] = &mediaSourceTrack{track: localTrack}
 	m.recomputeSourceRoutingLocked(sourcePeer.token)
 	m.mu.Unlock()
+	buf := make([]byte, 2048)
 
 	for {
-		pkt, _, readErr := remote.ReadRTP()
+		n, _, readErr := remote.Read(buf)
 		if readErr != nil {
 			break
 		}
-		if writeErr := localTrack.WriteRTP(pkt); writeErr != nil {
+		if _, writeErr := localTrack.Write(buf[:n]); writeErr != nil {
 			break
 		}
 	}
@@ -260,7 +274,7 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 	delete(m.sources, sourcePeer.token)
 	for _, p := range m.peers {
 		if m.removeSenderLocked(p, sourcePeer.token) {
-			m.renegotiateLocked(p)
+			m.requestRenegotiationLocked(p)
 		}
 	}
 	m.mu.Unlock()
@@ -352,12 +366,12 @@ func (m *MediaManager) recomputeSourceRoutingLocked(sourceToken string) {
 
 		if shouldReceive {
 			if m.attachSourceToPeerLocked(sourceToken, src, p) {
-				m.renegotiateLocked(p)
+				m.requestRenegotiationLocked(p)
 			}
 			continue
 		}
 		if m.removeSenderLocked(p, sourceToken) {
-			m.renegotiateLocked(p)
+			m.requestRenegotiationLocked(p)
 		}
 	}
 }
@@ -371,11 +385,11 @@ func (m *MediaManager) talkRoomsForSourceLocked(sourceToken string) map[string]s
 	}
 	rooms := make(map[string]struct{}, len(c.talkRooms))
 	for roomID := range c.talkRooms {
-		senderRoles, _, err := m.hub.store.RoomRolePolicies(context.Background(), roomID)
+		allowed, err := m.hub.store.RoomAllowsSenderRole(context.Background(), roomID, c.session.RoleID)
 		if err != nil {
 			continue
 		}
-		if !isRoleAllowed(senderRoles, c.session.RoleID) {
+		if !allowed {
 			continue
 		}
 		rooms[roomID] = struct{}{}
@@ -397,11 +411,11 @@ func (m *MediaManager) peerListensToAnyRoomLocked(peerToken string, roomSet map[
 		if _, ok := roomSet[roomID]; !ok {
 			continue
 		}
-		_, receiverRoles, err := m.hub.store.RoomRolePolicies(context.Background(), roomID)
+		allowed, err := m.hub.store.RoomAllowsReceiverRole(context.Background(), roomID, c.session.RoleID)
 		if err != nil {
 			continue
 		}
-		if isRoleAllowed(receiverRoles, c.session.RoleID) {
+		if allowed {
 			return true
 		}
 	}
@@ -421,25 +435,25 @@ func (m *MediaManager) broadcastRoomsForSourceLocked(sourceToken string) map[str
 	}
 	rooms := make(map[string]struct{})
 	for groupID := range groups {
-		allowedRoles, err := m.hub.store.BroadcastGroupAllowedRoleSet(context.Background(), groupID)
+		allowed, err := m.hub.store.BroadcastGroupAllowsRole(context.Background(), groupID, sourceClient.session.RoleID)
 		if err != nil {
 			m.logger.Warn("broadcast group role lookup failed", "groupId", groupID, "error", err)
 			continue
 		}
-		if !isRoleAllowed(allowedRoles, sourceClient.session.RoleID) {
+		if !allowed {
 			continue
 		}
-		set, err := m.hub.store.BroadcastGroupRoomSet(context.Background(), groupID)
+		roomIDs, err := m.hub.store.BroadcastGroupRoomIDs(context.Background(), groupID)
 		if err != nil {
 			m.logger.Warn("broadcast group room lookup failed", "groupId", groupID, "error", err)
 			continue
 		}
-		for roomID := range set {
-			senderRoles, _, err := m.hub.store.RoomRolePolicies(context.Background(), roomID)
+		for _, roomID := range roomIDs {
+			canSend, err := m.hub.store.RoomAllowsSenderRole(context.Background(), roomID, sourceClient.session.RoleID)
 			if err != nil {
 				continue
 			}
-			if !isRoleAllowed(senderRoles, sourceClient.session.RoleID) {
+			if !canSend {
 				continue
 			}
 			rooms[roomID] = struct{}{}
@@ -471,26 +485,86 @@ func (m *MediaManager) removeSenderLocked(peer *mediaPeer, srcToken string) bool
 	return true
 }
 
-func (m *MediaManager) renegotiateLocked(peer *mediaPeer) {
+func senderSetHash(senders map[string]*webrtc.RTPSender) uint64 {
+	if len(senders) == 0 {
+		return 0
+	}
+	tokens := make([]string, 0, len(senders))
+	for token := range senders {
+		tokens = append(tokens, token)
+	}
+	sort.Strings(tokens)
+	h := fnv.New64a()
+	for _, token := range tokens {
+		_, _ = h.Write([]byte(token))
+		_, _ = h.Write([]byte{0})
+	}
+	return h.Sum64()
+}
+
+func (m *MediaManager) requestRenegotiationLocked(peer *mediaPeer) {
+	peer.pendingRenegotiate = true
+	m.scheduleRenegotiationLocked(peer.token)
+}
+
+func (m *MediaManager) scheduleRenegotiationLocked(token string) {
+	peer, ok := m.peers[token]
+	if !ok {
+		return
+	}
+	if peer.renegotiateTimer != nil {
+		return
+	}
+	peer.renegotiateTimer = time.AfterFunc(renegotiationDebounce, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		peer, ok := m.peers[token]
+		if !ok {
+			return
+		}
+		peer.renegotiateTimer = nil
+		m.maybeRenegotiateLocked(peer)
+		if peer.pendingRenegotiate {
+			m.scheduleRenegotiationLocked(token)
+		}
+	})
+}
+
+func (m *MediaManager) maybeRenegotiateLocked(peer *mediaPeer) {
+	if !peer.pendingRenegotiate {
+		return
+	}
 	if peer.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
+		peer.pendingRenegotiate = false
 		return
 	}
 	if peer.pc.SignalingState() != webrtc.SignalingStateStable || peer.renegotiating {
-		peer.pendingRenegotiate = true
 		return
 	}
+	nextSenderSetHash := senderSetHash(peer.senders)
+	if peer.lastSenderSetHashSet && peer.lastSenderSetHash == nextSenderSetHash {
+		peer.pendingRenegotiate = false
+		return
+	}
+	peer.pendingRenegotiate = false
 	peer.renegotiating = true
 	offer, err := peer.pc.CreateOffer(nil)
 	if err != nil {
 		peer.renegotiating = false
+		peer.pendingRenegotiate = true
+		m.scheduleRenegotiationLocked(peer.token)
 		m.logger.Warn("create offer failed", "token", peer.token, "error", err)
 		return
 	}
 	if err := peer.pc.SetLocalDescription(offer); err != nil {
 		peer.renegotiating = false
+		peer.pendingRenegotiate = true
+		m.scheduleRenegotiationLocked(peer.token)
 		m.logger.Warn("set local description failed", "token", peer.token, "error", err)
 		return
 	}
+	peer.lastSenderSetHashSet = true
+	peer.lastSenderSetHash = nextSenderSetHash
 	m.renegotiations.Add(1)
 	m.sendWS(peer.token, WSOutbound{
 		Type: "webrtc_offer",

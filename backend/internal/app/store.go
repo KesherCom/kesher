@@ -27,6 +27,7 @@ type Store struct {
 	roomPolicyCache             map[string]cachedRoomPolicy
 	broadcastAllowedRoleCache   map[string]map[string]struct{}
 	broadcastRoomSetCache       map[string]map[string]struct{}
+	broadcastRoomIDsCache       map[string][]string
 	forcedListenRoomIDsByRole   map[string][]string
 	roomPolicyCacheHits         atomic.Uint64
 	roomPolicyCacheMisses       atomic.Uint64
@@ -54,14 +55,6 @@ type PolicyCacheStats struct {
 	ForcedListenMisses     uint64 `json:"forcedListenMisses"`
 }
 
-func copyStringSet(in map[string]struct{}) map[string]struct{} {
-	out := make(map[string]struct{}, len(in))
-	for key := range in {
-		out[key] = struct{}{}
-	}
-	return out
-}
-
 func copyStringSlice(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -74,6 +67,7 @@ func (s *Store) resetPolicyCaches() {
 	s.roomPolicyCache = make(map[string]cachedRoomPolicy)
 	s.broadcastAllowedRoleCache = make(map[string]map[string]struct{})
 	s.broadcastRoomSetCache = make(map[string]map[string]struct{})
+	s.broadcastRoomIDsCache = make(map[string][]string)
 	s.forcedListenRoomIDsByRole = make(map[string][]string)
 	s.policyCacheMu.Unlock()
 }
@@ -166,33 +160,50 @@ func (s *Store) roomRoleIDs(ctx context.Context, table, roomID string) ([]string
 	return roleIDs, nil
 }
 
-func (s *Store) RoomRolePolicies(ctx context.Context, roomID string) (map[string]struct{}, map[string]struct{}, error) {
+func (s *Store) RoomAllowsSenderRole(ctx context.Context, roomID, roleID string) (bool, error) {
+	cached, err := s.roomPolicyCached(ctx, roomID)
+	if err != nil {
+		return false, err
+	}
+	_, ok := cached.senderRoles[roleID]
+	return ok, nil
+}
+
+func (s *Store) RoomAllowsReceiverRole(ctx context.Context, roomID, roleID string) (bool, error) {
+	cached, err := s.roomPolicyCached(ctx, roomID)
+	if err != nil {
+		return false, err
+	}
+	_, ok := cached.receiverRoles[roleID]
+	return ok, nil
+}
+
+func (s *Store) roomPolicyCached(ctx context.Context, roomID string) (cachedRoomPolicy, error) {
 	s.policyCacheMu.RLock()
 	if cached, ok := s.roomPolicyCache[roomID]; ok {
 		s.roomPolicyCacheHits.Add(1)
 		s.policyCacheMu.RUnlock()
-		return copyStringSet(cached.senderRoles), copyStringSet(cached.receiverRoles), nil
+		return cached, nil
 	}
 	s.policyCacheMu.RUnlock()
 	s.roomPolicyCacheMisses.Add(1)
 	senderRoleIDs, err := s.roomRoleIDs(ctx, "room_sender_roles", roomID)
 	if err != nil {
-		return nil, nil, err
+		return cachedRoomPolicy{}, err
 	}
 	receiverRoleIDs, err := s.roomRoleIDs(ctx, "room_receiver_roles", roomID)
 	if err != nil {
-		return nil, nil, err
+		return cachedRoomPolicy{}, err
 	}
-	senderSet := toStringSet(senderRoleIDs)
-	receiverSet := toStringSet(receiverRoleIDs)
+	cached := cachedRoomPolicy{
+		senderRoles:   toStringSet(senderRoleIDs),
+		receiverRoles: toStringSet(receiverRoleIDs),
+	}
 
 	s.policyCacheMu.Lock()
-	s.roomPolicyCache[roomID] = cachedRoomPolicy{
-		senderRoles:   copyStringSet(senderSet),
-		receiverRoles: copyStringSet(receiverSet),
-	}
+	s.roomPolicyCache[roomID] = cached
 	s.policyCacheMu.Unlock()
-	return senderSet, receiverSet, nil
+	return cached, nil
 }
 
 // ForcedListenRoomIDs returns the list of room IDs that the given role must listen to.
@@ -632,12 +643,32 @@ func (s *Store) ListBroadcastGroups(ctx context.Context) ([]BroadcastGroup, erro
 	return groups, nil
 }
 
-func (s *Store) BroadcastGroupRoomSet(ctx context.Context, groupID string) (map[string]struct{}, error) {
+func (s *Store) BroadcastGroupRoomIDs(ctx context.Context, groupID string) ([]string, error) {
+	s.policyCacheMu.RLock()
+	if cached, ok := s.broadcastRoomIDsCache[groupID]; ok {
+		s.broadcastRoomCacheHits.Add(1)
+		s.policyCacheMu.RUnlock()
+		return copyStringSlice(cached), nil
+	}
+	s.policyCacheMu.RUnlock()
+	if _, err := s.broadcastGroupRoomSetCached(ctx, groupID); err != nil {
+		return nil, err
+	}
+	s.policyCacheMu.RLock()
+	cached, ok := s.broadcastRoomIDsCache[groupID]
+	s.policyCacheMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("broadcast group not found or empty")
+	}
+	return copyStringSlice(cached), nil
+}
+
+func (s *Store) broadcastGroupRoomSetCached(ctx context.Context, groupID string) (map[string]struct{}, error) {
 	s.policyCacheMu.RLock()
 	if cached, ok := s.broadcastRoomSetCache[groupID]; ok {
 		s.broadcastRoomCacheHits.Add(1)
 		s.policyCacheMu.RUnlock()
-		return copyStringSet(cached), nil
+		return cached, nil
 	}
 	s.policyCacheMu.RUnlock()
 	s.broadcastRoomCacheMisses.Add(1)
@@ -657,17 +688,32 @@ func (s *Store) BroadcastGroupRoomSet(ctx context.Context, groupID string) (map[
 	if len(out) == 0 {
 		return nil, fmt.Errorf("broadcast group not found or empty")
 	}
+	roomIDs := make([]string, 0, len(out))
+	for roomID := range out {
+		roomIDs = append(roomIDs, roomID)
+	}
 	s.policyCacheMu.Lock()
-	s.broadcastRoomSetCache[groupID] = copyStringSet(out)
+	s.broadcastRoomSetCache[groupID] = out
+	s.broadcastRoomIDsCache[groupID] = roomIDs
 	s.policyCacheMu.Unlock()
 	return out, nil
 }
-func (s *Store) BroadcastGroupAllowedRoleSet(ctx context.Context, groupID string) (map[string]struct{}, error) {
+
+func (s *Store) BroadcastGroupAllowsRole(ctx context.Context, groupID, roleID string) (bool, error) {
+	cached, err := s.broadcastGroupAllowedRoleSetCached(ctx, groupID)
+	if err != nil {
+		return false, err
+	}
+	_, ok := cached[roleID]
+	return ok, nil
+}
+
+func (s *Store) broadcastGroupAllowedRoleSetCached(ctx context.Context, groupID string) (map[string]struct{}, error) {
 	s.policyCacheMu.RLock()
 	if cached, ok := s.broadcastAllowedRoleCache[groupID]; ok {
 		s.broadcastAllowedCacheHits.Add(1)
 		s.policyCacheMu.RUnlock()
-		return copyStringSet(cached), nil
+		return cached, nil
 	}
 	s.policyCacheMu.RUnlock()
 	s.broadcastAllowedCacheMisses.Add(1)
@@ -692,7 +738,7 @@ func (s *Store) BroadcastGroupAllowedRoleSet(ctx context.Context, groupID string
 		allowed[roleID] = struct{}{}
 	}
 	s.policyCacheMu.Lock()
-	s.broadcastAllowedRoleCache[groupID] = copyStringSet(allowed)
+	s.broadcastAllowedRoleCache[groupID] = allowed
 	s.policyCacheMu.Unlock()
 	return allowed, nil
 }

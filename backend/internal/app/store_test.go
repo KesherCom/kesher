@@ -33,7 +33,6 @@ func TestCreateRoleRejectsUnknownDefaultRoom(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-
 	err = store.CreateRole(context.Background(), "qa", "QA", "missing-room", "ptt", false)
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected ErrInvalidInput, got %v", err)
@@ -69,20 +68,19 @@ func TestDeleteRoleConflictsWhenRoleAssignedToUser(t *testing.T) {
 	}
 }
 
-func TestBroadcastGroupAllowedRoleSetReturnsNotFoundForUnknownGroup(t *testing.T) {
+func TestBroadcastGroupAllowsRoleReturnsNotFoundForUnknownGroup(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-
-	_, err = store.BroadcastGroupAllowedRoleSet(context.Background(), "does-not-exist")
+	_, err = store.BroadcastGroupAllowsRole(context.Background(), "does-not-exist", "audio")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
 
-func TestBroadcastGroupRoomSetErrorsForEmptyGroup(t *testing.T) {
+func TestBroadcastGroupRoomIDsErrorsForEmptyGroup(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +90,7 @@ func TestBroadcastGroupRoomSetErrorsForEmptyGroup(t *testing.T) {
 	if _, err := store.db.ExecContext(context.Background(), `INSERT OR IGNORE INTO broadcast_groups (id,name) VALUES ('empty','Empty')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.BroadcastGroupRoomSet(context.Background(), "empty"); err == nil {
+	if _, err := store.BroadcastGroupRoomIDs(context.Background(), "empty"); err == nil {
 		t.Fatal("expected error for empty broadcast group room set")
 	}
 }
@@ -116,49 +114,41 @@ func TestBulkUpdateRoomPermissions(t *testing.T) {
 		t.Fatalf("BulkUpdateRoomPermissions failed: %v", err)
 	}
 
-	// Verify foh permissions via RoomRolePolicies
-	fohSenders, fohReceivers, err := store.RoomRolePolicies(ctx, "foh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := fohSenders["audio"]; !ok {
+	// Verify foh permissions.
+	if allowed, err := store.RoomAllowsSenderRole(ctx, "foh", "audio"); err != nil || !allowed {
 		t.Fatal("foh should have audio as sender")
 	}
-	if _, ok := fohSenders["video"]; !ok {
+	if allowed, err := store.RoomAllowsSenderRole(ctx, "foh", "video"); err != nil || !allowed {
 		t.Fatal("foh should have video as sender")
 	}
-	if len(fohSenders) != 2 {
-		t.Fatalf("foh senders: expected 2 got %d", len(fohSenders))
+	if allowed, err := store.RoomAllowsSenderRole(ctx, "foh", "lighting"); err != nil || allowed {
+		t.Fatal("foh should not have lighting as sender")
 	}
-	if _, ok := fohReceivers["audio"]; !ok {
+	if allowed, err := store.RoomAllowsReceiverRole(ctx, "foh", "audio"); err != nil || !allowed {
 		t.Fatal("foh should have audio as receiver")
 	}
-	if _, ok := fohReceivers["lighting"]; !ok {
+	if allowed, err := store.RoomAllowsReceiverRole(ctx, "foh", "lighting"); err != nil || !allowed {
 		t.Fatal("foh should have lighting as receiver")
 	}
-	if len(fohReceivers) != 2 {
-		t.Fatalf("foh receivers: expected 2 got %d", len(fohReceivers))
+	if allowed, err := store.RoomAllowsReceiverRole(ctx, "foh", "video"); err != nil || allowed {
+		t.Fatal("foh should not have video as receiver")
 	}
 
 	// Verify stage permissions
-	stageSenders, stageReceivers, err := store.RoomRolePolicies(ctx, "stage")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := stageSenders["lighting"]; !ok {
+	if allowed, err := store.RoomAllowsSenderRole(ctx, "stage", "lighting"); err != nil || !allowed {
 		t.Fatal("stage should have lighting as sender")
 	}
-	if len(stageSenders) != 1 {
-		t.Fatalf("stage senders: expected 1 got %d", len(stageSenders))
+	if allowed, err := store.RoomAllowsSenderRole(ctx, "stage", "audio"); err != nil || allowed {
+		t.Fatal("stage should not have audio as sender")
 	}
-	if _, ok := stageReceivers["video"]; !ok {
+	if allowed, err := store.RoomAllowsReceiverRole(ctx, "stage", "video"); err != nil || !allowed {
 		t.Fatal("stage should have video as receiver")
 	}
-	if _, ok := stageReceivers["lighting"]; !ok {
+	if allowed, err := store.RoomAllowsReceiverRole(ctx, "stage", "lighting"); err != nil || !allowed {
 		t.Fatal("stage should have lighting as receiver")
 	}
-	if len(stageReceivers) != 2 {
-		t.Fatalf("stage receivers: expected 2 got %d", len(stageReceivers))
+	if allowed, err := store.RoomAllowsReceiverRole(ctx, "stage", "audio"); err != nil || allowed {
+		t.Fatal("stage should not have audio as receiver")
 	}
 }
 
