@@ -21,6 +21,7 @@ const appData: Bootstrap = {
       name: "Room 1",
       senderRoleIds: ["op"],
       receiverRoleIds: ["op"],
+      forcedListenRoleIds: [],
     },
   ],
   broadcastGroups: [],

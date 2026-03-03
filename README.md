@@ -51,11 +51,8 @@ Some environments block unsigned binaries by default.
   2. If SmartScreen warns, click **More info** → **Run anyway**.
   3. If Defender quarantines it, restore/allow the file in Windows Security, then run again.
 
-If you need a desktop proxy binary package, you can build cross-platform archives locally:
-
-```sh
-make package-desktop-proxy DESKTOP_PROXY_VERSION=v0.1.0
-```
+Desktop proxy binaries are maintained in a separate repository:
+`https://github.com/KesherCom/kesher-desktop-proxy`
 
 ## HTTPS options
 
@@ -109,38 +106,62 @@ Verify: open `https://intercom.example.org` from a LAN client — no warning, mi
 ## Desktop proxy (alternative to HTTPS)
 
 Instead of setting up HTTPS, you can distribute a small desktop app that proxies through `localhost`, which browsers treat as a secure context (mic access works without HTTPS).
-
 The backend must serve the UI itself (`make run-backend` or the embedded binary). The proxy does **not** bundle frontend assets.
+Desktop proxy source, run/build instructions, and release artifacts are in:
+`https://github.com/KesherCom/kesher-desktop-proxy`
 
-```sh
-make run-desktop-proxy UPSTREAM=http://192.168.1.50:8080
-```
-
-For HTTPS upstreams with private/self-signed CAs:
-
-```sh
-make run-desktop-proxy UPSTREAM=https://intercom.example.org CA_FILE=/path/to/ca.pem
-```
-
-Cross-platform release builds:
-
-```sh
-make package-desktop-proxy DESKTOP_PROXY_VERSION=v0.1.0
-# outputs to desktop-proxy/dist/v0.1.0/
-```
+````
 
 ## Single-binary build (embedded UI)
 
 ```sh
 make build-backend   # builds frontend into the Go binary
 ./backend/bin/server # serves UI + API from one binary, no STATIC_DIR needed
-```
+````
 
 ## Tests
 
 ```sh
 make test   # backend go tests + frontend TypeScript/Vite build check
 ```
+
+## Load testing (real-world style)
+
+The backend includes a staged load test that simulates:
+
+- increasing concurrent clients,
+- realistic operator WS traffic (`chat`, `signal`, `voice_state`, matrix updates),
+- real WebRTC signaling (`webrtc_offer`/`webrtc_answer`/ICE) and synthetic RTP audio streams,
+- non-ideal Wi-Fi style behavior (latency, jitter, packet loss, occasional disconnect/reconnect).
+
+Run it with:
+
+```sh
+make loadtest
+# or run the built-in 20-client profile
+make loadtest-20
+```
+
+Useful tuning variables:
+
+```sh
+LOADTEST_STAGE_CLIENTS=20,40,80 \
+LOADTEST_STAGE_HOLD_SECONDS=20,30,45 \
+LOADTEST_RAMP_INTERVAL_MS=250 \
+LOADTEST_ACTION_INTERVAL_MS=800 \
+LOADTEST_NET_BASE_LATENCY_MS=40 \
+LOADTEST_NET_JITTER_MS=30 \
+LOADTEST_NET_SPIKE_CHANCE=0.10 \
+LOADTEST_NET_SPIKE_LATENCY_MS=220 \
+LOADTEST_NET_PACKET_LOSS=0.04 \
+LOADTEST_NET_MEDIA_PACKET_LOSS=0.06 \
+LOADTEST_NET_DISCONNECTS_PER_MIN=0.30 \
+make loadtest
+```
+
+The run prints per-stage and final summaries (client counts, queue pressure, dropped messages, reconnects, etc.) so you can compare profiles over time.
+
+Profile selection is also available via `LOADTEST_PROFILE` (`default` or `20clients`).
 
 Run `make help` for all available targets.
 

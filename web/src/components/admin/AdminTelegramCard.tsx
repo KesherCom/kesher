@@ -7,6 +7,7 @@ import {
 } from "../../api";
 import type { Bootstrap } from "../../types";
 import type { TelegramMapping } from "../../types";
+import { useAdminAction } from "./useAdminAction";
 
 type AdminTelegramCardProps = {
   token: string;
@@ -23,8 +24,14 @@ export function AdminTelegramCard({
   const [botConfigured, setBotConfigured] = useState(false);
   const [mode, setMode] = useState<"polling" | "webhook" | "">("");
   const [mappings, setMappings] = useState<TelegramMapping[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const {
+    busy,
+    error,
+    run: runAction,
+  } = useAdminAction({
+    onSuccess: loadStatus,
+    defaultErrorMessage: "operation failed",
+  });
 
   const [createChatId, setCreateChatId] = useState("");
   const [createLabel, setCreateLabel] = useState("");
@@ -53,19 +60,6 @@ export function AdminTelegramCard({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
-
-  async function runAction(action: () => Promise<void>) {
-    setBusy(true);
-    setError("");
-    try {
-      await action();
-      await loadStatus();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "operation failed");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   function resetCreateForm() {
     setCreateChatId("");

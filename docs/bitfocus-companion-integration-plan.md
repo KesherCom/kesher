@@ -49,17 +49,17 @@ The following are already in place and are not part of this remaining plan:
 
 - Add feedback for “active room equals X”.
 - Add feedback for “target PTT active” (room/direct/broadcast target).
-- Touchpoints: `companion/module-kesher/src/feedbacks.ts`.
+- Touchpoints: `KesherCom/companion-module-kesher/src/feedbacks.ts`.
 
 ### 6) Expose reconnect/backoff tuning in module config
 
 - Add advanced config fields for reconnect behavior and wire into existing reconnect logic.
-- Touchpoints: `companion/module-kesher/src/config.ts`, `companion/module-kesher/src/main.ts`.
+- Touchpoints: `KesherCom/companion-module-kesher/src/config.ts`, `KesherCom/companion-module-kesher/src/main.ts`.
 
 ## Validation strategy
 
 - `make test` for backend/frontend baseline.
-- Companion module build/package check (`npm run build`, `npm run package` in module directory).
+- Companion module build/package check in external companion repo (`npm run build`, `npm run package`).
 - Manual verification with:
   - one operator + one companion instance
   - multiple browser sessions for one username (warning visible)

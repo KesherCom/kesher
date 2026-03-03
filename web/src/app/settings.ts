@@ -2,7 +2,65 @@ export const tokenStorageKey = "intercom-token";
 export const sessionSettingsStorageKey = "intercom-session-settings";
 export const globalSettingsStorageKey = "intercom-global-settings";
 export const favoritesStorageKey = "intercom-favorites";
+export const keyboardShortcutsStorageKey = "intercom-keyboard-shortcuts";
 export const defaultAdminPin = "123456";
+
+// ── Keyboard shortcut types ──────────────────────────────────────────
+
+/**
+ * Actions that can be bound to keyboard shortcuts.
+ * - hold-type: active while the key is held down (e.g. PTT)
+ * - toggle-type: toggles state on each key press (e.g. always-on)
+ */
+export type ShortcutAction = "ptt" | "toggleAlwaysOn";
+
+export const shortcutActionMeta: Record<
+  ShortcutAction,
+  { label: string; type: "hold" | "toggle" }
+> = {
+  ptt: { label: "Push to Talk (room)", type: "hold" },
+  toggleAlwaysOn: { label: "Toggle Always On", type: "toggle" },
+};
+
+export const allShortcutActions: ShortcutAction[] = Object.keys(
+  shortcutActionMeta,
+) as ShortcutAction[];
+
+export type ShortcutBinding = {
+  code: string; // KeyboardEvent.code, e.g. "Space", "KeyT"
+  ctrl?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+};
+
+export type KeyboardShortcutSettings = Record<
+  ShortcutAction,
+  ShortcutBinding | null
+>;
+
+export const defaultShortcuts: KeyboardShortcutSettings = {
+  ptt: { code: "Space" },
+  toggleAlwaysOn: null,
+};
+
+/** Human-readable label for a binding. */
+export function formatBinding(binding: ShortcutBinding | null): string {
+  if (!binding) return "Not set";
+  const parts: string[] = [];
+  if (binding.ctrl) parts.push("Ctrl");
+  if (binding.alt) parts.push("Alt");
+  if (binding.shift) parts.push("Shift");
+  parts.push(friendlyKeyName(binding.code));
+  return parts.join(" + ");
+}
+
+function friendlyKeyName(code: string): string {
+  if (code === "Space") return "Space";
+  if (code.startsWith("Key")) return code.slice(3);
+  if (code.startsWith("Digit")) return code.slice(5);
+  if (code.startsWith("Numpad")) return "Num " + code.slice(6);
+  return code;
+}
 
 export type SessionSettings = {
   username: string;
@@ -10,6 +68,10 @@ export type SessionSettings = {
   listenRoomIds: string[];
   talkRoomIds: string[];
 };
+
+export function hasStoredSessionSettings(): boolean {
+  return localStorage.getItem(sessionSettingsStorageKey) !== null;
+}
 
 export type GlobalSettings = {
   selectedInputDeviceId: string;
@@ -135,5 +197,36 @@ export function loadFavoriteSettings(): FavoriteSettings {
     } satisfies FavoriteSettings;
   } catch {
     return { pinnedRoomIds: [], pinnedUserIds: [], showPinnedOnly: false };
+  }
+}
+
+function sanitizeBinding(value: unknown): ShortcutBinding | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.code !== "string" || record.code.length === 0) return null;
+  return {
+    code: record.code,
+    ...(record.ctrl === true ? { ctrl: true } : {}),
+    ...(record.shift === true ? { shift: true } : {}),
+    ...(record.alt === true ? { alt: true } : {}),
+  };
+}
+
+export function loadKeyboardShortcuts(): KeyboardShortcutSettings {
+  try {
+    const raw = localStorage.getItem(keyboardShortcutsStorageKey);
+    if (!raw) return { ...defaultShortcuts };
+    const parsed = JSON.parse(raw) as Partial<
+      Record<ShortcutAction, unknown>
+    >;
+    const result = { ...defaultShortcuts };
+    for (const action of allShortcutActions) {
+      if (action in parsed) {
+        result[action] = sanitizeBinding(parsed[action]);
+      }
+    }
+    return result;
+  } catch {
+    return { ...defaultShortcuts };
   }
 }

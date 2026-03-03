@@ -643,6 +643,147 @@ button {
   gap: 0.6rem;
   align-items: center;
 }
+
+/* ============ Routing Matrix ============ */
+.routing-matrix-hint {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  margin: 0 0 0.65rem;
+  line-height: 1.45;
+}
+.routing-matrix-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 0.5rem;
+}
+.routing-matrix {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 0.82rem;
+}
+.routing-matrix th,
+.routing-matrix td {
+  padding: 0.35rem 0.45rem;
+  white-space: nowrap;
+}
+.routing-matrix-corner {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.78rem;
+  border-bottom: 1px solid var(--border-light);
+  position: sticky;
+  left: 0;
+  background: var(--panel);
+  z-index: 2;
+}
+.routing-matrix-col-header {
+  text-align: center;
+  color: var(--text-secondary);
+  font-weight: 700;
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--border-light);
+  padding-bottom: 0.5rem;
+}
+.routing-matrix-row-header {
+  text-align: left;
+  color: var(--text-secondary);
+  font-weight: 700;
+  font-size: 0.82rem;
+  border-right: 1px solid var(--border-light);
+  position: sticky;
+  left: 0;
+  background: var(--panel);
+  z-index: 1;
+  padding-right: 0.75rem;
+}
+.routing-matrix-cell {
+  text-align: center;
+  vertical-align: middle;
+}
+.routing-matrix-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  margin: 0 0.1rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-dark);
+  font-size: 0.7rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
+  user-select: none;
+}
+.routing-matrix-toggle:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+}
+.routing-matrix-toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.routing-matrix-toggle.unavailable {
+  opacity: 0.25;
+  pointer-events: none;
+}
+.routing-matrix-talk.active {
+  background: var(--talk);
+  color: #fff;
+  border-color: var(--talk);
+  box-shadow: 0 0 6px rgba(255, 59, 48, 0.35);
+}
+.routing-matrix-listen.active {
+  background: var(--listen);
+  color: #fff;
+  border-color: var(--listen);
+  box-shadow: 0 0 6px rgba(52, 199, 89, 0.35);
+}
+.routing-matrix-forced.active {
+  background: var(--forced, #af52de);
+  color: #fff;
+  border-color: var(--forced, #af52de);
+  box-shadow: 0 0 6px rgba(175, 82, 222, 0.35);
+}
+
+/* Legend */
+.routing-matrix-legend {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+.routing-matrix-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.routing-matrix-swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 3px;
+}
+.routing-matrix-swatch-talk {
+  background: var(--talk);
+}
+.routing-matrix-swatch-listen {
+  background: var(--listen);
+}
+.routing-matrix-swatch-forced {
+  background: var(--forced, #af52de);
+}
+
 .admin-metric {
   padding: 0.65rem 0.75rem;
   border: 1px solid rgba(255, 255, 255, 0.03);
@@ -984,8 +1125,11 @@ button {
   display: grid;
   gap: 0.62rem;
 }
+.role-multiselect-actions {
+  display: flex;
+  gap: 0.5rem;
+}
 .role-multiselect-reset {
-  justify-self: start;
   min-height: 34px;
   padding: 0.35rem 0.72rem;
   font-size: 0.78rem;
@@ -1291,6 +1435,60 @@ button.secondary {
   border-radius: 50%;
   background: var(--disconnected-bg);
   box-shadow: 0 0 10px rgba(220, 50, 50, 0.75);
+  transition:
+    background 0.3s,
+    box-shadow 0.3s;
+}
+.station-live-dot.connected {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+}
+.station-live-dot.disconnected {
+  background: var(--disconnected-bg);
+  box-shadow: 0 0 10px rgba(220, 50, 50, 0.75);
+}
+
+/* ── Connection offline banner ── */
+.connection-offline-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.45rem 1rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--disconnected-bg);
+  color: var(--disconnected-text-highlight);
+  margin-bottom: 0.75rem;
+  animation: offline-pulse 1.8s ease-in-out infinite;
+}
+.connection-offline-icon {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--disconnected-text-highlight);
+  animation: offline-dot-blink 1.8s ease-in-out infinite;
+}
+@keyframes offline-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.65;
+  }
+}
+@keyframes offline-dot-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 .station-top-actions {
   display: flex;
@@ -1532,6 +1730,32 @@ button.secondary {
   font-size: 0.64rem;
   color: var(--text-tertiary);
 }
+
+/* Presence indicator badge – top-right corner of station-card */
+.station-presence-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+.station-presence-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4caf50;
+  box-shadow: 0 0 4px rgba(76, 175, 80, 0.55);
+  flex-shrink: 0;
+}
+
 .station-card-head.selected {
   background: var(--station-card-head-active-bg);
   color: #fff;
@@ -1654,12 +1878,23 @@ button.secondary {
   background: var(--station-listen-on-bg);
   color: #fff;
 }
+.station-card-actions .listen.forced {
+  background: var(--station-listen-on-bg);
+  color: #fff;
+  opacity: 0.85;
+  cursor: not-allowed;
+}
 .station-card-actions .listen.disabled,
 .station-card-actions .listen:disabled {
   opacity: 0.45;
   background: var(--btn-disabled-bg);
   color: var(--btn-disabled-text);
   cursor: not-allowed;
+}
+.station-card-actions .listen.forced:disabled {
+  opacity: 0.85;
+  background: var(--station-listen-on-bg);
+  color: #fff;
 }
 .station-card-actions .call {
   background: var(--station-call-bg);
@@ -1732,7 +1967,56 @@ button.secondary {
   flex-wrap: wrap;
   gap: 0.75rem;
   margin: 1rem 0;
+  padding: 0.6rem 0.85rem;
+  border-radius: 14px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  transition:
+    border-color 200ms ease,
+    background 200ms ease,
+    box-shadow 200ms ease;
 }
+
+/* ── Transmitting banner ── */
+/* ── Talk-armed & Talk-live card-head states ── */
+/* Selected for talk but not actively transmitting → red border around whole card */
+.station-card-head.talk-armed {
+  border: 2px solid var(--talk);
+  border-radius: 0;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+}
+/* Actively transmitting → only the header turns red */
+.station-card-head.talk-live {
+  background: var(--talk);
+  color: #fff;
+  box-shadow:
+    0 0 20px rgba(255, 59, 48, 0.45),
+    inset 0 0 12px rgba(0, 0, 0, 0.15);
+  animation: talk-live-head-glow 1.8s ease-in-out infinite;
+}
+.station-card-head.talk-live small {
+  color: rgba(255, 220, 220, 0.95);
+}
+.station-card-head.talk-live strong {
+  color: #fff;
+}
+@keyframes talk-live-head-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 20px rgba(255, 59, 48, 0.45),
+      inset 0 0 12px rgba(0, 0, 0, 0.15);
+  }
+  50% {
+    box-shadow:
+      0 0 30px rgba(255, 59, 48, 0.6),
+      inset 0 0 16px rgba(0, 0, 0, 0.1);
+  }
+}
+
 .station-ptt {
   min-width: 220px;
   min-height: 54px;
@@ -2171,6 +2455,112 @@ button.secondary {
   grid-column: 1 / -1;
   color: var(--muted);
   margin-top: 0.25rem;
+}
+
+/* ── Keyboard shortcuts settings ────────────────────────────────── */
+.keyboard-shortcuts-settings {
+  grid-column: 1 / -1;
+  margin-top: 1rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.keyboard-shortcuts-settings h4 {
+  margin: 0 0 0.5rem 0;
+  color: #fff;
+  font-size: 1.02rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.shortcuts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.shortcuts-table th {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.shortcuts-table td {
+  padding: 0.4rem 0.5rem;
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.shortcut-type-hint {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.shortcut-key {
+  display: inline-block;
+  padding: 0.15em 0.5em;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  color: #fff;
+  min-width: 2.5em;
+  text-align: center;
+}
+
+.shortcut-recording {
+  color: var(--accent);
+  font-style: italic;
+  animation: shortcut-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes shortcut-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.shortcut-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.shortcut-btn {
+  padding: 0.2em 0.6em;
+  font-size: 0.82rem;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.shortcut-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.shortcut-btn-clear {
+  color: var(--muted);
+}
+
+.shortcuts-hint {
+  display: block;
+  margin-top: 0.4rem;
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 /* Make the checkboxes look nicer: compact and aligned */

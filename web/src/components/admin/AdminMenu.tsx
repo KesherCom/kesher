@@ -1,12 +1,9 @@
-import React from "react";
 import type { Bootstrap } from "../../types";
 import { AdminConfigCard } from "./AdminConfigCard";
 import { AdminPinCard } from "./AdminPinCard";
 import { AdminMonitoringCard } from "./AdminMonitoringCard";
 
 type AdminMenuProps = {
-  isOpen: boolean;
-  setIsOpen: (value: boolean) => void;
   token: string | null;
   appData: Bootstrap;
   refreshBootstrapData: () => Promise<void>;
@@ -17,8 +14,6 @@ type AdminMenuProps = {
 };
 
 export function AdminMenu({
-  isOpen,
-  setIsOpen,
   token,
   appData,
   refreshBootstrapData,
@@ -41,6 +36,8 @@ export function AdminMenu({
       <AdminPinCard onUpdateAdminPin={onUpdateAdminPin} />
 
       <AdminMonitoringCard
+        token={token}
+        adminPin={adminPin}
         audioStats={audioStats}
         activeRoutesCount={activeRoutesCount}
       />

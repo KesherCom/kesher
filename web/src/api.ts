@@ -1,13 +1,16 @@
-import type { Bootstrap, PublicBootstrap, TelegramStatus, User } from "./types";
+import type {
+  Bootstrap,
+  PublicBootstrap,
+  RealtimeStatsResponse,
+  StatusResponse,
+  TelegramStatus,
+  User,
+} from "./types";
+import { toStringArray } from "./lib/normalize";
 
 const adminPinHeaderName = "X-Admin-Pin";
 
-function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string");
-}
-
-function normalizePublicBootstrap(data: unknown): PublicBootstrap {
+export function normalizePublicBootstrap(data: unknown): PublicBootstrap {
   const raw = (data ?? {}) as Record<string, unknown>;
   const roles = Array.isArray(raw.roles) ? raw.roles : [];
   const rooms = Array.isArray(raw.rooms) ? raw.rooms : [];
@@ -32,6 +35,7 @@ function normalizePublicBootstrap(data: unknown): PublicBootstrap {
         name: typeof entry.name === "string" ? entry.name : "",
         senderRoleIds: toStringArray(entry.senderRoleIds),
         receiverRoleIds: toStringArray(entry.receiverRoleIds),
+        forcedListenRoleIds: toStringArray(entry.forcedListenRoleIds),
       };
     }),
     broadcastGroups: broadcastGroups.map((group) => {
@@ -109,6 +113,28 @@ export async function logout(token: string): Promise<void> {
   });
 }
 
+export async function getRealtimeStats(
+  token: string,
+  adminPin: string,
+): Promise<RealtimeStatsResponse> {
+  const res = await fetch("/api/realtime-stats", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+    },
+  });
+  if (!res.ok) throw new Error("failed to load realtime stats");
+  return res.json() as Promise<RealtimeStatsResponse>;
+}
+
+export async function getStatus(token: string): Promise<StatusResponse> {
+  const res = await fetch("/api/status", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("failed to load status");
+  return res.json() as Promise<StatusResponse>;
+}
+
 async function apiMutation(
   url: string,
   token: string,
@@ -184,6 +210,7 @@ export async function createRoom(
     name: string;
     senderRoleIds?: string[];
     receiverRoleIds?: string[];
+    forcedListenRoleIds?: string[];
   },
 ): Promise<void> {
   await apiMutation("/api/admin/rooms", token, "POST", adminPin, payload);
@@ -196,6 +223,7 @@ export async function updateRoom(
     name: string;
     senderRoleIds?: string[];
     receiverRoleIds?: string[];
+    forcedListenRoleIds?: string[];
   },
 ): Promise<void> {
   await apiMutation(
@@ -325,4 +353,25 @@ export async function updateAdminPin(
   await apiMutation("/api/admin/pin", token, "PUT", currentAdminPin, {
     newPin,
   });
+}
+
+export type RoutingMatrixEntry = {
+  roomId: string;
+  senderRoleIds: string[];
+  receiverRoleIds: string[];
+  forcedListenRoleIds: string[];
+};
+
+export async function updateRoutingMatrix(
+  token: string,
+  adminPin: string,
+  entries: RoutingMatrixEntry[],
+): Promise<void> {
+  await apiMutation(
+    "/api/admin/routing-matrix",
+    token,
+    "PUT",
+    adminPin,
+    entries,
+  );
 }

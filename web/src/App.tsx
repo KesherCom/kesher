@@ -2,24 +2,26 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   bootstrap,
   getPublicBootstrap,
+  getStatus,
   login,
   logout,
+  normalizePublicBootstrap,
   updateAdminPin,
 } from "./api";
 import { LoginView } from "./components/LoginView";
 import { SimpleIntercomView } from "./components/SimpleIntercomView";
 import { StationIntercomView } from "./components/StationIntercomView";
-import { AdminPanel } from "./components/admin/AdminPanel";
 import { AdminMenu } from "./components/admin/AdminMenu";
-import { AudioPanel } from "./components/panels/AudioPanel";
 import { ChatSignalPanel } from "./components/panels/ChatSignalPanel";
 import { RealtimeEventsPanel } from "./components/panels/RealtimeEventsPanel";
 import {
   defaultAdminPin,
   type FavoriteSettings,
   type GlobalSettings,
+  type KeyboardShortcutSettings,
   loadFavoriteSettings,
   loadGlobalSettings,
+  loadKeyboardShortcuts,
   loadSessionSettings,
   type SessionSettings,
   tokenStorageKey,
@@ -27,7 +29,13 @@ import {
   sessionSettingsStorageKey,
   globalSettingsStorageKey,
   favoritesStorageKey,
+  keyboardShortcutsStorageKey,
+  hasStoredSessionSettings,
 } from "./app/settings";
+import {
+  useKeyboardShortcuts,
+  type ShortcutCallbacks,
+} from "./app/useKeyboardShortcuts";
 import {
   sameStringArray,
   sameStringSet,
@@ -39,6 +47,8 @@ import {
   roleAllowed,
   toggleRoomSelectionState,
 } from "./lib/intercom";
+import { toStringArray } from "./lib/normalize";
+import { sortDirectUsersByRoleAndUsername } from "./lib/users";
 import type {
   Bootstrap,
   Presence,
@@ -60,8 +70,6 @@ type WsMessage =
         targetId?: string;
         state?: "ptt_start" | "ptt_stop";
         signal?: string;
-        roomId?: string;
-        activeRoomId?: string;
         listenRoomIds?: string[];
         talkRoomIds?: string[];
       };
@@ -70,12 +78,8 @@ type WsMessage =
   | {
       type: "webrtc_ice_candidate";
       data: { candidate: string; sdpMid?: string; sdpMLineIndex?: number };
-    };
-
-function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string");
-}
+    }
+  | { type: "config_updated"; data: unknown };
 
 function normalizePresenceList(value: unknown): Presence[] {
   if (!Array.isArray(value)) return [];
@@ -86,8 +90,6 @@ function normalizePresenceList(value: unknown): Presence[] {
       userId: typeof record.userId === "string" ? record.userId : "",
       username: typeof record.username === "string" ? record.username : "",
       roleId: typeof record.roleId === "string" ? record.roleId : "",
-      activeRoom:
-        typeof record.activeRoom === "string" ? record.activeRoom : "",
       listenRooms: toStringArray(record.listenRooms),
       talkRooms: toStringArray(record.talkRooms),
       voiceMode:
@@ -98,10 +100,36 @@ function normalizePresenceList(value: unknown): Presence[] {
   });
 }
 
+function samePresenceList(a: Presence[], b: Presence[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i];
+    const right = b[i];
+    if (
+      left.userId !== right.userId ||
+      left.username !== right.username ||
+      left.roleId !== right.roleId ||
+      left.voiceMode !== right.voiceMode ||
+      left.micEnabled !== right.micEnabled ||
+      left.broadcastActive !== right.broadcastActive
+    ) {
+      return false;
+    }
+    if (
+      !sameStringArray(left.listenRooms ?? [], right.listenRooms ?? []) ||
+      !sameStringArray(left.talkRooms ?? [], right.talkRooms ?? [])
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 const defaultInputGainDeviceKey = "__default__";
 const meterDbFsFloor = -60;
 const adminPathname = "/admin";
 const loginPathname = "/login";
+const statusPollIntervalMs = 3000;
 
 function inputGainDeviceKey(deviceId: string): string {
   return deviceId || defaultInputGainDeviceKey;
@@ -130,9 +158,8 @@ export function App() {
   const initialSessionSettings = loadSessionSettings();
   const initialGlobalSettings = loadGlobalSettings();
   const initialFavorites = loadFavoriteSettings();
-  const hadStoredRoomMatrix =
-    initialSessionSettings.listenRoomIds.length > 0 ||
-    initialSessionSettings.talkRoomIds.length > 0;
+  const initialKeyboardShortcuts = loadKeyboardShortcuts();
+  const hadStoredRoomMatrix = hasStoredSessionSettings();
   const [publicData, setPublicData] = useState<PublicBootstrap | null>(null);
   const [appData, setAppData] = useState<Bootstrap | null>(null);
   const [pathname, setPathname] = useState(() => window.location.pathname);
@@ -148,8 +175,10 @@ export function App() {
     initialSessionSettings.talkRoomIds,
   );
   const [presence, setPresence] = useState<Presence[]>([]);
-  const [scope, setScope] = useState<"direct" | "room" | "broadcast">("room");
-  const [targetId, setTargetId] = useState("");
+  const [roomListenerCounts, setRoomListenerCounts] = useState<
+    Record<string, number>
+  >({});
+  const scope: "direct" | "room" | "broadcast" = "room";
   const [message, setMessage] = useState("");
   const [chatMessages, setChatMessages] = useState<
     Array<{
@@ -169,6 +198,8 @@ export function App() {
   const [connectionState, setConnectionState] = useState<
     "connecting" | "connected" | "reconnecting" | "offline"
   >("offline");
+  const [, setAudioError] = useState("");
+  const [, setWebrtcState] = useState("");
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedInputDeviceId, setSelectedInputDeviceId] = useState(
     initialGlobalSettings.selectedInputDeviceId,
@@ -201,17 +232,15 @@ export function App() {
   const [showPinnedOnly, setShowPinnedOnly] = useState<boolean>(
     initialFavorites.showPinnedOnly,
   );
-  const [selectedChannelId, setSelectedChannelId] = useState<string>("");
+  const [keyboardShortcuts, setKeyboardShortcuts] =
+    useState<KeyboardShortcutSettings>(initialKeyboardShortcuts);
+  const [isRecordingShortcut, setIsRecordingShortcut] = useState(false);
   const [inputLevelDbFs, setInputLevelDbFs] = useState(meterDbFsFloor);
   const [inputSamplePeakClipping, setInputSamplePeakClipping] = useState(false);
   const [displayedInputClipping, setDisplayedInputClipping] = useState(false);
-  const [audioError, setAudioError] = useState<string>("");
-  const [webrtcState, setWebrtcState] = useState<string>("new");
   const [rtpStats, setRtpStats] = useState<{ inKbps: number; outKbps: number }>(
     { inKbps: 0, outKbps: 0 },
   );
-  const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
-  const [isOutputMenuOpen, setIsOutputMenuOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"station" | "simple">("station");
   const [authMode, setAuthMode] = useState<"operator" | "admin">(() =>
     isAdminPathname(window.location.pathname) ? "admin" : "operator",
@@ -220,7 +249,6 @@ export function App() {
   const [adminLoginError, setAdminLoginError] = useState("");
   const [adminPinGuard, setAdminPinGuard] = useState<string>(defaultAdminPin);
   const [adminOverrideActive, setAdminOverrideActive] = useState(false);
-  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState<boolean>(false);
   const [isUserSettingsOpen, setIsUserSettingsOpen] = useState(false);
   const [pttPressed, setPttPressed] = useState(false);
   const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(
@@ -321,17 +349,34 @@ export function App() {
   const talkRoomIdsRef = useRef<string[]>(talkRoomIds);
   const prevChannelRef = useRef<string>("");
   const pendingInitialRoomRestoreRef = useRef(hadStoredRoomMatrix);
-  const micMenuRef = useRef<HTMLDivElement | null>(null);
-  const outputMenuRef = useRef<HTMLDivElement | null>(null);
+  const isUserSettingsOpenRef = useRef(isUserSettingsOpen);
   const showDebug = (() => {
     const params = new URLSearchParams(window.location.search);
     const value = params.get("debug");
     return value === "1" || value === "true";
   })();
+  const pushDebugEvent = useCallback(
+    (label: string) => {
+      if (!showDebug) return;
+      setEvents((old) =>
+        [
+          {
+            label,
+            at: new Date().toLocaleTimeString(),
+          },
+          ...old,
+        ].slice(0, 200),
+      );
+    },
+    [showDebug],
+  );
 
   useEffect(() => {
     voiceModeRef.current = voiceMode;
   }, [voiceMode]);
+  useEffect(() => {
+    isUserSettingsOpenRef.current = isUserSettingsOpen;
+  }, [isUserSettingsOpen]);
   useEffect(() => {
     selectedInputDeviceIdRef.current = selectedInputDeviceId;
   }, [selectedInputDeviceId]);
@@ -406,6 +451,13 @@ export function App() {
   }, [pinnedRoomIds, pinnedUserIds, showPinnedOnly]);
 
   useEffect(() => {
+    localStorage.setItem(
+      keyboardShortcutsStorageKey,
+      JSON.stringify(keyboardShortcuts),
+    );
+  }, [keyboardShortcuts]);
+
+  useEffect(() => {
     if (!token) return;
     bootstrap(token)
       .then((data) => {
@@ -422,10 +474,15 @@ export function App() {
           const room = data.rooms.find((entry) => entry.id === roomId);
           return !!room && roleAllowed(room.senderRoleIds, data.self.roleId);
         });
-        pendingInitialRoomRestoreRef.current =
-          sanitizedListen.length > 0 || sanitizedTalk.length > 0;
-        if (sanitizedListen.length > 0 || sanitizedTalk.length > 0) {
-          setListenRoomIds(sanitizedListen);
+        pendingInitialRoomRestoreRef.current = hadStoredRoomMatrix;
+        if (hadStoredRoomMatrix) {
+          setListenRoomIds(
+            mergeForcedListenRooms(
+              sanitizedListen,
+              data.rooms,
+              data.self.roleId,
+            ),
+          );
           setTalkRoomIds(sanitizedTalk);
         } else {
           let initialRoom = "";
@@ -453,7 +510,13 @@ export function App() {
               initialRoomConfig?.senderRoleIds,
               data.self.roleId,
             );
-            setListenRoomIds(initialCanListen ? [initialRoom] : []);
+            setListenRoomIds(
+              mergeForcedListenRooms(
+                initialCanListen ? [initialRoom] : [],
+                data.rooms,
+                data.self.roleId,
+              ),
+            );
             setTalkRoomIds(initialCanTalk ? [initialRoom] : []);
           }
         }
@@ -470,6 +533,36 @@ export function App() {
         setToken(null);
       });
   }, [token]);
+
+  useEffect(() => {
+    if (!token || authMode !== "operator") {
+      setRoomListenerCounts({});
+      return;
+    }
+    let cancelled = false;
+    let inFlight = false;
+    const pollStatus = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const status = await getStatus(token);
+        if (cancelled) return;
+        setRoomListenerCounts(status.roomListenerCounts ?? {});
+      } catch {
+        if (cancelled) return;
+      } finally {
+        inFlight = false;
+      }
+    };
+    void pollStatus();
+    const intervalId = window.setInterval(() => {
+      void pollStatus();
+    }, statusPollIntervalMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [token, authMode]);
 
   useEffect(() => {
     if (!appData) return;
@@ -582,11 +675,7 @@ export function App() {
         listenRoomIdsRef.current.includes(roomID),
       );
       if (listenedTalkRooms.length > 0) {
-        const roomToUse =
-          senderPresence.activeRoom &&
-          listenedTalkRooms.includes(senderPresence.activeRoom)
-            ? senderPresence.activeRoom
-            : listenedTalkRooms[0];
+        const roomToUse = listenedTalkRooms[0];
         return clampGainValue(roomGainByIdRef.current[roomToUse] ?? 1);
       }
     }
@@ -655,27 +744,6 @@ export function App() {
         "Microphone capture needs HTTPS (or localhost). Open the app via HTTPS for remote devices.",
       );
     }
-  }, []);
-
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (
-        micMenuRef.current &&
-        event.target instanceof Node &&
-        !micMenuRef.current.contains(event.target)
-      ) {
-        setIsMicMenuOpen(false);
-      }
-      if (
-        outputMenuRef.current &&
-        event.target instanceof Node &&
-        !outputMenuRef.current.contains(event.target)
-      ) {
-        setIsOutputMenuOpen(false);
-      }
-    };
-    window.addEventListener("pointerdown", onPointerDown);
-    return () => window.removeEventListener("pointerdown", onPointerDown);
   }, []);
 
   function clearReconnectTimer() {
@@ -845,16 +913,42 @@ export function App() {
     return roleAllowed(room.receiverRoleIds, currentRoleId);
   }
 
+  function isRoomForcedListen(roomId: string, currentRoleId: string) {
+    const room = appData?.rooms.find((entry) => entry.id === roomId);
+    if (!room) return false;
+    return (room.forcedListenRoleIds ?? []).includes(currentRoleId);
+  }
+
+  /** Ensure forced-listen rooms for the given role are included in a listen-room set. */
+  function mergeForcedListenRooms(
+    prev: string[],
+    rooms: { id: string; forcedListenRoleIds?: string[] }[],
+    roleId: string,
+  ): string[] {
+    const forced = rooms
+      .filter((r) => (r.forcedListenRoleIds ?? []).includes(roleId))
+      .map((r) => r.id);
+    if (forced.length === 0) return prev;
+    const existing = new Set(prev);
+    const merged = [...prev];
+    for (const id of forced) {
+      if (!existing.has(id)) merged.push(id);
+    }
+    return merged;
+  }
+
   function toggleListenRoom(roomId: string) {
     if (!appData || !canRoleReceiveFromRoom(roomId, appData.self.roleId))
       return;
+    // Prevent deselecting a forced-listen room
+    if (isRoomForcedListen(roomId, appData.self.roleId)) return;
     setListenRoomIds((prev) => toggleRoomSelectionState(prev, roomId));
   }
 
   function toggleTalkRoom(roomId: string) {
     if (!appData || !canRoleSendToRoom(roomId, appData.self.roleId)) return;
     setTalkRoomIds((prev) => {
-      if (prev[0] === roomId && prev.length === 1) return prev;
+      if (prev.includes(roomId)) return prev.filter((id) => id !== roomId);
       return [roomId];
     });
   }
@@ -1125,9 +1219,24 @@ export function App() {
     clearIncomingAttentionTimer();
     setIncomingAttention(null);
   }
+  useEffect(() => {
+    if (authMode !== "admin") return;
+    shouldReconnectRef.current = false;
+    clearReconnectTimer();
+    cleanupRealtimeResources();
+    setConnectionState("offline");
+    setPresence([]);
+    setChatMessages([]);
+    setEvents([]);
+    setPttPressed(false);
+    setBroadcastPttPressed(null);
+    setdirectPttPressedUserId(null);
+    setPttPressedChannelId(null);
+    setLastDirectCallerUserId(null);
+  }, [authMode]);
 
   useEffect(() => {
-    if (!token || !appData) return;
+    if (!token || !appData || authMode !== "operator") return;
     shouldReconnectRef.current = true;
     let cancelled = false;
 
@@ -1136,9 +1245,7 @@ export function App() {
       setConnectionState(
         reconnectAttemptsRef.current > 0 ? "reconnecting" : "connecting",
       );
-      pendingInitialRoomRestoreRef.current =
-        listenRoomIdsRef.current.length > 0 ||
-        talkRoomIdsRef.current.length > 0;
+      pendingInitialRoomRestoreRef.current = true;
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(
         `${proto}//${window.location.host}/ws?token=${encodeURIComponent(token)}`,
@@ -1155,7 +1262,9 @@ export function App() {
         pc.onconnectionstatechange = () => setWebrtcState(pc.connectionState);
         pc.oniceconnectionstatechange = () =>
           setWebrtcState(`ice:${pc.iceConnectionState}`);
-        startStatsLoop(pc);
+        if (showDebug) {
+          startStatsLoop(pc);
+        }
         pc.onicecandidate = (event) => {
           if (
             !event.candidate ||
@@ -1232,15 +1341,7 @@ export function App() {
                 `Remote audio playback blocked: ${err instanceof Error ? err.message : "unknown error"}`,
               );
             });
-          setEvents((old) =>
-            [
-              {
-                label: "system · webrtc · remote audio track attached",
-                at: new Date().toLocaleTimeString(),
-              },
-              ...old,
-            ].slice(0, 200),
-          );
+          pushDebugEvent("system · webrtc · remote audio track attached");
         };
         try {
           const captureStream = await getMicStream(
@@ -1253,7 +1354,11 @@ export function App() {
             selectedInputGainFor(selectedInputDeviceIdRef.current),
           );
           localStreamRef.current = stream;
-          startLevelMeter(captureStream);
+          if (isUserSettingsOpenRef.current) {
+            startLevelMeter(captureStream);
+          } else {
+            stopLevelMeter();
+          }
           void refreshAudioDevices();
           const initialEnabled = voiceModeRef.current === "always_on";
           for (const track of stream.getAudioTracks()) {
@@ -1265,34 +1370,13 @@ export function App() {
           setAudioError(
             `Failed to access microphone: ${e instanceof Error ? e.message : "unknown error"}`,
           );
-          setEvents((old) =>
-            [
-              {
-                label: "system · local/mic · capture failed (receive-only)",
-                at: new Date().toLocaleTimeString(),
-              },
-              ...old,
-            ].slice(0, 200),
-          );
+          pushDebugEvent("system · local/mic · capture failed (receive-only)");
         }
         ws.send(JSON.stringify({ type: "webrtc_ready", data: {} }));
-        const activeRoomId = matrixAnchorRoomId(
-          listenRoomIdsRef.current,
-          talkRoomIdsRef.current,
-        );
-        if (activeRoomId) {
-          ws.send(
-            JSON.stringify({
-              type: "set_active_room",
-              data: { roomId: activeRoomId },
-            }),
-          );
-        }
         ws.send(
           JSON.stringify({
             type: "set_room_matrix",
             data: {
-              activeRoomId,
               listenRoomIds: listenRoomIdsRef.current,
               talkRoomIds: talkRoomIdsRef.current,
             },
@@ -1319,7 +1403,39 @@ export function App() {
       ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data) as WsMessage;
         if (msg.type === "presence") {
-          setPresence(normalizePresenceList(msg.data));
+          const nextPresence = normalizePresenceList(msg.data);
+          setPresence((prev) =>
+            samePresenceList(prev, nextPresence) ? prev : nextPresence,
+          );
+          return;
+        }
+        if (msg.type === "config_updated") {
+          const updated = normalizePublicBootstrap(msg.data);
+          setAppData((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              roles: updated.roles,
+              rooms: updated.rooms,
+              broadcastGroups: updated.broadcastGroups,
+            };
+          });
+          setPublicData(updated);
+          // Remove listen/talk selections that the user's role no longer has access to
+          const selfRoleId = appData?.self?.roleId ?? "";
+          setListenRoomIds((prev) => {
+            const filtered = prev.filter((id) => {
+              const room = updated.rooms.find((r) => r.id === id);
+              return !!room && roleAllowed(room.receiverRoleIds, selfRoleId);
+            });
+            return mergeForcedListenRooms(filtered, updated.rooms, selfRoleId);
+          });
+          setTalkRoomIds((prev) =>
+            prev.filter((id) => {
+              const room = updated.rooms.find((r) => r.id === id);
+              return !!room && roleAllowed(room.senderRoleIds, selfRoleId);
+            }),
+          );
           return;
         }
         if (msg.type === "companion_command") {
@@ -1377,17 +1493,6 @@ export function App() {
             }
             return;
           }
-          if (msg.data.command === "set_active_room" && msg.data.roomId) {
-            setTalkRoomIds([msg.data.roomId]);
-            setListenRoomIds([msg.data.roomId]);
-            wsRef.current?.send(
-              JSON.stringify({
-                type: "set_active_room",
-                data: { roomId: msg.data.roomId },
-              }),
-            );
-            return;
-          }
           if (msg.data.command === "set_room_matrix") {
             const nextListen = Array.isArray(msg.data.listenRoomIds)
               ? msg.data.listenRoomIds
@@ -1402,14 +1507,10 @@ export function App() {
               setTalkRoomIds(msg.data.talkRoomIds);
             }
             if (wsRef.current?.readyState === WebSocket.OPEN) {
-              const activeRoomId =
-                msg.data.activeRoomId ||
-                matrixAnchorRoomId(nextListen, nextTalk);
               wsRef.current.send(
                 JSON.stringify({
                   type: "set_room_matrix",
                   data: {
-                    activeRoomId,
                     listenRoomIds: nextListen,
                     talkRoomIds: nextTalk,
                   },
@@ -1449,15 +1550,7 @@ export function App() {
                 data: { sdp: answer.sdp || "" },
               }),
             );
-            setEvents((old) =>
-              [
-                {
-                  label: "system · webrtc · answered offer",
-                  at: new Date().toLocaleTimeString(),
-                },
-                ...old,
-              ].slice(0, 200),
-            );
+            pushDebugEvent("system · webrtc · answered offer");
           })().catch((err) => {
             setAudioError(
               `WebRTC renegotiation failed: ${err instanceof Error ? err.message : "unknown error"}`,
@@ -1543,15 +1636,17 @@ export function App() {
           }
         }
         const body = (msg.data.signal || msg.data.body || "").toString();
-        setEvents((old) =>
-          [
-            {
-              label: `${msg.type} · ${msg.data.fromUser.username} · ${msg.data.scope}/${msg.data.targetId} · ${body}`,
-              at: new Date(msg.data.timestamp).toLocaleTimeString(),
-            },
-            ...old,
-          ].slice(0, 200),
-        );
+        if (showDebug) {
+          setEvents((old) =>
+            [
+              {
+                label: `${msg.type} · ${msg.data.fromUser.username} · ${msg.data.scope}/${msg.data.targetId} · ${body}`,
+                at: new Date(msg.data.timestamp).toLocaleTimeString(),
+              },
+              ...old,
+            ].slice(0, 200),
+          );
+        }
       };
 
       ws.onclose = (event) => {
@@ -1566,14 +1661,8 @@ export function App() {
           reason: event.reason,
           wasClean: event.wasClean,
         });
-        setEvents((old) =>
-          [
-            {
-              label: `system · websocket closed · code:${event.code} clean:${event.wasClean ? "yes" : "no"} · reconnecting...`,
-              at: new Date().toLocaleTimeString(),
-            },
-            ...old,
-          ].slice(0, 200),
+        pushDebugEvent(
+          `system · websocket closed · code:${event.code} clean:${event.wasClean ? "yes" : "no"} · reconnecting...`,
         );
         setConnectionState("reconnecting");
         reconnectAttemptsRef.current += 1;
@@ -1581,20 +1670,16 @@ export function App() {
           8000,
           500 * 2 ** Math.min(reconnectAttemptsRef.current, 5),
         );
+        const jitterFactor = 0.7 + Math.random() * 0.6;
+        const reconnectDelay = Math.round(backoff * jitterFactor);
         reconnectTimeoutRef.current = window.setTimeout(() => {
           void connect();
-        }, backoff);
+        }, reconnectDelay);
       };
       ws.onerror = (event) => {
         console.error("WebSocket error:", event);
-        setEvents((old) =>
-          [
-            {
-              label: `system · websocket error · ${event instanceof ErrorEvent ? event.message : "check console"}`,
-              at: new Date().toLocaleTimeString(),
-            },
-            ...old,
-          ].slice(0, 200),
+        pushDebugEvent(
+          `system · websocket error · ${event instanceof ErrorEvent ? event.message : "check console"}`,
         );
         ws.close();
       };
@@ -1608,7 +1693,14 @@ export function App() {
       cleanupRealtimeResources();
       setConnectionState("offline");
     };
-  }, [token, appData, refreshAudioDevices]);
+  }, [
+    token,
+    appData,
+    authMode,
+    refreshAudioDevices,
+    pushDebugEvent,
+    showDebug,
+  ]);
 
   useEffect(() => {
     if (!appData) return;
@@ -1627,23 +1719,10 @@ export function App() {
       );
       if (!matchesListen || !matchesTalk) {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
-          const activeRoomId = matrixAnchorRoomId(
-            listenRoomIdsRef.current,
-            talkRoomIdsRef.current,
-          );
-          if (activeRoomId) {
-            wsRef.current.send(
-              JSON.stringify({
-                type: "set_active_room",
-                data: { roomId: activeRoomId },
-              }),
-            );
-          }
           wsRef.current.send(
             JSON.stringify({
               type: "set_room_matrix",
               data: {
-                activeRoomId,
                 listenRoomIds: listenRoomIdsRef.current,
                 talkRoomIds: talkRoomIdsRef.current,
               },
@@ -1688,29 +1767,20 @@ export function App() {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     roomSwitchTimerRef.current = window.setTimeout(() => {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-      const activeRoomId = matrixAnchorRoomId(listenRoomIds, talkRoomIds);
+      const anchorRoomId = matrixAnchorRoomId(listenRoomIds, talkRoomIds);
       wsRef.current.send(
         JSON.stringify({
           type: "set_room_matrix",
           data: {
-            activeRoomId,
             listenRoomIds,
             talkRoomIds,
           },
         }),
       );
-      setEvents((old) =>
-        [
-          {
-            label: `system · matrix updated · ${activeRoomId || "no-room"}`,
-            at: new Date().toLocaleTimeString(),
-          },
-          ...old,
-        ].slice(0, 200),
-      );
+      pushDebugEvent(`system · matrix updated · ${anchorRoomId || "no-room"}`);
     }, 120);
     return () => clearRoomSwitchTimer();
-  }, [listenRoomIds, talkRoomIds]);
+  }, [listenRoomIds, talkRoomIds, pushDebugEvent]);
 
   useEffect(() => {
     if (!token || !appData || !pcRef.current) return;
@@ -1746,7 +1816,11 @@ export function App() {
           for (const t of localStreamRef.current.getTracks()) t.stop();
         }
         localStreamRef.current = newStream;
-        startLevelMeter(newCaptureStream);
+        if (isUserSettingsOpenRef.current) {
+          startLevelMeter(newCaptureStream);
+        } else {
+          stopLevelMeter();
+        }
         applyVoiceModeToLocalTracks(voiceModeRef.current);
         setAudioError("");
       } catch (e) {
@@ -1768,6 +1842,17 @@ export function App() {
       inputGainNodeRef.current.gain.value = selectedGain;
     }
   }, [selectedInputDeviceId, inputGainByDeviceId]);
+
+  useEffect(() => {
+    if (!isUserSettingsOpen) {
+      stopLevelMeter();
+      return;
+    }
+    const captureStream = inputCaptureStreamRef.current;
+    if (captureStream) {
+      startLevelMeter(captureStream);
+    }
+  }, [isUserSettingsOpen]);
 
   useEffect(() => {
     for (const audio of remoteAudioRef.current.values()) {
@@ -1793,31 +1878,6 @@ export function App() {
       [key]: clampGainValue(gain),
     }));
   }, []);
-
-  const currentTargets = useMemo(() => {
-    if (!appData) return [];
-    if (scope === "direct") {
-      return appData.users
-        .filter(
-          (u) =>
-            u.id !== appData.self.id && u.username.toLowerCase() !== "admin",
-        )
-        .map((u) => ({ id: u.id, label: `${u.username} (${u.roleId})` }));
-    }
-    if (scope === "room") {
-      return appData.rooms
-        .filter((room) => roleAllowed(room.senderRoleIds, appData.self.roleId))
-        .map((r) => ({ id: r.id, label: r.name }));
-    }
-    return appData.broadcastGroups
-      .filter((group) =>
-        roleAllowed(
-          Array.isArray(group.allowedRoleIds) ? group.allowedRoleIds : [],
-          appData.self.roleId,
-        ),
-      )
-      .map((b) => ({ id: b.id, label: b.name }));
-  }, [scope, appData]);
 
   const selectedMicLabel = useMemo(() => {
     return (
@@ -1879,19 +1939,6 @@ export function App() {
     return map;
   }, [appData]);
 
-  const availableChannels = useMemo(() => {
-    return (appData?.rooms || []).map((room) => ({
-      id: room.id,
-      label: room.name,
-    }));
-  }, [appData]);
-
-  useEffect(() => {
-    setTargetId((prev) => {
-      if (currentTargets.some((target) => target.id === prev)) return prev;
-      return currentTargets[0]?.id || "";
-    });
-  }, [currentTargets]);
   useEffect(() => {
     const onPopState = () => {
       setPathname(window.location.pathname);
@@ -2012,26 +2059,17 @@ export function App() {
       broadcastGroups: data.broadcastGroups,
     });
     setListenRoomIds((prev) => {
-      const next = prev.filter((roomId) => {
+      const filtered = prev.filter((roomId) => {
         const room = data.rooms.find((entry) => entry.id === roomId);
         return !!room && roleAllowed(room.receiverRoleIds, data.self.roleId);
       });
-      if (next.length > 0) return next;
-      const firstAllowed = data.rooms.find((room) =>
-        roleAllowed(room.receiverRoleIds, data.self.roleId),
-      );
-      return firstAllowed ? [firstAllowed.id] : [];
+      return mergeForcedListenRooms(filtered, data.rooms, data.self.roleId);
     });
     setTalkRoomIds((prev) => {
-      const next = prev.filter((roomId) => {
+      return prev.filter((roomId) => {
         const room = data.rooms.find((entry) => entry.id === roomId);
         return !!room && roleAllowed(room.senderRoleIds, data.self.roleId);
       });
-      if (next.length > 0) return next;
-      const firstAllowed = data.rooms.find((room) =>
-        roleAllowed(room.senderRoleIds, data.self.roleId),
-      );
-      return firstAllowed ? [firstAllowed.id] : [];
     });
   }
 
@@ -2042,13 +2080,10 @@ export function App() {
       !message.trim()
     )
       return;
-    const resolvedTargetId =
-      scope === "room"
-        ? matrixAnchorRoomId(
-            listenRoomIdsRef.current,
-            talkRoomIdsRef.current,
-          ) || targetId
-        : targetId;
+    const resolvedTargetId = matrixAnchorRoomId(
+      listenRoomIdsRef.current,
+      talkRoomIdsRef.current,
+    );
     if (!resolvedTargetId) return;
     wsRef.current.send(
       JSON.stringify({
@@ -2188,11 +2223,30 @@ export function App() {
     sendDirectVoiceState(userId, "ptt_stop");
   }
 
+  // ── Keyboard shortcuts ──────────────────────────────────────────────
+  const shortcutCallbacks = useMemo<ShortcutCallbacks>(
+    () => ({
+      ptt: { onStart: startPtt, onStop: stopPtt },
+      toggleAlwaysOn: {
+        onToggle: () => setAlwaysOn(voiceModeRef.current !== "always_on"),
+      },
+    }),
+    // startPtt / stopPtt / setAlwaysOn are stable function declarations
+    // inside the component body – they close over refs so this is safe.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  useKeyboardShortcuts(
+    keyboardShortcuts,
+    shortcutCallbacks,
+    !isRecordingShortcut,
+  );
+
   function handleChannelPttStart(channelId: string) {
     if (!appData || !channelId) return;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     // Select the channel and start PTT with that channel directly
-    setSelectedChannelId(channelId);
     setTalkRoomIds([channelId]);
     setPttPressed(true);
     setPttPressedChannelId(channelId);
@@ -2202,9 +2256,8 @@ export function App() {
       JSON.stringify({
         type: "set_room_matrix",
         data: {
-          listenRoomIDs: listenRoomIdsRef.current,
-          talkRoomIDs: [channelId],
-          activeRoomID: channelId,
+          listenRoomIds: listenRoomIdsRef.current,
+          talkRoomIds: [channelId],
         },
       }),
     );
@@ -2264,30 +2317,6 @@ export function App() {
     return <div className="root">Loading data…</div>;
   }
 
-  // audioPanel is now integrated into the User Settings modal in StationIntercomView
-  // const audioPanel = (
-  //   <AudioPanel
-  //     inputDevices={inputDevices}
-  //     selectedInputDeviceId={selectedInputDeviceId}
-  //     selectedMicLabel={selectedMicLabel}
-  //     isMicMenuOpen={isMicMenuOpen}
-  //     setIsMicMenuOpen={setIsMicMenuOpen}
-  //     setSelectedInputDeviceId={setSelectedInputDeviceId}
-  //     inputLevel={inputLevel}
-  //     outputDevices={outputDevices}
-  //     selectedOutputDeviceId={selectedOutputDeviceId}
-  //     selectedOutputLabel={selectedOutputLabel}
-  //     isOutputMenuOpen={isOutputMenuOpen}
-  //     setIsOutputMenuOpen={setIsOutputMenuOpen}
-  //     setSelectedOutputDeviceId={(nextOutputDeviceId) => {
-  //       void changeOutputDevice(nextOutputDeviceId);
-  //     }}
-  //     outputSelectionSupported={outputSelectionSupported}
-  //     micMenuRef={micMenuRef}
-  //     outputMenuRef={outputMenuRef}
-  //   />
-  // );
-
   const chatAndSignalBlock = (
     <ChatSignalPanel
       message={message}
@@ -2345,8 +2374,6 @@ export function App() {
         </div>
 
         <AdminMenu
-          isOpen={isAdminPanelOpen}
-          setIsOpen={setIsAdminPanelOpen}
           token={token}
           appData={appData}
           refreshBootstrapData={refreshBootstrapData}
@@ -2388,28 +2415,10 @@ export function App() {
     );
   }
 
-  const directOnlineTargets = presence
-    .filter((p) => p.userId !== appData.self.id)
-    .slice()
-    .sort((a, b) => {
-      const roleA = (
-        roleNameById.get(a.roleId) ||
-        a.roleId ||
-        ""
-      ).toLowerCase();
-      const roleB = (
-        roleNameById.get(b.roleId) ||
-        b.roleId ||
-        ""
-      ).toLowerCase();
-      const byRole = roleA.localeCompare(roleB, undefined, {
-        sensitivity: "base",
-      });
-      if (byRole !== 0) return byRole;
-      return a.username.localeCompare(b.username, undefined, {
-        sensitivity: "base",
-      });
-    });
+  const directOnlineTargets = sortDirectUsersByRoleAndUsername(
+    presence.filter((p) => p.userId !== appData.self.id),
+    roleNameById,
+  );
   const replyTarget =
     directOnlineTargets.find((p) => p.userId === lastDirectCallerUserId) ||
     null;
@@ -2435,6 +2444,7 @@ export function App() {
     return (
       <>
         <SimpleIntercomView
+          connectionState={connectionState}
           pttPressed={pttPressed}
           onStartPpt={startPtt}
           onStopPpt={stopPtt}
@@ -2465,6 +2475,7 @@ export function App() {
   return (
     <>
       <StationIntercomView
+        connectionState={connectionState}
         appData={appData}
         doLogout={() => {
           void doLogout();
@@ -2483,6 +2494,7 @@ export function App() {
         stopBroadcastPtt={stopBroadcastPtt}
         broadcastGroups={appData.broadcastGroups}
         presence={presence}
+        roomListenerCounts={roomListenerCounts}
         roleNameById={roleNameById}
         lastDirectCallerUserId={lastDirectCallerUserId}
         directPttPressedUserId={directPttPressedUserId}
@@ -2516,9 +2528,6 @@ export function App() {
         onEnableDirectPptChange={handleEnableDirectPptChange}
         enableDirectTabs={enableDirectTabs}
         onEnableDirectTabsChange={setEnableDirectTabs}
-        availableChannels={availableChannels}
-        selectedChannelId={selectedChannelId}
-        onSelectChannel={setSelectedChannelId}
         onChannelPptStart={handleChannelPttStart}
         onChannelPptStop={handleChannelPttStop}
         pptPressedChannelId={pttPressedChannelId}
@@ -2534,6 +2543,9 @@ export function App() {
         directGainByUserId={directGainByUserId}
         onRoomGainChange={onRoomGainChange}
         onDirectGainChange={onDirectGainChange}
+        keyboardShortcuts={keyboardShortcuts}
+        onKeyboardShortcutsChange={setKeyboardShortcuts}
+        onRecordingShortcutChange={setIsRecordingShortcut}
       />
       {attentionFlashOverlay}
     </>

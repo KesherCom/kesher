@@ -1,18 +1,12 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import type { Bootstrap } from "../../types";
 import { UsersPanel } from "./UsersPanel";
 
 type AdminUsersCardProps = {
-  token: string;
   appData: Bootstrap;
-  refreshBootstrapData: () => Promise<void>;
 };
 
-export function AdminUsersCard({
-  token,
-  appData,
-  refreshBootstrapData,
-}: AdminUsersCardProps) {
+export function AdminUsersCard({ appData }: AdminUsersCardProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -31,12 +25,7 @@ export function AdminUsersCard({
       </div>
       {isOpen ? (
         <div className="admin-card-body">
-          <UsersPanel
-            token={token}
-            appData={appData}
-            refreshBootstrapData={refreshBootstrapData}
-            adminBusy={false}
-          />
+          <UsersPanel appData={appData} />
         </div>
       ) : null}
     </div>
