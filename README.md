@@ -51,11 +51,8 @@ Some environments block unsigned binaries by default.
   2. If SmartScreen warns, click **More info** → **Run anyway**.
   3. If Defender quarantines it, restore/allow the file in Windows Security, then run again.
 
-If you need a desktop proxy binary package, you can build cross-platform archives locally:
-
-```sh
-make package-desktop-proxy DESKTOP_PROXY_VERSION=v0.1.0
-```
+Desktop proxy binaries are maintained in a separate repository:
+`https://github.com/KesherCom/kesher-desktop-proxy`
 
 ## HTTPS options
 
@@ -109,32 +106,18 @@ Verify: open `https://intercom.example.org` from a LAN client — no warning, mi
 ## Desktop proxy (alternative to HTTPS)
 
 Instead of setting up HTTPS, you can distribute a small desktop app that proxies through `localhost`, which browsers treat as a secure context (mic access works without HTTPS).
-
 The backend must serve the UI itself (`make run-backend` or the embedded binary). The proxy does **not** bundle frontend assets.
+Desktop proxy source, run/build instructions, and release artifacts are in:
+`https://github.com/KesherCom/kesher-desktop-proxy`
 
-```sh
-make run-desktop-proxy UPSTREAM=http://192.168.1.50:8080
-```
-
-For HTTPS upstreams with private/self-signed CAs:
-
-```sh
-make run-desktop-proxy UPSTREAM=https://intercom.example.org CA_FILE=/path/to/ca.pem
-```
-
-Cross-platform release builds:
-
-```sh
-make package-desktop-proxy DESKTOP_PROXY_VERSION=v0.1.0
-# outputs to desktop-proxy/dist/v0.1.0/
-```
+````
 
 ## Single-binary build (embedded UI)
 
 ```sh
 make build-backend   # builds frontend into the Go binary
 ./backend/bin/server # serves UI + API from one binary, no STATIC_DIR needed
-```
+````
 
 ## Tests
 
