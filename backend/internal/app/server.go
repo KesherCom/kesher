@@ -1156,11 +1156,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	listenRooms = s.filterAllowedRoomsForRole(r.Context(), session.RoleID, listenRooms, false)
 	talkRooms = s.filterAllowedRoomsForRole(r.Context(), session.RoleID, talkRooms, true)
-	defaultRoomID = firstNonEmpty(talkRooms, listenRooms, "")
 	c := &client{
 		session:         session,
 		user:            user,
-		activeRoom:      defaultRoomID,
 		listenRooms:     toRoomSet(listenRooms),
 		talkRooms:       toRoomSet(talkRooms),
 		voiceMode:       initialVoiceMode,
@@ -1174,7 +1172,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("failed to initialize media peer", "error", err)
 	}
 	defer s.hub.Remove(session.Token)
-	currentRoom := c.activeRoom
 	mediaReady := false
 	var connMu sync.Mutex
 
@@ -1233,19 +1230,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			mediaReady = true
 			s.media.EnsureNegotiation(session.Token)
 			s.media.SyncRouting()
-		case "set_active_room":
-			raw, _ := json.Marshal(in.Data)
-			var e ActiveRoomEvent
-			_ = json.Unmarshal(raw, &e)
-			allowedListen := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, []string{e.RoomID}, false)
-			allowedListen = s.mergeForcedListenRooms(r.Context(), session.RoleID, allowedListen)
-			allowedTalk := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, []string{e.RoomID}, true)
-			currentRoom = firstNonEmpty(allowedTalk, allowedListen, "")
-			s.hub.SetActiveRoom(session.Token, currentRoom)
-			s.hub.SetRoomMatrix(session.Token, allowedListen, allowedTalk)
-			if mediaReady {
-				s.media.SyncRouting()
-			}
 		case "set_room_matrix":
 			raw, _ := json.Marshal(in.Data)
 			var e RoomMatrixEvent
@@ -1253,14 +1237,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			allowedListen := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, e.ListenRoomIDs, false)
 			allowedListen = s.mergeForcedListenRooms(r.Context(), session.RoleID, allowedListen)
 			allowedTalk := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, e.TalkRoomIDs, true)
-			if e.ActiveRoomID != "" {
-				activeTalk := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, []string{e.ActiveRoomID}, true)
-				activeListen := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, []string{e.ActiveRoomID}, false)
-				currentRoom = firstNonEmpty(activeTalk, activeListen, firstNonEmpty(allowedTalk, allowedListen, currentRoom))
-			} else {
-				currentRoom = firstNonEmpty(allowedTalk, allowedListen, currentRoom)
-			}
-			s.hub.SetActiveRoom(session.Token, currentRoom)
 			s.hub.SetRoomMatrix(session.Token, allowedListen, allowedTalk)
 			if mediaReady {
 				s.media.SyncRouting()
@@ -1428,17 +1404,6 @@ func defaultRoomForSession(session Session, roles []Role, rooms []Room) string {
 		return rooms[0].ID
 	}
 	return ""
-}
-
-func firstNonEmpty(primary []string, secondary []string, fallback string) string {
-	for _, values := range [][]string{primary, secondary} {
-		for _, value := range values {
-			if value != "" {
-				return value
-			}
-		}
-	}
-	return fallback
 }
 
 func newID() string {

@@ -70,8 +70,6 @@ type WsMessage =
         targetId?: string;
         state?: "ptt_start" | "ptt_stop";
         signal?: string;
-        roomId?: string;
-        activeRoomId?: string;
         listenRoomIds?: string[];
         talkRoomIds?: string[];
       };
@@ -92,8 +90,6 @@ function normalizePresenceList(value: unknown): Presence[] {
       userId: typeof record.userId === "string" ? record.userId : "",
       username: typeof record.username === "string" ? record.username : "",
       roleId: typeof record.roleId === "string" ? record.roleId : "",
-      activeRoom:
-        typeof record.activeRoom === "string" ? record.activeRoom : "",
       listenRooms: toStringArray(record.listenRooms),
       talkRooms: toStringArray(record.talkRooms),
       voiceMode:
@@ -113,7 +109,6 @@ function samePresenceList(a: Presence[], b: Presence[]): boolean {
       left.userId !== right.userId ||
       left.username !== right.username ||
       left.roleId !== right.roleId ||
-      left.activeRoom !== right.activeRoom ||
       left.voiceMode !== right.voiceMode ||
       left.micEnabled !== right.micEnabled ||
       left.broadcastActive !== right.broadcastActive
@@ -680,11 +675,7 @@ export function App() {
         listenRoomIdsRef.current.includes(roomID),
       );
       if (listenedTalkRooms.length > 0) {
-        const roomToUse =
-          senderPresence.activeRoom &&
-          listenedTalkRooms.includes(senderPresence.activeRoom)
-            ? senderPresence.activeRoom
-            : listenedTalkRooms[0];
+        const roomToUse = listenedTalkRooms[0];
         return clampGainValue(roomGainByIdRef.current[roomToUse] ?? 1);
       }
     }
@@ -1382,23 +1373,10 @@ export function App() {
           pushDebugEvent("system · local/mic · capture failed (receive-only)");
         }
         ws.send(JSON.stringify({ type: "webrtc_ready", data: {} }));
-        const activeRoomId = matrixAnchorRoomId(
-          listenRoomIdsRef.current,
-          talkRoomIdsRef.current,
-        );
-        if (activeRoomId) {
-          ws.send(
-            JSON.stringify({
-              type: "set_active_room",
-              data: { roomId: activeRoomId },
-            }),
-          );
-        }
         ws.send(
           JSON.stringify({
             type: "set_room_matrix",
             data: {
-              activeRoomId,
               listenRoomIds: listenRoomIdsRef.current,
               talkRoomIds: talkRoomIdsRef.current,
             },
@@ -1515,17 +1493,6 @@ export function App() {
             }
             return;
           }
-          if (msg.data.command === "set_active_room" && msg.data.roomId) {
-            setTalkRoomIds([msg.data.roomId]);
-            setListenRoomIds([msg.data.roomId]);
-            wsRef.current?.send(
-              JSON.stringify({
-                type: "set_active_room",
-                data: { roomId: msg.data.roomId },
-              }),
-            );
-            return;
-          }
           if (msg.data.command === "set_room_matrix") {
             const nextListen = Array.isArray(msg.data.listenRoomIds)
               ? msg.data.listenRoomIds
@@ -1540,14 +1507,10 @@ export function App() {
               setTalkRoomIds(msg.data.talkRoomIds);
             }
             if (wsRef.current?.readyState === WebSocket.OPEN) {
-              const activeRoomId =
-                msg.data.activeRoomId ||
-                matrixAnchorRoomId(nextListen, nextTalk);
               wsRef.current.send(
                 JSON.stringify({
                   type: "set_room_matrix",
                   data: {
-                    activeRoomId,
                     listenRoomIds: nextListen,
                     talkRoomIds: nextTalk,
                   },
@@ -1756,23 +1719,10 @@ export function App() {
       );
       if (!matchesListen || !matchesTalk) {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
-          const activeRoomId = matrixAnchorRoomId(
-            listenRoomIdsRef.current,
-            talkRoomIdsRef.current,
-          );
-          if (activeRoomId) {
-            wsRef.current.send(
-              JSON.stringify({
-                type: "set_active_room",
-                data: { roomId: activeRoomId },
-              }),
-            );
-          }
           wsRef.current.send(
             JSON.stringify({
               type: "set_room_matrix",
               data: {
-                activeRoomId,
                 listenRoomIds: listenRoomIdsRef.current,
                 talkRoomIds: talkRoomIdsRef.current,
               },
@@ -1817,18 +1767,17 @@ export function App() {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     roomSwitchTimerRef.current = window.setTimeout(() => {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-      const activeRoomId = matrixAnchorRoomId(listenRoomIds, talkRoomIds);
+      const anchorRoomId = matrixAnchorRoomId(listenRoomIds, talkRoomIds);
       wsRef.current.send(
         JSON.stringify({
           type: "set_room_matrix",
           data: {
-            activeRoomId,
             listenRoomIds,
             talkRoomIds,
           },
         }),
       );
-      pushDebugEvent(`system · matrix updated · ${activeRoomId || "no-room"}`);
+      pushDebugEvent(`system · matrix updated · ${anchorRoomId || "no-room"}`);
     }, 120);
     return () => clearRoomSwitchTimer();
   }, [listenRoomIds, talkRoomIds, pushDebugEvent]);
@@ -2309,7 +2258,6 @@ export function App() {
         data: {
           listenRoomIds: listenRoomIdsRef.current,
           talkRoomIds: [channelId],
-          activeRoomId: channelId,
         },
       }),
     );

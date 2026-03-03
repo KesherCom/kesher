@@ -85,7 +85,7 @@ flowchart LR
   AUDIO --> OUT
 
   %% Control/event fanout
-  FE -->|"chat/signal/voice_state,\nset_active_room, set_room_matrix"| LWS
+  FE -->|"chat/signal/voice_state,\nset_room_matrix"| LWS
   LWS --> WSG
   WSG -->|"authorize by role + scope"| HUB
   HUB -->|"presence + chat + signal + voice_state"| WSG
@@ -145,7 +145,7 @@ sequenceDiagram
   MM-->>WS: webrtc_offer (+ ice candidates)
   WS-->>FE: WS webrtc_offer / webrtc_ice_candidate
   FE->>WS: webrtc_answer / webrtc_ice_candidate
-  FE->>WS: set_active_room + set_room_matrix + initial voice_state
+  FE->>WS: set_room_matrix + initial voice_state
   WS->>DB: Policy checks (room sender/receiver, groups, forced-listen)
   WS->>HUB: Update presence + route control events
   HUB-->>PEER: presence/chat/signal/voice_state fanout

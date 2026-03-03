@@ -33,21 +33,18 @@ func TestHubRoomRoutingRespectsReceiverRoleRestrictions(t *testing.T) {
 		session:     Session{Token: "sender", RoleID: "audio"},
 		user:        User{ID: "u1", Username: "sender", RoleID: "audio"},
 		send:        make(chan WSOutbound, 4),
-		activeRoom:  "foh",
 		listenRooms: toRoomSet([]string{"foh"}),
 	}
 	allowedReceiver := &client{
 		session:     Session{Token: "allowed", RoleID: "video"},
 		user:        User{ID: "u2", Username: "allowed", RoleID: "video"},
 		send:        make(chan WSOutbound, 4),
-		activeRoom:  "foh",
 		listenRooms: toRoomSet([]string{"foh"}),
 	}
 	blockedReceiver := &client{
 		session:     Session{Token: "blocked", RoleID: "lighting"},
 		user:        User{ID: "u3", Username: "blocked", RoleID: "lighting"},
 		send:        make(chan WSOutbound, 4),
-		activeRoom:  "foh",
 		listenRooms: toRoomSet([]string{"foh"}),
 	}
 	hub.Add(sender)
@@ -101,21 +98,18 @@ func TestHubBroadcastRoutingFiltersRoomsBySenderRole(t *testing.T) {
 		session:     Session{Token: "sender", RoleID: "audio"},
 		user:        User{ID: "u1", Username: "sender", RoleID: "audio"},
 		send:        make(chan WSOutbound, 4),
-		activeRoom:  "foh",
 		listenRooms: toRoomSet([]string{"foh"}),
 	}
 	fohReceiver := &client{
 		session:     Session{Token: "foh", RoleID: "lighting"},
 		user:        User{ID: "u2", Username: "foh", RoleID: "lighting"},
 		send:        make(chan WSOutbound, 4),
-		activeRoom:  "foh",
 		listenRooms: toRoomSet([]string{"foh"}),
 	}
 	stageReceiver := &client{
 		session:     Session{Token: "stage", RoleID: "lighting"},
 		user:        User{ID: "u3", Username: "stage", RoleID: "lighting"},
 		send:        make(chan WSOutbound, 4),
-		activeRoom:  "stage",
 		listenRooms: toRoomSet([]string{"stage"}),
 	}
 	hub.Add(audioSender)
@@ -147,8 +141,8 @@ func TestHubDirectRouting(t *testing.T) {
 	defer store.Close()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	hub := NewHub(store, logger)
-	c1 := &client{session: Session{Token: "a"}, user: User{ID: "u1", Username: "a", RoleID: "audio"}, send: make(chan WSOutbound, 2), activeRoom: "foh"}
-	c2 := &client{session: Session{Token: "b"}, user: User{ID: "u2", Username: "b", RoleID: "video"}, send: make(chan WSOutbound, 2), activeRoom: "foh"}
+	c1 := &client{session: Session{Token: "a"}, user: User{ID: "u1", Username: "a", RoleID: "audio"}, send: make(chan WSOutbound, 2)}
+	c2 := &client{session: Session{Token: "b"}, user: User{ID: "u2", Username: "b", RoleID: "video"}, send: make(chan WSOutbound, 2)}
 	hub.Add(c1)
 	hub.Add(c2)
 	drain(c1.send)
@@ -174,8 +168,8 @@ func TestHubBroadcastRouting(t *testing.T) {
 	defer store.Close()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	hub := NewHub(store, logger)
-	c1 := &client{session: Session{Token: "a", RoleID: "audio"}, user: User{ID: "u1", Username: "a", RoleID: "audio"}, send: make(chan WSOutbound, 2), activeRoom: "foh"}
-	c2 := &client{session: Session{Token: "b", RoleID: "video"}, user: User{ID: "u2", Username: "b", RoleID: "video"}, send: make(chan WSOutbound, 2), activeRoom: "stage"}
+	c1 := &client{session: Session{Token: "a", RoleID: "audio"}, user: User{ID: "u1", Username: "a", RoleID: "audio"}, send: make(chan WSOutbound, 2), listenRooms: toRoomSet([]string{"foh"})}
+	c2 := &client{session: Session{Token: "b", RoleID: "video"}, user: User{ID: "u2", Username: "b", RoleID: "video"}, send: make(chan WSOutbound, 2), listenRooms: toRoomSet([]string{"stage"})}
 	hub.Add(c1)
 	hub.Add(c2)
 	drain(c1.send)
