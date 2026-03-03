@@ -53,7 +53,7 @@ flowchart LR
   TG["Telegram API / chats"]
 
   subgraph COMP["Bitfocus Companion path"]
-    MOD["Companion module\n(module-kesher)"]
+    MOD["Companion module\n(companion-module-kesher repo)"]
     CDISC["GET /api/companion/discovery?username=..."]
     CWS["WS /api/companion/ws?username=..."]
   end

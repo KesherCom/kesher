@@ -53,22 +53,16 @@ There is still no dedicated frontend lint target in `Makefile`; frontend validat
 - It also runs `web-typescript-build` (`npm --prefix web run build`) and Prettier.
 - If hooks auto-format files, re-stage (`git add -A`) and re-run the same commit command.
 
-Companion module (Bitfocus) has its own npm project:
-
-```sh
-cd companion/module-kesher && npm install
-cd companion/module-kesher && npm run build
-cd companion/module-kesher && npm run package
-```
+Companion module (Bitfocus) lives in a separate repository:
+`https://github.com/KesherCom/companion-module-kesher`
 
 ## High-level architecture
 
-This repository has four parts:
+This repository has three parts:
 
 - `backend/`: Go API + WebSocket event hub + embedded WebRTC SFU + SQLite persistence.
 - `web/`: React/Vite SPA for operator clients.
 - `desktop-proxy/`: Standalone Go binary that reverse-proxies a remote backend to `127.0.0.1`, giving desktop clients a localhost secure context for `getUserMedia()` without system-wide trust.
-- `companion/module-kesher/`: Bitfocus Companion module that controls active browser sessions through backend companion endpoints.
 
 `backend/` and `desktop-proxy/` are separate Go modules (separate `go.mod` files). They share the same GitHub namespace but have no source-level dependency on each other.
 
