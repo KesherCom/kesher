@@ -125,6 +125,44 @@ make build-backend   # builds frontend into the Go binary
 make test   # backend go tests + frontend TypeScript/Vite build check
 ```
 
+## Load testing (real-world style)
+
+The backend includes a staged load test that simulates:
+
+- increasing concurrent clients,
+- realistic operator WS traffic (`chat`, `signal`, `voice_state`, matrix updates),
+- real WebRTC signaling (`webrtc_offer`/`webrtc_answer`/ICE) and synthetic RTP audio streams,
+- non-ideal Wi-Fi style behavior (latency, jitter, packet loss, occasional disconnect/reconnect).
+
+Run it with:
+
+```sh
+make loadtest
+# or run the built-in 20-client profile
+make loadtest-20
+```
+
+Useful tuning variables:
+
+```sh
+LOADTEST_STAGE_CLIENTS=20,40,80 \
+LOADTEST_STAGE_HOLD_SECONDS=20,30,45 \
+LOADTEST_RAMP_INTERVAL_MS=250 \
+LOADTEST_ACTION_INTERVAL_MS=800 \
+LOADTEST_NET_BASE_LATENCY_MS=40 \
+LOADTEST_NET_JITTER_MS=30 \
+LOADTEST_NET_SPIKE_CHANCE=0.10 \
+LOADTEST_NET_SPIKE_LATENCY_MS=220 \
+LOADTEST_NET_PACKET_LOSS=0.04 \
+LOADTEST_NET_MEDIA_PACKET_LOSS=0.06 \
+LOADTEST_NET_DISCONNECTS_PER_MIN=0.30 \
+make loadtest
+```
+
+The run prints per-stage and final summaries (client counts, queue pressure, dropped messages, reconnects, etc.) so you can compare profiles over time.
+
+Profile selection is also available via `LOADTEST_PROFILE` (`default` or `20clients`).
+
 Run `make help` for all available targets.
 
 ## Environment variables

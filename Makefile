@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 LAN_IP ?= 127.0.0.1
 
-.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build test docker-build docker-up docker-down clean
+.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build test loadtest loadtest-20 docker-build docker-up docker-down clean
 
 help:
 	@echo "Available targets:"
@@ -20,6 +20,8 @@ help:
 	@echo "  make build-web     - build frontend bundle"
 	@echo "  make build         - build backend + frontend"
 	@echo "  make test          - run backend tests + frontend build"
+	@echo "  make loadtest      - run staged backend load test with non-ideal network simulation"
+	@echo "  make loadtest-20   - run staged backend load test profile that ramps to 20 clients"
 	@echo "  make docker-build  - build Docker image via compose"
 	@echo "  make docker-up     - run app via Docker compose"
 	@echo "  make docker-down   - stop Docker compose app"
@@ -131,6 +133,12 @@ build: build-backend
 test:
 	@cd backend && go test ./...
 	@cd web && npm run build
+
+loadtest:
+	@cd backend && LOADTEST_RUN=1 go test -tags=loadtest -run TestRealWorldLoadRamp -count=1 -v -timeout 30m ./internal/app
+
+loadtest-20:
+	@cd backend && LOADTEST_RUN=1 LOADTEST_PROFILE=20clients go test -tags=loadtest -run TestRealWorldLoadRamp -count=1 -v -timeout 30m ./internal/app
 
 docker-build:
 	@docker compose -f deploy/compose/docker-compose.yml build
