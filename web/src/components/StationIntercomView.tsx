@@ -68,6 +68,7 @@ type StationIntercomViewProps = {
   stopBroadcastPtt: (groupId: string) => void;
   broadcastGroups: BroadcastGroup[];
   presence: Presence[];
+  roomListenerCounts: Record<string, number>;
   roleNameById: Map<string, string>;
   lastDirectCallerUserId: string | null;
   directPttPressedUserId: string | null;
@@ -146,6 +147,7 @@ export function StationIntercomView({
   stopBroadcastPtt,
   broadcastGroups,
   presence,
+  roomListenerCounts,
   roleNameById,
   lastDirectCallerUserId,
   directPttPressedUserId,
@@ -331,17 +333,6 @@ export function StationIntercomView({
     }
   }, [enableDirectTabs, directGroups, activeDirectTab]);
 
-  /** Map roomId → number of users listening to that room. */
-  const roomListenerCount = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const p of presence) {
-      for (const r of p.listenRooms) {
-        counts.set(r, (counts.get(r) || 0) + 1);
-      }
-    }
-    return counts;
-  }, [presence]);
-
   const visibleRooms = useMemo(
     () =>
       showPinnedOnly
@@ -378,9 +369,7 @@ export function StationIntercomView({
         <div className="station-live">
           <span
             className={`station-live-dot ${
-              connectionState === "connected"
-                ? "connected"
-                : "disconnected"
+              connectionState === "connected" ? "connected" : "disconnected"
             }`}
           />
           Live: {appData.self.username.toUpperCase()}
@@ -435,15 +424,15 @@ export function StationIntercomView({
               }
             };
 
-            const listenerCount = roomListenerCount.get(room.id) || 0;
+            const listenerCount = roomListenerCounts[room.id] ?? 0;
 
             return (
-              <article
-                key={`station-room-${room.id}`}
-                className="station-card"
-              >
+              <article key={`station-room-${room.id}`} className="station-card">
                 {listenerCount > 0 ? (
-                  <span className="station-presence-badge" title={`${listenerCount} listener(s)`}>
+                  <span
+                    className="station-presence-badge"
+                    title={`${listenerCount} listener(s)`}
+                  >
                     <span className="station-presence-dot" />
                     {listenerCount}
                   </span>
@@ -473,8 +462,14 @@ export function StationIntercomView({
                         : ""
                       : ""
                   } ${canTalk ? "" : "disabled"}${!enableDirectPpt && talking && canTalk ? " talk-armed" : ""}${!enableDirectPpt && talking && canTalk && isSendingOnTalkRooms ? " talk-live" : ""}`}
-                  onPointerDown={canTalk && enableDirectPpt ? handleTalkPointerDown : undefined}
-                  onPointerUp={canTalk && enableDirectPpt ? handleTalkPointerUp : undefined}
+                  onPointerDown={
+                    canTalk && enableDirectPpt
+                      ? handleTalkPointerDown
+                      : undefined
+                  }
+                  onPointerUp={
+                    canTalk && enableDirectPpt ? handleTalkPointerUp : undefined
+                  }
                   onPointerLeave={
                     canTalk && enableDirectPpt && isPttPressed
                       ? handleTalkPointerUp

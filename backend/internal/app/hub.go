@@ -207,6 +207,18 @@ func (h *Hub) RealtimeStats() HubRealtimeStats {
 	return stats
 }
 
+func (h *Hub) RoomListenerCounts() map[string]int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	counts := make(map[string]int)
+	for _, c := range h.clients {
+		for roomID := range c.listenRooms {
+			counts[roomID]++
+		}
+	}
+	return counts
+}
+
 func (h *Hub) markDirectSignalIncoming(targetUserID string, fromUser User, signal string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

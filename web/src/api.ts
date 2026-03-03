@@ -2,6 +2,7 @@ import type {
   Bootstrap,
   PublicBootstrap,
   RealtimeStatsResponse,
+  StatusResponse,
   TelegramStatus,
   User,
 } from "./types";
@@ -128,6 +129,14 @@ export async function getRealtimeStats(
   });
   if (!res.ok) throw new Error("failed to load realtime stats");
   return res.json() as Promise<RealtimeStatsResponse>;
+}
+
+export async function getStatus(token: string): Promise<StatusResponse> {
+  const res = await fetch("/api/status", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("failed to load status");
+  return res.json() as Promise<StatusResponse>;
 }
 
 async function apiMutation(
