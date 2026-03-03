@@ -108,6 +108,32 @@ function normalizePresenceList(value: unknown): Presence[] {
   });
 }
 
+function samePresenceList(a: Presence[], b: Presence[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i];
+    const right = b[i];
+    if (
+      left.userId !== right.userId ||
+      left.username !== right.username ||
+      left.roleId !== right.roleId ||
+      left.activeRoom !== right.activeRoom ||
+      left.voiceMode !== right.voiceMode ||
+      left.micEnabled !== right.micEnabled ||
+      left.broadcastActive !== right.broadcastActive
+    ) {
+      return false;
+    }
+    if (
+      !sameStringArray(left.listenRooms ?? [], right.listenRooms ?? []) ||
+      !sameStringArray(left.talkRooms ?? [], right.talkRooms ?? [])
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 const defaultInputGainDeviceKey = "__default__";
 const meterDbFsFloor = -60;
 const adminPathname = "/admin";
@@ -340,6 +366,21 @@ export function App() {
     const value = params.get("debug");
     return value === "1" || value === "true";
   })();
+  const pushDebugEvent = useCallback(
+    (label: string) => {
+      if (!showDebug) return;
+      setEvents((old) =>
+        [
+          {
+            label,
+            at: new Date().toLocaleTimeString(),
+          },
+          ...old,
+        ].slice(0, 200),
+      );
+    },
+    [showDebug],
+  );
 
   useEffect(() => {
     voiceModeRef.current = voiceMode;
@@ -1286,15 +1327,7 @@ export function App() {
                 `Remote audio playback blocked: ${err instanceof Error ? err.message : "unknown error"}`,
               );
             });
-          setEvents((old) =>
-            [
-              {
-                label: "system · webrtc · remote audio track attached",
-                at: new Date().toLocaleTimeString(),
-              },
-              ...old,
-            ].slice(0, 200),
-          );
+          pushDebugEvent("system · webrtc · remote audio track attached");
         };
         try {
           const captureStream = await getMicStream(
@@ -1319,15 +1352,7 @@ export function App() {
           setAudioError(
             `Failed to access microphone: ${e instanceof Error ? e.message : "unknown error"}`,
           );
-          setEvents((old) =>
-            [
-              {
-                label: "system · local/mic · capture failed (receive-only)",
-                at: new Date().toLocaleTimeString(),
-              },
-              ...old,
-            ].slice(0, 200),
-          );
+          pushDebugEvent("system · local/mic · capture failed (receive-only)");
         }
         ws.send(JSON.stringify({ type: "webrtc_ready", data: {} }));
         const activeRoomId = matrixAnchorRoomId(
@@ -1373,14 +1398,22 @@ export function App() {
       ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data) as WsMessage;
         if (msg.type === "presence") {
-          setPresence(normalizePresenceList(msg.data));
+          const nextPresence = normalizePresenceList(msg.data);
+          setPresence((prev) =>
+            samePresenceList(prev, nextPresence) ? prev : nextPresence,
+          );
           return;
         }
         if (msg.type === "config_updated") {
           const updated = normalizePublicBootstrap(msg.data);
           setAppData((prev) => {
             if (!prev) return prev;
-            return { ...prev, roles: updated.roles, rooms: updated.rooms, broadcastGroups: updated.broadcastGroups };
+            return {
+              ...prev,
+              roles: updated.roles,
+              rooms: updated.rooms,
+              broadcastGroups: updated.broadcastGroups,
+            };
           });
           setPublicData(updated);
           // Remove listen/talk selections that the user's role no longer has access to
@@ -1527,15 +1560,7 @@ export function App() {
                 data: { sdp: answer.sdp || "" },
               }),
             );
-            setEvents((old) =>
-              [
-                {
-                  label: "system · webrtc · answered offer",
-                  at: new Date().toLocaleTimeString(),
-                },
-                ...old,
-              ].slice(0, 200),
-            );
+            pushDebugEvent("system · webrtc · answered offer");
           })().catch((err) => {
             setAudioError(
               `WebRTC renegotiation failed: ${err instanceof Error ? err.message : "unknown error"}`,
@@ -1621,15 +1646,17 @@ export function App() {
           }
         }
         const body = (msg.data.signal || msg.data.body || "").toString();
-        setEvents((old) =>
-          [
-            {
-              label: `${msg.type} · ${msg.data.fromUser.username} · ${msg.data.scope}/${msg.data.targetId} · ${body}`,
-              at: new Date(msg.data.timestamp).toLocaleTimeString(),
-            },
-            ...old,
-          ].slice(0, 200),
-        );
+        if (showDebug) {
+          setEvents((old) =>
+            [
+              {
+                label: `${msg.type} · ${msg.data.fromUser.username} · ${msg.data.scope}/${msg.data.targetId} · ${body}`,
+                at: new Date(msg.data.timestamp).toLocaleTimeString(),
+              },
+              ...old,
+            ].slice(0, 200),
+          );
+        }
       };
 
       ws.onclose = (event) => {
@@ -1644,14 +1671,8 @@ export function App() {
           reason: event.reason,
           wasClean: event.wasClean,
         });
-        setEvents((old) =>
-          [
-            {
-              label: `system · websocket closed · code:${event.code} clean:${event.wasClean ? "yes" : "no"} · reconnecting...`,
-              at: new Date().toLocaleTimeString(),
-            },
-            ...old,
-          ].slice(0, 200),
+        pushDebugEvent(
+          `system · websocket closed · code:${event.code} clean:${event.wasClean ? "yes" : "no"} · reconnecting...`,
         );
         setConnectionState("reconnecting");
         reconnectAttemptsRef.current += 1;
@@ -1659,20 +1680,16 @@ export function App() {
           8000,
           500 * 2 ** Math.min(reconnectAttemptsRef.current, 5),
         );
+        const jitterFactor = 0.7 + Math.random() * 0.6;
+        const reconnectDelay = Math.round(backoff * jitterFactor);
         reconnectTimeoutRef.current = window.setTimeout(() => {
           void connect();
-        }, backoff);
+        }, reconnectDelay);
       };
       ws.onerror = (event) => {
         console.error("WebSocket error:", event);
-        setEvents((old) =>
-          [
-            {
-              label: `system · websocket error · ${event instanceof ErrorEvent ? event.message : "check console"}`,
-              at: new Date().toLocaleTimeString(),
-            },
-            ...old,
-          ].slice(0, 200),
+        pushDebugEvent(
+          `system · websocket error · ${event instanceof ErrorEvent ? event.message : "check console"}`,
         );
         ws.close();
       };
@@ -1686,7 +1703,7 @@ export function App() {
       cleanupRealtimeResources();
       setConnectionState("offline");
     };
-  }, [token, appData, refreshAudioDevices]);
+  }, [token, appData, refreshAudioDevices, pushDebugEvent, showDebug]);
 
   useEffect(() => {
     if (!appData) return;
@@ -1777,18 +1794,10 @@ export function App() {
           },
         }),
       );
-      setEvents((old) =>
-        [
-          {
-            label: `system · matrix updated · ${activeRoomId || "no-room"}`,
-            at: new Date().toLocaleTimeString(),
-          },
-          ...old,
-        ].slice(0, 200),
-      );
+      pushDebugEvent(`system · matrix updated · ${activeRoomId || "no-room"}`);
     }, 120);
     return () => clearRoomSwitchTimer();
-  }, [listenRoomIds, talkRoomIds]);
+  }, [listenRoomIds, talkRoomIds, pushDebugEvent]);
 
   useEffect(() => {
     if (!token || !appData || !pcRef.current) return;
@@ -2291,9 +2300,9 @@ export function App() {
       JSON.stringify({
         type: "set_room_matrix",
         data: {
-          listenRoomIDs: listenRoomIdsRef.current,
-          talkRoomIDs: [channelId],
-          activeRoomID: channelId,
+          listenRoomIds: listenRoomIdsRef.current,
+          talkRoomIds: [channelId],
+          activeRoomId: channelId,
         },
       }),
     );
