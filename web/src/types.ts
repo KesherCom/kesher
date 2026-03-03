@@ -23,7 +23,6 @@ export type Presence = {
   userId: string;
   username: string;
   roleId: string;
-  activeRoom: string;
   listenRooms: string[];
   talkRooms: string[];
   voiceMode: string;

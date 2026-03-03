@@ -452,21 +452,6 @@ func TestDefaultRoomForSessionPrefersRoleDefaultThenFirstRoom(t *testing.T) {
 	}
 }
 
-func TestFirstNonEmpty(t *testing.T) {
-	got := firstNonEmpty([]string{"", "foh"}, []string{"stage"}, "fallback")
-	if got != "foh" {
-		t.Fatalf("unexpected first non-empty from primary: %q", got)
-	}
-	got = firstNonEmpty([]string{""}, []string{"", "stage"}, "fallback")
-	if got != "stage" {
-		t.Fatalf("unexpected first non-empty from secondary: %q", got)
-	}
-	got = firstNonEmpty(nil, nil, "fallback")
-	if got != "fallback" {
-		t.Fatalf("unexpected fallback value: %q", got)
-	}
-}
-
 func TestServerFilterAllowedRoomsForRole(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {

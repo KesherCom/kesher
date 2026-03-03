@@ -426,7 +426,6 @@ func (c *simulatedClient) runSession(ctx context.Context, conn *websocket.Conn, 
 	defer cleanupMedia()
 
 	matrix := RoomMatrixEvent{
-		ActiveRoomID:  roomIDs[0],
 		ListenRoomIDs: []string{roomIDs[0]},
 		TalkRoomIDs:   []string{roomIDs[0]},
 	}
@@ -800,12 +799,7 @@ func (c *simulatedClient) randomRoomMatrix(roomIDs []string) RoomMatrixEvent {
 	}
 	listen := pickSubset(c.randIntn, roomIDs, 1, min(3, len(roomIDs)))
 	talk := pickSubset(c.randIntn, roomIDs, 1, min(2, len(roomIDs)))
-	active := talk[0]
-	if c.randFloat64() < 0.5 && len(listen) > 0 {
-		active = listen[0]
-	}
 	return RoomMatrixEvent{
-		ActiveRoomID:  active,
 		ListenRoomIDs: listen,
 		TalkRoomIDs:   talk,
 	}

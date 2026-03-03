@@ -21,7 +21,6 @@ type client struct {
 	signalFrom      string
 	signalMessage   string
 	signalUntil     time.Time
-	activeRoom      string
 	listenRooms     map[string]struct{}
 	talkRooms       map[string]struct{}
 	voiceMode       string
@@ -341,12 +340,6 @@ func (h *Hub) Add(c *client) {
 	if c.talkRooms == nil {
 		c.talkRooms = make(map[string]struct{})
 	}
-	if len(c.listenRooms) == 0 && c.activeRoom != "" {
-		c.listenRooms[c.activeRoom] = struct{}{}
-	}
-	if len(c.talkRooms) == 0 && c.activeRoom != "" {
-		c.talkRooms[c.activeRoom] = struct{}{}
-	}
 	h.clients[c.session.Token] = c
 	h.mu.Unlock()
 	h.broadcastPresence()
@@ -403,15 +396,6 @@ func (h *Hub) Remove(token string) {
 		h.media.RemovePeer(token)
 	}
 	h.broadcastPresence()
-}
-
-func (h *Hub) SetActiveRoom(token, roomID string) {
-	h.mu.Lock()
-	if c, ok := h.clients[token]; ok {
-		c.activeRoom = roomID
-	}
-	h.mu.Unlock()
-	h.requestPresenceBroadcast()
 }
 
 func (h *Hub) SetRoomMatrix(token string, listenRooms []string, talkRooms []string) {
@@ -612,7 +596,6 @@ func (h *Hub) PresenceForUsername(username string) (PresenceState, bool) {
 		UserID:          selected.user.ID,
 		Username:        selected.user.Username,
 		RoleID:          selected.user.RoleID,
-		ActiveRoom:      selected.activeRoom,
 		ListenRooms:     roomSetToSortedSlice(selected.listenRooms),
 		TalkRooms:       roomSetToSortedSlice(selected.talkRooms),
 		VoiceMode:       selected.voiceMode,
@@ -654,7 +637,6 @@ func (h *Hub) broadcastPresence() {
 			UserID:          c.user.ID,
 			Username:        c.user.Username,
 			RoleID:          c.user.RoleID,
-			ActiveRoom:      c.activeRoom,
 			ListenRooms:     roomSetToSortedSlice(c.listenRooms),
 			TalkRooms:       roomSetToSortedSlice(c.talkRooms),
 			VoiceMode:       c.voiceMode,
@@ -731,7 +713,6 @@ func hashPresenceSnapshot(list []PresenceState) uint64 {
 		writePresenceHashString(h, state.UserID)
 		writePresenceHashString(h, state.Username)
 		writePresenceHashString(h, state.RoleID)
-		writePresenceHashString(h, state.ActiveRoom)
 		writePresenceHashString(h, state.VoiceMode)
 		if state.MicEnabled {
 			_, _ = h.Write([]byte{1})

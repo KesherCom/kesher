@@ -88,12 +88,7 @@ type WSOutbound struct {
 	Data any    `json:"data"`
 }
 
-type ActiveRoomEvent struct {
-	RoomID string `json:"roomId"`
-}
-
 type RoomMatrixEvent struct {
-	ActiveRoomID  string   `json:"activeRoomId,omitempty"`
 	ListenRoomIDs []string `json:"listenRoomIds"`
 	TalkRoomIDs   []string `json:"talkRoomIds"`
 }
@@ -101,7 +96,6 @@ type PresenceState struct {
 	UserID          string   `json:"userId"`
 	Username        string   `json:"username"`
 	RoleID          string   `json:"roleId"`
-	ActiveRoom      string   `json:"activeRoom"`
 	ListenRooms     []string `json:"listenRooms"`
 	TalkRooms       []string `json:"talkRooms"`
 	VoiceMode       string   `json:"voiceMode"`
@@ -140,8 +134,6 @@ type CompanionCommand struct {
 	TargetID      string   `json:"targetId,omitempty"`
 	State         string   `json:"state,omitempty"`
 	Signal        string   `json:"signal,omitempty"`
-	RoomID        string   `json:"roomId,omitempty"`
-	ActiveRoomID  string   `json:"activeRoomId,omitempty"`
 	ListenRoomIDs []string `json:"listenRoomIds,omitempty"`
 	TalkRoomIDs   []string `json:"talkRoomIds,omitempty"`
 }
