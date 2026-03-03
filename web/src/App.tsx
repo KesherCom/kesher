@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   bootstrap,
   getPublicBootstrap,
+  getStatus,
   login,
   logout,
   normalizePublicBootstrap,
@@ -138,6 +139,7 @@ const defaultInputGainDeviceKey = "__default__";
 const meterDbFsFloor = -60;
 const adminPathname = "/admin";
 const loginPathname = "/login";
+const statusPollIntervalMs = 3000;
 
 function inputGainDeviceKey(deviceId: string): string {
   return deviceId || defaultInputGainDeviceKey;
@@ -183,6 +185,9 @@ export function App() {
     initialSessionSettings.talkRoomIds,
   );
   const [presence, setPresence] = useState<Presence[]>([]);
+  const [roomListenerCounts, setRoomListenerCounts] = useState<
+    Record<string, number>
+  >({});
   const [scope, setScope] = useState<"direct" | "room" | "broadcast">("room");
   const [targetId, setTargetId] = useState("");
   const [message, setMessage] = useState("");
@@ -359,6 +364,7 @@ export function App() {
   const talkRoomIdsRef = useRef<string[]>(talkRoomIds);
   const prevChannelRef = useRef<string>("");
   const pendingInitialRoomRestoreRef = useRef(hadStoredRoomMatrix);
+  const isUserSettingsOpenRef = useRef(isUserSettingsOpen);
   const micMenuRef = useRef<HTMLDivElement | null>(null);
   const outputMenuRef = useRef<HTMLDivElement | null>(null);
   const showDebug = (() => {
@@ -385,6 +391,9 @@ export function App() {
   useEffect(() => {
     voiceModeRef.current = voiceMode;
   }, [voiceMode]);
+  useEffect(() => {
+    isUserSettingsOpenRef.current = isUserSettingsOpen;
+  }, [isUserSettingsOpen]);
   useEffect(() => {
     selectedInputDeviceIdRef.current = selectedInputDeviceId;
   }, [selectedInputDeviceId]);
@@ -541,6 +550,36 @@ export function App() {
         setToken(null);
       });
   }, [token]);
+
+  useEffect(() => {
+    if (!token || authMode !== "operator") {
+      setRoomListenerCounts({});
+      return;
+    }
+    let cancelled = false;
+    let inFlight = false;
+    const pollStatus = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const status = await getStatus(token);
+        if (cancelled) return;
+        setRoomListenerCounts(status.roomListenerCounts ?? {});
+      } catch {
+        if (cancelled) return;
+      } finally {
+        inFlight = false;
+      }
+    };
+    void pollStatus();
+    const intervalId = window.setInterval(() => {
+      void pollStatus();
+    }, statusPollIntervalMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [token, authMode]);
 
   useEffect(() => {
     if (!appData) return;
@@ -1265,7 +1304,9 @@ export function App() {
         pc.onconnectionstatechange = () => setWebrtcState(pc.connectionState);
         pc.oniceconnectionstatechange = () =>
           setWebrtcState(`ice:${pc.iceConnectionState}`);
-        startStatsLoop(pc);
+        if (showDebug) {
+          startStatsLoop(pc);
+        }
         pc.onicecandidate = (event) => {
           if (
             !event.candidate ||
@@ -1355,7 +1396,11 @@ export function App() {
             selectedInputGainFor(selectedInputDeviceIdRef.current),
           );
           localStreamRef.current = stream;
-          startLevelMeter(captureStream);
+          if (isUserSettingsOpenRef.current) {
+            startLevelMeter(captureStream);
+          } else {
+            stopLevelMeter();
+          }
           void refreshAudioDevices();
           const initialEnabled = voiceModeRef.current === "always_on";
           for (const track of stream.getAudioTracks()) {
@@ -1855,7 +1900,11 @@ export function App() {
           for (const t of localStreamRef.current.getTracks()) t.stop();
         }
         localStreamRef.current = newStream;
-        startLevelMeter(newCaptureStream);
+        if (isUserSettingsOpenRef.current) {
+          startLevelMeter(newCaptureStream);
+        } else {
+          stopLevelMeter();
+        }
         applyVoiceModeToLocalTracks(voiceModeRef.current);
         setAudioError("");
       } catch (e) {
@@ -1877,6 +1926,17 @@ export function App() {
       inputGainNodeRef.current.gain.value = selectedGain;
     }
   }, [selectedInputDeviceId, inputGainByDeviceId]);
+
+  useEffect(() => {
+    if (!isUserSettingsOpen) {
+      stopLevelMeter();
+      return;
+    }
+    const captureStream = inputCaptureStreamRef.current;
+    if (captureStream) {
+      startLevelMeter(captureStream);
+    }
+  }, [isUserSettingsOpen]);
 
   useEffect(() => {
     for (const audio of remoteAudioRef.current.values()) {
@@ -2605,6 +2665,7 @@ export function App() {
         stopBroadcastPtt={stopBroadcastPtt}
         broadcastGroups={appData.broadcastGroups}
         presence={presence}
+        roomListenerCounts={roomListenerCounts}
         roleNameById={roleNameById}
         lastDirectCallerUserId={lastDirectCallerUserId}
         directPttPressedUserId={directPttPressedUserId}

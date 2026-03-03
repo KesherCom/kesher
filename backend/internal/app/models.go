@@ -26,11 +26,11 @@ type CompanionDiscoveryResponse struct {
 }
 
 type Room struct {
-	ID                   string   `json:"id"`
-	Name                 string   `json:"name"`
-	SenderRoleIDs        []string `json:"senderRoleIds"`
-	ReceiverRoleIDs      []string `json:"receiverRoleIds"`
-	ForcedListenRoleIDs  []string `json:"forcedListenRoleIds"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	SenderRoleIDs       []string `json:"senderRoleIds"`
+	ReceiverRoleIDs     []string `json:"receiverRoleIds"`
+	ForcedListenRoleIDs []string `json:"forcedListenRoleIds"`
 }
 
 type BroadcastGroup struct {
@@ -157,6 +157,11 @@ type CompanionBridgeState struct {
 	SignalMessage       string         `json:"signalMessage,omitempty"`
 }
 
+type StatusResponse struct {
+	RoomListenerCounts map[string]int `json:"roomListenerCounts"`
+	TimestampUnixMs    int64          `json:"timestampUnixMs"`
+}
+
 type TelegramMapping struct {
 	ID     string `json:"id"`
 	ChatID string `json:"chatId"`
@@ -176,10 +181,10 @@ type TelegramUpdate struct {
 }
 
 type TelegramMessage struct {
-	MessageID int64        `json:"message_id"`
+	MessageID int64         `json:"message_id"`
 	From      *TelegramUser `json:"from,omitempty"`
-	Chat      TelegramChat `json:"chat"`
-	Text      string       `json:"text,omitempty"`
+	Chat      TelegramChat  `json:"chat"`
+	Text      string        `json:"text,omitempty"`
 }
 
 type TelegramUser struct {

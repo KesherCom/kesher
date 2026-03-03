@@ -94,6 +94,11 @@ export type RealtimeStatsResponse = {
   timestampUnixMs: number;
 };
 
+export type StatusResponse = {
+  roomListenerCounts: Record<string, number>;
+  timestampUnixMs: number;
+};
+
 export type RoutedEvent = {
   scope: "direct" | "room" | "broadcast";
   targetId: string;

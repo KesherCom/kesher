@@ -145,14 +145,10 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
-		ticker := time.NewTicker(250 * time.Millisecond)
-		defer ticker.Stop()
 		for {
 			select {
 			case <-done:
 				return
-			case <-ticker.C:
-				writeState()
 			case _, ok := <-presenceCh:
 				if !ok {
 					return
@@ -364,6 +360,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/logout", s.withAuth(s.handleLogout))
 	mux.HandleFunc("/api/bootstrap", s.withAuth(s.handleBootstrap))
+	mux.HandleFunc("/api/status", s.withAuth(s.handleStatus))
 	mux.HandleFunc("/api/admin/roles", s.withAuth(s.handleAdminRoles))
 	mux.HandleFunc("/api/admin/roles/", s.withAuth(s.handleAdminRoleByID))
 	mux.HandleFunc("/api/admin/rooms", s.withAuth(s.handleAdminRooms))
@@ -615,6 +612,21 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request, session
 		Rooms:           rooms,
 		BroadcastGroups: groups,
 		Users:           users,
+	})
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, _ Session) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	roomListenerCounts := map[string]int{}
+	if s.hub != nil {
+		roomListenerCounts = s.hub.RoomListenerCounts()
+	}
+	s.writeJSON(w, http.StatusOK, StatusResponse{
+		RoomListenerCounts: roomListenerCounts,
+		TimestampUnixMs:    time.Now().UnixMilli(),
 	})
 }
 
