@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import type { Bootstrap } from "../../types";
 import { createRole, deleteRole, updateRole } from "../../api";
+import { useAdminAction } from "./useAdminAction";
 
 type AdminRolesCardProps = {
   token: string;
@@ -16,8 +17,11 @@ export function AdminRolesCard({
   refreshBootstrapData,
 }: AdminRolesCardProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [adminBusy, setAdminBusy] = useState(false);
-  const [adminError, setAdminError] = useState("");
+  const {
+    busy: adminBusy,
+    error: adminError,
+    run: runAdminAction,
+  } = useAdminAction({ onSuccess: refreshBootstrapData });
   const [roleCreateId, setRoleCreateId] = useState("");
   const [roleCreateName, setRoleCreateName] = useState("");
   const [roleCreateDefaultRoomId, setRoleCreateDefaultRoomId] = useState("");
@@ -35,21 +39,6 @@ export function AdminRolesCard({
   >("");
   const [roleEditDefaultSimpleView, setRoleEditDefaultSimpleView] =
     useState(false);
-
-  async function runAdminAction(action: () => Promise<void>) {
-    setAdminBusy(true);
-    setAdminError("");
-    try {
-      await action();
-      await refreshBootstrapData();
-    } catch (error) {
-      setAdminError(
-        error instanceof Error ? error.message : "admin operation failed",
-      );
-    } finally {
-      setAdminBusy(false);
-    }
-  }
 
   function resetRoleCreateForm() {
     setRoleCreateId("");

@@ -80,6 +80,48 @@ type companionInbound struct {
 	Data CompanionCommand `json:"data"`
 }
 
+const (
+	websocketPingInterval    = 30 * time.Second
+	websocketReadTimeout     = 60 * time.Second
+	websocketPingWriteWindow = 5 * time.Second
+)
+
+func refreshWebSocketReadDeadline(conn *websocket.Conn) {
+	_ = conn.SetReadDeadline(time.Now().Add(websocketReadTimeout))
+}
+
+func writeWebSocketPing(conn *websocket.Conn, connMu *sync.Mutex) {
+	if connMu != nil {
+		connMu.Lock()
+		defer connMu.Unlock()
+	}
+	_ = conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(websocketPingWriteWindow))
+}
+
+func startWebSocketKeepalive(conn *websocket.Conn, connMu *sync.Mutex) func() {
+	pingTicker := time.NewTicker(websocketPingInterval)
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			case <-pingTicker.C:
+				writeWebSocketPing(conn, connMu)
+			}
+		}
+	}()
+	refreshWebSocketReadDeadline(conn)
+	conn.SetPongHandler(func(string) error {
+		refreshWebSocketReadDeadline(conn)
+		return nil
+	})
+	return func() {
+		close(stop)
+		pingTicker.Stop()
+	}
+}
+
 func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 	username := strings.TrimSpace(r.URL.Query().Get("username"))
 	if username == "" {
@@ -126,21 +168,8 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 	}
 	writeState()
 
-	// Set up ping/pong to keep WebSocket connection alive
-	pingTicker := time.NewTicker(30 * time.Second)
-	defer pingTicker.Stop()
-	go func() {
-		for range pingTicker.C {
-			connMu.Lock()
-			_ = conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second))
-			connMu.Unlock()
-		}
-	}()
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-		return nil
-	})
+	stopKeepalive := startWebSocketKeepalive(conn, &connMu)
+	defer stopKeepalive()
 
 	done := make(chan struct{})
 	defer close(done)
@@ -166,7 +195,7 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		refreshWebSocketReadDeadline(conn)
 		if in.Type != "command" {
 			continue
 		}
@@ -1147,9 +1176,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	defer s.hub.Remove(session.Token)
 	currentRoom := c.activeRoom
 	mediaReady := false
+	var connMu sync.Mutex
 
 	go func() {
 		write := func(msg WSOutbound) bool {
+			connMu.Lock()
+			defer connMu.Unlock()
 			return conn.WriteJSON(msg) == nil
 		}
 		for {
@@ -1183,19 +1215,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Set up ping/pong to keep WebSocket connection alive
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	go func() {
-		for range ticker.C {
-			_ = conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second))
-		}
-	}()
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-		return nil
-	})
+	stopKeepalive := startWebSocketKeepalive(conn, &connMu)
+	defer stopKeepalive()
 
 	for {
 		var in WSInbound
@@ -1206,7 +1227,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			_ = conn.Close()
 			return
 		}
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		refreshWebSocketReadDeadline(conn)
 		switch in.Type {
 		case "webrtc_ready":
 			mediaReady = true

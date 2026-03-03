@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Bootstrap, BroadcastGroup, Presence } from "../types";
 import type { KeyboardShortcutSettings } from "../app/settings";
+import { sortDirectUsersByRoleAndUsername } from "../lib/users";
 import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
 
 const DB_MIN = -60;
@@ -91,9 +92,6 @@ type StationIntercomViewProps = {
   onEnableDirectPptChange: (enabled: boolean) => void;
   enableDirectTabs: boolean;
   onEnableDirectTabsChange: (enabled: boolean) => void;
-  availableChannels: Array<{ id: string; label: string }>;
-  selectedChannelId: string;
-  onSelectChannel: (channelId: string) => void;
   onChannelPptStart: (channelId: string) => void;
   onChannelPptStop: (channelId: string) => void;
   pptPressedChannelId: string | null;
@@ -166,9 +164,6 @@ export function StationIntercomView({
   onEnableDirectPptChange,
   enableDirectTabs,
   onEnableDirectTabsChange,
-  availableChannels,
-  selectedChannelId,
-  onSelectChannel,
   onChannelPptStart,
   onChannelPptStop,
   pptPressedChannelId,
@@ -229,31 +224,11 @@ export function StationIntercomView({
   }, []);
 
   const allDirectOnlineTargets = useMemo(() => {
-    return presence
-      .filter(
-        (p) =>
-          p.userId !== appData.self.id && p.username.toLowerCase() !== "admin",
-      )
-      .slice()
-      .sort((a, b) => {
-        const roleA = (
-          roleNameById.get(a.roleId) ||
-          a.roleId ||
-          ""
-        ).toLowerCase();
-        const roleB = (
-          roleNameById.get(b.roleId) ||
-          b.roleId ||
-          ""
-        ).toLowerCase();
-        const byRole = roleA.localeCompare(roleB, undefined, {
-          sensitivity: "base",
-        });
-        if (byRole !== 0) return byRole;
-        return a.username.localeCompare(b.username, undefined, {
-          sensitivity: "base",
-        });
-      });
+    const directCandidates = presence.filter(
+      (p) =>
+        p.userId !== appData.self.id && p.username.toLowerCase() !== "admin",
+    );
+    return sortDirectUsersByRoleAndUsername(directCandidates, roleNameById);
   }, [appData.self.id, presence, roleNameById]);
 
   const directOnlineTargets = useMemo(
@@ -290,7 +265,6 @@ export function StationIntercomView({
     // Role-based tabs
     const roleGroups = new Map<string, typeof allDirectOnlineTargets>();
     for (const p of allDirectOnlineTargets) {
-      const roleLabel = roleNameById.get(p.roleId) || p.roleId || "Unknown";
       if (!roleGroups.has(p.roleId)) {
         roleGroups.set(p.roleId, []);
       }

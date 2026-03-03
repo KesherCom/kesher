@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import type { Bootstrap } from "../../types";
 import {
   createBroadcastGroup,
@@ -7,6 +7,7 @@ import {
 } from "../../api";
 import { RoleMultiSelect } from "./RoleMultiSelect";
 import { RoomMultiSelect } from "./RoomMultiSelect";
+import { useAdminAction } from "./useAdminAction";
 
 type AdminChannelsCardProps = {
   token: string;
@@ -22,8 +23,11 @@ export function AdminChannelsCard({
   refreshBootstrapData,
 }: AdminChannelsCardProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [adminBusy, setAdminBusy] = useState(false);
-  const [adminError, setAdminError] = useState("");
+  const {
+    busy: adminBusy,
+    error: adminError,
+    run: runAdminAction,
+  } = useAdminAction({ onSuccess: refreshBootstrapData });
 
   const [groupCreateId, setGroupCreateId] = useState("");
   const [groupCreateName, setGroupCreateName] = useState("");
@@ -38,21 +42,6 @@ export function AdminChannelsCard({
   const [groupEditAllowedRoleIds, setGroupEditAllowedRoleIds] = useState<
     string[]
   >([]);
-
-  async function runAdminAction(action: () => Promise<void>) {
-    setAdminBusy(true);
-    setAdminError("");
-    try {
-      await action();
-      await refreshBootstrapData();
-    } catch (error) {
-      setAdminError(
-        error instanceof Error ? error.message : "admin operation failed",
-      );
-    } finally {
-      setAdminBusy(false);
-    }
-  }
 
   function resetGroupCreateForm() {
     setGroupCreateId("");

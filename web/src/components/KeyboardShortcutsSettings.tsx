@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
   KeyboardShortcutSettings,
   ShortcutAction,
@@ -25,10 +25,13 @@ export function KeyboardShortcutsSettings({
   // Which action is currently being recorded (null = none).
   const [recording, setRecording] = useState<ShortcutAction | null>(null);
 
-  const startRecording = useCallback((action: ShortcutAction) => {
-    setRecording(action);
-    onRecordingChange?.(true);
-  }, [onRecordingChange]);
+  const startRecording = useCallback(
+    (action: ShortcutAction) => {
+      setRecording(action);
+      onRecordingChange?.(true);
+    },
+    [onRecordingChange],
+  );
 
   const clearBinding = useCallback(
     (action: ShortcutAction) => {

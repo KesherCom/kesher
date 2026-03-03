@@ -6,13 +6,9 @@ import type {
   TelegramStatus,
   User,
 } from "./types";
+import { toStringArray } from "./lib/normalize";
 
 const adminPinHeaderName = "X-Admin-Pin";
-
-function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string");
-}
 
 export function normalizePublicBootstrap(data: unknown): PublicBootstrap {
   const raw = (data ?? {}) as Record<string, unknown>;

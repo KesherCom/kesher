@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { Bootstrap, Room, Role } from "../../types";
 import { updateRoutingMatrix, type RoutingMatrixEntry } from "../../api";
 
@@ -46,7 +46,12 @@ function matrixToEntries(
       if (cell?.listen) receiverRoleIds.push(role.id);
       if (cell?.forced) forcedListenRoleIds.push(role.id);
     }
-    return { roomId: room.id, senderRoleIds, receiverRoleIds, forcedListenRoleIds };
+    return {
+      roomId: room.id,
+      senderRoleIds,
+      receiverRoleIds,
+      forcedListenRoleIds,
+    };
   });
 }
 
@@ -84,7 +89,11 @@ export function AdminRoutingMatrixCard({
         const local = localMatrix[role.id]?.[room.id];
         const server = serverMatrix[role.id]?.[room.id];
         if (!local || !server) continue;
-        if (local.talk !== server.talk || local.listen !== server.listen || local.forced !== server.forced)
+        if (
+          local.talk !== server.talk ||
+          local.listen !== server.listen ||
+          local.forced !== server.forced
+        )
           return true;
       }
     }
@@ -165,10 +174,9 @@ export function AdminRoutingMatrixCard({
           {adminError ? <p className="admin-error">{adminError}</p> : null}
 
           <p className="routing-matrix-hint">
-            Click <strong>T</strong>&thinsp;(Talk),{" "}
-            <strong>L</strong>&thinsp;(Listen), or{" "}
-            <strong>F</strong>&thinsp;(Forced listen) to toggle permissions for
-            each role/room combination.
+            Click <strong>T</strong>&thinsp;(Talk), <strong>L</strong>
+            &thinsp;(Listen), or <strong>F</strong>&thinsp;(Forced listen) to
+            toggle permissions for each role/room combination.
           </p>
 
           <div className="routing-matrix-wrapper">
@@ -224,7 +232,11 @@ export function AdminRoutingMatrixCard({
                             }
                             disabled={adminBusy || !cell.listen}
                             aria-label={`Forced listen ${role.name} → ${room.name}: ${cell.forced ? "on" : "off"}`}
-                            title={cell.listen ? `Forced listen: ${cell.forced ? "ON" : "off"}` : "Enable Listen first"}
+                            title={
+                              cell.listen
+                                ? `Forced listen: ${cell.forced ? "ON" : "off"}`
+                                : "Enable Listen first"
+                            }
                           >
                             F
                           </button>

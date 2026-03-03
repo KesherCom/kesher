@@ -1435,7 +1435,9 @@ button.secondary {
   border-radius: 50%;
   background: var(--disconnected-bg);
   box-shadow: 0 0 10px rgba(220, 50, 50, 0.75);
-  transition: background 0.3s, box-shadow 0.3s;
+  transition:
+    background 0.3s,
+    box-shadow 0.3s;
 }
 .station-live-dot.connected {
   background: #22c55e;
@@ -1471,12 +1473,22 @@ button.secondary {
   animation: offline-dot-blink 1.8s ease-in-out infinite;
 }
 @keyframes offline-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.65; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.65;
+  }
 }
 @keyframes offline-dot-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 .station-top-actions {
   display: flex;
@@ -1744,32 +1756,6 @@ button.secondary {
   flex-shrink: 0;
 }
 
-/* Presence badge for ChannelSelector */
-.channel-button {
-  position: relative;
-}
-.channel-presence-badge {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.22rem;
-  font-size: 0.62rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  pointer-events: none;
-}
-.channel-presence-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #4caf50;
-  box-shadow: 0 0 4px rgba(76, 175, 80, 0.55);
-  flex-shrink: 0;
-}
-
 .station-card-head.selected {
   background: var(--station-card-head-active-bg);
   color: #fff;
@@ -2018,7 +2004,8 @@ button.secondary {
   color: #fff;
 }
 @keyframes talk-live-head-glow {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow:
       0 0 20px rgba(255, 59, 48, 0.45),
       inset 0 0 12px rgba(0, 0, 0, 0.15);
@@ -2026,7 +2013,7 @@ button.secondary {
   50% {
     box-shadow:
       0 0 30px rgba(255, 59, 48, 0.6),
-      inset 0 0 16px rgba(0, 0, 0, 0.10);
+      inset 0 0 16px rgba(0, 0, 0, 0.1);
   }
 }
 
@@ -2536,8 +2523,13 @@ button.secondary {
 }
 
 @keyframes shortcut-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 .shortcut-actions {

@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { UsersPanel } from "./UsersPanel";
 import type { Bootstrap } from "../../types";
 
@@ -20,14 +20,7 @@ const appData: Bootstrap = {
 
 describe("UsersPanel", () => {
   it("renders non-admin users only", () => {
-    render(
-      <UsersPanel
-        token="token-123"
-        appData={appData}
-        refreshBootstrapData={vi.fn()}
-        adminBusy={false}
-      />,
-    );
+    render(<UsersPanel appData={appData} />);
 
     expect(screen.getByText("tim")).toBeVisible();
     expect(screen.getByText("Alice")).toBeVisible();
@@ -35,14 +28,7 @@ describe("UsersPanel", () => {
   });
 
   it("keeps assign controls disabled while endpoints are not implemented", () => {
-    render(
-      <UsersPanel
-        token="token-123"
-        appData={appData}
-        refreshBootstrapData={vi.fn()}
-        adminBusy={false}
-      />,
-    );
+    render(<UsersPanel appData={appData} />);
 
     const assignButtons = screen.getAllByRole("button", { name: "Assign" });
     expect(assignButtons.length).toBe(2);

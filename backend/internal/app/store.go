@@ -383,9 +383,6 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "roles", "default_simple_view", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE roles SET default_voice_mode = 'ptt' WHERE default_voice_mode = 'listen_only'`); err != nil {
-		return err
-	}
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS telegram_mappings (
 		id TEXT PRIMARY KEY,
 		chat_id TEXT NOT NULL UNIQUE,
@@ -553,11 +550,7 @@ func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
 			r.DefaultRoomID = defaultRoomID.String
 		}
 		if defaultVoiceMode.Valid {
-			if defaultVoiceMode.String == "listen_only" {
-				r.DefaultVoiceMode = "ptt"
-			} else {
-				r.DefaultVoiceMode = defaultVoiceMode.String
-			}
+			r.DefaultVoiceMode = defaultVoiceMode.String
 		}
 		r.DefaultSimpleView = defaultSimpleView != 0
 		roles = append(roles, r)

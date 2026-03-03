@@ -1,19 +1,10 @@
-import React from "react";
 import type { Bootstrap } from "../../types";
 
 type UsersPanelProps = {
-  token: string;
   appData: Bootstrap;
-  refreshBootstrapData: () => Promise<void>;
-  adminBusy: boolean;
 };
 
-export function UsersPanel({
-  token,
-  appData,
-  refreshBootstrapData,
-  adminBusy,
-}: UsersPanelProps) {
+export function UsersPanel({ appData }: UsersPanelProps) {
   return (
     <div className="admin-block">
       <div className="admin-block-header">
