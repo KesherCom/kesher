@@ -10,8 +10,6 @@ tmp
 *.db-*
 backend/bin
 backend/certs/
-desktop-proxy/bin
-desktop-proxy/dist
 web/tsconfig.tsbuildinfo
 web/test-results/
 web/playwright-report/

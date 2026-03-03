@@ -27,7 +27,7 @@ flowchart LR
   %% ===============================
   %% Optional localhost desktop proxy
   %% ===============================
-  subgraph PROXY["Optional desktop-proxy (localhost bridge)"]
+  subgraph PROXY["Optional desktop-proxy (kesher-desktop-proxy repo)"]
     DPHTTP["HTTP reverse proxy\n127.0.0.1 -> upstream"]
     DPWS["WS reverse proxy\n/ws passthrough"]
     DPTLS["Custom trust / pins / CA file"]
