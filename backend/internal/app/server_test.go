@@ -90,6 +90,76 @@ func TestServerHandleAdminPinUpdateWrongCurrentPINForbidden(t *testing.T) {
 	}
 }
 
+func TestServerHandleRealtimeStatsMissingPINForbidden(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{
+		store:    store,
+		sessions: NewSessionManager(time.Minute),
+	}
+	session := s.sessions.Create(User{ID: "u1", Username: "tim", RoleID: "audio"})
+	req := httptest.NewRequest(http.MethodGet, "/api/realtime-stats", nil)
+	rec := httptest.NewRecorder()
+	s.handleRealtimeStats(rec, req, session)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+}
+
+func TestServerHandleRealtimeStatsWrongPINForbidden(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{
+		store:    store,
+		sessions: NewSessionManager(time.Minute),
+	}
+	session := s.sessions.Create(User{ID: "u1", Username: "tim", RoleID: "audio"})
+	req := httptest.NewRequest(http.MethodGet, "/api/realtime-stats", nil)
+	req.Header.Set("X-Admin-Pin", "bad-pin")
+	rec := httptest.NewRecorder()
+	s.handleRealtimeStats(rec, req, session)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+}
+
+func TestServerHandleRealtimeStatsSuccess(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	media := NewMediaManager(hub, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := &Server{
+		store:    store,
+		hub:      hub,
+		media:    media,
+		sessions: NewSessionManager(time.Minute),
+	}
+	session := s.sessions.Create(User{ID: "u1", Username: "tim", RoleID: "audio"})
+	req := httptest.NewRequest(http.MethodGet, "/api/realtime-stats", nil)
+	req.Header.Set("X-Admin-Pin", "123456")
+	rec := httptest.NewRecorder()
+	s.handleRealtimeStats(rec, req, session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp RealtimeStatsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.TimestampUnixMs <= 0 {
+		t.Fatalf("expected timestamp to be set, got %d", resp.TimestampUnixMs)
+	}
+}
+
 func TestServerHandleAdminRolesMissingPINForbidden(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {

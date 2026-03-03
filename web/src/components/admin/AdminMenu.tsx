@@ -42,6 +42,7 @@ export function AdminMenu({
 
       <AdminMonitoringCard
         token={token}
+        adminPin={adminPin}
         audioStats={audioStats}
         activeRoutesCount={activeRoutesCount}
       />

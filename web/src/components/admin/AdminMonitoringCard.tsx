@@ -4,6 +4,7 @@ import type { RealtimeStatsResponse } from "../../types";
 
 type AdminMonitoringCardProps = {
   token: string;
+  adminPin: string;
   audioStats: { inKbps: number; outKbps: number };
   activeRoutesCount: number;
 };
@@ -17,6 +18,7 @@ function formatHitRate(hits: number, misses: number): string {
 
 export function AdminMonitoringCard({
   token,
+  adminPin,
   audioStats,
   activeRoutesCount,
 }: AdminMonitoringCardProps) {
@@ -34,7 +36,7 @@ export function AdminMonitoringCard({
       if (inFlight) return;
       inFlight = true;
       try {
-        const next = await getRealtimeStats(token);
+        const next = await getRealtimeStats(token, adminPin);
         if (cancelled) return;
         setStats(next);
         setError("");
@@ -60,7 +62,7 @@ export function AdminMonitoringCard({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [isOpen, token]);
+  }, [isOpen, token, adminPin]);
 
   const droppedByType = stats
     ? Object.entries(stats.hub.droppedMessagesByType).sort(

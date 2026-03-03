@@ -1222,9 +1222,24 @@ export function App() {
     clearIncomingAttentionTimer();
     setIncomingAttention(null);
   }
+  useEffect(() => {
+    if (authMode !== "admin") return;
+    shouldReconnectRef.current = false;
+    clearReconnectTimer();
+    cleanupRealtimeResources();
+    setConnectionState("offline");
+    setPresence([]);
+    setChatMessages([]);
+    setEvents([]);
+    setPttPressed(false);
+    setBroadcastPttPressed(null);
+    setdirectPttPressedUserId(null);
+    setPttPressedChannelId(null);
+    setLastDirectCallerUserId(null);
+  }, [authMode]);
 
   useEffect(() => {
-    if (!token || !appData) return;
+    if (!token || !appData || authMode !== "operator") return;
     shouldReconnectRef.current = true;
     let cancelled = false;
 
@@ -1703,7 +1718,14 @@ export function App() {
       cleanupRealtimeResources();
       setConnectionState("offline");
     };
-  }, [token, appData, refreshAudioDevices, pushDebugEvent, showDebug]);
+  }, [
+    token,
+    appData,
+    authMode,
+    refreshAudioDevices,
+    pushDebugEvent,
+    showDebug,
+  ]);
 
   useEffect(() => {
     if (!appData) return;
