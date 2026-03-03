@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   bootstrap,
   normalizePublicBootstrap,
@@ -9,10 +9,11 @@ import {
   roleAllowed,
   toggleRoomSelectionState,
 } from "../lib/intercom";
-import { toStringArray } from "../lib/normalize";
 import {
-  clampGainValue,
-} from "../app/settings";
+  normalizePresenceList,
+  samePresenceList,
+} from "../lib/presence";
+import { clampGainValue } from "../app/settings";
 import {
   sameStringArray,
   sameStringSet,
@@ -20,8 +21,11 @@ import {
   sourceUserIDFromTrackID,
 } from "../app/utils";
 import type { Bootstrap, Presence, PublicBootstrap, RoutedEvent } from "../types";
+import { useLocalMic } from "./useLocalMic";
+import { useRemoteAudio } from "./useRemoteAudio";
+import { useRtpStats } from "./useRtpStats";
 
-// ── WS message types ──────────────────────────────────────────────────────────
+// ── WS message types ───────────────────────────────────────────────────────────────────────────────
 
 type WsMessage =
   | { type: "presence"; data: Presence[] }
@@ -48,64 +52,7 @@ type WsMessage =
     }
   | { type: "config_updated"; data: unknown };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-const meterDbFsFloor = -60;
-const defaultInputGainDeviceKey = "__default__";
-
-function inputGainDeviceKey(deviceId: string): string {
-  return deviceId || defaultInputGainDeviceKey;
-}
-
-function peakAmplitudeToDbFs(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return meterDbFsFloor;
-  if (value >= 1) return 0;
-  return Math.max(meterDbFsFloor, 20 * Math.log10(value));
-}
-
-function normalizePresenceList(value: unknown): Presence[] {
-  if (!Array.isArray(value)) return [];
-  return value.map((entry) => {
-    const record = (entry ?? {}) as Record<string, unknown>;
-    return {
-      ...record,
-      userId: typeof record.userId === "string" ? record.userId : "",
-      username: typeof record.username === "string" ? record.username : "",
-      roleId: typeof record.roleId === "string" ? record.roleId : "",
-      listenRooms: toStringArray(record.listenRooms),
-      talkRooms: toStringArray(record.talkRooms),
-      voiceMode:
-        typeof record.voiceMode === "string" ? record.voiceMode : "ptt",
-      micEnabled: Boolean(record.micEnabled),
-      broadcastActive: Boolean(record.broadcastActive),
-    };
-  });
-}
-
-function samePresenceList(a: Presence[], b: Presence[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) {
-    const left = a[i];
-    const right = b[i];
-    if (
-      left.userId !== right.userId ||
-      left.username !== right.username ||
-      left.roleId !== right.roleId ||
-      left.voiceMode !== right.voiceMode ||
-      left.micEnabled !== right.micEnabled ||
-      left.broadcastActive !== right.broadcastActive
-    )
-      return false;
-    if (
-      !sameStringArray(left.listenRooms ?? [], right.listenRooms ?? []) ||
-      !sameStringArray(left.talkRooms ?? [], right.talkRooms ?? [])
-    )
-      return false;
-  }
-  return true;
-}
-
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Exported types ────────────────────────────────────────────────────────────────────────
 
 export type VoiceRoute = {
   senderUserID: string;
@@ -144,9 +91,7 @@ export type UseIntercomSessionOptions = {
 
   // Callbacks that update App.tsx state
   onUpdateAppData: React.Dispatch<React.SetStateAction<Bootstrap | null>>;
-  onUpdatePublicData: React.Dispatch<
-    React.SetStateAction<PublicBootstrap | null>
-  >;
+  onUpdatePublicData: React.Dispatch<React.SetStateAction<PublicBootstrap | null>>;
   onRefreshAudioDevices: () => Promise<void>;
 };
 
@@ -205,7 +150,7 @@ export type UseIntercomSessionResult = {
   applyBootstrapData: (data: Bootstrap, isInitial?: boolean) => void;
 };
 
-// ── Hook ──────────────────────────────────────────────────────────────────────
+// ── Hook ────────────────────────────────────────────────────────────────────────────────
 
 export function useIntercomSession({
   token,
@@ -245,10 +190,6 @@ export function useIntercomSession({
     Array<{ from: string; body: string; at: string; room: string; self: boolean }>
   >([]);
   const [events, setEvents] = useState<Array<{ label: string; at: string }>>([]);
-  const [rtpStats, setRtpStats] = useState<{ inKbps: number; outKbps: number }>(
-    { inKbps: 0, outKbps: 0 },
-  );
-  const [incomingAudioActive, setIncomingAudioActive] = useState(false);
   const [activeVoiceRoutes, setActiveVoiceRoutes] = useState<VoiceRoute[]>([]);
   const [incomingAttention, setIncomingAttention] = useState<{
     title: string;
@@ -257,34 +198,18 @@ export function useIntercomSession({
   const [attentionFlashKey, setAttentionFlashKey] = useState(0);
   const [voiceMode, setVoiceMode] = useState<"always_on" | "ptt">(initialVoiceMode);
   const [pttPressed, setPttPressed] = useState(false);
-  const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(
-    null,
-  );
-  const [directPttPressedUserId, setdirectPttPressedUserId] = useState<
-    string | null
-  >(null);
-  const [pttPressedChannelId, setPttPressedChannelId] = useState<string | null>(
-    null,
-  );
-  const [lastDirectCallerUserId, setLastDirectCallerUserId] = useState<
-    string | null
-  >(null);
-  const [listenRoomIds, setListenRoomIds] = useState<string[]>(
-    initialListenRoomIds,
-  );
+  const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(null);
+  const [directPttPressedUserId, setdirectPttPressedUserId] = useState<string | null>(null);
+  const [pttPressedChannelId, setPttPressedChannelId] = useState<string | null>(null);
+  const [lastDirectCallerUserId, setLastDirectCallerUserId] = useState<string | null>(null);
+  const [listenRoomIds, setListenRoomIds] = useState<string[]>(initialListenRoomIds);
   const [talkRoomIds, setTalkRoomIds] = useState<string[]>(initialTalkRoomIds);
   const [viewMode, setViewMode] = useState<"station" | "simple">("station");
   const [message, setMessage] = useState("");
-  const [inputLevelDbFs, setInputLevelDbFs] = useState(meterDbFsFloor);
-  const [inputSamplePeakClipping, setInputSamplePeakClipping] = useState(false);
-  const [displayedInputClipping, setDisplayedInputClipping] = useState(false);
 
   // ── Refs ──
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const remoteAudioRef = useRef<Map<string, HTMLAudioElement>>(new Map());
-  const remoteSourceUserIdRef = useRef<Map<string, string>>(new Map());
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const shouldReconnectRef = useRef(false);
@@ -292,52 +217,24 @@ export function useIntercomSession({
     Array<{ candidate: string; sdpMid?: string; sdpMLineIndex?: number }>
   >([]);
   const activeVoiceRoutesRef = useRef<Map<string, VoiceRoute>>(new Map());
-  const remoteAnalyserNodesRef = useRef<
-    Map<
-      string,
-      { ctx: AudioContext; analyser: AnalyserNode; gain: GainNode; buf: Uint8Array }
-    >
-  >(new Map());
-  const remoteAudioMeterRafRef = useRef<number | null>(null);
-  const incomingAudioOffTimeoutRef = useRef<number | null>(null);
   const incomingAttentionTimeoutRef = useRef<number | null>(null);
-  const incomingAudioActiveRef = useRef(false);
   const roomSwitchTimerRef = useRef<number | null>(null);
   const voiceModeRef = useRef<"always_on" | "ptt">(initialVoiceMode);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const meterMonitorStreamRef = useRef<MediaStream | null>(null);
-  const inputCaptureStreamRef = useRef<MediaStream | null>(null);
-  const inputProcessingAudioCtxRef = useRef<AudioContext | null>(null);
-  const inputGainNodeRef = useRef<GainNode | null>(null);
-  const meterRafRef = useRef<number | null>(null);
-  const inputClippingDisplayTimeoutRef = useRef<number | null>(null);
-  const micReinitGenerationRef = useRef(0);
-  const statsIntervalRef = useRef<number | null>(null);
-  const lastStatsRef = useRef<{
-    ts: number;
-    inBytes: number;
-    outBytes: number;
-  } | null>(null);
-  const listenRoomIdsRef = useRef<string[]>(initialListenRoomIds);
-  const talkRoomIdsRef = useRef<string[]>(initialTalkRoomIds);
   const prevChannelRef = useRef<string>("");
   const pendingInitialRoomRestoreRef = useRef(hadStoredSessionSettings);
   const appDataRef = useRef(appData);
+  const listenRoomIdsRef = useRef<string[]>(initialListenRoomIds);
+  const talkRoomIdsRef = useRef<string[]>(initialTalkRoomIds);
 
   // Sync refs
-  useEffect(() => {
-    voiceModeRef.current = voiceMode;
-  }, [voiceMode]);
-  useEffect(() => {
-    listenRoomIdsRef.current = listenRoomIds;
-  }, [listenRoomIds]);
-  useEffect(() => {
-    talkRoomIdsRef.current = talkRoomIds;
-  }, [talkRoomIds]);
-  useEffect(() => {
-    appDataRef.current = appData;
-  }, [appData]);
+  useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
+  useEffect(() => { listenRoomIdsRef.current = listenRoomIds; }, [listenRoomIds]);
+  useEffect(() => { talkRoomIdsRef.current = talkRoomIds; }, [talkRoomIds]);
+  useEffect(() => { appDataRef.current = appData; }, [appData]);
+
+  // ── Presence ref (read inside callbacks without stale closure) ──
+  const presenceRef = useRef<Presence[]>([]);
+  useEffect(() => { presenceRef.current = presence; }, [presence]);
 
   // ── Debug events ──
   const pushDebugEvent = useCallback(
@@ -350,24 +247,21 @@ export function useIntercomSession({
     [showDebug],
   );
 
-  // ── Gain helpers ──
+  // ── Gain resolver (reads only refs → always-fresh; wrapped in ref for sub-hooks) ──
   function resolveGainForSourceUser(sourceUserID: string): number {
     const ad = appDataRef.current;
     if (!ad) return 1;
     const routes = Array.from(activeVoiceRoutesRef.current.values());
     if (!sourceUserID) {
       const directToSelfRoutes = routes.filter(
-        (route) =>
-          route.scope === "direct" && route.targetID === ad.self.id,
+        (route) => route.scope === "direct" && route.targetID === ad.self.id,
       );
       if (directToSelfRoutes.length > 0) {
         let gain = 1;
         for (const route of directToSelfRoutes) {
           gain = Math.max(
             gain,
-            clampGainValue(
-              directGainByUserIdRef.current[route.senderUserID] ?? 1,
-            ),
+            clampGainValue(directGainByUserIdRef.current[route.senderUserID] ?? 1),
           );
         }
         return gain;
@@ -421,9 +315,7 @@ export function useIntercomSession({
     if (directToSelf) {
       return clampGainValue(directGainByUserIdRef.current[sourceUserID] ?? 1);
     }
-    const senderPresence = presenceRef.current.find(
-      (p) => p.userId === sourceUserID,
-    );
+    const senderPresence = presenceRef.current.find((p) => p.userId === sourceUserID);
     if (
       senderPresence &&
       Array.isArray(senderPresence.talkRooms) &&
@@ -433,8 +325,7 @@ export function useIntercomSession({
         listenRoomIdsRef.current.includes(roomID),
       );
       if (listenedTalkRooms.length > 0) {
-        const roomToUse = listenedTalkRooms[0];
-        return clampGainValue(roomGainByIdRef.current[roomToUse] ?? 1);
+        return clampGainValue(roomGainByIdRef.current[listenedTalkRooms[0]] ?? 1);
       }
     }
     const routedRoom = routes.find(
@@ -449,261 +340,41 @@ export function useIntercomSession({
     return 1;
   }
 
-  // Need a presence ref for use in callbacks
-  const presenceRef = useRef<Presence[]>([]);
-  useEffect(() => {
-    presenceRef.current = presence;
-  }, [presence]);
+  // Keep a stable ref so sub-hooks always call the latest version
+  const resolveGainRef = useRef(resolveGainForSourceUser);
+  resolveGainRef.current = resolveGainForSourceUser;
 
-  function applyVolumeToRemoteAudio(key: string) {
-    const sourceUserID = remoteSourceUserIdRef.current.get(key) || "";
-    const gainValue = resolveGainForSourceUser(sourceUserID);
-    const analyserNode = remoteAnalyserNodesRef.current.get(key);
-    if (analyserNode) analyserNode.gain.gain.value = gainValue;
-    const audio = remoteAudioRef.current.get(key);
-    if (audio) audio.volume = Math.min(1, Math.max(0, gainValue));
-  }
+  // ── Sub-hooks ─────────────────────────────────────────────────────────────────────────────
 
-  function applyVolumeToAllRemoteAudio() {
-    for (const key of remoteAudioRef.current.keys()) {
-      applyVolumeToRemoteAudio(key);
-    }
-  }
+  const mic = useLocalMic({
+    selectedInputDeviceId,
+    selectedInputDeviceIdRef,
+    selectedInputGainFor,
+    inputGainByDeviceId,
+    isUserSettingsOpen,
+    isUserSettingsOpenRef,
+    voiceModeRef,
+    pcRef,
+    onAudioError: setAudioError,
+    onRefreshAudioDevices,
+    enableReinit: !!(token && appData),
+  });
 
-  // Apply volume when gain settings change
-  useEffect(() => {
-    applyVolumeToAllRemoteAudio();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomGainById, directGainByUserId]);
+  const { rtpStats, startStatsLoop, stopStatsLoop } = useRtpStats();
 
-  // ── Audio capture helpers ──
-  async function getMicStream(deviceId: string): Promise<MediaStream> {
-    const baseAudio = {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    };
-    if (deviceId) {
-      try {
-        return await navigator.mediaDevices.getUserMedia({
-          audio: { ...baseAudio, deviceId: { exact: deviceId } },
-          video: false,
-        });
-      } catch {
-        return navigator.mediaDevices.getUserMedia({
-          audio: baseAudio,
-          video: false,
-        });
-      }
-    }
-    return navigator.mediaDevices.getUserMedia({ audio: baseAudio, video: false });
-  }
-
-  function buildOutgoingMicStream(
-    sourceStream: MediaStream,
-    gainValue: number,
-  ): MediaStream {
-    const sourceTrack = sourceStream.getAudioTracks()[0];
-    if (!sourceTrack) return sourceStream;
-    const AudioCtx = window.AudioContext;
-    if (!AudioCtx) return sourceStream;
-    try {
-      const ctx = new AudioCtx();
-      const src = ctx.createMediaStreamSource(sourceStream);
-      const gain = ctx.createGain();
-      gain.gain.value = clampGainValue(gainValue);
-      const dest = ctx.createMediaStreamDestination();
-      src.connect(gain);
-      gain.connect(dest);
-      const processedTrack = dest.stream.getAudioTracks()[0];
-      if (!processedTrack) {
-        void ctx.close();
-        return sourceStream;
-      }
-      inputProcessingAudioCtxRef.current = ctx;
-      inputGainNodeRef.current = gain;
-      return new MediaStream([processedTrack]);
-    } catch {
-      return sourceStream;
-    }
-  }
-
-  function stopInputProcessing() {
-    if (inputCaptureStreamRef.current) {
-      for (const track of inputCaptureStreamRef.current.getTracks())
-        track.stop();
-      inputCaptureStreamRef.current = null;
-    }
-    if (inputProcessingAudioCtxRef.current) {
-      void inputProcessingAudioCtxRef.current.close();
-      inputProcessingAudioCtxRef.current = null;
-    }
-    inputGainNodeRef.current = null;
-  }
-
-  function stopLevelMeter() {
-    if (meterRafRef.current !== null) {
-      cancelAnimationFrame(meterRafRef.current);
-      meterRafRef.current = null;
-    }
-    analyserRef.current = null;
-    if (meterMonitorStreamRef.current) {
-      for (const track of meterMonitorStreamRef.current.getTracks())
-        track.stop();
-      meterMonitorStreamRef.current = null;
-    }
-    if (audioCtxRef.current) {
-      void audioCtxRef.current.close();
-      audioCtxRef.current = null;
-    }
-    setInputLevelDbFs(meterDbFsFloor);
-    setInputSamplePeakClipping(false);
-  }
-
-  function startLevelMeter(stream: MediaStream) {
-    stopLevelMeter();
-    const AudioCtx = window.AudioContext;
-    if (!AudioCtx) return;
-    const sourceTrack = stream.getAudioTracks()[0];
-    if (!sourceTrack) return;
-    const monitorTrack = sourceTrack.clone();
-    const monitorStream = new MediaStream([monitorTrack]);
-    meterMonitorStreamRef.current = monitorStream;
-    const ctx = new AudioCtx();
-    audioCtxRef.current = ctx;
-    const src = ctx.createMediaStreamSource(monitorStream);
-    const meterGain = ctx.createGain();
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 2048;
-    src.connect(meterGain);
-    meterGain.connect(analyser);
-    analyserRef.current = analyser;
-    const buf = new Float32Array(analyser.fftSize);
-    const tick = () => {
-      meterGain.gain.value = clampGainValue(
-        inputGainNodeRef.current?.gain.value ?? 1,
-      );
-      analyser.getFloatTimeDomainData(buf);
-      let peak = 0;
-      for (const v of buf) {
-        const abs = Math.abs(v);
-        if (abs > peak) peak = abs;
-      }
-      setInputLevelDbFs(peakAmplitudeToDbFs(peak));
-      setInputSamplePeakClipping(peak >= 1);
-      meterRafRef.current = requestAnimationFrame(tick);
-    };
-    meterRafRef.current = requestAnimationFrame(tick);
-  }
-
-  function applyVoiceModeToLocalTracks(mode: "always_on" | "ptt") {
-    const stream = localStreamRef.current;
-    if (!stream) return;
-    const enabled = mode === "always_on";
-    for (const track of stream.getAudioTracks()) {
-      track.enabled = enabled;
-    }
-  }
-
-  // ── Output device helpers ──
-  async function applyOutputDeviceToAudio(
-    audio: HTMLAudioElement,
-    outputDeviceId: string,
-  ): Promise<boolean> {
-    type AudioWithSinkId = HTMLAudioElement & {
-      setSinkId?: (sinkId: string) => Promise<void>;
-    };
-    const audioWithSink = audio as AudioWithSinkId;
-    if (typeof audioWithSink.setSinkId !== "function")
-      return outputDeviceId === "";
-    const sinkId = outputDeviceId || "default";
-    try {
-      await audioWithSink.setSinkId(sinkId);
-      return true;
-    } catch (err) {
-      setAudioError(
-        `Failed to switch speaker output: ${err instanceof Error ? err.message : "unknown error"}`,
-      );
-      return false;
-    }
-  }
-
-  // Apply output device when it changes
-  useEffect(() => {
-    for (const audio of remoteAudioRef.current.values()) {
-      void applyOutputDeviceToAudio(audio, selectedOutputDeviceId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedOutputDeviceId]);
-
-  // ── Remote audio meter ──
-  function stopRemoteAudioMeter() {
-    if (remoteAudioMeterRafRef.current !== null) {
-      cancelAnimationFrame(remoteAudioMeterRafRef.current);
-      remoteAudioMeterRafRef.current = null;
-    }
-    if (incomingAudioOffTimeoutRef.current !== null) {
-      window.clearTimeout(incomingAudioOffTimeoutRef.current);
-      incomingAudioOffTimeoutRef.current = null;
-    }
-    for (const { ctx } of remoteAnalyserNodesRef.current.values()) {
-      void ctx.close();
-    }
-    remoteAnalyserNodesRef.current.clear();
-    incomingAudioActiveRef.current = false;
-    setIncomingAudioActive(false);
-  }
-
-  function startRemoteAudioMeterLoop() {
-    if (remoteAudioMeterRafRef.current !== null) return;
-    const tick = () => {
-      let active = false;
-      for (const {
-        analyser,
-        buf,
-      } of remoteAnalyserNodesRef.current.values()) {
-        analyser.getByteTimeDomainData(
-          buf as unknown as Uint8Array<ArrayBuffer>,
-        );
-        let sum = 0;
-        for (const v of buf) {
-          const centered = (v - 128) / 128;
-          sum += centered * centered;
-        }
-        const rms = Math.sqrt(sum / buf.length);
-        if (rms > 0.018) {
-          active = true;
-          break;
-        }
-      }
-      if (active) {
-        if (incomingAudioOffTimeoutRef.current !== null) {
-          window.clearTimeout(incomingAudioOffTimeoutRef.current);
-          incomingAudioOffTimeoutRef.current = null;
-        }
-        if (!incomingAudioActiveRef.current) {
-          incomingAudioActiveRef.current = true;
-          setIncomingAudioActive(true);
-        }
-      } else if (
-        incomingAudioActiveRef.current &&
-        incomingAudioOffTimeoutRef.current === null
-      ) {
-        incomingAudioOffTimeoutRef.current = window.setTimeout(() => {
-          incomingAudioOffTimeoutRef.current = null;
-          incomingAudioActiveRef.current = false;
-          setIncomingAudioActive(false);
-        }, 1000);
-      }
-      remoteAudioMeterRafRef.current = requestAnimationFrame(tick);
-    };
-    remoteAudioMeterRafRef.current = requestAnimationFrame(tick);
-  }
+  const remote = useRemoteAudio({
+    selectedOutputDeviceId,
+    selectedOutputDeviceIdRef,
+    roomGainById,
+    directGainByUserId,
+    resolveGainRef,
+    onAudioError: setAudioError,
+  });
 
   // ── Voice route tracking ──
   function refreshActiveVoiceChannelState() {
     setActiveVoiceRoutes(Array.from(activeVoiceRoutesRef.current.values()));
-    applyVolumeToAllRemoteAudio();
+    remote.applyVolumeToAllRemoteAudio();
   }
 
   function updateVoiceRoute(
@@ -722,12 +393,7 @@ export function useIntercomSession({
           ? ad?.broadcastGroups.find((g) => g.id === targetID)?.name || targetID
           : `Direct · ${fromUsername}`;
     if (body === "ptt_start" || body === "always_on") {
-      activeVoiceRoutesRef.current.set(routeKey, {
-        senderUserID,
-        scope: scopeValue,
-        targetID,
-        label,
-      });
+      activeVoiceRoutesRef.current.set(routeKey, { senderUserID, scope: scopeValue, targetID, label });
     } else if (body === "ptt_stop") {
       activeVoiceRoutesRef.current.delete(routeKey);
     }
@@ -749,10 +415,8 @@ export function useIntercomSession({
     let detail = event.fromUser.username;
     if (event.scope === "room") {
       const roomName =
-        ad.rooms.find((room) => room.id === event.targetId)?.name ||
-        event.targetId;
-      title =
-        event.signal === "call" ? "Incoming group call" : "Incoming group signal";
+        ad.rooms.find((room) => room.id === event.targetId)?.name || event.targetId;
+      title = event.signal === "call" ? "Incoming group call" : "Incoming group signal";
       detail = `${event.fromUser.username} · ${roomName}`;
     } else if (event.scope === "direct") {
       title = "Incoming direct signal";
@@ -769,77 +433,21 @@ export function useIntercomSession({
     }, 2200);
   }
 
-  // ── RTP stats ──
-  function stopStatsLoop() {
-    if (statsIntervalRef.current !== null) {
-      window.clearInterval(statsIntervalRef.current);
-      statsIntervalRef.current = null;
-    }
-    lastStatsRef.current = null;
-    setRtpStats({ inKbps: 0, outKbps: 0 });
-  }
-
-  function startStatsLoop(pc: RTCPeerConnection) {
-    stopStatsLoop();
-    statsIntervalRef.current = window.setInterval(() => {
-      void (async () => {
-        const report = await pc.getStats();
-        let inBytes = 0;
-        let outBytes = 0;
-        report.forEach((s) => {
-          if (
-            s.type === "inbound-rtp" &&
-            (s as RTCInboundRtpStreamStats).kind === "audio"
-          ) {
-            inBytes += (s as RTCInboundRtpStreamStats).bytesReceived || 0;
-          }
-          if (
-            s.type === "outbound-rtp" &&
-            (s as RTCOutboundRtpStreamStats).kind === "audio"
-          ) {
-            outBytes += (s as RTCOutboundRtpStreamStats).bytesSent || 0;
-          }
-        });
-        const now = Date.now();
-        const prev = lastStatsRef.current;
-        if (!prev) {
-          lastStatsRef.current = { ts: now, inBytes, outBytes };
-          return;
-        }
-        const dtSec = (now - prev.ts) / 1000;
-        if (dtSec <= 0) return;
-        const inKbps = ((inBytes - prev.inBytes) * 8) / 1000 / dtSec;
-        const outKbps = ((outBytes - prev.outBytes) * 8) / 1000 / dtSec;
-        lastStatsRef.current = { ts: now, inBytes, outBytes };
-        setRtpStats({
-          inKbps: Math.max(0, Math.round(inKbps)),
-          outKbps: Math.max(0, Math.round(outKbps)),
-        });
-      })().catch(() => undefined);
-    }, 1000);
-  }
-
-  // ── Room helpers ──
+  // ── Room permission helpers ──
   function canRoleSendToRoom(roomId: string, currentRoleId: string): boolean {
-    const ad = appDataRef.current;
-    const room = ad?.rooms.find((entry) => entry.id === roomId);
+    const room = appDataRef.current?.rooms.find((entry) => entry.id === roomId);
     if (!room) return false;
     return roleAllowed(room.senderRoleIds, currentRoleId);
   }
 
-  function canRoleReceiveFromRoom(
-    roomId: string,
-    currentRoleId: string,
-  ): boolean {
-    const ad = appDataRef.current;
-    const room = ad?.rooms.find((entry) => entry.id === roomId);
+  function canRoleReceiveFromRoom(roomId: string, currentRoleId: string): boolean {
+    const room = appDataRef.current?.rooms.find((entry) => entry.id === roomId);
     if (!room) return false;
     return roleAllowed(room.receiverRoleIds, currentRoleId);
   }
 
   function isRoomForcedListen(roomId: string, currentRoleId: string): boolean {
-    const ad = appDataRef.current;
-    const room = ad?.rooms.find((entry) => entry.id === roomId);
+    const room = appDataRef.current?.rooms.find((entry) => entry.id === roomId);
     if (!room) return false;
     return (room.forcedListenRoleIds ?? []).includes(currentRoleId);
   }
@@ -861,7 +469,7 @@ export function useIntercomSession({
     });
   }
 
-  // ── Cleanup ──
+  // ── Cleanup helpers ──
   function clearReconnectTimer() {
     if (reconnectTimeoutRef.current !== null) {
       window.clearTimeout(reconnectTimeoutRef.current);
@@ -877,7 +485,7 @@ export function useIntercomSession({
   }
 
   function cleanupRealtimeResources() {
-    micReinitGenerationRef.current += 1;
+    mic.micReinitGenerationRef.current += 1;
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -886,23 +494,23 @@ export function useIntercomSession({
       pcRef.current.close();
       pcRef.current = null;
     }
-    for (const audio of remoteAudioRef.current.values()) {
+    for (const audio of remote.remoteAudioRef.current.values()) {
       audio.pause();
       audio.srcObject = null;
     }
-    remoteAudioRef.current.clear();
-    remoteSourceUserIdRef.current.clear();
+    remote.remoteAudioRef.current.clear();
+    remote.remoteSourceUserIdRef.current.clear();
     activeVoiceRoutesRef.current.clear();
     setActiveVoiceRoutes([]);
-    if (localStreamRef.current) {
-      for (const track of localStreamRef.current.getTracks()) track.stop();
-      localStreamRef.current = null;
+    if (mic.localStreamRef.current) {
+      for (const track of mic.localStreamRef.current.getTracks()) track.stop();
+      mic.localStreamRef.current = null;
     }
-    stopInputProcessing();
+    mic.stopInputProcessing();
     pendingICERef.current = [];
     stopStatsLoop();
-    stopLevelMeter();
-    stopRemoteAudioMeter();
+    mic.stopLevelMeter();
+    remote.stopRemoteAudioMeter();
     clearIncomingAttentionTimer();
     setIncomingAttention(null);
   }
@@ -919,7 +527,7 @@ export function useIntercomSession({
       !scopedTargetId
     )
       return;
-    const stream = localStreamRef.current;
+    const stream = mic.localStreamRef.current;
     if (stream) {
       for (const track of stream.getAudioTracks()) {
         if (state === "always_on" || state === "ptt_start") {
@@ -992,50 +600,33 @@ export function useIntercomSession({
     if (enabled) setAlwaysOn(false);
   }
 
-  function startPtt() {
-    setPttPressed(true);
-    sendVoiceState("ptt_start");
-  }
-
-  function stopPtt() {
-    setPttPressed(false);
-    sendVoiceState("ptt_stop");
-  }
-
-  function sendBroadcastVoiceState(groupId: string, state: string) {
-    sendScopedVoiceState("broadcast", groupId, state);
-  }
+  // ── PTT actions ──
+  function startPtt() { setPttPressed(true); sendVoiceState("ptt_start"); }
+  function stopPtt() { setPttPressed(false); sendVoiceState("ptt_stop"); }
 
   function startBroadcastPtt(groupId: string) {
     setBroadcastPttPressed(groupId);
-    sendBroadcastVoiceState(groupId, "ptt_start");
+    sendScopedVoiceState("broadcast", groupId, "ptt_start");
   }
 
   function stopBroadcastPtt(groupId: string) {
     setBroadcastPttPressed((current) => (current === groupId ? null : current));
-    sendBroadcastVoiceState(groupId, "ptt_stop");
-  }
-
-  function sendDirectVoiceState(userId: string, state: string) {
-    sendScopedVoiceState("direct", userId, state);
+    sendScopedVoiceState("broadcast", groupId, "ptt_stop");
   }
 
   function startDirectPtt(userId: string) {
     setdirectPttPressedUserId(userId);
-    sendDirectVoiceState(userId, "ptt_start");
+    sendScopedVoiceState("direct", userId, "ptt_start");
   }
 
   function stopDirectPtt(userId: string) {
-    setdirectPttPressedUserId((current) =>
-      current === userId ? null : current,
-    );
-    sendDirectVoiceState(userId, "ptt_stop");
+    setdirectPttPressedUserId((current) => (current === userId ? null : current));
+    sendScopedVoiceState("direct", userId, "ptt_stop");
   }
 
   // ── Channel PTT ──
   function handleChannelPttStart(channelId: string) {
-    const ad = appDataRef.current;
-    if (!ad || !channelId) return;
+    if (!appDataRef.current || !channelId) return;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     setTalkRoomIds([channelId]);
     setPttPressed(true);
@@ -1064,7 +655,7 @@ export function useIntercomSession({
   }
 
   // ── Chat ──
-  const scope: "direct" | "room" | "broadcast" = "room";
+  const chatScope: "direct" | "room" | "broadcast" = "room";
 
   function sendChat() {
     if (
@@ -1081,7 +672,7 @@ export function useIntercomSession({
     wsRef.current.send(
       JSON.stringify({
         type: "chat",
-        data: { scope, targetId: resolvedTargetId, body: message.trim() },
+        data: { scope: chatScope, targetId: resolvedTargetId, body: message.trim() },
       }),
     );
     setMessage("");
@@ -1090,18 +681,14 @@ export function useIntercomSession({
   // ── Bootstrap data application ──
   const applyBootstrapData = useCallback(
     (data: Bootstrap, isInitial = false) => {
-      const roleDefaults = data.roles.find(
-        (role) => role.id === data.self.roleId,
-      );
+      const roleDefaults = data.roles.find((role) => role.id === data.self.roleId);
       if (roleDefaults?.defaultVoiceMode) {
         const nextMode = roleDefaults.defaultVoiceMode as "always_on" | "ptt";
         setVoiceMode(nextMode);
         voiceModeRef.current = nextMode;
       }
       setViewMode(roleDefaults?.defaultSimpleView ? "simple" : "station");
-      pendingInitialRoomRestoreRef.current = isInitial
-        ? hadStoredSessionSettings
-        : false;
+      pendingInitialRoomRestoreRef.current = isInitial ? hadStoredSessionSettings : false;
       const hadStored = isInitial ? hadStoredSessionSettings : false;
       if (hadStored) {
         setListenRoomIds((prev) => {
@@ -1128,13 +715,10 @@ export function useIntercomSession({
           const firstAllowedListenRoom = data.rooms.find((room) =>
             roleAllowed(room.receiverRoleIds, data.self.roleId),
           );
-          initialRoom =
-            firstAllowedTalkRoom?.id || firstAllowedListenRoom?.id || "";
+          initialRoom = firstAllowedTalkRoom?.id || firstAllowedListenRoom?.id || "";
         }
         if (initialRoom) {
-          const initialRoomConfig = data.rooms.find(
-            (room) => room.id === initialRoom,
-          );
+          const initialRoomConfig = data.rooms.find((room) => room.id === initialRoom);
           const initialCanListen = roleAllowed(
             initialRoomConfig?.receiverRoleIds,
             data.self.roleId,
@@ -1228,17 +812,17 @@ export function useIntercomSession({
             sourceUserIDFromTrackID(event.track.id) ||
             sourceUserIDFromRemoteSDPMid(pcRef.current, event.transceiver?.mid);
           if (sourceUserID) {
-            remoteSourceUserIdRef.current.set(key, sourceUserID);
+            remote.remoteSourceUserIdRef.current.set(key, sourceUserID);
           }
-          let audio = remoteAudioRef.current.get(key);
+          let audio = remote.remoteAudioRef.current.get(key);
           if (!audio) {
             audio = document.createElement("audio");
             audio.autoplay = true;
             audio.muted = false;
-            remoteAudioRef.current.set(key, audio);
+            remote.remoteAudioRef.current.set(key, audio);
           }
           const stream = event.streams[0] ?? new MediaStream([event.track]);
-          if (!remoteAnalyserNodesRef.current.has(key)) {
+          if (!remote.remoteAnalyserNodesRef.current.has(key)) {
             const AudioCtx = window.AudioContext;
             if (AudioCtx) {
               const ctx = new AudioCtx();
@@ -1251,19 +835,19 @@ export function useIntercomSession({
               const analyserBuf = new Uint8Array(
                 new ArrayBuffer(analyser.frequencyBinCount),
               );
-              remoteAnalyserNodesRef.current.set(key, {
+              remote.remoteAnalyserNodesRef.current.set(key, {
                 ctx,
                 analyser,
                 gain,
                 buf: analyserBuf,
               });
-              startRemoteAudioMeterLoop();
+              remote.startRemoteAudioMeterLoop();
             }
           }
           audio.srcObject = stream;
-          applyVolumeToRemoteAudio(key);
+          remote.applyVolumeToRemoteAudio(key);
           const reapplyOutputDevice = () => {
-            void applyOutputDeviceToAudio(
+            void remote.applyOutputDeviceToAudio(
               audio,
               selectedOutputDeviceIdRef.current,
             );
@@ -1271,9 +855,7 @@ export function useIntercomSession({
           reapplyOutputDevice();
           void audio
             .play()
-            .then(() => {
-              reapplyOutputDevice();
-            })
+            .then(() => { reapplyOutputDevice(); })
             .catch((err) => {
               setAudioError(
                 `Remote audio playback blocked: ${err instanceof Error ? err.message : "unknown error"}`,
@@ -1282,20 +864,18 @@ export function useIntercomSession({
           pushDebugEvent("system · webrtc · remote audio track attached");
         };
         try {
-          const captureStream = await getMicStream(
-            selectedInputDeviceIdRef.current,
-          );
-          stopInputProcessing();
-          inputCaptureStreamRef.current = captureStream;
-          const stream = buildOutgoingMicStream(
+          const captureStream = await mic.getMicStream(selectedInputDeviceIdRef.current);
+          mic.stopInputProcessing();
+          mic.inputCaptureStreamRef.current = captureStream;
+          const stream = mic.buildOutgoingMicStream(
             captureStream,
             selectedInputGainFor(selectedInputDeviceIdRef.current),
           );
-          localStreamRef.current = stream;
+          mic.localStreamRef.current = stream;
           if (isUserSettingsOpenRef.current) {
-            startLevelMeter(captureStream);
+            mic.startLevelMeter(captureStream);
           } else {
-            stopLevelMeter();
+            mic.stopLevelMeter();
           }
           void onRefreshAudioDevices();
           const initialEnabled = voiceModeRef.current === "always_on";
@@ -1303,7 +883,7 @@ export function useIntercomSession({
             track.enabled = initialEnabled;
             pc.addTrack(track, stream);
           }
-          applyVoiceModeToLocalTracks(voiceModeRef.current);
+          mic.applyVoiceModeToLocalTracks(voiceModeRef.current);
         } catch (e) {
           setAudioError(
             `Failed to access microphone: ${e instanceof Error ? e.message : "unknown error"}`,
@@ -1320,9 +900,9 @@ export function useIntercomSession({
             },
           }),
         );
-        const initialVoiceMode = voiceModeRef.current;
+        const initialVoiceModeValue = voiceModeRef.current;
         const voiceState =
-          initialVoiceMode === "always_on" ? "always_on" : "ptt_stop";
+          initialVoiceModeValue === "always_on" ? "always_on" : "ptt_stop";
         ws.send(
           JSON.stringify({
             type: "voice_state",
@@ -1469,10 +1049,7 @@ export function useIntercomSession({
                 // ignore rollback failures
               }
             }
-            await pc.setRemoteDescription({
-              type: "offer",
-              sdp: msg.data.sdp,
-            });
+            await pc.setRemoteDescription({ type: "offer", sdp: msg.data.sdp });
             for (const c of pendingICERef.current) {
               await pc.addIceCandidate(c);
             }
@@ -1548,8 +1125,8 @@ export function useIntercomSession({
           if (chatBody) {
             const roomLabel =
               msg.data.scope === "room"
-                ? ad?.rooms.find((room) => room.id === msg.data.targetId)
-                    ?.name || msg.data.targetId
+                ? ad?.rooms.find((room) => room.id === msg.data.targetId)?.name ||
+                  msg.data.targetId
                 : msg.data.scope === "broadcast"
                   ? ad?.broadcastGroups.find(
                       (group) => group.id === msg.data.targetId,
@@ -1600,16 +1177,14 @@ export function useIntercomSession({
         );
         setConnectionState("reconnecting");
         reconnectAttemptsRef.current += 1;
-        const backoff = Math.min(
-          8000,
-          500 * 2 ** Math.min(reconnectAttemptsRef.current, 5),
-        );
+        const backoff = Math.min(8000, 500 * 2 ** Math.min(reconnectAttemptsRef.current, 5));
         const jitterFactor = 0.7 + Math.random() * 0.6;
         const reconnectDelay = Math.round(backoff * jitterFactor);
         reconnectTimeoutRef.current = window.setTimeout(() => {
           void connect();
         }, reconnectDelay);
       };
+
       ws.onerror = (event) => {
         console.error("WebSocket error:", event);
         pushDebugEvent(
@@ -1633,9 +1208,7 @@ export function useIntercomSession({
   // ── Presence sync → local state ──
   useEffect(() => {
     if (!appData) return;
-    const selfPresence = presence.find(
-      (entry) => entry.userId === appData.self.id,
-    );
+    const selfPresence = presence.find((entry) => entry.userId === appData.self.id);
     if (!selfPresence) return;
     if (pendingInitialRoomRestoreRef.current) {
       const matchesListen = sameStringSet(
@@ -1710,120 +1283,6 @@ export function useIntercomSession({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listenRoomIds, talkRoomIds]);
 
-  // ── Mic reinit on device change ──
-  useEffect(() => {
-    if (!token || !appData || !pcRef.current) return;
-    const generation = ++micReinitGenerationRef.current;
-    void (async () => {
-      const pc = pcRef.current;
-      if (!pc) return;
-      try {
-        const newCaptureStream = await getMicStream(selectedInputDeviceId);
-        if (generation !== micReinitGenerationRef.current) {
-          for (const t of newCaptureStream.getTracks()) t.stop();
-          return;
-        }
-        stopInputProcessing();
-        inputCaptureStreamRef.current = newCaptureStream;
-        const newStream = buildOutgoingMicStream(
-          newCaptureStream,
-          selectedInputGainFor(selectedInputDeviceId),
-        );
-        const newTrack = newStream.getAudioTracks()[0];
-        if (!newTrack) return;
-        const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
-        if (sender) {
-          await sender.replaceTrack(newTrack);
-        } else {
-          pc.addTrack(newTrack, newStream);
-        }
-        if (generation !== micReinitGenerationRef.current) {
-          for (const t of newStream.getTracks()) t.stop();
-          return;
-        }
-        if (localStreamRef.current) {
-          for (const t of localStreamRef.current.getTracks()) t.stop();
-        }
-        localStreamRef.current = newStream;
-        if (isUserSettingsOpenRef.current) {
-          startLevelMeter(newCaptureStream);
-        } else {
-          stopLevelMeter();
-        }
-        applyVoiceModeToLocalTracks(voiceModeRef.current);
-        setAudioError("");
-      } catch (e) {
-        setAudioError(
-          `Failed to switch microphone: ${e instanceof Error ? e.message : "unknown error"}`,
-        );
-      }
-    })();
-    return () => {
-      if (generation === micReinitGenerationRef.current) {
-        micReinitGenerationRef.current += 1;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedInputDeviceId, token, appData]);
-
-  // ── Input gain node update ──
-  useEffect(() => {
-    const selectedGain = selectedInputGainFor(selectedInputDeviceId);
-    if (inputGainNodeRef.current) {
-      inputGainNodeRef.current.gain.value = selectedGain;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedInputDeviceId, inputGainByDeviceId]);
-
-  // ── Level meter toggle (settings panel open/close) ──
-  useEffect(() => {
-    if (!isUserSettingsOpen) {
-      stopLevelMeter();
-      return;
-    }
-    const captureStream = inputCaptureStreamRef.current;
-    if (captureStream) startLevelMeter(captureStream);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isUserSettingsOpen]);
-
-  // ── Clipping display debounce ──
-  useEffect(() => {
-    if (displayedInputClipping === inputSamplePeakClipping) return;
-    if (inputClippingDisplayTimeoutRef.current !== null) {
-      window.clearTimeout(inputClippingDisplayTimeoutRef.current);
-      inputClippingDisplayTimeoutRef.current = null;
-    }
-    inputClippingDisplayTimeoutRef.current = window.setTimeout(() => {
-      inputClippingDisplayTimeoutRef.current = null;
-      setDisplayedInputClipping(inputSamplePeakClipping);
-    }, 2000);
-    return () => {
-      if (inputClippingDisplayTimeoutRef.current !== null) {
-        window.clearTimeout(inputClippingDisplayTimeoutRef.current);
-        inputClippingDisplayTimeoutRef.current = null;
-      }
-    };
-  }, [inputSamplePeakClipping, displayedInputClipping]);
-
-  useEffect(
-    () => () => {
-      if (inputClippingDisplayTimeoutRef.current !== null) {
-        window.clearTimeout(inputClippingDisplayTimeoutRef.current);
-        inputClippingDisplayTimeoutRef.current = null;
-      }
-    },
-    [],
-  );
-
-  // ── Secure context check ──
-  useEffect(() => {
-    if (!(window.isSecureContext || window.location.hostname === "localhost")) {
-      setAudioError(
-        "Microphone capture needs HTTPS (or localhost). Open the app via HTTPS for remote devices.",
-      );
-    }
-  }, []);
-
   // ── Return ──
   return {
     connectionState,
@@ -1831,7 +1290,7 @@ export function useIntercomSession({
     chatMessages,
     events,
     rtpStats,
-    incomingAudioActive,
+    incomingAudioActive: remote.incomingAudioActive,
     activeVoiceRoutes,
     incomingAttention,
     attentionFlashKey,
@@ -1849,8 +1308,8 @@ export function useIntercomSession({
     viewMode,
     message,
     setMessage,
-    inputLevelDbFs,
-    displayedInputClipping,
+    inputLevelDbFs: mic.inputLevelDbFs,
+    displayedInputClipping: mic.displayedInputClipping,
     startPtt,
     stopPtt,
     startBroadcastPtt,
