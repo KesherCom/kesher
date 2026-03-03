@@ -479,7 +479,10 @@ type RealtimeStatsResponse struct {
 	TimestampUnixMs  int64              `json:"timestampUnixMs"`
 }
 
-func (s *Server) handleRealtimeStats(w http.ResponseWriter, r *http.Request, _ Session) {
+func (s *Server) handleRealtimeStats(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

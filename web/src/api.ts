@@ -118,9 +118,13 @@ export async function logout(token: string): Promise<void> {
 
 export async function getRealtimeStats(
   token: string,
+  adminPin: string,
 ): Promise<RealtimeStatsResponse> {
   const res = await fetch("/api/realtime-stats", {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+    },
   });
   if (!res.ok) throw new Error("failed to load realtime stats");
   return res.json() as Promise<RealtimeStatsResponse>;
