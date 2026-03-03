@@ -11,9 +11,7 @@ import {
 import { LoginView } from "./components/LoginView";
 import { SimpleIntercomView } from "./components/SimpleIntercomView";
 import { StationIntercomView } from "./components/StationIntercomView";
-import { AdminPanel } from "./components/admin/AdminPanel";
 import { AdminMenu } from "./components/admin/AdminMenu";
-import { AudioPanel } from "./components/panels/AudioPanel";
 import { ChatSignalPanel } from "./components/panels/ChatSignalPanel";
 import { RealtimeEventsPanel } from "./components/panels/RealtimeEventsPanel";
 import {
@@ -49,6 +47,8 @@ import {
   roleAllowed,
   toggleRoomSelectionState,
 } from "./lib/intercom";
+import { toStringArray } from "./lib/normalize";
+import { sortDirectUsersByRoleAndUsername } from "./lib/users";
 import type {
   Bootstrap,
   Presence,
@@ -82,11 +82,6 @@ type WsMessage =
       data: { candidate: string; sdpMid?: string; sdpMLineIndex?: number };
     }
   | { type: "config_updated"; data: unknown };
-
-function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string");
-}
 
 function normalizePresenceList(value: unknown): Presence[] {
   if (!Array.isArray(value)) return [];
@@ -188,8 +183,7 @@ export function App() {
   const [roomListenerCounts, setRoomListenerCounts] = useState<
     Record<string, number>
   >({});
-  const [scope, setScope] = useState<"direct" | "room" | "broadcast">("room");
-  const [targetId, setTargetId] = useState("");
+  const scope: "direct" | "room" | "broadcast" = "room";
   const [message, setMessage] = useState("");
   const [chatMessages, setChatMessages] = useState<
     Array<{
@@ -209,6 +203,8 @@ export function App() {
   const [connectionState, setConnectionState] = useState<
     "connecting" | "connected" | "reconnecting" | "offline"
   >("offline");
+  const [, setAudioError] = useState("");
+  const [, setWebrtcState] = useState("");
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedInputDeviceId, setSelectedInputDeviceId] = useState(
     initialGlobalSettings.selectedInputDeviceId,
@@ -244,17 +240,12 @@ export function App() {
   const [keyboardShortcuts, setKeyboardShortcuts] =
     useState<KeyboardShortcutSettings>(initialKeyboardShortcuts);
   const [isRecordingShortcut, setIsRecordingShortcut] = useState(false);
-  const [selectedChannelId, setSelectedChannelId] = useState<string>("");
   const [inputLevelDbFs, setInputLevelDbFs] = useState(meterDbFsFloor);
   const [inputSamplePeakClipping, setInputSamplePeakClipping] = useState(false);
   const [displayedInputClipping, setDisplayedInputClipping] = useState(false);
-  const [audioError, setAudioError] = useState<string>("");
-  const [webrtcState, setWebrtcState] = useState<string>("new");
   const [rtpStats, setRtpStats] = useState<{ inKbps: number; outKbps: number }>(
     { inKbps: 0, outKbps: 0 },
   );
-  const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
-  const [isOutputMenuOpen, setIsOutputMenuOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"station" | "simple">("station");
   const [authMode, setAuthMode] = useState<"operator" | "admin">(() =>
     isAdminPathname(window.location.pathname) ? "admin" : "operator",
@@ -263,7 +254,6 @@ export function App() {
   const [adminLoginError, setAdminLoginError] = useState("");
   const [adminPinGuard, setAdminPinGuard] = useState<string>(defaultAdminPin);
   const [adminOverrideActive, setAdminOverrideActive] = useState(false);
-  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState<boolean>(false);
   const [isUserSettingsOpen, setIsUserSettingsOpen] = useState(false);
   const [pttPressed, setPttPressed] = useState(false);
   const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(
@@ -365,8 +355,6 @@ export function App() {
   const prevChannelRef = useRef<string>("");
   const pendingInitialRoomRestoreRef = useRef(hadStoredRoomMatrix);
   const isUserSettingsOpenRef = useRef(isUserSettingsOpen);
-  const micMenuRef = useRef<HTMLDivElement | null>(null);
-  const outputMenuRef = useRef<HTMLDivElement | null>(null);
   const showDebug = (() => {
     const params = new URLSearchParams(window.location.search);
     const value = params.get("debug");
@@ -765,27 +753,6 @@ export function App() {
         "Microphone capture needs HTTPS (or localhost). Open the app via HTTPS for remote devices.",
       );
     }
-  }, []);
-
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (
-        micMenuRef.current &&
-        event.target instanceof Node &&
-        !micMenuRef.current.contains(event.target)
-      ) {
-        setIsMicMenuOpen(false);
-      }
-      if (
-        outputMenuRef.current &&
-        event.target instanceof Node &&
-        !outputMenuRef.current.contains(event.target)
-      ) {
-        setIsOutputMenuOpen(false);
-      }
-    };
-    window.addEventListener("pointerdown", onPointerDown);
-    return () => window.removeEventListener("pointerdown", onPointerDown);
   }, []);
 
   function clearReconnectTimer() {
@@ -1963,31 +1930,6 @@ export function App() {
     }));
   }, []);
 
-  const currentTargets = useMemo(() => {
-    if (!appData) return [];
-    if (scope === "direct") {
-      return appData.users
-        .filter(
-          (u) =>
-            u.id !== appData.self.id && u.username.toLowerCase() !== "admin",
-        )
-        .map((u) => ({ id: u.id, label: `${u.username} (${u.roleId})` }));
-    }
-    if (scope === "room") {
-      return appData.rooms
-        .filter((room) => roleAllowed(room.senderRoleIds, appData.self.roleId))
-        .map((r) => ({ id: r.id, label: r.name }));
-    }
-    return appData.broadcastGroups
-      .filter((group) =>
-        roleAllowed(
-          Array.isArray(group.allowedRoleIds) ? group.allowedRoleIds : [],
-          appData.self.roleId,
-        ),
-      )
-      .map((b) => ({ id: b.id, label: b.name }));
-  }, [scope, appData]);
-
   const selectedMicLabel = useMemo(() => {
     return (
       inputDevices.find((d) => d.deviceId === selectedInputDeviceId)?.label ||
@@ -2048,19 +1990,6 @@ export function App() {
     return map;
   }, [appData]);
 
-  const availableChannels = useMemo(() => {
-    return (appData?.rooms || []).map((room) => ({
-      id: room.id,
-      label: room.name,
-    }));
-  }, [appData]);
-
-  useEffect(() => {
-    setTargetId((prev) => {
-      if (currentTargets.some((target) => target.id === prev)) return prev;
-      return currentTargets[0]?.id || "";
-    });
-  }, [currentTargets]);
   useEffect(() => {
     const onPopState = () => {
       setPathname(window.location.pathname);
@@ -2202,13 +2131,10 @@ export function App() {
       !message.trim()
     )
       return;
-    const resolvedTargetId =
-      scope === "room"
-        ? matrixAnchorRoomId(
-            listenRoomIdsRef.current,
-            talkRoomIdsRef.current,
-          ) || targetId
-        : targetId;
+    const resolvedTargetId = matrixAnchorRoomId(
+      listenRoomIdsRef.current,
+      talkRoomIdsRef.current,
+    );
     if (!resolvedTargetId) return;
     wsRef.current.send(
       JSON.stringify({
@@ -2372,7 +2298,6 @@ export function App() {
     if (!appData || !channelId) return;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     // Select the channel and start PTT with that channel directly
-    setSelectedChannelId(channelId);
     setTalkRoomIds([channelId]);
     setPttPressed(true);
     setPttPressedChannelId(channelId);
@@ -2444,30 +2369,6 @@ export function App() {
     return <div className="root">Loading data…</div>;
   }
 
-  // audioPanel is now integrated into the User Settings modal in StationIntercomView
-  // const audioPanel = (
-  //   <AudioPanel
-  //     inputDevices={inputDevices}
-  //     selectedInputDeviceId={selectedInputDeviceId}
-  //     selectedMicLabel={selectedMicLabel}
-  //     isMicMenuOpen={isMicMenuOpen}
-  //     setIsMicMenuOpen={setIsMicMenuOpen}
-  //     setSelectedInputDeviceId={setSelectedInputDeviceId}
-  //     inputLevel={inputLevel}
-  //     outputDevices={outputDevices}
-  //     selectedOutputDeviceId={selectedOutputDeviceId}
-  //     selectedOutputLabel={selectedOutputLabel}
-  //     isOutputMenuOpen={isOutputMenuOpen}
-  //     setIsOutputMenuOpen={setIsOutputMenuOpen}
-  //     setSelectedOutputDeviceId={(nextOutputDeviceId) => {
-  //       void changeOutputDevice(nextOutputDeviceId);
-  //     }}
-  //     outputSelectionSupported={outputSelectionSupported}
-  //     micMenuRef={micMenuRef}
-  //     outputMenuRef={outputMenuRef}
-  //   />
-  // );
-
   const chatAndSignalBlock = (
     <ChatSignalPanel
       message={message}
@@ -2525,8 +2426,6 @@ export function App() {
         </div>
 
         <AdminMenu
-          isOpen={isAdminPanelOpen}
-          setIsOpen={setIsAdminPanelOpen}
           token={token}
           appData={appData}
           refreshBootstrapData={refreshBootstrapData}
@@ -2568,28 +2467,10 @@ export function App() {
     );
   }
 
-  const directOnlineTargets = presence
-    .filter((p) => p.userId !== appData.self.id)
-    .slice()
-    .sort((a, b) => {
-      const roleA = (
-        roleNameById.get(a.roleId) ||
-        a.roleId ||
-        ""
-      ).toLowerCase();
-      const roleB = (
-        roleNameById.get(b.roleId) ||
-        b.roleId ||
-        ""
-      ).toLowerCase();
-      const byRole = roleA.localeCompare(roleB, undefined, {
-        sensitivity: "base",
-      });
-      if (byRole !== 0) return byRole;
-      return a.username.localeCompare(b.username, undefined, {
-        sensitivity: "base",
-      });
-    });
+  const directOnlineTargets = sortDirectUsersByRoleAndUsername(
+    presence.filter((p) => p.userId !== appData.self.id),
+    roleNameById,
+  );
   const replyTarget =
     directOnlineTargets.find((p) => p.userId === lastDirectCallerUserId) ||
     null;
@@ -2699,9 +2580,6 @@ export function App() {
         onEnableDirectPptChange={handleEnableDirectPptChange}
         enableDirectTabs={enableDirectTabs}
         onEnableDirectTabsChange={setEnableDirectTabs}
-        availableChannels={availableChannels}
-        selectedChannelId={selectedChannelId}
-        onSelectChannel={setSelectedChannelId}
         onChannelPptStart={handleChannelPttStart}
         onChannelPptStop={handleChannelPttStop}
         pptPressedChannelId={pttPressedChannelId}

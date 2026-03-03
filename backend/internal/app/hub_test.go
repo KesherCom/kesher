@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"reflect"
 	"testing"
 	"time"
 )
@@ -288,30 +287,5 @@ func TestHubSetVoiceStateTransitions(t *testing.T) {
 	presence, ok = hub.PresenceForUsername("a")
 	if !ok || presence.VoiceMode != "ptt" || presence.MicEnabled {
 		t.Fatalf("unexpected ptt_stop presence: %+v", presence)
-	}
-}
-
-func TestHubRoomSelectionsReturnsSortedValues(t *testing.T) {
-	store, err := NewStore(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	hub := NewHub(store, logger)
-	c := &client{
-		session: Session{Token: "t1"},
-		user:    User{ID: "u1", Username: "user", RoleID: "audio"},
-		send:    make(chan WSOutbound, 4),
-	}
-	hub.Add(c)
-	hub.SetRoomMatrix("t1", []string{"stage", "foh"}, []string{"video-control", "foh"})
-
-	listen, talk := hub.roomSelections("t1")
-	if !reflect.DeepEqual(listen, []string{"foh", "stage"}) {
-		t.Fatalf("unexpected listen room selection: %v", listen)
-	}
-	if !reflect.DeepEqual(talk, []string{"foh", "video-control"}) {
-		t.Fatalf("unexpected talk room selection: %v", talk)
 	}
 }

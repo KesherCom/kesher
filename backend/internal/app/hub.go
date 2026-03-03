@@ -381,9 +381,6 @@ func (h *Hub) SetVoiceState(token, state string) {
 		case "ptt_stop":
 			c.voiceMode = "ptt"
 			c.micEnabled = false
-		case "listen_only":
-			c.voiceMode = "ptt"
-			c.micEnabled = false
 		}
 	}
 	h.mu.Unlock()
@@ -425,16 +422,6 @@ func (h *Hub) SetRoomMatrix(token string, listenRooms []string, talkRooms []stri
 	}
 	h.mu.Unlock()
 	h.requestPresenceBroadcast()
-}
-
-func (h *Hub) roomSelections(token string) (listenRooms []string, talkRooms []string) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	c, ok := h.clients[token]
-	if !ok {
-		return nil, nil
-	}
-	return roomSetToSortedSlice(c.listenRooms), roomSetToSortedSlice(c.talkRooms)
 }
 
 func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
@@ -736,18 +723,6 @@ func roomSetToSortedSlice(roomSet map[string]struct{}) []string {
 	}
 	slices.Sort(list)
 	return list
-}
-
-func intersectsRoomSet(a map[string]struct{}, b map[string]struct{}) bool {
-	if len(a) == 0 || len(b) == 0 {
-		return false
-	}
-	for roomID := range a {
-		if _, ok := b[roomID]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 func hashPresenceSnapshot(list []PresenceState) uint64 {

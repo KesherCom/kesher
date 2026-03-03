@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import type { Bootstrap } from "../../types";
 import { createRoom, deleteRoom, updateRoom } from "../../api";
 import { RoleMultiSelect } from "./RoleMultiSelect";
+import { useAdminAction } from "./useAdminAction";
 
 type AdminRoomsCardProps = {
   token: string;
@@ -17,8 +18,11 @@ export function AdminRoomsCard({
   refreshBootstrapData,
 }: AdminRoomsCardProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [adminBusy, setAdminBusy] = useState(false);
-  const [adminError, setAdminError] = useState("");
+  const {
+    busy: adminBusy,
+    error: adminError,
+    run: runAdminAction,
+  } = useAdminAction({ onSuccess: refreshBootstrapData });
 
   const [roomCreateId, setRoomCreateId] = useState("");
   const [roomCreateName, setRoomCreateName] = useState("");
@@ -41,21 +45,6 @@ export function AdminRoomsCard({
   >([]);
   const [roomEditForcedListenRoleIds, setRoomEditForcedListenRoleIds] =
     useState<string[]>([]);
-
-  async function runAdminAction(action: () => Promise<void>) {
-    setAdminBusy(true);
-    setAdminError("");
-    try {
-      await action();
-      await refreshBootstrapData();
-    } catch (error) {
-      setAdminError(
-        error instanceof Error ? error.message : "admin operation failed",
-      );
-    } finally {
-      setAdminBusy(false);
-    }
-  }
 
   function resetRoomCreateForm() {
     setRoomCreateId("");

@@ -1,4 +1,3 @@
-import React from "react";
 import type { Bootstrap } from "../../types";
 import { AdminRolesCard } from "./AdminRolesCard";
 import { AdminRoomsCard } from "./AdminRoomsCard";
@@ -29,11 +28,7 @@ export function AdminConfigCard({
         refreshBootstrapData={refreshBootstrapData}
       />
 
-      <AdminUsersCard
-        token={token}
-        appData={appData}
-        refreshBootstrapData={refreshBootstrapData}
-      />
+      <AdminUsersCard appData={appData} />
 
       <AdminRoomsCard
         token={token}

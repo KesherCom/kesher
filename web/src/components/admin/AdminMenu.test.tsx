@@ -37,8 +37,6 @@ describe("AdminMenu", () => {
   it("renders nothing without token", () => {
     const { container } = render(
       <AdminMenu
-        isOpen
-        setIsOpen={vi.fn()}
         token={null}
         appData={appData}
         refreshBootstrapData={vi.fn()}
@@ -55,8 +53,6 @@ describe("AdminMenu", () => {
   it("renders composed admin cards when token is present", () => {
     render(
       <AdminMenu
-        isOpen
-        setIsOpen={vi.fn()}
         token="token-123"
         appData={appData}
         refreshBootstrapData={vi.fn()}
