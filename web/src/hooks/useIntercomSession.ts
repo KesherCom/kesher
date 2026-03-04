@@ -1,18 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  bootstrap,
-  normalizePublicBootstrap,
-} from "../api";
+import { bootstrap, normalizePublicBootstrap } from "../api";
 import {
   matrixAnchorRoomId,
   mergeForcedListenRooms,
   roleAllowed,
   toggleRoomSelectionState,
 } from "../lib/intercom";
-import {
-  normalizePresenceList,
-  samePresenceList,
-} from "../lib/presence";
+import { normalizePresenceList, samePresenceList } from "../lib/presence";
 import { clampGainValue } from "../app/settings";
 import {
   sameStringArray,
@@ -20,7 +14,12 @@ import {
   sourceUserIDFromRemoteSDPMid,
   sourceUserIDFromTrackID,
 } from "../app/utils";
-import type { Bootstrap, Presence, PublicBootstrap, RoutedEvent } from "../types";
+import type {
+  Bootstrap,
+  Presence,
+  PublicBootstrap,
+  RoutedEvent,
+} from "../types";
 import { useLocalMic } from "./useLocalMic";
 import { useRemoteAudio } from "./useRemoteAudio";
 import { useRtpStats } from "./useRtpStats";
@@ -51,6 +50,90 @@ type WsMessage =
       data: { candidate: string; sdpMid?: string; sdpMLineIndex?: number };
     }
   | { type: "config_updated"; data: unknown };
+const opusMaxBitrateBps = 24000;
+const opusSpeechFmtpParams = [
+  ["stereo", "0"],
+  ["sprop-stereo", "0"],
+  ["useinbandfec", "1"],
+  ["usedtx", "1"],
+  ["maxaveragebitrate", `${opusMaxBitrateBps}`],
+] as const;
+
+function upsertFmtpParams(existing: string): string {
+  const desired = Object.fromEntries(opusSpeechFmtpParams) as Record<
+    string,
+    string
+  >;
+  const parts = existing
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const next = parts.map((part) => {
+    const [rawKey] = part.split("=");
+    const key = rawKey.trim().toLowerCase();
+    if (!(key in desired)) return part;
+    seen.add(key);
+    return `${key}=${desired[key] || ""}`;
+  });
+  for (const [key, value] of Object.entries(desired)) {
+    if (!seen.has(key)) next.push(`${key}=${value}`);
+  }
+  return next.join(";");
+}
+
+function tuneOpusSdpForSpeech(sdp: string): string {
+  if (!sdp) return sdp;
+  const lines = sdp.split("\r\n");
+  const opusPayloadTypes = lines.flatMap((line) => {
+    const match = line.match(/^a=rtpmap:(\d+)\s+opus\/48000(?:\/\d+)?$/i);
+    return match ? [match[1]] : [];
+  });
+  if (opusPayloadTypes.length === 0) return sdp;
+  for (const payloadType of opusPayloadTypes) {
+    const fmtpPrefix = `a=fmtp:${payloadType}`;
+    const fmtpIndex = lines.findIndex(
+      (line) => line === fmtpPrefix || line.startsWith(`${fmtpPrefix} `),
+    );
+    if (fmtpIndex >= 0) {
+      const currentParams = lines[fmtpIndex].slice(fmtpPrefix.length).trim();
+      lines[fmtpIndex] = `${fmtpPrefix} ${upsertFmtpParams(currentParams)}`;
+      continue;
+    }
+    const rtpmapIndex = lines.findIndex((line) =>
+      new RegExp(`^a=rtpmap:${payloadType}\\s+`, "i").test(line),
+    );
+    const nextFmtpLine = `${fmtpPrefix} ${upsertFmtpParams("")}`;
+    if (rtpmapIndex >= 0) {
+      lines.splice(rtpmapIndex + 1, 0, nextFmtpLine);
+    } else {
+      lines.push(nextFmtpLine);
+    }
+  }
+  return lines.join("\r\n");
+}
+
+async function applyOutgoingAudioSenderBitrate(pc: RTCPeerConnection) {
+  const audioSender = pc
+    .getSenders()
+    .find((sender) => sender.track?.kind === "audio");
+  if (!audioSender) return;
+  const params = audioSender.getParameters();
+  const encodings = params.encodings?.length ? params.encodings : [{}];
+  const firstEncoding = encodings[0] ?? {};
+  params.encodings = [
+    {
+      ...firstEncoding,
+      maxBitrate: opusMaxBitrateBps,
+    },
+    ...encodings.slice(1),
+  ];
+  try {
+    await audioSender.setParameters(params);
+  } catch (err) {
+    console.warn("Failed to tune outgoing audio sender bitrate", err);
+  }
+}
 
 // ── Exported types ────────────────────────────────────────────────────────────────────────
 
@@ -91,7 +174,9 @@ export type UseIntercomSessionOptions = {
 
   // Callbacks that update App.tsx state
   onUpdateAppData: React.Dispatch<React.SetStateAction<Bootstrap | null>>;
-  onUpdatePublicData: React.Dispatch<React.SetStateAction<PublicBootstrap | null>>;
+  onUpdatePublicData: React.Dispatch<
+    React.SetStateAction<PublicBootstrap | null>
+  >;
   onRefreshAudioDevices: () => Promise<void>;
 };
 
@@ -187,22 +272,41 @@ export function useIntercomSession({
   const [, setWebrtcState] = useState("");
   const [presence, setPresence] = useState<Presence[]>([]);
   const [chatMessages, setChatMessages] = useState<
-    Array<{ from: string; body: string; at: string; room: string; self: boolean }>
+    Array<{
+      from: string;
+      body: string;
+      at: string;
+      room: string;
+      self: boolean;
+    }>
   >([]);
-  const [events, setEvents] = useState<Array<{ label: string; at: string }>>([]);
+  const [events, setEvents] = useState<Array<{ label: string; at: string }>>(
+    [],
+  );
   const [activeVoiceRoutes, setActiveVoiceRoutes] = useState<VoiceRoute[]>([]);
   const [incomingAttention, setIncomingAttention] = useState<{
     title: string;
     detail: string;
   } | null>(null);
   const [attentionFlashKey, setAttentionFlashKey] = useState(0);
-  const [voiceMode, setVoiceMode] = useState<"always_on" | "ptt">(initialVoiceMode);
+  const [voiceMode, setVoiceMode] = useState<"always_on" | "ptt">(
+    initialVoiceMode,
+  );
   const [pttPressed, setPttPressed] = useState(false);
-  const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(null);
-  const [directPttPressedUserId, setdirectPttPressedUserId] = useState<string | null>(null);
-  const [pttPressedChannelId, setPttPressedChannelId] = useState<string | null>(null);
-  const [lastDirectCallerUserId, setLastDirectCallerUserId] = useState<string | null>(null);
-  const [listenRoomIds, setListenRoomIds] = useState<string[]>(initialListenRoomIds);
+  const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(
+    null,
+  );
+  const [directPttPressedUserId, setdirectPttPressedUserId] = useState<
+    string | null
+  >(null);
+  const [pttPressedChannelId, setPttPressedChannelId] = useState<string | null>(
+    null,
+  );
+  const [lastDirectCallerUserId, setLastDirectCallerUserId] = useState<
+    string | null
+  >(null);
+  const [listenRoomIds, setListenRoomIds] =
+    useState<string[]>(initialListenRoomIds);
   const [talkRoomIds, setTalkRoomIds] = useState<string[]>(initialTalkRoomIds);
   const [viewMode, setViewMode] = useState<"station" | "simple">("station");
   const [message, setMessage] = useState("");
@@ -227,14 +331,24 @@ export function useIntercomSession({
   const talkRoomIdsRef = useRef<string[]>(initialTalkRoomIds);
 
   // Sync refs
-  useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
-  useEffect(() => { listenRoomIdsRef.current = listenRoomIds; }, [listenRoomIds]);
-  useEffect(() => { talkRoomIdsRef.current = talkRoomIds; }, [talkRoomIds]);
-  useEffect(() => { appDataRef.current = appData; }, [appData]);
+  useEffect(() => {
+    voiceModeRef.current = voiceMode;
+  }, [voiceMode]);
+  useEffect(() => {
+    listenRoomIdsRef.current = listenRoomIds;
+  }, [listenRoomIds]);
+  useEffect(() => {
+    talkRoomIdsRef.current = talkRoomIds;
+  }, [talkRoomIds]);
+  useEffect(() => {
+    appDataRef.current = appData;
+  }, [appData]);
 
   // ── Presence ref (read inside callbacks without stale closure) ──
   const presenceRef = useRef<Presence[]>([]);
-  useEffect(() => { presenceRef.current = presence; }, [presence]);
+  useEffect(() => {
+    presenceRef.current = presence;
+  }, [presence]);
 
   // ── Debug events ──
   const pushDebugEvent = useCallback(
@@ -261,7 +375,9 @@ export function useIntercomSession({
         for (const route of directToSelfRoutes) {
           gain = Math.max(
             gain,
-            clampGainValue(directGainByUserIdRef.current[route.senderUserID] ?? 1),
+            clampGainValue(
+              directGainByUserIdRef.current[route.senderUserID] ?? 1,
+            ),
           );
         }
         return gain;
@@ -292,7 +408,9 @@ export function useIntercomSession({
         talkRoomIdsRef.current,
       );
       if (anchorRoomID) {
-        return clampGainValue(roomGainByIdRef.current[anchorRoomID] ?? roomGain);
+        return clampGainValue(
+          roomGainByIdRef.current[anchorRoomID] ?? roomGain,
+        );
       }
       if (listenRoomIdsRef.current.length > 0) {
         let fallbackRoomGain = roomGain;
@@ -315,7 +433,9 @@ export function useIntercomSession({
     if (directToSelf) {
       return clampGainValue(directGainByUserIdRef.current[sourceUserID] ?? 1);
     }
-    const senderPresence = presenceRef.current.find((p) => p.userId === sourceUserID);
+    const senderPresence = presenceRef.current.find(
+      (p) => p.userId === sourceUserID,
+    );
     if (
       senderPresence &&
       Array.isArray(senderPresence.talkRooms) &&
@@ -325,7 +445,9 @@ export function useIntercomSession({
         listenRoomIdsRef.current.includes(roomID),
       );
       if (listenedTalkRooms.length > 0) {
-        return clampGainValue(roomGainByIdRef.current[listenedTalkRooms[0]] ?? 1);
+        return clampGainValue(
+          roomGainByIdRef.current[listenedTalkRooms[0]] ?? 1,
+        );
       }
     }
     const routedRoom = routes.find(
@@ -357,6 +479,7 @@ export function useIntercomSession({
     pcRef,
     onAudioError: setAudioError,
     onRefreshAudioDevices,
+    onAfterAudioSenderUpdated: applyOutgoingAudioSenderBitrate,
     enableReinit: !!(token && appData),
   });
 
@@ -393,7 +516,12 @@ export function useIntercomSession({
           ? ad?.broadcastGroups.find((g) => g.id === targetID)?.name || targetID
           : `Direct · ${fromUsername}`;
     if (body === "ptt_start" || body === "always_on") {
-      activeVoiceRoutesRef.current.set(routeKey, { senderUserID, scope: scopeValue, targetID, label });
+      activeVoiceRoutesRef.current.set(routeKey, {
+        senderUserID,
+        scope: scopeValue,
+        targetID,
+        label,
+      });
     } else if (body === "ptt_stop") {
       activeVoiceRoutesRef.current.delete(routeKey);
     }
@@ -415,8 +543,12 @@ export function useIntercomSession({
     let detail = event.fromUser.username;
     if (event.scope === "room") {
       const roomName =
-        ad.rooms.find((room) => room.id === event.targetId)?.name || event.targetId;
-      title = event.signal === "call" ? "Incoming group call" : "Incoming group signal";
+        ad.rooms.find((room) => room.id === event.targetId)?.name ||
+        event.targetId;
+      title =
+        event.signal === "call"
+          ? "Incoming group call"
+          : "Incoming group signal";
       detail = `${event.fromUser.username} · ${roomName}`;
     } else if (event.scope === "direct") {
       title = "Incoming direct signal";
@@ -440,7 +572,10 @@ export function useIntercomSession({
     return roleAllowed(room.senderRoleIds, currentRoleId);
   }
 
-  function canRoleReceiveFromRoom(roomId: string, currentRoleId: string): boolean {
+  function canRoleReceiveFromRoom(
+    roomId: string,
+    currentRoleId: string,
+  ): boolean {
     const room = appDataRef.current?.rooms.find((entry) => entry.id === roomId);
     if (!room) return false;
     return roleAllowed(room.receiverRoleIds, currentRoleId);
@@ -601,8 +736,14 @@ export function useIntercomSession({
   }
 
   // ── PTT actions ──
-  function startPtt() { setPttPressed(true); sendVoiceState("ptt_start"); }
-  function stopPtt() { setPttPressed(false); sendVoiceState("ptt_stop"); }
+  function startPtt() {
+    setPttPressed(true);
+    sendVoiceState("ptt_start");
+  }
+  function stopPtt() {
+    setPttPressed(false);
+    sendVoiceState("ptt_stop");
+  }
 
   function startBroadcastPtt(groupId: string) {
     setBroadcastPttPressed(groupId);
@@ -620,7 +761,9 @@ export function useIntercomSession({
   }
 
   function stopDirectPtt(userId: string) {
-    setdirectPttPressedUserId((current) => (current === userId ? null : current));
+    setdirectPttPressedUserId((current) =>
+      current === userId ? null : current,
+    );
     sendScopedVoiceState("direct", userId, "ptt_stop");
   }
 
@@ -672,7 +815,11 @@ export function useIntercomSession({
     wsRef.current.send(
       JSON.stringify({
         type: "chat",
-        data: { scope: chatScope, targetId: resolvedTargetId, body: message.trim() },
+        data: {
+          scope: chatScope,
+          targetId: resolvedTargetId,
+          body: message.trim(),
+        },
       }),
     );
     setMessage("");
@@ -681,22 +828,32 @@ export function useIntercomSession({
   // ── Bootstrap data application ──
   const applyBootstrapData = useCallback(
     (data: Bootstrap, isInitial = false) => {
-      const roleDefaults = data.roles.find((role) => role.id === data.self.roleId);
+      const roleDefaults = data.roles.find(
+        (role) => role.id === data.self.roleId,
+      );
       if (roleDefaults?.defaultVoiceMode) {
         const nextMode = roleDefaults.defaultVoiceMode as "always_on" | "ptt";
         setVoiceMode(nextMode);
         voiceModeRef.current = nextMode;
       }
       setViewMode(roleDefaults?.defaultSimpleView ? "simple" : "station");
-      pendingInitialRoomRestoreRef.current = isInitial ? hadStoredSessionSettings : false;
+      pendingInitialRoomRestoreRef.current = isInitial
+        ? hadStoredSessionSettings
+        : false;
       const hadStored = isInitial ? hadStoredSessionSettings : false;
       if (hadStored) {
         setListenRoomIds((prev) => {
           const sanitized = prev.filter((roomId) => {
             const room = data.rooms.find((entry) => entry.id === roomId);
-            return !!room && roleAllowed(room.receiverRoleIds, data.self.roleId);
+            return (
+              !!room && roleAllowed(room.receiverRoleIds, data.self.roleId)
+            );
           });
-          return mergeForcedListenRooms(sanitized, data.rooms, data.self.roleId);
+          return mergeForcedListenRooms(
+            sanitized,
+            data.rooms,
+            data.self.roleId,
+          );
         });
         setTalkRoomIds((prev) =>
           prev.filter((roomId) => {
@@ -715,10 +872,13 @@ export function useIntercomSession({
           const firstAllowedListenRoom = data.rooms.find((room) =>
             roleAllowed(room.receiverRoleIds, data.self.roleId),
           );
-          initialRoom = firstAllowedTalkRoom?.id || firstAllowedListenRoom?.id || "";
+          initialRoom =
+            firstAllowedTalkRoom?.id || firstAllowedListenRoom?.id || "";
         }
         if (initialRoom) {
-          const initialRoomConfig = data.rooms.find((room) => room.id === initialRoom);
+          const initialRoomConfig = data.rooms.find(
+            (room) => room.id === initialRoom,
+          );
           const initialCanListen = roleAllowed(
             initialRoomConfig?.receiverRoleIds,
             data.self.roleId,
@@ -855,7 +1015,9 @@ export function useIntercomSession({
           reapplyOutputDevice();
           void audio
             .play()
-            .then(() => { reapplyOutputDevice(); })
+            .then(() => {
+              reapplyOutputDevice();
+            })
             .catch((err) => {
               setAudioError(
                 `Remote audio playback blocked: ${err instanceof Error ? err.message : "unknown error"}`,
@@ -864,7 +1026,9 @@ export function useIntercomSession({
           pushDebugEvent("system · webrtc · remote audio track attached");
         };
         try {
-          const captureStream = await mic.getMicStream(selectedInputDeviceIdRef.current);
+          const captureStream = await mic.getMicStream(
+            selectedInputDeviceIdRef.current,
+          );
           mic.stopInputProcessing();
           mic.inputCaptureStreamRef.current = captureStream;
           const stream = mic.buildOutgoingMicStream(
@@ -883,6 +1047,7 @@ export function useIntercomSession({
             track.enabled = initialEnabled;
             pc.addTrack(track, stream);
           }
+          await applyOutgoingAudioSenderBitrate(pc);
           mic.applyVoiceModeToLocalTracks(voiceModeRef.current);
         } catch (e) {
           setAudioError(
@@ -1039,7 +1204,11 @@ export function useIntercomSession({
         }
         if (msg.type === "webrtc_offer") {
           const pc = pcRef.current;
-          if (!pc || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)
+          if (
+            !pc ||
+            !wsRef.current ||
+            wsRef.current.readyState !== WebSocket.OPEN
+          )
             return;
           void (async () => {
             if (pc.signalingState !== "stable") {
@@ -1055,11 +1224,16 @@ export function useIntercomSession({
             }
             pendingICERef.current = [];
             const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
+            const tunedAnswerSdp = tuneOpusSdpForSpeech(answer.sdp || "");
+            await pc.setLocalDescription({
+              type: "answer",
+              sdp: tunedAnswerSdp,
+            });
+            await applyOutgoingAudioSenderBitrate(pc);
             wsRef.current?.send(
               JSON.stringify({
                 type: "webrtc_answer",
-                data: { sdp: answer.sdp || "" },
+                data: { sdp: tunedAnswerSdp },
               }),
             );
             pushDebugEvent("system · webrtc · answered offer");
@@ -1125,8 +1299,8 @@ export function useIntercomSession({
           if (chatBody) {
             const roomLabel =
               msg.data.scope === "room"
-                ? ad?.rooms.find((room) => room.id === msg.data.targetId)?.name ||
-                  msg.data.targetId
+                ? ad?.rooms.find((room) => room.id === msg.data.targetId)
+                    ?.name || msg.data.targetId
                 : msg.data.scope === "broadcast"
                   ? ad?.broadcastGroups.find(
                       (group) => group.id === msg.data.targetId,
@@ -1177,7 +1351,10 @@ export function useIntercomSession({
         );
         setConnectionState("reconnecting");
         reconnectAttemptsRef.current += 1;
-        const backoff = Math.min(8000, 500 * 2 ** Math.min(reconnectAttemptsRef.current, 5));
+        const backoff = Math.min(
+          8000,
+          500 * 2 ** Math.min(reconnectAttemptsRef.current, 5),
+        );
         const jitterFactor = 0.7 + Math.random() * 0.6;
         const reconnectDelay = Math.round(backoff * jitterFactor);
         reconnectTimeoutRef.current = window.setTimeout(() => {
@@ -1208,7 +1385,9 @@ export function useIntercomSession({
   // ── Presence sync → local state ──
   useEffect(() => {
     if (!appData) return;
-    const selfPresence = presence.find((entry) => entry.userId === appData.self.id);
+    const selfPresence = presence.find(
+      (entry) => entry.userId === appData.self.id,
+    );
     if (!selfPresence) return;
     if (pendingInitialRoomRestoreRef.current) {
       const matchesListen = sameStringSet(

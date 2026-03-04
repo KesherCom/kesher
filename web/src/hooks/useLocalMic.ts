@@ -34,6 +34,8 @@ export type UseLocalMicOptions = {
   onAudioError: (msg: string) => void;
   /** Called after a new mic stream is obtained so the device list can refresh. */
   onRefreshAudioDevices: () => Promise<void>;
+  /** Optional callback to tune the active outgoing RTCRtpSender after add/replace. */
+  onAfterAudioSenderUpdated?: (pc: RTCPeerConnection) => Promise<void> | void;
   /**
    * When true the mic-reinit effect fires on `selectedInputDeviceId` changes.
    * Should be `!!(token && appData)` in the caller.
@@ -76,6 +78,7 @@ export function useLocalMic({
   pcRef,
   onAudioError,
   onRefreshAudioDevices,
+  onAfterAudioSenderUpdated,
   enableReinit,
 }: UseLocalMicOptions): UseLocalMicResult {
   // ── State ──
@@ -101,6 +104,7 @@ export function useLocalMic({
       echoCancellation: true,
       noiseSuppression: true,
       autoGainControl: true,
+      channelCount: 1,
     };
     if (deviceId) {
       try {
@@ -115,7 +119,10 @@ export function useLocalMic({
         });
       }
     }
-    return navigator.mediaDevices.getUserMedia({ audio: baseAudio, video: false });
+    return navigator.mediaDevices.getUserMedia({
+      audio: baseAudio,
+      video: false,
+    });
   }
 
   // ── Gain processing ──
@@ -254,6 +261,7 @@ export function useLocalMic({
         } else {
           pc.addTrack(newTrack, newStream);
         }
+        await onAfterAudioSenderUpdated?.(pc);
         if (generation !== micReinitGenerationRef.current) {
           for (const t of newStream.getTracks()) t.stop();
           return;
