@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock,
+} from "vitest";
 import { renderHook } from "@testing-library/react";
 import {
   useKeyboardShortcuts,
@@ -27,9 +35,9 @@ describe("useKeyboardShortcuts", () => {
     toggleAlwaysOn: { code: "KeyA" },
   };
 
-  let pttStart: ReturnType<typeof vi.fn>;
-  let pttStop: ReturnType<typeof vi.fn>;
-  let toggleAlwaysOn: ReturnType<typeof vi.fn>;
+  let pttStart: Mock<() => void>;
+  let pttStop: Mock<() => void>;
+  let toggleAlwaysOn: Mock<() => void>;
   let callbacks: ShortcutCallbacks;
 
   beforeEach(() => {
@@ -47,9 +55,7 @@ describe("useKeyboardShortcuts", () => {
   });
 
   it("fires ptt onStart on keydown and onStop on keyup", () => {
-    renderHook(() =>
-      useKeyboardShortcuts(defaultShortcuts, callbacks, true),
-    );
+    renderHook(() => useKeyboardShortcuts(defaultShortcuts, callbacks, true));
 
     fireKey("keydown", "Space");
     expect(pttStart).toHaveBeenCalledTimes(1);
@@ -60,9 +66,7 @@ describe("useKeyboardShortcuts", () => {
   });
 
   it("does not repeat-fire on held key", () => {
-    renderHook(() =>
-      useKeyboardShortcuts(defaultShortcuts, callbacks, true),
-    );
+    renderHook(() => useKeyboardShortcuts(defaultShortcuts, callbacks, true));
 
     fireKey("keydown", "Space");
     fireKey("keydown", "Space", { repeat: true } as any);
@@ -71,9 +75,7 @@ describe("useKeyboardShortcuts", () => {
   });
 
   it("fires toggle on single keydown (no repeat)", () => {
-    renderHook(() =>
-      useKeyboardShortcuts(defaultShortcuts, callbacks, true),
-    );
+    renderHook(() => useKeyboardShortcuts(defaultShortcuts, callbacks, true));
 
     fireKey("keydown", "KeyA");
     expect(toggleAlwaysOn).toHaveBeenCalledTimes(1);
@@ -84,18 +86,14 @@ describe("useKeyboardShortcuts", () => {
   });
 
   it("ignores shortcuts when disabled", () => {
-    renderHook(() =>
-      useKeyboardShortcuts(defaultShortcuts, callbacks, false),
-    );
+    renderHook(() => useKeyboardShortcuts(defaultShortcuts, callbacks, false));
 
     fireKey("keydown", "Space");
     expect(pttStart).not.toHaveBeenCalled();
   });
 
   it("ignores unbound keys", () => {
-    renderHook(() =>
-      useKeyboardShortcuts(defaultShortcuts, callbacks, true),
-    );
+    renderHook(() => useKeyboardShortcuts(defaultShortcuts, callbacks, true));
 
     fireKey("keydown", "KeyZ");
     expect(pttStart).not.toHaveBeenCalled();
@@ -103,9 +101,7 @@ describe("useKeyboardShortcuts", () => {
   });
 
   it("ignores events when target is an input element", () => {
-    renderHook(() =>
-      useKeyboardShortcuts(defaultShortcuts, callbacks, true),
-    );
+    renderHook(() => useKeyboardShortcuts(defaultShortcuts, callbacks, true));
 
     const input = document.createElement("input");
     document.body.appendChild(input);
@@ -124,9 +120,7 @@ describe("useKeyboardShortcuts", () => {
   });
 
   it("releases held actions on window blur", () => {
-    renderHook(() =>
-      useKeyboardShortcuts(defaultShortcuts, callbacks, true),
-    );
+    renderHook(() => useKeyboardShortcuts(defaultShortcuts, callbacks, true));
 
     fireKey("keydown", "Space");
     expect(pttStart).toHaveBeenCalledTimes(1);
@@ -141,9 +135,7 @@ describe("useKeyboardShortcuts", () => {
       toggleAlwaysOn: null,
     };
 
-    renderHook(() =>
-      useKeyboardShortcuts(shortcuts, callbacks, true),
-    );
+    renderHook(() => useKeyboardShortcuts(shortcuts, callbacks, true));
 
     // Without ctrl → should NOT match
     fireKey("keydown", "Space");
@@ -160,9 +152,7 @@ describe("useKeyboardShortcuts", () => {
       toggleAlwaysOn: null,
     };
 
-    renderHook(() =>
-      useKeyboardShortcuts(shortcuts, callbacks, true),
-    );
+    renderHook(() => useKeyboardShortcuts(shortcuts, callbacks, true));
 
     fireKey("keydown", "Space");
     expect(pttStart).not.toHaveBeenCalled();
