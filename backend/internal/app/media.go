@@ -3,14 +3,27 @@ package app
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
+	"sort"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 )
 
 type mediaSourceTrack struct {
 	track *webrtc.TrackLocalStaticRTP
+}
+
+type MediaRealtimeStats struct {
+	Peers                 int    `json:"peers"`
+	Sources               int    `json:"sources"`
+	SyncRequests          uint64 `json:"syncRequests"`
+	SyncRuns              uint64 `json:"syncRuns"`
+	SyncRequestsCoalesced uint64 `json:"syncRequestsCoalesced"`
+	Renegotiations        uint64 `json:"renegotiations"`
 }
 
 type mediaPeer struct {
@@ -20,28 +33,47 @@ type mediaPeer struct {
 	senders              map[string]*webrtc.RTPSender
 	renegotiating        bool
 	pendingRenegotiate   bool
+	lastSenderSetHash    uint64
+	lastSenderSetHashSet bool
+	renegotiateTimer     *time.Timer
 	pendingICECandidates []webrtc.ICECandidateInit
 }
 
 type MediaManager struct {
-	mu              sync.Mutex
-	logger          *slog.Logger
-	hub             *Hub
-	peers           map[string]*mediaPeer
-	sources         map[string]*mediaSourceTrack   // sourceToken -> track
-	broadcastActive map[string]map[string]struct{} // sourceToken -> broadcastGroupID set
-	directActive    map[string]string              // sourceToken -> targetUserID
+	mu                         sync.Mutex
+	logger                     *slog.Logger
+	hub                        *Hub
+	peers                      map[string]*mediaPeer
+	sources                    map[string]*mediaSourceTrack   // sourceToken -> track
+	broadcastActive            map[string]map[string]struct{} // sourceToken -> broadcastGroupID set
+	directActive               map[string]string              // sourceToken -> targetUserID
+	idleRoomFallbackSuppressed map[string]struct{}            // sourceToken -> suppressed after direct/broadcast release while mic is idle
+	syncScheduled              bool
+	syncRequests               atomic.Uint64
+	syncRuns                   atomic.Uint64
+	syncMerged                 atomic.Uint64
+	renegotiations             atomic.Uint64
 }
+
+const renegotiationDebounce = 60 * time.Millisecond
 
 func NewMediaManager(hub *Hub, logger *slog.Logger) *MediaManager {
 	return &MediaManager{
-		logger:          logger,
-		hub:             hub,
-		peers:           make(map[string]*mediaPeer),
-		sources:         make(map[string]*mediaSourceTrack),
-		broadcastActive: make(map[string]map[string]struct{}),
-		directActive:    make(map[string]string),
+		logger:                     logger,
+		hub:                        hub,
+		peers:                      make(map[string]*mediaPeer),
+		sources:                    make(map[string]*mediaSourceTrack),
+		broadcastActive:            make(map[string]map[string]struct{}),
+		directActive:               make(map[string]string),
+		idleRoomFallbackSuppressed: make(map[string]struct{}),
 	}
+}
+
+func (m *MediaManager) sourceMicEnabledLocked(sourceToken string) bool {
+	m.hub.mu.RLock()
+	defer m.hub.mu.RUnlock()
+	c, ok := m.hub.clients[sourceToken]
+	return ok && c.micEnabled
 }
 
 func (m *MediaManager) EnsurePeer(token string, user User) error {
@@ -95,9 +127,36 @@ func (m *MediaManager) EnsurePeer(token string, user User) error {
 }
 
 func (m *MediaManager) SyncRouting() {
+	m.syncRequests.Add(1)
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.recomputeAllSourcesLocked()
+	if m.syncScheduled {
+		m.syncMerged.Add(1)
+		m.mu.Unlock()
+		return
+	}
+	m.syncScheduled = true
+	m.mu.Unlock()
+	time.AfterFunc(35*time.Millisecond, func() {
+		m.mu.Lock()
+		m.syncScheduled = false
+		m.syncRuns.Add(1)
+		m.recomputeAllSourcesLocked()
+		m.mu.Unlock()
+	})
+}
+
+func (m *MediaManager) RealtimeStats() MediaRealtimeStats {
+	m.mu.Lock()
+	stats := MediaRealtimeStats{
+		Peers:                 len(m.peers),
+		Sources:               len(m.sources),
+		SyncRequests:          m.syncRequests.Load(),
+		SyncRuns:              m.syncRuns.Load(),
+		SyncRequestsCoalesced: m.syncMerged.Load(),
+		Renegotiations:        m.renegotiations.Load(),
+	}
+	m.mu.Unlock()
+	return stats
 }
 
 func (m *MediaManager) EnsureNegotiation(token string) {
@@ -107,7 +166,7 @@ func (m *MediaManager) EnsureNegotiation(token string) {
 	if !ok {
 		return
 	}
-	m.renegotiateLocked(peer)
+	m.requestRenegotiationLocked(peer)
 }
 
 func (m *MediaManager) HandleAnswer(token string, sdp string) error {
@@ -131,8 +190,10 @@ func (m *MediaManager) HandleAnswer(token string, sdp string) error {
 	peer.pendingICECandidates = nil
 	peer.renegotiating = false
 	if peer.pendingRenegotiate {
-		peer.pendingRenegotiate = false
-		m.renegotiateLocked(peer)
+		m.maybeRenegotiateLocked(peer)
+		if peer.pendingRenegotiate {
+			m.scheduleRenegotiationLocked(peer.token)
+		}
 	}
 	return nil
 }
@@ -168,23 +229,31 @@ func (m *MediaManager) RemovePeer(token string) {
 	if !ok {
 		return
 	}
+	if peer.renegotiateTimer != nil {
+		peer.renegotiateTimer.Stop()
+		peer.renegotiateTimer = nil
+	}
 	_ = peer.pc.Close()
 	delete(m.peers, token)
 	delete(m.broadcastActive, token)
 	delete(m.directActive, token)
+	delete(m.idleRoomFallbackSuppressed, token)
 	delete(m.sources, token)
 
 	var affectedSources []string
 	for sourceToken, targetUserID := range m.directActive {
 		if targetUserID == peer.userID {
 			delete(m.directActive, sourceToken)
+			if !m.sourceMicEnabledLocked(sourceToken) {
+				m.idleRoomFallbackSuppressed[sourceToken] = struct{}{}
+			}
 			affectedSources = append(affectedSources, sourceToken)
 		}
 	}
 
 	for _, p := range m.peers {
 		if m.removeSenderLocked(p, token) {
-			m.renegotiateLocked(p)
+			m.requestRenegotiationLocked(p)
 		}
 	}
 	for _, sourceToken := range affectedSources {
@@ -202,13 +271,14 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 	m.sources[sourcePeer.token] = &mediaSourceTrack{track: localTrack}
 	m.recomputeSourceRoutingLocked(sourcePeer.token)
 	m.mu.Unlock()
+	buf := make([]byte, 2048)
 
 	for {
-		pkt, _, readErr := remote.ReadRTP()
+		n, _, readErr := remote.Read(buf)
 		if readErr != nil {
 			break
 		}
-		if writeErr := localTrack.WriteRTP(pkt); writeErr != nil {
+		if _, writeErr := localTrack.Write(buf[:n]); writeErr != nil {
 			break
 		}
 	}
@@ -217,7 +287,7 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 	delete(m.sources, sourcePeer.token)
 	for _, p := range m.peers {
 		if m.removeSenderLocked(p, sourcePeer.token) {
-			m.renegotiateLocked(p)
+			m.requestRenegotiationLocked(p)
 		}
 	}
 	m.mu.Unlock()
@@ -227,16 +297,28 @@ func (m *MediaManager) SetBroadcastGroupActive(sourceToken, groupID string, enab
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if enabled {
+		delete(m.idleRoomFallbackSuppressed, sourceToken)
 		if _, ok := m.broadcastActive[sourceToken]; !ok {
 			m.broadcastActive[sourceToken] = make(map[string]struct{})
+		}
+		if _, alreadyActive := m.broadcastActive[sourceToken][groupID]; alreadyActive {
+			return
 		}
 		m.broadcastActive[sourceToken][groupID] = struct{}{}
 	} else {
 		if groups, ok := m.broadcastActive[sourceToken]; ok {
+			if _, existed := groups[groupID]; !existed {
+				return
+			}
 			delete(groups, groupID)
 			if len(groups) == 0 {
 				delete(m.broadcastActive, sourceToken)
 			}
+		} else {
+			return
+		}
+		if _, stillActive := m.broadcastActive[sourceToken]; !stillActive && !m.sourceMicEnabledLocked(sourceToken) {
+			m.idleRoomFallbackSuppressed[sourceToken] = struct{}{}
 		}
 	}
 	m.recomputeSourceRoutingLocked(sourceToken)
@@ -246,11 +328,33 @@ func (m *MediaManager) SetDirectTargetActive(sourceToken, targetUserID string, e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if enabled {
+		delete(m.idleRoomFallbackSuppressed, sourceToken)
+		if currentTarget, ok := m.directActive[sourceToken]; ok && currentTarget == targetUserID {
+			return
+		}
 		m.directActive[sourceToken] = targetUserID
 	} else if currentTarget, ok := m.directActive[sourceToken]; ok {
 		if currentTarget == targetUserID || targetUserID == "" {
 			delete(m.directActive, sourceToken)
+			if !m.sourceMicEnabledLocked(sourceToken) {
+				m.idleRoomFallbackSuppressed[sourceToken] = struct{}{}
+			}
+		} else {
+			return
 		}
+	} else {
+		return
+	}
+	m.recomputeSourceRoutingLocked(sourceToken)
+}
+
+func (m *MediaManager) SetIdleRoomFallbackSuppressed(sourceToken string, suppressed bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if suppressed {
+		m.idleRoomFallbackSuppressed[sourceToken] = struct{}{}
+	} else {
+		delete(m.idleRoomFallbackSuppressed, sourceToken)
 	}
 	m.recomputeSourceRoutingLocked(sourceToken)
 }
@@ -278,6 +382,7 @@ func (m *MediaManager) recomputeSourceRoutingLocked(sourceToken string) {
 	}
 	broadcastRooms := m.broadcastRoomsForSourceLocked(sourceToken)
 	talkRooms := m.talkRoomsForSourceLocked(sourceToken)
+	_, idleRoomFallbackSuppressed := m.idleRoomFallbackSuppressed[sourceToken]
 
 	for _, p := range m.peers {
 		if p.token == sourceToken {
@@ -288,18 +393,18 @@ func (m *MediaManager) recomputeSourceRoutingLocked(sourceToken string) {
 			shouldReceive = p.token == directTargetPeerToken
 		} else if len(broadcastRooms) > 0 {
 			shouldReceive = m.peerListensToAnyRoomLocked(p.token, broadcastRooms)
-		} else {
+		} else if !idleRoomFallbackSuppressed {
 			shouldReceive = m.peerListensToAnyRoomLocked(p.token, talkRooms)
 		}
 
 		if shouldReceive {
 			if m.attachSourceToPeerLocked(sourceToken, src, p) {
-				m.renegotiateLocked(p)
+				m.requestRenegotiationLocked(p)
 			}
 			continue
 		}
 		if m.removeSenderLocked(p, sourceToken) {
-			m.renegotiateLocked(p)
+			m.requestRenegotiationLocked(p)
 		}
 	}
 }
@@ -313,11 +418,11 @@ func (m *MediaManager) talkRoomsForSourceLocked(sourceToken string) map[string]s
 	}
 	rooms := make(map[string]struct{}, len(c.talkRooms))
 	for roomID := range c.talkRooms {
-		senderRoles, _, err := m.hub.store.RoomRolePolicies(context.Background(), roomID)
+		allowed, err := m.hub.store.RoomAllowsSenderRole(context.Background(), roomID, c.session.RoleID)
 		if err != nil {
 			continue
 		}
-		if !isRoleAllowed(senderRoles, c.session.RoleID) {
+		if !allowed {
 			continue
 		}
 		rooms[roomID] = struct{}{}
@@ -339,11 +444,11 @@ func (m *MediaManager) peerListensToAnyRoomLocked(peerToken string, roomSet map[
 		if _, ok := roomSet[roomID]; !ok {
 			continue
 		}
-		_, receiverRoles, err := m.hub.store.RoomRolePolicies(context.Background(), roomID)
+		allowed, err := m.hub.store.RoomAllowsReceiverRole(context.Background(), roomID, c.session.RoleID)
 		if err != nil {
 			continue
 		}
-		if isRoleAllowed(receiverRoles, c.session.RoleID) {
+		if allowed {
 			return true
 		}
 	}
@@ -363,25 +468,25 @@ func (m *MediaManager) broadcastRoomsForSourceLocked(sourceToken string) map[str
 	}
 	rooms := make(map[string]struct{})
 	for groupID := range groups {
-		allowedRoles, err := m.hub.store.BroadcastGroupAllowedRoleSet(context.Background(), groupID)
+		allowed, err := m.hub.store.BroadcastGroupAllowsRole(context.Background(), groupID, sourceClient.session.RoleID)
 		if err != nil {
 			m.logger.Warn("broadcast group role lookup failed", "groupId", groupID, "error", err)
 			continue
 		}
-		if !isRoleAllowed(allowedRoles, sourceClient.session.RoleID) {
+		if !allowed {
 			continue
 		}
-		set, err := m.hub.store.BroadcastGroupRoomSet(context.Background(), groupID)
+		roomIDs, err := m.hub.store.BroadcastGroupRoomIDs(context.Background(), groupID)
 		if err != nil {
 			m.logger.Warn("broadcast group room lookup failed", "groupId", groupID, "error", err)
 			continue
 		}
-		for roomID := range set {
-			senderRoles, _, err := m.hub.store.RoomRolePolicies(context.Background(), roomID)
+		for _, roomID := range roomIDs {
+			canSend, err := m.hub.store.RoomAllowsSenderRole(context.Background(), roomID, sourceClient.session.RoleID)
 			if err != nil {
 				continue
 			}
-			if !isRoleAllowed(senderRoles, sourceClient.session.RoleID) {
+			if !canSend {
 				continue
 			}
 			rooms[roomID] = struct{}{}
@@ -413,26 +518,87 @@ func (m *MediaManager) removeSenderLocked(peer *mediaPeer, srcToken string) bool
 	return true
 }
 
-func (m *MediaManager) renegotiateLocked(peer *mediaPeer) {
+func senderSetHash(senders map[string]*webrtc.RTPSender) uint64 {
+	if len(senders) == 0 {
+		return 0
+	}
+	tokens := make([]string, 0, len(senders))
+	for token := range senders {
+		tokens = append(tokens, token)
+	}
+	sort.Strings(tokens)
+	h := fnv.New64a()
+	for _, token := range tokens {
+		_, _ = h.Write([]byte(token))
+		_, _ = h.Write([]byte{0})
+	}
+	return h.Sum64()
+}
+
+func (m *MediaManager) requestRenegotiationLocked(peer *mediaPeer) {
+	peer.pendingRenegotiate = true
+	m.scheduleRenegotiationLocked(peer.token)
+}
+
+func (m *MediaManager) scheduleRenegotiationLocked(token string) {
+	peer, ok := m.peers[token]
+	if !ok {
+		return
+	}
+	if peer.renegotiateTimer != nil {
+		return
+	}
+	peer.renegotiateTimer = time.AfterFunc(renegotiationDebounce, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		peer, ok := m.peers[token]
+		if !ok {
+			return
+		}
+		peer.renegotiateTimer = nil
+		m.maybeRenegotiateLocked(peer)
+		if peer.pendingRenegotiate {
+			m.scheduleRenegotiationLocked(token)
+		}
+	})
+}
+
+func (m *MediaManager) maybeRenegotiateLocked(peer *mediaPeer) {
+	if !peer.pendingRenegotiate {
+		return
+	}
 	if peer.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
+		peer.pendingRenegotiate = false
 		return
 	}
 	if peer.pc.SignalingState() != webrtc.SignalingStateStable || peer.renegotiating {
-		peer.pendingRenegotiate = true
 		return
 	}
+	nextSenderSetHash := senderSetHash(peer.senders)
+	if peer.lastSenderSetHashSet && peer.lastSenderSetHash == nextSenderSetHash {
+		peer.pendingRenegotiate = false
+		return
+	}
+	peer.pendingRenegotiate = false
 	peer.renegotiating = true
 	offer, err := peer.pc.CreateOffer(nil)
 	if err != nil {
 		peer.renegotiating = false
+		peer.pendingRenegotiate = true
+		m.scheduleRenegotiationLocked(peer.token)
 		m.logger.Warn("create offer failed", "token", peer.token, "error", err)
 		return
 	}
 	if err := peer.pc.SetLocalDescription(offer); err != nil {
 		peer.renegotiating = false
+		peer.pendingRenegotiate = true
+		m.scheduleRenegotiationLocked(peer.token)
 		m.logger.Warn("set local description failed", "token", peer.token, "error", err)
 		return
 	}
+	peer.lastSenderSetHashSet = true
+	peer.lastSenderSetHash = nextSenderSetHash
+	m.renegotiations.Add(1)
 	m.sendWS(peer.token, WSOutbound{
 		Type: "webrtc_offer",
 		Data: WebRTCOffer{SDP: offer.SDP},
@@ -446,10 +612,7 @@ func (m *MediaManager) sendWS(token string, msg WSOutbound) {
 	if !ok {
 		return
 	}
-	select {
-	case c.send <- msg:
-	default:
-	}
+	m.hub.enqueueOutbound(c, msg)
 }
 
 func derefString(s *string) string {

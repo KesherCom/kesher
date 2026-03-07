@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import type { Bootstrap } from "../../types";
 import { createRoom, deleteRoom, updateRoom } from "../../api";
 import { RoleMultiSelect } from "./RoleMultiSelect";
+import { useAdminAction } from "./useAdminAction";
 
 type AdminRoomsCardProps = {
   token: string;
@@ -17,8 +18,11 @@ export function AdminRoomsCard({
   refreshBootstrapData,
 }: AdminRoomsCardProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [adminBusy, setAdminBusy] = useState(false);
-  const [adminError, setAdminError] = useState("");
+  const {
+    busy: adminBusy,
+    error: adminError,
+    run: runAdminAction,
+  } = useAdminAction({ onSuccess: refreshBootstrapData });
 
   const [roomCreateId, setRoomCreateId] = useState("");
   const [roomCreateName, setRoomCreateName] = useState("");
@@ -28,6 +32,8 @@ export function AdminRoomsCard({
   const [roomCreateReceiverRoleIds, setRoomCreateReceiverRoleIds] = useState<
     string[]
   >([]);
+  const [roomCreateForcedListenRoleIds, setRoomCreateForcedListenRoleIds] =
+    useState<string[]>([]);
   const [showRoomCreateForm, setShowRoomCreateForm] = useState(false);
   const [roomEditId, setRoomEditId] = useState<string | null>(null);
   const [roomEditName, setRoomEditName] = useState("");
@@ -37,27 +43,15 @@ export function AdminRoomsCard({
   const [roomEditReceiverRoleIds, setRoomEditReceiverRoleIds] = useState<
     string[]
   >([]);
-
-  async function runAdminAction(action: () => Promise<void>) {
-    setAdminBusy(true);
-    setAdminError("");
-    try {
-      await action();
-      await refreshBootstrapData();
-    } catch (error) {
-      setAdminError(
-        error instanceof Error ? error.message : "admin operation failed",
-      );
-    } finally {
-      setAdminBusy(false);
-    }
-  }
+  const [roomEditForcedListenRoleIds, setRoomEditForcedListenRoleIds] =
+    useState<string[]>([]);
 
   function resetRoomCreateForm() {
     setRoomCreateId("");
     setRoomCreateName("");
     setRoomCreateSenderRoleIds([]);
     setRoomCreateReceiverRoleIds([]);
+    setRoomCreateForcedListenRoleIds([]);
   }
 
   function resetRoomEditForm() {
@@ -65,6 +59,7 @@ export function AdminRoomsCard({
     setRoomEditName("");
     setRoomEditSenderRoleIds([]);
     setRoomEditReceiverRoleIds([]);
+    setRoomEditForcedListenRoleIds([]);
   }
 
   function createRoomConfig() {
@@ -77,6 +72,7 @@ export function AdminRoomsCard({
         name,
         senderRoleIds: roomCreateSenderRoleIds,
         receiverRoleIds: roomCreateReceiverRoleIds,
+        forcedListenRoleIds: roomCreateForcedListenRoleIds,
       });
       resetRoomCreateForm();
       setShowRoomCreateForm(false);
@@ -92,6 +88,7 @@ export function AdminRoomsCard({
         name,
         senderRoleIds: roomEditSenderRoleIds,
         receiverRoleIds: roomEditReceiverRoleIds,
+        forcedListenRoleIds: roomEditForcedListenRoleIds,
       });
       resetRoomEditForm();
     });
@@ -194,6 +191,13 @@ export function AdminRoomsCard({
                     keyPrefix="room-create-receiver"
                     roles={appData.roles}
                   />
+                  <RoleMultiSelect
+                    label="Forced listeners"
+                    selectedRoleIds={roomCreateForcedListenRoleIds}
+                    setState={setRoomCreateForcedListenRoleIds}
+                    keyPrefix="room-create-forced-listen"
+                    roles={appData.roles}
+                  />
                 </div>
               </div>
             ) : null}
@@ -238,6 +242,13 @@ export function AdminRoomsCard({
                     keyPrefix="room-edit-receiver"
                     roles={appData.roles}
                   />
+                  <RoleMultiSelect
+                    label="Forced listeners"
+                    selectedRoleIds={roomEditForcedListenRoleIds}
+                    setState={setRoomEditForcedListenRoleIds}
+                    keyPrefix="room-edit-forced-listen"
+                    roles={appData.roles}
+                  />
                 </div>
               </div>
             ) : null}
@@ -256,6 +267,9 @@ export function AdminRoomsCard({
                       setRoomEditName(room.name);
                       setRoomEditSenderRoleIds(room.senderRoleIds || []);
                       setRoomEditReceiverRoleIds(room.receiverRoleIds || []);
+                      setRoomEditForcedListenRoleIds(
+                        room.forcedListenRoleIds || [],
+                      );
                     }}
                   >
                     Edit

@@ -167,7 +167,7 @@ func TestTelegramProcessUpdate(t *testing.T) {
 
 	// create a room and mapping
 	ctx := context.Background()
-	_ = store.CreateRoom(ctx, "testroom", "Test Room", nil, nil)
+	_ = store.CreateRoom(ctx, "testroom", "Test Room", nil, nil, nil)
 	_ = store.CreateTelegramMapping(ctx, "m1", "-100999", "TestLabel", "testroom")
 
 	update := TelegramUpdate{
@@ -223,7 +223,7 @@ func TestTelegramPollingIntegration(t *testing.T) {
 	// The integration between polling and processUpdate is tested via processUpdate above
 
 	ctx := context.Background()
-	_ = store.CreateRoom(ctx, "pingroom", "Ping", nil, nil)
+	_ = store.CreateRoom(ctx, "pingroom", "Ping", nil, nil, nil)
 	_ = store.CreateTelegramMapping(ctx, "m2", "-100123", "Ping", "pingroom")
 
 	// Verify the update would be processed correctly
@@ -265,7 +265,7 @@ func TestTelegramWebhookMode(t *testing.T) {
 
 	// Test webhook handler with valid secret
 	ctx := context.Background()
-	_ = store.CreateRoom(ctx, "whroom", "WH Room", nil, nil)
+	_ = store.CreateRoom(ctx, "whroom", "WH Room", nil, nil, nil)
 	_ = store.CreateTelegramMapping(ctx, "m3", "-100555", "WH", "whroom")
 
 	body := `{"update_id":1,"message":{"message_id":1,"from":{"id":1,"first_name":"Test"},"chat":{"id":-100555,"type":"group"},"text":"via webhook"}}`
@@ -307,6 +307,7 @@ func TestTelegramStatusIncludesMode(t *testing.T) {
 	session, _ := s.sessions.Get(loginResp.Token)
 
 	req = httptest.NewRequest(http.MethodGet, "/api/admin/telegram", nil)
+	req.Header.Set("X-Admin-Pin", "123456")
 	rec = httptest.NewRecorder()
 	s.handleAdminTelegram(rec, req, session)
 	if rec.Code != http.StatusOK {

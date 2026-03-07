@@ -69,8 +69,8 @@ jobs:
           mkdir -p dist/bin dist/packages
           ext=""
           if [ "${GOOS}" = "windows" ]; then ext=".exe"; fi
-          bin="server-${GOOS}-${GOARCH}${ext}"
-          archive="live-production-intercom-${GOOS}-${GOARCH}"
+          bin="kesher-${GOOS}-${GOARCH}${ext}"
+          archive="kesher-${GOOS}-${GOARCH}"
 
           (
             cd backend

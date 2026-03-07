@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Bootstrap, BroadcastGroup, Presence } from "../types";
+import type { KeyboardShortcutSettings } from "../app/settings";
+import { sortDirectUsersByRoleAndUsername } from "../lib/users";
+import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
 
 const DB_MIN = -60;
 const DB_MAX = 6; // +6 dB ≈ gain 2.0
@@ -49,6 +52,7 @@ function formatDbFs(dbFs: number): string {
 }
 
 type StationIntercomViewProps = {
+  connectionState: "connecting" | "connected" | "reconnecting" | "offline";
   appData: Bootstrap;
   doLogout: () => void;
   listenRoomIds: string[];
@@ -65,6 +69,7 @@ type StationIntercomViewProps = {
   stopBroadcastPtt: (groupId: string) => void;
   broadcastGroups: BroadcastGroup[];
   presence: Presence[];
+  roomListenerCounts: Record<string, number>;
   roleNameById: Map<string, string>;
   lastDirectCallerUserId: string | null;
   directPttPressedUserId: string | null;
@@ -87,9 +92,14 @@ type StationIntercomViewProps = {
   onEnableDirectPptChange: (enabled: boolean) => void;
   enableDirectTabs: boolean;
   onEnableDirectTabsChange: (enabled: boolean) => void;
-  availableChannels: Array<{ id: string; label: string }>;
-  selectedChannelId: string;
-  onSelectChannel: (channelId: string) => void;
+  enableBackgroundAudioRecovery: boolean;
+  onEnableBackgroundAudioRecoveryChange: (enabled: boolean) => void;
+  keepScreenAwake: boolean;
+  onKeepScreenAwakeChange: (enabled: boolean) => void;
+  mediaSessionSupported: boolean;
+  wakeLockSupported: boolean;
+  wakeLockActive: boolean;
+  isStandaloneDisplayMode: boolean;
   onChannelPptStart: (channelId: string) => void;
   onChannelPptStop: (channelId: string) => void;
   pptPressedChannelId: string | null;
@@ -105,6 +115,10 @@ type StationIntercomViewProps = {
   directGainByUserId: Record<string, number>;
   onRoomGainChange: (roomId: string, gain: number) => void;
   onDirectGainChange: (userId: string, gain: number) => void;
+  // Keyboard shortcuts
+  keyboardShortcuts: KeyboardShortcutSettings;
+  onKeyboardShortcutsChange: (next: KeyboardShortcutSettings) => void;
+  onRecordingShortcutChange: (recording: boolean) => void;
   // Audio device props
   inputDevices: MediaDeviceInfo[];
   selectedInputDeviceId: string;
@@ -122,6 +136,7 @@ type StationIntercomViewProps = {
 };
 
 export function StationIntercomView({
+  connectionState,
   appData,
   doLogout,
   listenRoomIds,
@@ -138,6 +153,7 @@ export function StationIntercomView({
   stopBroadcastPtt,
   broadcastGroups,
   presence,
+  roomListenerCounts,
   roleNameById,
   lastDirectCallerUserId,
   directPttPressedUserId,
@@ -156,9 +172,14 @@ export function StationIntercomView({
   onEnableDirectPptChange,
   enableDirectTabs,
   onEnableDirectTabsChange,
-  availableChannels,
-  selectedChannelId,
-  onSelectChannel,
+  enableBackgroundAudioRecovery,
+  onEnableBackgroundAudioRecoveryChange,
+  keepScreenAwake,
+  onKeepScreenAwakeChange,
+  mediaSessionSupported,
+  wakeLockSupported,
+  wakeLockActive,
+  isStandaloneDisplayMode,
   onChannelPptStart,
   onChannelPptStop,
   pptPressedChannelId,
@@ -174,6 +195,9 @@ export function StationIntercomView({
   directGainByUserId,
   onRoomGainChange,
   onDirectGainChange,
+  keyboardShortcuts,
+  onKeyboardShortcutsChange,
+  onRecordingShortcutChange,
   inputDevices,
   selectedInputDeviceId,
   selectedMicLabel,
@@ -216,31 +240,11 @@ export function StationIntercomView({
   }, []);
 
   const allDirectOnlineTargets = useMemo(() => {
-    return presence
-      .filter(
-        (p) =>
-          p.userId !== appData.self.id && p.username.toLowerCase() !== "admin",
-      )
-      .slice()
-      .sort((a, b) => {
-        const roleA = (
-          roleNameById.get(a.roleId) ||
-          a.roleId ||
-          ""
-        ).toLowerCase();
-        const roleB = (
-          roleNameById.get(b.roleId) ||
-          b.roleId ||
-          ""
-        ).toLowerCase();
-        const byRole = roleA.localeCompare(roleB, undefined, {
-          sensitivity: "base",
-        });
-        if (byRole !== 0) return byRole;
-        return a.username.localeCompare(b.username, undefined, {
-          sensitivity: "base",
-        });
-      });
+    const directCandidates = presence.filter(
+      (p) =>
+        p.userId !== appData.self.id && p.username.toLowerCase() !== "admin",
+    );
+    return sortDirectUsersByRoleAndUsername(directCandidates, roleNameById);
   }, [appData.self.id, presence, roleNameById]);
 
   const directOnlineTargets = useMemo(
@@ -277,7 +281,6 @@ export function StationIntercomView({
     // Role-based tabs
     const roleGroups = new Map<string, typeof allDirectOnlineTargets>();
     for (const p of allDirectOnlineTargets) {
-      const roleLabel = roleNameById.get(p.roleId) || p.roleId || "Unknown";
       if (!roleGroups.has(p.roleId)) {
         roleGroups.set(p.roleId, []);
       }
@@ -333,11 +336,32 @@ export function StationIntercomView({
     null;
   const replyTargetUserId = lastDirectCallerUserId;
 
+  // Is user actively sending audio on their main talk rooms?
+  // Not when direct PTT or broadcast PTT is active (audio goes there instead).
+  const isSendingOnTalkRooms =
+    (pttPressed || voiceMode === "always_on") &&
+    !directPttPressedUserId &&
+    !broadcastPttPressed;
+
   return (
     <div className="root app station-shell">
+      {connectionState !== "connected" && (
+        <div className="connection-offline-banner">
+          <span className="connection-offline-icon" />
+          {connectionState === "reconnecting"
+            ? "Reconnecting…"
+            : connectionState === "connecting"
+              ? "Connecting…"
+              : "Offline"}
+        </div>
+      )}
       <div className="station-topbar">
         <div className="station-live">
-          <span className="station-live-dot" />
+          <span
+            className={`station-live-dot ${
+              connectionState === "connected" ? "connected" : "disconnected"
+            }`}
+          />
           Live: {appData.self.username.toUpperCase()}
         </div>
         <div className="station-top-actions">
@@ -372,14 +396,15 @@ export function StationIntercomView({
               room.id,
               appData.self.roleId,
             );
+            const isForced = (room.forcedListenRoleIds ?? []).includes(
+              appData.self.roleId,
+            );
             const isPttPressed =
               enableDirectPpt && pptPressedChannelId === room.id;
 
             const handleTalkPointerDown = () => {
               if (enableDirectPpt) {
                 onChannelPptStart(room.id);
-              } else {
-                toggleTalkRoom(room.id);
               }
             };
 
@@ -389,8 +414,19 @@ export function StationIntercomView({
               }
             };
 
+            const listenerCount = roomListenerCounts[room.id] ?? 0;
+
             return (
               <article key={`station-room-${room.id}`} className="station-card">
+                {listenerCount > 0 ? (
+                  <span
+                    className="station-presence-badge"
+                    title={`${listenerCount} listener(s)`}
+                  >
+                    <span className="station-presence-dot" />
+                    {listenerCount}
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   className={`station-pin-top ${pinnedRoomIds.includes(room.id) ? "active" : ""}`}
@@ -411,15 +447,19 @@ export function StationIntercomView({
                 <button
                   className={`station-card-head ${
                     enableDirectPpt
-                      ? isPttPressed
+                      ? isPttPressed && canTalk
                         ? "ppt-active"
                         : ""
-                      : talking
-                        ? "selected"
-                        : ""
-                  } ${canTalk ? "" : "disabled"}`}
-                  onPointerDown={canTalk ? handleTalkPointerDown : undefined}
-                  onPointerUp={canTalk ? handleTalkPointerUp : undefined}
+                      : ""
+                  } ${canTalk ? "" : "disabled"}${!enableDirectPpt && talking && canTalk ? " talk-armed" : ""}${!enableDirectPpt && talking && canTalk && isSendingOnTalkRooms ? " talk-live" : ""}`}
+                  onPointerDown={
+                    canTalk && enableDirectPpt
+                      ? handleTalkPointerDown
+                      : undefined
+                  }
+                  onPointerUp={
+                    canTalk && enableDirectPpt ? handleTalkPointerUp : undefined
+                  }
                   onPointerLeave={
                     canTalk && enableDirectPpt && isPttPressed
                       ? handleTalkPointerUp
@@ -477,16 +517,18 @@ export function StationIntercomView({
                 </div>
                 <div className="station-card-actions">
                   <button
-                    className={`listen ${listening ? "on" : ""} ${canListen ? "" : "disabled"}`}
+                    className={`listen ${listening && canListen ? "on" : ""} ${canListen ? "" : "disabled"} ${isForced ? "forced" : ""}`}
                     onClick={() => toggleListenRoom(room.id)}
-                    disabled={!canListen}
+                    disabled={!canListen || isForced}
                     title={
-                      canListen
-                        ? ""
-                        : "Your role is not allowed to receive from this room"
+                      isForced
+                        ? "Forced listen — cannot be deselected"
+                        : canListen
+                          ? ""
+                          : "Your role is not allowed to receive from this room"
                     }
                   >
-                    Listen
+                    {isForced ? "🔒 Listen" : "Listen"}
                   </button>
                   <button
                     className={`call ${canTalk ? "" : "disabled"}`}
@@ -722,7 +764,6 @@ export function StationIntercomView({
           />
           <span>Always on</span>
         </label>
-
         <button
           className={`station-reply ${replyTargetUserId ? "" : "disabled"} ${
             replyTargetUserId && directPttPressedUserId === replyTargetUserId
@@ -850,6 +891,49 @@ export function StationIntercomView({
                 />
                 <span>Show direct communication as tabs</span>
               </label>
+              <label className="station-setting">
+                <input
+                  type="checkbox"
+                  checked={enableBackgroundAudioRecovery}
+                  onChange={(e) =>
+                    onEnableBackgroundAudioRecoveryChange(e.target.checked)
+                  }
+                />
+                <span>Background audio assist</span>
+              </label>
+              <label className="station-setting">
+                <input
+                  type="checkbox"
+                  checked={keepScreenAwake}
+                  disabled={!wakeLockSupported}
+                  onChange={(e) => onKeepScreenAwakeChange(e.target.checked)}
+                />
+                <span>Keep device awake while connected</span>
+              </label>
+              <div style={{ display: "grid", gap: "0.35rem" }}>
+                <small>
+                  Media controls:{" "}
+                  {mediaSessionSupported ? "supported" : "not supported"} · Wake
+                  lock:{" "}
+                  {wakeLockSupported
+                    ? wakeLockActive
+                      ? "active"
+                      : "available"
+                    : "not supported"}{" "}
+                  · Install mode:{" "}
+                  {isStandaloneDisplayMode ? "installed app" : "browser tab"}
+                </small>
+                <small>
+                  For best mobile reliability, keep background audio assist
+                  enabled and install the app to your home screen.
+                </small>
+              </div>
+
+              <KeyboardShortcutsSettings
+                shortcuts={keyboardShortcuts}
+                onShortcutsChange={onKeyboardShortcutsChange}
+                onRecordingChange={onRecordingShortcutChange}
+              />
 
               <div className="audio-section">
                 <div className={`audio-box ${isAudioOpen ? "" : "collapsed"}`}>

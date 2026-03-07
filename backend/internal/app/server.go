@@ -43,6 +43,16 @@ type tlsProvider interface {
 
 func (s *Server) listenAndServeHTTPS() error {
 	switch strings.ToLower(strings.TrimSpace(s.cfg.TLSMode)) {
+	case "internal":
+		tlsCfg, err := newInternalTLSConfig(s.httpSrv.Addr)
+		if err != nil {
+			return fmt.Errorf("failed to generate internal tls certificate: %w", err)
+		}
+		ln, err := net.Listen("tcp", s.httpSrv.Addr)
+		if err != nil {
+			return err
+		}
+		return s.httpSrv.Serve(tls.NewListener(ln, tlsCfg))
 	case "", "file":
 		if s.cfg.TLSCertFile == "" || s.cfg.TLSKeyFile == "" {
 			return errors.New("file TLS mode requires TLS_CERT_FILE and TLS_KEY_FILE")
@@ -68,6 +78,48 @@ func (s *Server) listenAndServeHTTPS() error {
 type companionInbound struct {
 	Type string           `json:"type"`
 	Data CompanionCommand `json:"data"`
+}
+
+const (
+	websocketPingInterval    = 30 * time.Second
+	websocketReadTimeout     = 60 * time.Second
+	websocketPingWriteWindow = 5 * time.Second
+)
+
+func refreshWebSocketReadDeadline(conn *websocket.Conn) {
+	_ = conn.SetReadDeadline(time.Now().Add(websocketReadTimeout))
+}
+
+func writeWebSocketPing(conn *websocket.Conn, connMu *sync.Mutex) {
+	if connMu != nil {
+		connMu.Lock()
+		defer connMu.Unlock()
+	}
+	_ = conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(websocketPingWriteWindow))
+}
+
+func startWebSocketKeepalive(conn *websocket.Conn, connMu *sync.Mutex) func() {
+	pingTicker := time.NewTicker(websocketPingInterval)
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			case <-pingTicker.C:
+				writeWebSocketPing(conn, connMu)
+			}
+		}
+	}()
+	refreshWebSocketReadDeadline(conn)
+	conn.SetPongHandler(func(string) error {
+		refreshWebSocketReadDeadline(conn)
+		return nil
+	})
+	return func() {
+		close(stop)
+		pingTicker.Stop()
+	}
 }
 
 func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
@@ -116,33 +168,16 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 	}
 	writeState()
 
-	// Set up ping/pong to keep WebSocket connection alive
-	pingTicker := time.NewTicker(30 * time.Second)
-	defer pingTicker.Stop()
-	go func() {
-		for range pingTicker.C {
-			connMu.Lock()
-			_ = conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second))
-			connMu.Unlock()
-		}
-	}()
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-		return nil
-	})
+	stopKeepalive := startWebSocketKeepalive(conn, &connMu)
+	defer stopKeepalive()
 
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
-		ticker := time.NewTicker(250 * time.Millisecond)
-		defer ticker.Stop()
 		for {
 			select {
 			case <-done:
 				return
-			case <-ticker.C:
-				writeState()
 			case _, ok := <-presenceCh:
 				if !ok {
 					return
@@ -160,7 +195,7 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		refreshWebSocketReadDeadline(conn)
 		if in.Type != "command" {
 			continue
 		}
@@ -238,15 +273,19 @@ func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request
 	groups = filterBroadcastGroupsForRole(targetUser.RoleID, groups)
 	roomDiscovery := make([]CompanionRoomDiscovery, 0, len(rooms))
 	for _, room := range rooms {
-		senderRoles, receiverRoles, err := s.store.RoomRolePolicies(r.Context(), room.ID)
+		canTalk, err := s.store.RoomAllowsSenderRole(r.Context(), room.ID, targetUser.RoleID)
+		if err != nil {
+			continue
+		}
+		canListen, err := s.store.RoomAllowsReceiverRole(r.Context(), room.ID, targetUser.RoleID)
 		if err != nil {
 			continue
 		}
 		roomDiscovery = append(roomDiscovery, CompanionRoomDiscovery{
 			ID:        room.ID,
 			Name:      room.Name,
-			CanTalk:   isRoleAllowed(senderRoles, targetUser.RoleID),
-			CanListen: isRoleAllowed(receiverRoles, targetUser.RoleID),
+			CanTalk:   canTalk,
+			CanListen: canListen,
 		})
 	}
 	s.writeJSON(w, http.StatusOK, CompanionDiscoveryResponse{
@@ -270,26 +309,44 @@ func (s *Server) filterAllowedRoomsForRole(ctx context.Context, roleID string, r
 	normalized := normalizeIDs(roomIDs)
 	out := make([]string, 0, len(normalized))
 	for _, roomID := range normalized {
-		senderRoles, receiverRoles, err := s.store.RoomRolePolicies(ctx, roomID)
-		if err != nil {
-			continue
-		}
-		allowed := false
+		var (
+			allowed bool
+			err     error
+		)
 		if forSend {
-			allowed = isRoleAllowed(senderRoles, roleID)
+			allowed, err = s.store.RoomAllowsSenderRole(ctx, roomID, roleID)
 		} else {
-			allowed = isRoleAllowed(receiverRoles, roleID)
+			allowed, err = s.store.RoomAllowsReceiverRole(ctx, roomID, roleID)
 		}
-		if allowed {
+		if err == nil && allowed {
 			out = append(out, roomID)
 		}
 	}
 	return out
 }
 
+// mergeForcedListenRooms adds any forced-listen rooms for the role that are not
+// already present in the listen set.
+func (s *Server) mergeForcedListenRooms(ctx context.Context, roleID string, listenRooms []string) []string {
+	forced, err := s.store.ForcedListenRoomIDs(ctx, roleID)
+	if err != nil || len(forced) == 0 {
+		return listenRooms
+	}
+	existing := make(map[string]struct{}, len(listenRooms))
+	for _, r := range listenRooms {
+		existing[r] = struct{}{}
+	}
+	for _, r := range forced {
+		if _, ok := existing[r]; !ok {
+			listenRooms = append(listenRooms, r)
+		}
+	}
+	return listenRooms
+}
+
 func isRoleAllowed(allowedRoles map[string]struct{}, roleID string) bool {
 	if len(allowedRoles) == 0 {
-		return true
+		return false
 	}
 	_, ok := allowedRoles[roleID]
 	return ok
@@ -335,6 +392,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/logout", s.withAuth(s.handleLogout))
 	mux.HandleFunc("/api/bootstrap", s.withAuth(s.handleBootstrap))
+	mux.HandleFunc("/api/status", s.withAuth(s.handleStatus))
 	mux.HandleFunc("/api/admin/roles", s.withAuth(s.handleAdminRoles))
 	mux.HandleFunc("/api/admin/roles/", s.withAuth(s.handleAdminRoleByID))
 	mux.HandleFunc("/api/admin/rooms", s.withAuth(s.handleAdminRooms))
@@ -342,11 +400,13 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/broadcast-groups", s.withAuth(s.handleAdminBroadcastGroups))
 	mux.HandleFunc("/api/admin/broadcast-groups/", s.withAuth(s.handleAdminBroadcastGroupByID))
 	mux.HandleFunc("/api/admin/pin", s.withAuth(s.handleAdminPin))
+	mux.HandleFunc("/api/admin/routing-matrix", s.withAuth(s.handleAdminRoutingMatrix))
 	mux.HandleFunc("/api/companion/discovery", s.handleCompanionDiscovery)
 	mux.HandleFunc("/api/companion/ws", s.handleCompanionWS)
 	mux.HandleFunc("/api/telegram/webhook", s.handleTelegramWebhook)
 	mux.HandleFunc("/api/admin/telegram", s.withAuth(s.handleAdminTelegram))
 	mux.HandleFunc("/api/admin/telegram/", s.withAuth(s.handleAdminTelegramByID))
+	mux.HandleFunc("/api/realtime-stats", s.withAuth(s.handleRealtimeStats))
 	mux.HandleFunc("/ws", s.handleWS)
 	if cfg.StaticDir != "" || embeddedStaticAvailable() {
 		mux.Handle("/", s.staticHandler())
@@ -439,6 +499,41 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type RealtimeStatsResponse struct {
+	Hub              HubRealtimeStats   `json:"hub"`
+	Media            MediaRealtimeStats `json:"media"`
+	StorePolicyCache PolicyCacheStats   `json:"storePolicyCache"`
+	TimestampUnixMs  int64              `json:"timestampUnixMs"`
+}
+
+func (s *Server) handleRealtimeStats(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	hubStats := HubRealtimeStats{}
+	if s.hub != nil {
+		hubStats = s.hub.RealtimeStats()
+	}
+	mediaStats := MediaRealtimeStats{}
+	if s.media != nil {
+		mediaStats = s.media.RealtimeStats()
+	}
+	storeCacheStats := PolicyCacheStats{}
+	if s.store != nil {
+		storeCacheStats = s.store.PolicyCacheStats()
+	}
+	s.writeJSON(w, http.StatusOK, RealtimeStatsResponse{
+		Hub:              hubStats,
+		Media:            mediaStats,
+		StorePolicyCache: storeCacheStats,
+		TimestampUnixMs:  time.Now().UnixMilli(),
+	})
 }
 
 func (s *Server) handlePublicBootstrap(w http.ResponseWriter, r *http.Request) {
@@ -552,6 +647,21 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request, session
 	})
 }
 
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, _ Session) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	roomListenerCounts := map[string]int{}
+	if s.hub != nil {
+		roomListenerCounts = s.hub.RoomListenerCounts()
+	}
+	s.writeJSON(w, http.StatusOK, StatusResponse{
+		RoomListenerCounts: roomListenerCounts,
+		TimestampUnixMs:    time.Now().UnixMilli(),
+	})
+}
+
 func filterBroadcastGroupsForRole(roleID string, groups []BroadcastGroup) []BroadcastGroup {
 	filtered := make([]BroadcastGroup, 0, len(groups))
 	for _, group := range groups {
@@ -571,10 +681,11 @@ type upsertRoleRequest struct {
 }
 
 type upsertRoomRequest struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	SenderRoleIDs   []string `json:"senderRoleIds"`
-	ReceiverRoleIDs []string `json:"receiverRoleIds"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	SenderRoleIDs       []string `json:"senderRoleIds"`
+	ReceiverRoleIDs     []string `json:"receiverRoleIds"`
+	ForcedListenRoleIDs []string `json:"forcedListenRoleIds"`
 }
 
 type upsertBroadcastGroupRequest struct {
@@ -657,7 +768,7 @@ func (s *Server) handleAdminRooms(w http.ResponseWriter, r *http.Request, sessio
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		if err := s.store.CreateRoom(r.Context(), req.ID, req.Name, req.SenderRoleIDs, req.ReceiverRoleIDs); err != nil {
+		if err := s.store.CreateRoom(r.Context(), req.ID, req.Name, req.SenderRoleIDs, req.ReceiverRoleIDs, req.ForcedListenRoleIDs); err != nil {
 			if s.writeStoreErr(w, err) {
 				return
 			}
@@ -686,7 +797,7 @@ func (s *Server) handleAdminRoomByID(w http.ResponseWriter, r *http.Request, ses
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		if err := s.store.UpdateRoom(r.Context(), roomID, req.Name, req.SenderRoleIDs, req.ReceiverRoleIDs); err != nil {
+		if err := s.store.UpdateRoom(r.Context(), roomID, req.Name, req.SenderRoleIDs, req.ReceiverRoleIDs, req.ForcedListenRoleIDs); err != nil {
 			if s.writeStoreErr(w, err) {
 				return
 			}
@@ -906,6 +1017,43 @@ func (s *Server) handleAdminTelegramByID(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+func (s *Server) handleAdminRoutingMatrix(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var entries []RoomPermissionEntry
+		if err := json.NewDecoder(r.Body).Decode(&entries); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.BulkUpdateRoomPermissions(r.Context(), entries); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		// Broadcast updated config to all connected clients so they
+		// see permission changes immediately without refreshing.
+		if roles, err := s.store.ListRoles(r.Context()); err == nil {
+			if rooms, err := s.store.ListRooms(r.Context()); err == nil {
+				if groups, err := s.store.ListBroadcastGroups(r.Context()); err == nil {
+					s.hub.BroadcastConfigUpdate(PublicBootstrapResponse{
+						Roles:           roles,
+						Rooms:           rooms,
+						BroadcastGroups: groups,
+					})
+				}
+			}
+		}
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 func (s *Server) writeStoreErr(w http.ResponseWriter, err error) bool {
 	switch {
 	case errors.Is(err, ErrInvalidInput):
@@ -1008,45 +1156,64 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	listenRooms = s.filterAllowedRoomsForRole(r.Context(), session.RoleID, listenRooms, false)
 	talkRooms = s.filterAllowedRoomsForRole(r.Context(), session.RoleID, talkRooms, true)
-	defaultRoomID = firstNonEmpty(talkRooms, listenRooms, "")
 	c := &client{
 		session:         session,
 		user:            user,
-		activeRoom:      defaultRoomID,
 		listenRooms:     toRoomSet(listenRooms),
 		talkRooms:       toRoomSet(talkRooms),
 		voiceMode:       initialVoiceMode,
 		micEnabled:      initialMicEnabled,
 		broadcastGroups: make(map[string]struct{}),
-		send:            make(chan WSOutbound, 32),
+		send:            make(chan WSOutbound, 128),
+		sendPriority:    make(chan WSOutbound, 128),
 	}
 	s.hub.Add(c)
 	if err := s.media.EnsurePeer(session.Token, user); err != nil {
 		s.logger.Error("failed to initialize media peer", "error", err)
 	}
 	defer s.hub.Remove(session.Token)
-	currentRoom := c.activeRoom
 	mediaReady := false
+	var connMu sync.Mutex
 
 	go func() {
-		for msg := range c.send {
-			_ = conn.WriteJSON(msg)
+		write := func(msg WSOutbound) bool {
+			connMu.Lock()
+			defer connMu.Unlock()
+			return conn.WriteJSON(msg) == nil
+		}
+		for {
+			select {
+			case msg, ok := <-c.sendPriority:
+				if !ok {
+					return
+				}
+				if !write(msg) {
+					return
+				}
+				continue
+			default:
+			}
+			select {
+			case msg, ok := <-c.sendPriority:
+				if !ok {
+					return
+				}
+				if !write(msg) {
+					return
+				}
+			case msg, ok := <-c.send:
+				if !ok {
+					return
+				}
+				if !write(msg) {
+					return
+				}
+			}
 		}
 	}()
 
-	// Set up ping/pong to keep WebSocket connection alive
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	go func() {
-		for range ticker.C {
-			_ = conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second))
-		}
-	}()
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-		return nil
-	})
+	stopKeepalive := startWebSocketKeepalive(conn, &connMu)
+	defer stopKeepalive()
 
 	for {
 		var in WSInbound
@@ -1057,38 +1224,19 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			_ = conn.Close()
 			return
 		}
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		refreshWebSocketReadDeadline(conn)
 		switch in.Type {
 		case "webrtc_ready":
 			mediaReady = true
 			s.media.EnsureNegotiation(session.Token)
 			s.media.SyncRouting()
-		case "set_active_room":
-			raw, _ := json.Marshal(in.Data)
-			var e ActiveRoomEvent
-			_ = json.Unmarshal(raw, &e)
-			allowedListen := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, []string{e.RoomID}, false)
-			allowedTalk := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, []string{e.RoomID}, true)
-			currentRoom = firstNonEmpty(allowedTalk, allowedListen, "")
-			s.hub.SetActiveRoom(session.Token, currentRoom)
-			s.hub.SetRoomMatrix(session.Token, allowedListen, allowedTalk)
-			if mediaReady {
-				s.media.SyncRouting()
-			}
 		case "set_room_matrix":
 			raw, _ := json.Marshal(in.Data)
 			var e RoomMatrixEvent
 			_ = json.Unmarshal(raw, &e)
 			allowedListen := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, e.ListenRoomIDs, false)
+			allowedListen = s.mergeForcedListenRooms(r.Context(), session.RoleID, allowedListen)
 			allowedTalk := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, e.TalkRoomIDs, true)
-			if e.ActiveRoomID != "" {
-				activeTalk := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, []string{e.ActiveRoomID}, true)
-				activeListen := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, []string{e.ActiveRoomID}, false)
-				currentRoom = firstNonEmpty(activeTalk, activeListen, firstNonEmpty(allowedTalk, allowedListen, currentRoom))
-			} else {
-				currentRoom = firstNonEmpty(allowedTalk, allowedListen, currentRoom)
-			}
-			s.hub.SetActiveRoom(session.Token, currentRoom)
 			s.hub.SetRoomMatrix(session.Token, allowedListen, allowedTalk)
 			if mediaReady {
 				s.media.SyncRouting()
@@ -1105,13 +1253,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			s.hub.SetVoiceState(session.Token, e.Body)
-			if e.Scope == "room" {
-				if e.Body == "ptt_start" {
-					s.media.SyncRouting()
-				}
-				if e.Body == "ptt_stop" {
-					s.media.SyncRouting()
-				}
+			if e.Scope == "room" && (e.Body == "always_on" || e.Body == "ptt_start") {
+				s.media.SetIdleRoomFallbackSuppressed(session.Token, false)
 			}
 			if e.Scope == "direct" {
 				if e.Body == "ptt_start" {
@@ -1172,23 +1315,20 @@ func (s *Server) routeInbound(ctx context.Context, sender Session, in WSInbound,
 func (s *Server) isInboundAllowed(ctx context.Context, sender Session, e RoutedEvent) bool {
 	switch e.Scope {
 	case "room":
-		senderRoles, _, err := s.store.RoomRolePolicies(ctx, e.TargetID)
-		return err == nil && isRoleAllowed(senderRoles, sender.RoleID)
+		allowed, err := s.store.RoomAllowsSenderRole(ctx, e.TargetID, sender.RoleID)
+		return err == nil && allowed
 	case "broadcast":
-		allowedRoles, err := s.store.BroadcastGroupAllowedRoleSet(ctx, e.TargetID)
-		if err != nil || !isRoleAllowed(allowedRoles, sender.RoleID) {
+		allowed, err := s.store.BroadcastGroupAllowsRole(ctx, e.TargetID, sender.RoleID)
+		if err != nil || !allowed {
 			return false
 		}
-		roomSet, err := s.store.BroadcastGroupRoomSet(ctx, e.TargetID)
+		roomIDs, err := s.store.BroadcastGroupRoomIDs(ctx, e.TargetID)
 		if err != nil {
 			return false
 		}
-		for roomID := range roomSet {
-			senderRoles, _, err := s.store.RoomRolePolicies(ctx, roomID)
-			if err != nil {
-				continue
-			}
-			if isRoleAllowed(senderRoles, sender.RoleID) {
+		for _, roomID := range roomIDs {
+			canSend, err := s.store.RoomAllowsSenderRole(ctx, roomID, sender.RoleID)
+			if err == nil && canSend {
 				return true
 			}
 		}
@@ -1234,7 +1374,7 @@ func (s *Server) embeddedStaticHandler() http.Handler {
 			return
 		}
 		if r.URL.Path == "/" {
-			serveEmbeddedFile(fileServer, w, r, "/index.html")
+			http.ServeFileFS(w, r, assets, "index.html")
 			return
 		}
 		requestedPath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
@@ -1242,16 +1382,8 @@ func (s *Server) embeddedStaticHandler() http.Handler {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-		serveEmbeddedFile(fileServer, w, r, "/index.html")
+		http.ServeFileFS(w, r, assets, "index.html")
 	})
-}
-
-func serveEmbeddedFile(fileServer http.Handler, w http.ResponseWriter, r *http.Request, requestedPath string) {
-	cloned := r.Clone(r.Context())
-	urlCopy := *r.URL
-	urlCopy.Path = requestedPath
-	cloned.URL = &urlCopy
-	fileServer.ServeHTTP(w, cloned)
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, status int, v any) {
@@ -1275,17 +1407,6 @@ func defaultRoomForSession(session Session, roles []Role, rooms []Room) string {
 		return rooms[0].ID
 	}
 	return ""
-}
-
-func firstNonEmpty(primary []string, secondary []string, fallback string) string {
-	for _, values := range [][]string{primary, secondary} {
-		for _, value := range values {
-			if value != "" {
-				return value
-			}
-		}
-	}
-	return fallback
 }
 
 func newID() string {

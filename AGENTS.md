@@ -30,7 +30,6 @@ Useful direct commands:
 make help
 cd backend && go test ./...
 cd backend && go test -run TestHubDirectRouting ./internal/app/
-cd desktop-proxy && go test ./...
 cd web && npm run build
 cd web && npm run test
 cd web && npm run test:watch
@@ -53,24 +52,18 @@ There is still no dedicated frontend lint target in `Makefile`; frontend validat
 - It also runs `web-typescript-build` (`npm --prefix web run build`) and Prettier.
 - If hooks auto-format files, re-stage (`git add -A`) and re-run the same commit command.
 
-Companion module (Bitfocus) has its own npm project:
-
-```sh
-cd companion/module-kesher && npm install
-cd companion/module-kesher && npm run build
-cd companion/module-kesher && npm run package
-```
+Companion module (Bitfocus) lives in a separate repository:
+`https://github.com/KesherCom/companion-module-kesher`
 
 ## High-level architecture
 
-This repository has four parts:
+This repository has two parts:
 
 - `backend/`: Go API + WebSocket event hub + embedded WebRTC SFU + SQLite persistence.
 - `web/`: React/Vite SPA for operator clients.
-- `desktop-proxy/`: Standalone Go binary that reverse-proxies a remote backend to `127.0.0.1`, giving desktop clients a localhost secure context for `getUserMedia()` without system-wide trust.
-- `companion/module-kesher/`: Bitfocus Companion module that controls active browser sessions through backend companion endpoints.
 
-`backend/` and `desktop-proxy/` are separate Go modules (separate `go.mod` files). They share the same GitHub namespace but have no source-level dependency on each other.
+Desktop proxy is maintained in a separate repository:
+`https://github.com/KesherCom/kesher-desktop-proxy`
 
 ## Backend architecture (`backend/internal/app`)
 
@@ -91,13 +84,10 @@ Important coupling to understand before changing routing logic:
 - Store sentinel errors (`ErrInvalidInput`, `ErrConflict`, `ErrNotFound`) are mapped centrally in `writeStoreErr`.
 - Current caveat: `requireAdmin` in `server.go` currently returns `true`, so admin endpoints are effectively not role-gated.
 
-## Desktop proxy architecture (`desktop-proxy/`)
+## Desktop proxy architecture
 
-- `cmd/desktop-proxy/main.go`: CLI entrypoint. Parses flags (`--upstream`, `--ca-file`, `--pins`, `--skip-preflight`, `--open-browser`), runs a preflight health check against upstream `/api/healthz`, starts a localhost-only HTTP listener, and auto-opens the browser.
-- `internal/proxy/ws.go`: WebSocket reverse proxy — upgrades incoming localhost WS connections and pipes frames bidirectionally to the upstream WS backend.
-- `internal/trust/transport.go`: Builds a custom `http.Transport` supporting private CA bundles (`--ca-file`) and SPKI/cert-SHA256 pinning (`--pins`). This lets desktop clients connect to backends behind self-signed or private certs without OS trust store changes.
-
-All HTTP routes (including `/`, `/api/*`, `/ws`) are forwarded to the upstream backend. The proxy does not bundle or serve frontend assets itself — the backend must serve them.
+Desktop proxy implementation lives in the standalone repo:
+`https://github.com/KesherCom/kesher-desktop-proxy`
 
 ## Frontend architecture (`web/src`)
 
@@ -128,6 +118,5 @@ All HTTP routes (including `/`, `/api/*`, `/ws`) are forwarded to the upstream b
 ## Module paths and runtime dependencies
 
 - Backend module: `github.com/KesherCom/kesher/backend`
-- Desktop proxy module: `github.com/KesherCom/kesher/desktop-proxy`
 - SQLite driver is `modernc.org/sqlite` (pure Go, no CGO runtime dependency).
 - WebRTC SFU uses `github.com/pion/webrtc/v4`.

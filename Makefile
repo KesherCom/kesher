@@ -1,10 +1,7 @@
 SHELL := /bin/bash
 LAN_IP ?= 127.0.0.1
-DESKTOP_PROXY_VERSION ?= dev
-DESKTOP_PROXY_DIST_DIR ?= desktop-proxy/dist
-DESKTOP_PROXY_PLATFORMS ?= darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64
 
-.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web run-desktop-proxy sync-embedded-web build-backend build-web build-desktop-proxy build-desktop-proxy-all package-desktop-proxy build test docker-build docker-up docker-down clean
+.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build test loadtest loadtest-20 docker-build docker-up docker-down clean
 
 help:
 	@echo "Available targets:"
@@ -12,21 +9,19 @@ help:
 	@echo "  make dev-backend   - run Go backend in dev mode"
 	@echo "  make dev-web       - run React frontend dev server"
 	@echo "  make run-backend   - run backend serving built frontend assets"
-	@echo "  make run-backend-https - run backend with HTTPS; auto-generate self-signed certs if missing (LAN_IP=... optional)"
+	@echo "  make run-backend-https - run backend with HTTPS using internal self-signed certificates"
 	@echo "  make run-backend-le DOMAIN=... - run backend with HTTPS using Let's Encrypt certs from /etc/letsencrypt/live/\$$DOMAIN/"
 	@echo "  make run-backend-certmagic DOMAIN=... DNS_PROVIDER=... - run backend with CertMagic ACME DNS-01 automation"
 	@echo "  make run-production-le DOMAIN=... - production mode (HTTPS :443 + HTTP :80 redirect) with Let's Encrypt certs"
 	@echo "  make run-production-certmagic DOMAIN=... DNS_PROVIDER=... - production mode with in-app CertMagic DNS-01 automation"
-	@echo "  make run-desktop-proxy UPSTREAM=... [CA_FILE=...] [PINS=...] [SKIP_PREFLIGHT=1] - run localhost desktop launcher/proxy"
 	@echo "  make run-web       - alias for dev-web"
 	@echo "  make sync-embedded-web - copy web/dist into backend embedded assets directory"
 	@echo "  make build-backend - build backend binary"
 	@echo "  make build-web     - build frontend bundle"
-	@echo "  make build-desktop-proxy - build desktop proxy binary"
-	@echo "  make build-desktop-proxy-all [DESKTOP_PROXY_VERSION=...] - cross-build desktop proxy binaries"
-	@echo "  make package-desktop-proxy [DESKTOP_PROXY_VERSION=...] - cross-build + SHA256 checksums"
 	@echo "  make build         - build backend + frontend"
 	@echo "  make test          - run backend tests + frontend build"
+	@echo "  make loadtest      - run staged backend load test with non-ideal network simulation"
+	@echo "  make loadtest-20   - run staged backend load test profile that ramps to 20 clients"
 	@echo "  make docker-build  - build Docker image via compose"
 	@echo "  make docker-up     - run app via Docker compose"
 	@echo "  make docker-down   - stop Docker compose app"
@@ -34,7 +29,6 @@ help:
 
 deps:
 	@cd backend && go mod tidy
-	@cd desktop-proxy && go mod tidy
 	@cd web && npm install
 
 dev-backend:
@@ -48,17 +42,7 @@ run-web: dev-web
 run-backend: build-web
 	@cd backend && STATIC_DIR=../web/dist go run ./cmd/server
 run-backend-https: build-web
-	@mkdir -p backend/certs
-	@if [[ ! -f backend/certs/lan-cert.pem || ! -f backend/certs/lan-key.pem ]]; then \
-		echo "Generating self-signed certs for LAN_IP=$(LAN_IP)"; \
-		MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
-		openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
-			-keyout backend/certs/lan-key.pem \
-			-out backend/certs/lan-cert.pem \
-			-subj "/CN=$(LAN_IP)" \
-			-addext "subjectAltName=IP:$(LAN_IP),DNS:localhost"; \
-	fi
-	@cd backend && STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false TLS_CERT_FILE=./certs/lan-cert.pem TLS_KEY_FILE=./certs/lan-key.pem go run ./cmd/server
+	@cd backend && STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false TLS_MODE=internal go run ./cmd/server
 
 run-backend-le: build-web
 	@if [[ -z "$(DOMAIN)" ]]; then \
@@ -133,13 +117,6 @@ run-production-certmagic: build-web
 	fi
 	@cd backend && sudo env "PATH=$$PATH" STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false PRODUCTION_MODE=true TLS_MODE=certmagic CERTMAGIC_DOMAINS="$(DOMAIN)" CERTMAGIC_DNS_PROVIDER="$(DNS_PROVIDER)" CERTMAGIC_CHALLENGE=dns-01 go run ./cmd/server
 
-run-desktop-proxy:
-	@if [[ -z "$(UPSTREAM)" ]]; then \
-		echo "UPSTREAM is required. Example: make run-desktop-proxy UPSTREAM=http://192.168.1.50:8080"; \
-		exit 1; \
-	fi
-	@cd desktop-proxy && go run ./cmd/desktop-proxy --upstream "$(UPSTREAM)" $(if $(CA_FILE),--ca-file "$(CA_FILE)",) $(if $(PINS),--pins "$(PINS)",) $(if $(PRECHECK_PATH),--preflight-path "$(PRECHECK_PATH)",) $(if $(SKIP_PREFLIGHT),--skip-preflight,)
-
 
 build-web:
 	@cd web && npm run build
@@ -151,31 +128,17 @@ sync-embedded-web: build-web
 build-backend: sync-embedded-web
 	@mkdir -p backend/bin
 	@cd backend && go build -o ./bin/server ./cmd/server
-
-build-desktop-proxy:
-	@mkdir -p desktop-proxy/bin
-	@cd desktop-proxy && go build -o ./bin/desktop-proxy ./cmd/desktop-proxy
-build-desktop-proxy-all:
-	@mkdir -p "$(DESKTOP_PROXY_DIST_DIR)/$(DESKTOP_PROXY_VERSION)"
-	@for target in $(DESKTOP_PROXY_PLATFORMS); do \
-		GOOS=$${target%/*}; \
-		GOARCH=$${target#*/}; \
-		EXT=""; \
-		if [[ "$$GOOS" == "windows" ]]; then EXT=".exe"; fi; \
-		OUT="$(DESKTOP_PROXY_DIST_DIR)/$(DESKTOP_PROXY_VERSION)/desktop-proxy-$$GOOS-$$GOARCH$$EXT"; \
-		echo "Building $$OUT"; \
-		( cd desktop-proxy && GOOS=$$GOOS GOARCH=$$GOARCH CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "../$$OUT" ./cmd/desktop-proxy ); \
-	done
-
-package-desktop-proxy: build-desktop-proxy-all
-	@cd "$(DESKTOP_PROXY_DIST_DIR)/$(DESKTOP_PROXY_VERSION)" && \
-	shasum -a 256 desktop-proxy-* > SHA256SUMS.txt
-
-build: build-backend build-desktop-proxy
+build: build-backend
 
 test:
 	@cd backend && go test ./...
 	@cd web && npm run build
+
+loadtest:
+	@cd backend && LOADTEST_RUN=1 go test -tags=loadtest -run TestRealWorldLoadRamp -count=1 -v -timeout 30m ./internal/app
+
+loadtest-20:
+	@cd backend && LOADTEST_RUN=1 LOADTEST_PROFILE=20clients go test -tags=loadtest -run TestRealWorldLoadRamp -count=1 -v -timeout 30m ./internal/app
 
 docker-build:
 	@docker compose -f deploy/compose/docker-compose.yml build
@@ -188,5 +151,4 @@ docker-down:
 
 clean:
 	@rm -rf backend/bin
-	@rm -rf desktop-proxy/bin
 	@rm -rf web/dist

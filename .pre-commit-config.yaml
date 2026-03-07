@@ -17,7 +17,7 @@ repos:
       - id: check-merge-conflict
       - id: check-case-conflict
 
-  # Go formatting (backend + desktop-proxy modules)
+  # Go formatting (backend module)
   - repo: https://github.com/dnephin/pre-commit-golang
     rev: v0.5.1
     hooks:
@@ -28,7 +28,7 @@ repos:
     rev: v4.0.0-alpha.8
     hooks:
       - id: prettier
-        files: ^(web/src/.*\.(js|jsx|ts|tsx|css)|companion/module-kesher/src/.*\.(js|ts)|.*\.(json|md|yml|yaml))$
+        files: ^(web/src/.*\.(js|jsx|ts|tsx|css)|.*\.(json|md|yml|yaml))$
 
   # Project-specific builds/type checks
   - repo: local
@@ -45,9 +45,3 @@ repos:
         language: system
         pass_filenames: false
         files: ^web/
-      - id: companion-typescript-build
-        name: companion-typescript-build
-        entry: npm --prefix companion/module-kesher run build
-        language: system
-        pass_filenames: false
-        files: ^companion/module-kesher/

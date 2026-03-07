@@ -1,10 +1,10 @@
-import React from "react";
 import type { Bootstrap } from "../../types";
 import { AdminRolesCard } from "./AdminRolesCard";
 import { AdminRoomsCard } from "./AdminRoomsCard";
 import { AdminChannelsCard } from "./AdminChannelsCard";
 import { AdminUsersCard } from "./AdminUsersCard";
 import { AdminTelegramCard } from "./AdminTelegramCard";
+import { AdminRoutingMatrixCard } from "./AdminRoutingMatrixCard";
 
 type AdminConfigCardProps = {
   token: string;
@@ -28,11 +28,7 @@ export function AdminConfigCard({
         refreshBootstrapData={refreshBootstrapData}
       />
 
-      <AdminUsersCard
-        token={token}
-        appData={appData}
-        refreshBootstrapData={refreshBootstrapData}
-      />
+      <AdminUsersCard appData={appData} />
 
       <AdminRoomsCard
         token={token}
@@ -48,6 +44,13 @@ export function AdminConfigCard({
         refreshBootstrapData={refreshBootstrapData}
       />
       <AdminTelegramCard token={token} adminPin={adminPin} appData={appData} />
+
+      <AdminRoutingMatrixCard
+        token={token}
+        adminPin={adminPin}
+        appData={appData}
+        refreshBootstrapData={refreshBootstrapData}
+      />
     </>
   );
 }

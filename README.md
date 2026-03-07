@@ -22,11 +22,43 @@ make run-backend   # builds frontend, then starts backend with embedded UI on :8
 
 Open `http://localhost:8080` (or `:5173` if using the Vite dev server).
 
+## Downloadable builds
+
+Prebuilt binaries are published in GitHub Releases:
+
+- https://github.com/KesherCom/kesher/releases
+
+Release assets are named like:
+
+- `kesher-darwin-arm64.tar.gz`
+- `kesher-darwin-amd64.tar.gz`
+- `kesher-windows-amd64.zip`
+- `kesher-windows-arm64.zip`
+
+Each archive contains a single backend binary (`kesher-<os>-<arch>` or `kesher-<os>-<arch>.exe`) with the web UI already embedded.
+
+### Running unsigned binaries (macOS / Windows)
+
+Some environments block unsigned binaries by default.
+
+- **macOS (Gatekeeper):**
+  1. Try to run the binary once from Terminal.
+  2. If blocked, open **System Settings → Privacy & Security** and allow the app anyway.
+  3. Run again.
+  4. Optional CLI alternative: `xattr -d com.apple.quarantine ./kesher-darwin-arm64` (adjust filename as needed).
+- **Windows (SmartScreen/Defender):**
+  1. Run the `.exe`.
+  2. If SmartScreen warns, click **More info** → **Run anyway**.
+  3. If Defender quarantines it, restore/allow the file in Windows Security, then run again.
+
+Desktop proxy binaries are maintained in a separate repository:
+`https://github.com/KesherCom/kesher-desktop-proxy`
+
 ## HTTPS options
 
 | Method                         | Command                                                                          | Notes                                                                     |
 | ------------------------------ | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Self-signed (dev/LAN)          | `make run-backend-https LAN_IP=192.168.1.50`                                     | Auto-generates certs if missing. Browsers will show a warning.            |
+| Self-signed (dev/LAN)          | `make run-backend-https`                                                         | Generates an internal cert at startup. Browsers will show a warning.      |
 | Let's Encrypt (existing certs) | `make run-backend-le DOMAIN=intercom.example.org`                                | Reads certs from `/etc/letsencrypt/live/<domain>/`                        |
 | CertMagic (automated DNS-01)   | `make run-backend-certmagic DOMAIN=intercom.example.org DNS_PROVIDER=cloudflare` | Issues/renews certs in-app. Providers: `cloudflare`, `hetzner`, `route53` |
 
@@ -74,32 +106,18 @@ Verify: open `https://intercom.example.org` from a LAN client — no warning, mi
 ## Desktop proxy (alternative to HTTPS)
 
 Instead of setting up HTTPS, you can distribute a small desktop app that proxies through `localhost`, which browsers treat as a secure context (mic access works without HTTPS).
-
 The backend must serve the UI itself (`make run-backend` or the embedded binary). The proxy does **not** bundle frontend assets.
+Desktop proxy source, run/build instructions, and release artifacts are in:
+`https://github.com/KesherCom/kesher-desktop-proxy`
 
-```sh
-make run-desktop-proxy UPSTREAM=http://192.168.1.50:8080
-```
-
-For HTTPS upstreams with private/self-signed CAs:
-
-```sh
-make run-desktop-proxy UPSTREAM=https://intercom.example.org CA_FILE=/path/to/ca.pem
-```
-
-Cross-platform release builds:
-
-```sh
-make package-desktop-proxy DESKTOP_PROXY_VERSION=v0.1.0
-# outputs to desktop-proxy/dist/v0.1.0/
-```
+````
 
 ## Single-binary build (embedded UI)
 
 ```sh
 make build-backend   # builds frontend into the Go binary
 ./backend/bin/server # serves UI + API from one binary, no STATIC_DIR needed
-```
+````
 
 ## Tests
 
@@ -107,24 +125,99 @@ make build-backend   # builds frontend into the Go binary
 make test   # backend go tests + frontend TypeScript/Vite build check
 ```
 
+## Load testing (real-world style)
+
+The backend includes a staged load test that simulates:
+
+- increasing concurrent clients,
+- realistic operator WS traffic (`chat`, `signal`, `voice_state`, matrix updates),
+- real WebRTC signaling (`webrtc_offer`/`webrtc_answer`/ICE) and synthetic RTP audio streams,
+- non-ideal Wi-Fi style behavior (latency, jitter, packet loss, occasional disconnect/reconnect).
+
+Run it with:
+
+```sh
+make loadtest
+# or run the built-in 20-client profile
+make loadtest-20
+```
+
+Useful tuning variables:
+
+```sh
+LOADTEST_STAGE_CLIENTS=20,40,80 \
+LOADTEST_STAGE_HOLD_SECONDS=20,30,45 \
+LOADTEST_RAMP_INTERVAL_MS=250 \
+LOADTEST_ACTION_INTERVAL_MS=800 \
+LOADTEST_NET_BASE_LATENCY_MS=40 \
+LOADTEST_NET_JITTER_MS=30 \
+LOADTEST_NET_SPIKE_CHANCE=0.10 \
+LOADTEST_NET_SPIKE_LATENCY_MS=220 \
+LOADTEST_NET_PACKET_LOSS=0.04 \
+LOADTEST_NET_MEDIA_PACKET_LOSS=0.06 \
+LOADTEST_NET_DISCONNECTS_PER_MIN=0.30 \
+make loadtest
+```
+
+The run prints per-stage and final summaries (client counts, queue pressure, dropped messages, reconnects, etc.) so you can compare profiles over time.
+
+Profile selection is also available via `LOADTEST_PROFILE` (`default` or `20clients`).
+
 Run `make help` for all available targets.
 
 ## Environment variables
 
-| Variable                        | Default       | Description                                                       |
-| ------------------------------- | ------------- | ----------------------------------------------------------------- |
-| `APP_ADDR`                      | `:8080`       | Listen address                                                    |
-| `STATIC_DIR`                    | _(empty)_     | Path to built frontend assets; when empty, serves embedded assets |
-| `DB_PATH`                       | `intercom.db` | SQLite database file path                                         |
-| `ALLOW_CORS`                    | `true`        | Enable CORS headers                                               |
-| `SESSION_TTL_MINUTES`           | `720`         | Session lifetime in minutes                                       |
-| `TRUSTED_LAN_HTTP`              | `true`        | `true` = plain HTTP, `false` = HTTPS                              |
-| `TLS_MODE`                      | `file`        | `file` (cert/key paths) or `certmagic` (in-app ACME)              |
-| `TLS_CERT_FILE`                 | _(empty)_     | TLS certificate path (when `TRUSTED_LAN_HTTP=false`)              |
-| `TLS_KEY_FILE`                  | _(empty)_     | TLS key path (when `TRUSTED_LAN_HTTP=false`)                      |
-| `PRODUCTION_MODE`               | `false`       | HTTPS on `:443` + HTTP redirect on `:80`                          |
-| `PRODUCTION_HTTPS_ADDR`         | `:443`        | HTTPS listen address in production mode                           |
-| `PRODUCTION_HTTP_REDIRECT_ADDR` | `:80`         | HTTP redirect address in production mode                          |
+You can also use a `config.yaml` (or `config.yml`) in the backend working directory instead of environment variables.
+To specify a custom path, set `APP_CONFIG_FILE` (or `CONFIG_FILE`).
+If a config file is present, it is used as the config source; otherwise env vars are used.
+Start from the provided example with:
+
+```sh
+cp config.yaml.example config.yaml
+```
+
+Example:
+
+```yaml
+app_addr: ":8080"
+db_path: "intercom.db"
+allow_cors: true
+session_ttl_minutes: 720
+trusted_lan_http: true
+tls_mode: "internal"
+tls_cert_file: ""
+tls_key_file: ""
+production_mode: false
+production_https_addr: ":443"
+production_http_redirect_addr: ":80"
+certmagic_domains: []
+certmagic_email: ""
+certmagic_ca: "https://acme-v02.api.letsencrypt.org/directory"
+certmagic_storage_path: "./certmagic-data"
+certmagic_challenge: "dns-01"
+certmagic_dns_provider: ""
+certmagic_propagation_delay_seconds: 0
+certmagic_propagation_timeout_seconds: 120
+certmagic_dns_resolvers: []
+telegram_bot_token: ""
+telegram_webhook_secret: ""
+telegram_mode: "polling"
+```
+
+| Variable                        | Default       | Description                                                                          |
+| ------------------------------- | ------------- | ------------------------------------------------------------------------------------ |
+| `APP_ADDR`                      | `:8080`       | Listen address                                                                       |
+| `STATIC_DIR`                    | _(empty)_     | Path to built frontend assets; when empty, serves embedded assets                    |
+| `DB_PATH`                       | `intercom.db` | SQLite database file path                                                            |
+| `ALLOW_CORS`                    | `true`        | Enable CORS headers                                                                  |
+| `SESSION_TTL_MINUTES`           | `720`         | Session lifetime in minutes                                                          |
+| `TRUSTED_LAN_HTTP`              | `true`        | `true` = plain HTTP, `false` = HTTPS                                                 |
+| `TLS_MODE`                      | `internal`    | `internal` (auto self-signed), `file` (cert/key paths), or `certmagic` (in-app ACME) |
+| `TLS_CERT_FILE`                 | _(empty)_     | TLS certificate path (required when `TLS_MODE=file`)                                 |
+| `TLS_KEY_FILE`                  | _(empty)_     | TLS key path (required when `TLS_MODE=file`)                                         |
+| `PRODUCTION_MODE`               | `false`       | HTTPS on `:443` + HTTP redirect on `:80`                                             |
+| `PRODUCTION_HTTPS_ADDR`         | `:443`        | HTTPS listen address in production mode                                              |
+| `PRODUCTION_HTTP_REDIRECT_ADDR` | `:80`         | HTTP redirect address in production mode                                             |
 
 ### CertMagic variables (when `TLS_MODE=certmagic`)
 

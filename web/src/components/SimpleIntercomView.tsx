@@ -6,6 +6,7 @@ type DirectReplyTarget = {
 };
 
 type SimpleIntercomViewProps = {
+  connectionState: "connecting" | "connected" | "reconnecting" | "offline";
   pttPressed: boolean;
   onStartPpt: () => void;
   onStopPpt: () => void;
@@ -17,11 +18,20 @@ type SimpleIntercomViewProps = {
   onSelectedOutputDeviceIdChange: (deviceId: string) => void;
   outputDevices: MediaDeviceInfo[];
   outputSelectionSupported: boolean;
+  enableBackgroundAudioRecovery: boolean;
+  onEnableBackgroundAudioRecoveryChange: (enabled: boolean) => void;
+  keepScreenAwake: boolean;
+  onKeepScreenAwakeChange: (enabled: boolean) => void;
+  mediaSessionSupported: boolean;
+  wakeLockSupported: boolean;
+  wakeLockActive: boolean;
+  isStandaloneDisplayMode: boolean;
   simplePptTargetLabel: string;
   doLogout: () => void;
 };
 
 export function SimpleIntercomView({
+  connectionState,
   pttPressed,
   onStartPpt,
   onStopPpt,
@@ -33,6 +43,14 @@ export function SimpleIntercomView({
   onSelectedOutputDeviceIdChange,
   outputDevices,
   outputSelectionSupported,
+  enableBackgroundAudioRecovery,
+  onEnableBackgroundAudioRecoveryChange,
+  keepScreenAwake,
+  onKeepScreenAwakeChange,
+  mediaSessionSupported,
+  wakeLockSupported,
+  wakeLockActive,
+  isStandaloneDisplayMode,
   simplePptTargetLabel,
   doLogout,
 }: SimpleIntercomViewProps) {
@@ -46,6 +64,16 @@ export function SimpleIntercomView({
 
   return (
     <div className="root app simple-shell">
+      {connectionState !== "connected" && (
+        <div className="connection-offline-banner">
+          <span className="connection-offline-icon" />
+          {connectionState === "reconnecting"
+            ? "Reconnecting\u2026"
+            : connectionState === "connecting"
+              ? "Connecting\u2026"
+              : "Offline"}
+        </div>
+      )}
       <section className="simple-controls">
         <div className="simple-top-actions">
           <button className="simple-logout" onClick={doLogout}>
@@ -146,6 +174,42 @@ export function SimpleIntercomView({
               output.
             </small>
           ) : null}
+        </label>
+        <label className="simple-mic">
+          <span>
+            <input
+              type="checkbox"
+              checked={enableBackgroundAudioRecovery}
+              onChange={(event) =>
+                onEnableBackgroundAudioRecoveryChange(event.target.checked)
+              }
+            />{" "}
+            Background audio assist
+          </span>
+        </label>
+        <label className="simple-mic">
+          <span>
+            <input
+              type="checkbox"
+              checked={keepScreenAwake}
+              disabled={!wakeLockSupported}
+              onChange={(event) =>
+                onKeepScreenAwakeChange(event.target.checked)
+              }
+            />{" "}
+            Keep device awake while connected
+          </span>
+          <small>
+            Media controls:{" "}
+            {mediaSessionSupported ? "supported" : "not supported"} · Wake lock:{" "}
+            {wakeLockSupported
+              ? wakeLockActive
+                ? "active"
+                : "available"
+              : "not supported"}{" "}
+            · Install mode:{" "}
+            {isStandaloneDisplayMode ? "installed app" : "browser tab"}
+          </small>
         </label>
       </section>
     </div>

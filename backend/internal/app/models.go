@@ -26,10 +26,11 @@ type CompanionDiscoveryResponse struct {
 }
 
 type Room struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	SenderRoleIDs   []string `json:"senderRoleIds"`
-	ReceiverRoleIDs []string `json:"receiverRoleIds"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	SenderRoleIDs       []string `json:"senderRoleIds"`
+	ReceiverRoleIDs     []string `json:"receiverRoleIds"`
+	ForcedListenRoleIDs []string `json:"forcedListenRoleIds"`
 }
 
 type BroadcastGroup struct {
@@ -87,12 +88,7 @@ type WSOutbound struct {
 	Data any    `json:"data"`
 }
 
-type ActiveRoomEvent struct {
-	RoomID string `json:"roomId"`
-}
-
 type RoomMatrixEvent struct {
-	ActiveRoomID  string   `json:"activeRoomId,omitempty"`
 	ListenRoomIDs []string `json:"listenRoomIds"`
 	TalkRoomIDs   []string `json:"talkRoomIds"`
 }
@@ -100,7 +96,6 @@ type PresenceState struct {
 	UserID          string   `json:"userId"`
 	Username        string   `json:"username"`
 	RoleID          string   `json:"roleId"`
-	ActiveRoom      string   `json:"activeRoom"`
 	ListenRooms     []string `json:"listenRooms"`
 	TalkRooms       []string `json:"talkRooms"`
 	VoiceMode       string   `json:"voiceMode"`
@@ -139,8 +134,6 @@ type CompanionCommand struct {
 	TargetID      string   `json:"targetId,omitempty"`
 	State         string   `json:"state,omitempty"`
 	Signal        string   `json:"signal,omitempty"`
-	RoomID        string   `json:"roomId,omitempty"`
-	ActiveRoomID  string   `json:"activeRoomId,omitempty"`
 	ListenRoomIDs []string `json:"listenRoomIds,omitempty"`
 	TalkRoomIDs   []string `json:"talkRoomIds,omitempty"`
 }
@@ -154,6 +147,11 @@ type CompanionBridgeState struct {
 	SignalActive        bool           `json:"signalActive"`
 	SignalFrom          string         `json:"signalFrom,omitempty"`
 	SignalMessage       string         `json:"signalMessage,omitempty"`
+}
+
+type StatusResponse struct {
+	RoomListenerCounts map[string]int `json:"roomListenerCounts"`
+	TimestampUnixMs    int64          `json:"timestampUnixMs"`
 }
 
 type TelegramMapping struct {
@@ -175,10 +173,10 @@ type TelegramUpdate struct {
 }
 
 type TelegramMessage struct {
-	MessageID int64        `json:"message_id"`
+	MessageID int64         `json:"message_id"`
 	From      *TelegramUser `json:"from,omitempty"`
-	Chat      TelegramChat `json:"chat"`
-	Text      string       `json:"text,omitempty"`
+	Chat      TelegramChat  `json:"chat"`
+	Text      string        `json:"text,omitempty"`
 }
 
 type TelegramUser struct {
