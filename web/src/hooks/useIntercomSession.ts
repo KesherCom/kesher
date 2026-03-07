@@ -321,6 +321,7 @@ export function useIntercomSession({
     Array<{ candidate: string; sdpMid?: string; sdpMLineIndex?: number }>
   >([]);
   const activeVoiceRoutesRef = useRef<Map<string, VoiceRoute>>(new Map());
+  const observedVoiceSendersRef = useRef<Set<string>>(new Set());
   const incomingAttentionTimeoutRef = useRef<number | null>(null);
   const roomSwitchTimerRef = useRef<number | null>(null);
   const voiceModeRef = useRef<"always_on" | "ptt">(initialVoiceMode);
@@ -433,11 +434,21 @@ export function useIntercomSession({
     if (directToSelf) {
       return clampGainValue(directGainByUserIdRef.current[sourceUserID] ?? 1);
     }
+    const senderHasActiveRoute = routes.some(
+      (route) => route.senderUserID === sourceUserID,
+    );
+    if (
+      observedVoiceSendersRef.current.has(sourceUserID) &&
+      !senderHasActiveRoute
+    ) {
+      return 0;
+    }
     const senderPresence = presenceRef.current.find(
       (p) => p.userId === sourceUserID,
     );
     if (
       senderPresence &&
+      senderPresence.micEnabled &&
       Array.isArray(senderPresence.talkRooms) &&
       senderPresence.talkRooms.length > 0
     ) {
@@ -509,6 +520,7 @@ export function useIntercomSession({
   ) {
     const ad = appDataRef.current;
     const routeKey = `${senderUserID}:${scopeValue}:${targetID}`;
+    observedVoiceSendersRef.current.add(senderUserID);
     const label =
       scopeValue === "room"
         ? ad?.rooms.find((r) => r.id === targetID)?.name || targetID
@@ -636,6 +648,7 @@ export function useIntercomSession({
     remote.remoteAudioRef.current.clear();
     remote.remoteSourceUserIdRef.current.clear();
     activeVoiceRoutesRef.current.clear();
+    observedVoiceSendersRef.current.clear();
     setActiveVoiceRoutes([]);
     if (mic.localStreamRef.current) {
       for (const track of mic.localStreamRef.current.getTracks()) track.stop();

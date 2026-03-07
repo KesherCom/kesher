@@ -40,31 +40,40 @@ type mediaPeer struct {
 }
 
 type MediaManager struct {
-	mu              sync.Mutex
-	logger          *slog.Logger
-	hub             *Hub
-	peers           map[string]*mediaPeer
-	sources         map[string]*mediaSourceTrack   // sourceToken -> track
-	broadcastActive map[string]map[string]struct{} // sourceToken -> broadcastGroupID set
-	directActive    map[string]string              // sourceToken -> targetUserID
-	syncScheduled   bool
-	syncRequests    atomic.Uint64
-	syncRuns        atomic.Uint64
-	syncMerged      atomic.Uint64
-	renegotiations  atomic.Uint64
+	mu                         sync.Mutex
+	logger                     *slog.Logger
+	hub                        *Hub
+	peers                      map[string]*mediaPeer
+	sources                    map[string]*mediaSourceTrack   // sourceToken -> track
+	broadcastActive            map[string]map[string]struct{} // sourceToken -> broadcastGroupID set
+	directActive               map[string]string              // sourceToken -> targetUserID
+	idleRoomFallbackSuppressed map[string]struct{}            // sourceToken -> suppressed after direct/broadcast release while mic is idle
+	syncScheduled              bool
+	syncRequests               atomic.Uint64
+	syncRuns                   atomic.Uint64
+	syncMerged                 atomic.Uint64
+	renegotiations             atomic.Uint64
 }
 
 const renegotiationDebounce = 60 * time.Millisecond
 
 func NewMediaManager(hub *Hub, logger *slog.Logger) *MediaManager {
 	return &MediaManager{
-		logger:          logger,
-		hub:             hub,
-		peers:           make(map[string]*mediaPeer),
-		sources:         make(map[string]*mediaSourceTrack),
-		broadcastActive: make(map[string]map[string]struct{}),
-		directActive:    make(map[string]string),
+		logger:                     logger,
+		hub:                        hub,
+		peers:                      make(map[string]*mediaPeer),
+		sources:                    make(map[string]*mediaSourceTrack),
+		broadcastActive:            make(map[string]map[string]struct{}),
+		directActive:               make(map[string]string),
+		idleRoomFallbackSuppressed: make(map[string]struct{}),
 	}
+}
+
+func (m *MediaManager) sourceMicEnabledLocked(sourceToken string) bool {
+	m.hub.mu.RLock()
+	defer m.hub.mu.RUnlock()
+	c, ok := m.hub.clients[sourceToken]
+	return ok && c.micEnabled
 }
 
 func (m *MediaManager) EnsurePeer(token string, user User) error {
@@ -228,12 +237,16 @@ func (m *MediaManager) RemovePeer(token string) {
 	delete(m.peers, token)
 	delete(m.broadcastActive, token)
 	delete(m.directActive, token)
+	delete(m.idleRoomFallbackSuppressed, token)
 	delete(m.sources, token)
 
 	var affectedSources []string
 	for sourceToken, targetUserID := range m.directActive {
 		if targetUserID == peer.userID {
 			delete(m.directActive, sourceToken)
+			if !m.sourceMicEnabledLocked(sourceToken) {
+				m.idleRoomFallbackSuppressed[sourceToken] = struct{}{}
+			}
 			affectedSources = append(affectedSources, sourceToken)
 		}
 	}
@@ -284,6 +297,7 @@ func (m *MediaManager) SetBroadcastGroupActive(sourceToken, groupID string, enab
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if enabled {
+		delete(m.idleRoomFallbackSuppressed, sourceToken)
 		if _, ok := m.broadcastActive[sourceToken]; !ok {
 			m.broadcastActive[sourceToken] = make(map[string]struct{})
 		}
@@ -303,6 +317,9 @@ func (m *MediaManager) SetBroadcastGroupActive(sourceToken, groupID string, enab
 		} else {
 			return
 		}
+		if _, stillActive := m.broadcastActive[sourceToken]; !stillActive && !m.sourceMicEnabledLocked(sourceToken) {
+			m.idleRoomFallbackSuppressed[sourceToken] = struct{}{}
+		}
 	}
 	m.recomputeSourceRoutingLocked(sourceToken)
 }
@@ -311,6 +328,7 @@ func (m *MediaManager) SetDirectTargetActive(sourceToken, targetUserID string, e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if enabled {
+		delete(m.idleRoomFallbackSuppressed, sourceToken)
 		if currentTarget, ok := m.directActive[sourceToken]; ok && currentTarget == targetUserID {
 			return
 		}
@@ -318,11 +336,25 @@ func (m *MediaManager) SetDirectTargetActive(sourceToken, targetUserID string, e
 	} else if currentTarget, ok := m.directActive[sourceToken]; ok {
 		if currentTarget == targetUserID || targetUserID == "" {
 			delete(m.directActive, sourceToken)
+			if !m.sourceMicEnabledLocked(sourceToken) {
+				m.idleRoomFallbackSuppressed[sourceToken] = struct{}{}
+			}
 		} else {
 			return
 		}
 	} else {
 		return
+	}
+	m.recomputeSourceRoutingLocked(sourceToken)
+}
+
+func (m *MediaManager) SetIdleRoomFallbackSuppressed(sourceToken string, suppressed bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if suppressed {
+		m.idleRoomFallbackSuppressed[sourceToken] = struct{}{}
+	} else {
+		delete(m.idleRoomFallbackSuppressed, sourceToken)
 	}
 	m.recomputeSourceRoutingLocked(sourceToken)
 }
@@ -350,6 +382,7 @@ func (m *MediaManager) recomputeSourceRoutingLocked(sourceToken string) {
 	}
 	broadcastRooms := m.broadcastRoomsForSourceLocked(sourceToken)
 	talkRooms := m.talkRoomsForSourceLocked(sourceToken)
+	_, idleRoomFallbackSuppressed := m.idleRoomFallbackSuppressed[sourceToken]
 
 	for _, p := range m.peers {
 		if p.token == sourceToken {
@@ -360,7 +393,7 @@ func (m *MediaManager) recomputeSourceRoutingLocked(sourceToken string) {
 			shouldReceive = p.token == directTargetPeerToken
 		} else if len(broadcastRooms) > 0 {
 			shouldReceive = m.peerListensToAnyRoomLocked(p.token, broadcastRooms)
-		} else {
+		} else if !idleRoomFallbackSuppressed {
 			shouldReceive = m.peerListensToAnyRoomLocked(p.token, talkRooms)
 		}
 

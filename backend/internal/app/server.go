@@ -1253,6 +1253,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			s.hub.SetVoiceState(session.Token, e.Body)
+			if e.Scope == "room" && (e.Body == "always_on" || e.Body == "ptt_start") {
+				s.media.SetIdleRoomFallbackSuppressed(session.Token, false)
+			}
 			if e.Scope == "direct" {
 				if e.Body == "ptt_start" {
 					s.media.SetDirectTargetActive(session.Token, e.TargetID, true)
