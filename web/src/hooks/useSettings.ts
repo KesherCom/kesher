@@ -40,6 +40,10 @@ export type UseSettingsResult = {
   setEnableDirectPpt: (v: boolean) => void;
   enableDirectTabs: boolean;
   setEnableDirectTabs: (v: boolean) => void;
+  enableBackgroundAudioRecovery: boolean;
+  setEnableBackgroundAudioRecovery: (v: boolean) => void;
+  keepScreenAwake: boolean;
+  setKeepScreenAwake: (v: boolean) => void;
   inputGainByDeviceId: Record<string, number>;
   setInputGainByDeviceId: React.Dispatch<
     React.SetStateAction<Record<string, number>>
@@ -105,6 +109,11 @@ export function useSettings(): UseSettingsResult {
   const [enableDirectTabs, setEnableDirectTabs] = useState(
     initialGlobalSettings.enableDirectTabs,
   );
+  const [enableBackgroundAudioRecovery, setEnableBackgroundAudioRecovery] =
+    useState(initialGlobalSettings.enableBackgroundAudioRecovery);
+  const [keepScreenAwake, setKeepScreenAwake] = useState(
+    initialGlobalSettings.keepScreenAwake,
+  );
   const [inputGainByDeviceId, setInputGainByDeviceId] = useState<
     Record<string, number>
   >(initialGlobalSettings.inputGainByDeviceId ?? {});
@@ -144,7 +153,9 @@ export function useSettings(): UseSettingsResult {
     initialGlobalSettings.inputGainByDeviceId ?? {},
   );
   const roomGainByIdRef = useRef(initialGlobalSettings.roomGainById);
-  const directGainByUserIdRef = useRef(initialGlobalSettings.directGainByUserId);
+  const directGainByUserIdRef = useRef(
+    initialGlobalSettings.directGainByUserId,
+  );
 
   // Sync refs
   useEffect(() => {
@@ -172,6 +183,8 @@ export function useSettings(): UseSettingsResult {
         selectedOutputDeviceId,
         enableDirectPpt,
         enableDirectTabs,
+        enableBackgroundAudioRecovery,
+        keepScreenAwake,
         inputGainByDeviceId,
         roomGainById,
         directGainByUserId,
@@ -182,6 +195,8 @@ export function useSettings(): UseSettingsResult {
     selectedOutputDeviceId,
     enableDirectPpt,
     enableDirectTabs,
+    enableBackgroundAudioRecovery,
+    keepScreenAwake,
     inputGainByDeviceId,
     roomGainById,
     directGainByUserId,
@@ -255,6 +270,10 @@ export function useSettings(): UseSettingsResult {
     setEnableDirectPpt,
     enableDirectTabs,
     setEnableDirectTabs,
+    enableBackgroundAudioRecovery,
+    setEnableBackgroundAudioRecovery,
+    keepScreenAwake,
+    setKeepScreenAwake,
     inputGainByDeviceId,
     setInputGainByDeviceId,
     inputGainByDeviceIdRef,

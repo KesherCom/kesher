@@ -117,6 +117,8 @@ export function App() {
     directGainByUserId: settings.directGainByUserId,
     directGainByUserIdRef: settings.directGainByUserIdRef,
     enableDirectPpt: settings.enableDirectPpt,
+    enableBackgroundAudioRecovery: settings.enableBackgroundAudioRecovery,
+    keepScreenAwake: settings.keepScreenAwake,
     isUserSettingsOpen,
     isUserSettingsOpenRef,
     selectedInputGainFor: settings.selectedInputGainFor,
@@ -483,9 +485,7 @@ export function App() {
       : appData.self.username;
     const adminRoleLabel = adminOverrideActive
       ? "Admin"
-      : roleNameById.get(appData.self.roleId) ||
-        appData.self.roleId ||
-        "Admin";
+      : roleNameById.get(appData.self.roleId) || appData.self.roleId || "Admin";
     return (
       <AdminShell
         token={token}
@@ -540,7 +540,9 @@ export function App() {
 
   function isReceivingRoom(roomId: string) {
     if (!session.incomingAudioActive) return false;
-    if (receivingRoutes.some((r) => r.scope === "room" && r.targetID === roomId))
+    if (
+      receivingRoutes.some((r) => r.scope === "room" && r.targetID === roomId)
+    )
       return true;
     return alwaysOnFallbackRoomIds.has(roomId);
   }
@@ -610,6 +612,16 @@ export function App() {
           onSelectedOutputDeviceIdChange={(id) => void changeOutputDevice(id)}
           outputDevices={audioDevices.outputDevices}
           outputSelectionSupported={outputSelectionSupported}
+          enableBackgroundAudioRecovery={settings.enableBackgroundAudioRecovery}
+          onEnableBackgroundAudioRecoveryChange={
+            settings.setEnableBackgroundAudioRecovery
+          }
+          keepScreenAwake={settings.keepScreenAwake}
+          onKeepScreenAwakeChange={settings.setKeepScreenAwake}
+          mediaSessionSupported={session.mediaSessionSupported}
+          wakeLockSupported={session.wakeLockSupported}
+          wakeLockActive={session.wakeLockActive}
+          isStandaloneDisplayMode={session.isStandaloneDisplayMode}
           simplePptTargetLabel={simplePttTargetLabel}
           doLogout={() => void doLogout()}
         />
@@ -666,6 +678,16 @@ export function App() {
         }}
         enableDirectTabs={settings.enableDirectTabs}
         onEnableDirectTabsChange={settings.setEnableDirectTabs}
+        enableBackgroundAudioRecovery={settings.enableBackgroundAudioRecovery}
+        onEnableBackgroundAudioRecoveryChange={
+          settings.setEnableBackgroundAudioRecovery
+        }
+        keepScreenAwake={settings.keepScreenAwake}
+        onKeepScreenAwakeChange={settings.setKeepScreenAwake}
+        mediaSessionSupported={session.mediaSessionSupported}
+        wakeLockSupported={session.wakeLockSupported}
+        wakeLockActive={session.wakeLockActive}
+        isStandaloneDisplayMode={session.isStandaloneDisplayMode}
         onChannelPptStart={session.handleChannelPttStart}
         onChannelPptStop={session.handleChannelPttStop}
         pptPressedChannelId={session.pttPressedChannelId}

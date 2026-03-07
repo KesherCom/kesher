@@ -24,6 +24,25 @@ import { useLocalMic } from "./useLocalMic";
 import { useRemoteAudio } from "./useRemoteAudio";
 import { useRtpStats } from "./useRtpStats";
 
+type WakeLockSentinelLike = {
+  released: boolean;
+  release: () => Promise<void>;
+  addEventListener?: (
+    type: "release",
+    listener: () => void,
+    options?: AddEventListenerOptions,
+  ) => void;
+};
+
+type NavigatorWithAudioSession = Navigator & {
+  audioSession?: {
+    type?: string;
+  };
+  wakeLock?: {
+    request: (type: "screen") => Promise<WakeLockSentinelLike>;
+  };
+};
+
 // ── WS message types ───────────────────────────────────────────────────────────────────────────────
 
 type WsMessage =
@@ -162,6 +181,8 @@ export type UseIntercomSessionOptions = {
   directGainByUserId: Record<string, number>;
   directGainByUserIdRef: React.MutableRefObject<Record<string, number>>;
   enableDirectPpt: boolean;
+  enableBackgroundAudioRecovery: boolean;
+  keepScreenAwake: boolean;
   isUserSettingsOpen: boolean;
   isUserSettingsOpenRef: React.MutableRefObject<boolean>;
   selectedInputGainFor: (deviceId: string) => number;
@@ -212,6 +233,10 @@ export type UseIntercomSessionResult = {
   setMessage: (v: string) => void;
   inputLevelDbFs: number;
   displayedInputClipping: boolean;
+  mediaSessionSupported: boolean;
+  wakeLockSupported: boolean;
+  wakeLockActive: boolean;
+  isStandaloneDisplayMode: boolean;
 
   // Actions
   startPtt: () => void;
@@ -253,6 +278,8 @@ export function useIntercomSession({
   directGainByUserId,
   directGainByUserIdRef,
   enableDirectPpt,
+  enableBackgroundAudioRecovery,
+  keepScreenAwake,
   isUserSettingsOpen,
   isUserSettingsOpenRef,
   selectedInputGainFor,
@@ -310,13 +337,35 @@ export function useIntercomSession({
   const [talkRoomIds, setTalkRoomIds] = useState<string[]>(initialTalkRoomIds);
   const [viewMode, setViewMode] = useState<"station" | "simple">("station");
   const [message, setMessage] = useState("");
+  const [wakeLockActive, setWakeLockActive] = useState(false);
+  const [isStandaloneDisplayMode, setIsStandaloneDisplayMode] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const navigatorWithStandalone = navigator as Navigator & {
+      standalone?: boolean;
+    };
+    return (
+      window.matchMedia?.("(display-mode: standalone)")?.matches === true ||
+      navigatorWithStandalone.standalone === true
+    );
+  });
+  const mediaSessionSupported =
+    typeof navigator !== "undefined" && "mediaSession" in navigator;
+  const wakeLockSupported =
+    typeof navigator !== "undefined" &&
+    "wakeLock" in (navigator as NavigatorWithAudioSession);
 
   // ── Refs ──
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
+  const connectRealtimeRef = useRef<(() => Promise<void>) | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const shouldReconnectRef = useRef(false);
+  const enableBackgroundAudioRecoveryRef = useRef(
+    enableBackgroundAudioRecovery,
+  );
+  const keepScreenAwakeRef = useRef(keepScreenAwake);
+  const wakeLockSentinelRef = useRef<WakeLockSentinelLike | null>(null);
   const pendingICERef = useRef<
     Array<{ candidate: string; sdpMid?: string; sdpMLineIndex?: number }>
   >([]);
@@ -344,6 +393,27 @@ export function useIntercomSession({
   useEffect(() => {
     appDataRef.current = appData;
   }, [appData]);
+  useEffect(() => {
+    enableBackgroundAudioRecoveryRef.current = enableBackgroundAudioRecovery;
+  }, [enableBackgroundAudioRecovery]);
+  useEffect(() => {
+    keepScreenAwakeRef.current = keepScreenAwake;
+  }, [keepScreenAwake]);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mediaQuery = window.matchMedia("(display-mode: standalone)");
+    const navigatorWithStandalone = navigator as Navigator & {
+      standalone?: boolean;
+    };
+    const updateDisplayMode = () => {
+      setIsStandaloneDisplayMode(
+        mediaQuery.matches || navigatorWithStandalone.standalone === true,
+      );
+    };
+    updateDisplayMode();
+    mediaQuery.addEventListener?.("change", updateDisplayMode);
+    return () => mediaQuery.removeEventListener?.("change", updateDisplayMode);
+  }, []);
 
   // ── Presence ref (read inside callbacks without stale closure) ──
   const presenceRef = useRef<Presence[]>([]);
@@ -504,6 +574,11 @@ export function useIntercomSession({
     resolveGainRef,
     onAudioError: setAudioError,
   });
+  const {
+    pauseAllRemoteAudio,
+    retryPlayAllRemoteAudio,
+    resumeRemoteAudioContexts,
+  } = remote;
 
   // ── Voice route tracking ──
   function refreshActiveVoiceChannelState() {
@@ -662,6 +737,88 @@ export function useIntercomSession({
     clearIncomingAttentionTimer();
     setIncomingAttention(null);
   }
+
+  async function releaseWakeLock() {
+    const sentinel = wakeLockSentinelRef.current;
+    wakeLockSentinelRef.current = null;
+    if (!sentinel) {
+      setWakeLockActive(false);
+      return;
+    }
+    try {
+      if (!sentinel.released) await sentinel.release();
+    } catch {
+      // ignore release failures
+    } finally {
+      setWakeLockActive(false);
+    }
+  }
+
+  async function requestWakeLock() {
+    if (
+      !wakeLockSupported ||
+      !keepScreenAwakeRef.current ||
+      !token ||
+      authMode !== "operator" ||
+      connectionState !== "connected" ||
+      document.visibilityState === "hidden"
+    ) {
+      await releaseWakeLock();
+      return;
+    }
+    if (wakeLockSentinelRef.current && !wakeLockSentinelRef.current.released) {
+      setWakeLockActive(true);
+      return;
+    }
+    try {
+      const navigatorWithAudioSession = navigator as NavigatorWithAudioSession;
+      const sentinel =
+        await navigatorWithAudioSession.wakeLock?.request("screen");
+      if (!sentinel) {
+        setWakeLockActive(false);
+        return;
+      }
+      sentinel.addEventListener?.("release", () => {
+        wakeLockSentinelRef.current = null;
+        setWakeLockActive(false);
+      });
+      wakeLockSentinelRef.current = sentinel;
+      setWakeLockActive(true);
+    } catch {
+      setWakeLockActive(false);
+    }
+  }
+
+  function requestReconnectNow() {
+    if (!shouldReconnectRef.current || !connectRealtimeRef.current) return;
+    const socketState = wsRef.current?.readyState;
+    if (
+      socketState === WebSocket.OPEN ||
+      socketState === WebSocket.CONNECTING
+    ) {
+      return;
+    }
+    clearReconnectTimer();
+    void connectRealtimeRef.current();
+  }
+
+  const recoverPlaybackAfterResume = useCallback(
+    async (reason: string) => {
+      await resumeRemoteAudioContexts();
+      if (enableBackgroundAudioRecoveryRef.current) {
+        await retryPlayAllRemoteAudio();
+        requestReconnectNow();
+      }
+      void requestWakeLock();
+      pushDebugEvent(`system · mobile audio recovery · ${reason}`);
+    },
+    [
+      pushDebugEvent,
+      requestWakeLock,
+      resumeRemoteAudioContexts,
+      retryPlayAllRemoteAudio,
+    ],
+  );
 
   // ── Sending helpers ──
   function sendScopedVoiceState(
@@ -920,6 +1077,7 @@ export function useIntercomSession({
     shouldReconnectRef.current = false;
     clearReconnectTimer();
     cleanupRealtimeResources();
+    void releaseWakeLock();
     setConnectionState("offline");
     setPresence([]);
     setChatMessages([]);
@@ -1383,17 +1541,119 @@ export function useIntercomSession({
         ws.close();
       };
     };
+    connectRealtimeRef.current = connect;
 
     void connect();
     return () => {
       cancelled = true;
+      connectRealtimeRef.current = null;
       shouldReconnectRef.current = false;
       clearReconnectTimer();
       cleanupRealtimeResources();
+      void releaseWakeLock();
       setConnectionState("offline");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, appData, authMode]);
+
+  useEffect(() => {
+    if (authMode !== "operator") return;
+    const handleVisible = () => {
+      if (document.visibilityState === "hidden") {
+        void releaseWakeLock();
+        return;
+      }
+      void recoverPlaybackAfterResume("visible");
+    };
+    const handlePageShow = () => void recoverPlaybackAfterResume("pageshow");
+    const handleFocus = () => void recoverPlaybackAfterResume("focus");
+    const handleOnline = () => void recoverPlaybackAfterResume("online");
+    document.addEventListener("visibilitychange", handleVisible);
+    window.addEventListener("pageshow", handlePageShow);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("online", handleOnline);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisible);
+      window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [authMode, recoverPlaybackAfterResume]);
+
+  useEffect(() => {
+    void requestWakeLock();
+  }, [authMode, connectionState, keepScreenAwake, token]);
+
+  useEffect(() => {
+    const navigatorWithAudioSession = navigator as NavigatorWithAudioSession;
+    if (
+      !enableBackgroundAudioRecovery ||
+      !navigatorWithAudioSession.audioSession
+    )
+      return;
+    const nextType =
+      authMode === "operator" && token && connectionState === "connected"
+        ? "play-and-record"
+        : "auto";
+    try {
+      navigatorWithAudioSession.audioSession.type = nextType;
+    } catch {
+      // ignore unsupported audio session assignments
+    }
+  }, [authMode, connectionState, enableBackgroundAudioRecovery, token]);
+
+  useEffect(() => {
+    if (!enableBackgroundAudioRecovery || !mediaSessionSupported) return;
+    const mediaSession = navigator.mediaSession;
+    const playbackState =
+      connectionState === "connected"
+        ? remote.incomingAudioActive
+          ? "playing"
+          : "paused"
+        : "none";
+    try {
+      if (typeof MediaMetadata === "function") {
+        mediaSession.metadata = new MediaMetadata({
+          title: remote.incomingAudioActive
+            ? "Live audio active"
+            : "Intercom ready",
+          artist: appData?.self.username || "Operator",
+          album: "Kesher Live Production Intercom",
+        });
+      }
+      mediaSession.playbackState = playbackState;
+      mediaSession.setActionHandler("play", () => {
+        void recoverPlaybackAfterResume("media-session-play");
+      });
+      mediaSession.setActionHandler("pause", () => {
+        pauseAllRemoteAudio();
+        mediaSession.playbackState = "paused";
+      });
+      mediaSession.setActionHandler("stop", () => {
+        pauseAllRemoteAudio();
+        mediaSession.playbackState = "paused";
+      });
+    } catch {
+      // ignore media session errors on partially-supported browsers
+    }
+    return () => {
+      try {
+        mediaSession.setActionHandler("play", null);
+        mediaSession.setActionHandler("pause", null);
+        mediaSession.setActionHandler("stop", null);
+      } catch {
+        // ignore cleanup errors
+      }
+    };
+  }, [
+    appData?.self.username,
+    connectionState,
+    enableBackgroundAudioRecovery,
+    mediaSessionSupported,
+    pauseAllRemoteAudio,
+    recoverPlaybackAfterResume,
+    remote.incomingAudioActive,
+  ]);
 
   // ── Presence sync → local state ──
   useEffect(() => {
@@ -1502,6 +1762,10 @@ export function useIntercomSession({
     setMessage,
     inputLevelDbFs: mic.inputLevelDbFs,
     displayedInputClipping: mic.displayedInputClipping,
+    mediaSessionSupported,
+    wakeLockSupported,
+    wakeLockActive,
+    isStandaloneDisplayMode,
     startPtt,
     stopPtt,
     startBroadcastPtt,

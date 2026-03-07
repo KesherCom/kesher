@@ -78,6 +78,8 @@ export type GlobalSettings = {
   selectedOutputDeviceId: string;
   enableDirectPpt: boolean;
   enableDirectTabs: boolean;
+  enableBackgroundAudioRecovery: boolean;
+  keepScreenAwake: boolean;
   inputGainByDeviceId: Record<string, number>;
   roomGainById: Record<string, number>;
   directGainByUserId: Record<string, number>;
@@ -136,6 +138,8 @@ export function loadGlobalSettings(): GlobalSettings {
         selectedOutputDeviceId: "",
         enableDirectPpt: false,
         enableDirectTabs: false,
+        enableBackgroundAudioRecovery: true,
+        keepScreenAwake: false,
         inputGainByDeviceId: {},
         roomGainById: {},
         directGainByUserId: {},
@@ -159,6 +163,14 @@ export function loadGlobalSettings(): GlobalSettings {
         typeof parsed.enableDirectTabs === "boolean"
           ? parsed.enableDirectTabs
           : false,
+      enableBackgroundAudioRecovery:
+        typeof parsed.enableBackgroundAudioRecovery === "boolean"
+          ? parsed.enableBackgroundAudioRecovery
+          : true,
+      keepScreenAwake:
+        typeof parsed.keepScreenAwake === "boolean"
+          ? parsed.keepScreenAwake
+          : false,
       inputGainByDeviceId: sanitizeGainMap(parsed.inputGainByDeviceId),
       roomGainById: sanitizeGainMap(parsed.roomGainById),
       directGainByUserId: sanitizeGainMap(parsed.directGainByUserId),
@@ -169,6 +181,8 @@ export function loadGlobalSettings(): GlobalSettings {
       selectedOutputDeviceId: "",
       enableDirectPpt: false,
       enableDirectTabs: false,
+      enableBackgroundAudioRecovery: true,
+      keepScreenAwake: false,
       inputGainByDeviceId: {},
       roomGainById: {},
       directGainByUserId: {},
@@ -216,9 +230,7 @@ export function loadKeyboardShortcuts(): KeyboardShortcutSettings {
   try {
     const raw = localStorage.getItem(keyboardShortcutsStorageKey);
     if (!raw) return { ...defaultShortcuts };
-    const parsed = JSON.parse(raw) as Partial<
-      Record<ShortcutAction, unknown>
-    >;
+    const parsed = JSON.parse(raw) as Partial<Record<ShortcutAction, unknown>>;
     const result = { ...defaultShortcuts };
     for (const action of allShortcutActions) {
       if (action in parsed) {

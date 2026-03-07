@@ -92,6 +92,14 @@ type StationIntercomViewProps = {
   onEnableDirectPptChange: (enabled: boolean) => void;
   enableDirectTabs: boolean;
   onEnableDirectTabsChange: (enabled: boolean) => void;
+  enableBackgroundAudioRecovery: boolean;
+  onEnableBackgroundAudioRecoveryChange: (enabled: boolean) => void;
+  keepScreenAwake: boolean;
+  onKeepScreenAwakeChange: (enabled: boolean) => void;
+  mediaSessionSupported: boolean;
+  wakeLockSupported: boolean;
+  wakeLockActive: boolean;
+  isStandaloneDisplayMode: boolean;
   onChannelPptStart: (channelId: string) => void;
   onChannelPptStop: (channelId: string) => void;
   pptPressedChannelId: string | null;
@@ -164,6 +172,14 @@ export function StationIntercomView({
   onEnableDirectPptChange,
   enableDirectTabs,
   onEnableDirectTabsChange,
+  enableBackgroundAudioRecovery,
+  onEnableBackgroundAudioRecoveryChange,
+  keepScreenAwake,
+  onKeepScreenAwakeChange,
+  mediaSessionSupported,
+  wakeLockSupported,
+  wakeLockActive,
+  isStandaloneDisplayMode,
   onChannelPptStart,
   onChannelPptStop,
   pptPressedChannelId,
@@ -875,6 +891,43 @@ export function StationIntercomView({
                 />
                 <span>Show direct communication as tabs</span>
               </label>
+              <label className="station-setting">
+                <input
+                  type="checkbox"
+                  checked={enableBackgroundAudioRecovery}
+                  onChange={(e) =>
+                    onEnableBackgroundAudioRecoveryChange(e.target.checked)
+                  }
+                />
+                <span>Background audio assist</span>
+              </label>
+              <label className="station-setting">
+                <input
+                  type="checkbox"
+                  checked={keepScreenAwake}
+                  disabled={!wakeLockSupported}
+                  onChange={(e) => onKeepScreenAwakeChange(e.target.checked)}
+                />
+                <span>Keep device awake while connected</span>
+              </label>
+              <div style={{ display: "grid", gap: "0.35rem" }}>
+                <small>
+                  Media controls:{" "}
+                  {mediaSessionSupported ? "supported" : "not supported"} · Wake
+                  lock:{" "}
+                  {wakeLockSupported
+                    ? wakeLockActive
+                      ? "active"
+                      : "available"
+                    : "not supported"}{" "}
+                  · Install mode:{" "}
+                  {isStandaloneDisplayMode ? "installed app" : "browser tab"}
+                </small>
+                <small>
+                  For best mobile reliability, keep background audio assist
+                  enabled and install the app to your home screen.
+                </small>
+              </div>
 
               <KeyboardShortcutsSettings
                 shortcuts={keyboardShortcuts}

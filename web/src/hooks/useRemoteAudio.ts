@@ -58,6 +58,9 @@ export type UseRemoteAudioResult = {
   applyVolumeToAllRemoteAudio: () => void;
   startRemoteAudioMeterLoop: () => void;
   stopRemoteAudioMeter: () => void;
+  pauseAllRemoteAudio: () => void;
+  retryPlayAllRemoteAudio: () => Promise<void>;
+  resumeRemoteAudioContexts: () => Promise<void>;
 };
 
 export function useRemoteAudio({
@@ -76,7 +79,12 @@ export function useRemoteAudio({
   const remoteAnalyserNodesRef = useRef<
     Map<
       string,
-      { ctx: AudioContext; analyser: AnalyserNode; gain: GainNode; buf: Uint8Array }
+      {
+        ctx: AudioContext;
+        analyser: AnalyserNode;
+        gain: GainNode;
+        buf: Uint8Array;
+      }
     >
   >(new Map());
   const remoteAudioMeterRafRef = useRef<number | null>(null);
@@ -159,7 +167,9 @@ export function useRemoteAudio({
     const tick = () => {
       let active = false;
       for (const { analyser, buf } of remoteAnalyserNodesRef.current.values()) {
-        analyser.getByteTimeDomainData(buf as unknown as Uint8Array<ArrayBuffer>);
+        analyser.getByteTimeDomainData(
+          buf as unknown as Uint8Array<ArrayBuffer>,
+        );
         let sum = 0;
         for (const v of buf) {
           const centered = (v - 128) / 128;
@@ -195,6 +205,42 @@ export function useRemoteAudio({
     remoteAudioMeterRafRef.current = requestAnimationFrame(tick);
   }
 
+  function pauseAllRemoteAudio() {
+    for (const audio of remoteAudioRef.current.values()) {
+      audio.pause();
+    }
+  }
+
+  async function resumeRemoteAudioContexts() {
+    await Promise.allSettled(
+      Array.from(remoteAnalyserNodesRef.current.values()).map(({ ctx }) =>
+        ctx.state === "suspended" ? ctx.resume() : Promise.resolve(),
+      ),
+    );
+  }
+
+  async function retryPlayAllRemoteAudio() {
+    if (remoteAudioRef.current.size === 0) return;
+    await resumeRemoteAudioContexts();
+    let successfulPlays = 0;
+    let firstError: unknown = null;
+    await Promise.allSettled(
+      Array.from(remoteAudioRef.current.values()).map(async (audio) => {
+        try {
+          await audio.play();
+          successfulPlays += 1;
+        } catch (err) {
+          if (firstError === null) firstError = err;
+        }
+      }),
+    );
+    if (successfulPlays === 0 && firstError) {
+      onAudioError(
+        `Remote audio playback blocked: ${firstError instanceof Error ? firstError.message : "unknown error"}`,
+      );
+    }
+  }
+
   return {
     remoteAudioRef,
     remoteSourceUserIdRef,
@@ -205,5 +251,8 @@ export function useRemoteAudio({
     applyVolumeToAllRemoteAudio,
     startRemoteAudioMeterLoop,
     stopRemoteAudioMeter,
+    pauseAllRemoteAudio,
+    retryPlayAllRemoteAudio,
+    resumeRemoteAudioContexts,
   };
 }
