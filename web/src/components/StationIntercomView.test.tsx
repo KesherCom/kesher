@@ -54,6 +54,8 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
   onEnableDirectPptChange: vi.fn(),
   enableDirectTabs: false,
   onEnableDirectTabsChange: vi.fn(),
+  swapPttAndReplyButtons: false,
+  onSwapPttAndReplyButtonsChange: vi.fn(),
   enableBackgroundAudioRecovery: true,
   onEnableBackgroundAudioRecoveryChange: vi.fn(),
   keepScreenAwake: false,
@@ -130,5 +132,56 @@ describe("StationIntercomView", () => {
 
     expect(setAlwaysOn).toHaveBeenCalledWith(false);
     expect(setAlwaysOn).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders hold to talk before reply when swapping is enabled", () => {
+    const { container } = render(
+      <StationIntercomView {...baseProps} swapPttAndReplyButtons />,
+    );
+
+    const controls = container.querySelector(".station-controls");
+    expect(controls).not.toBeNull();
+
+    const buttonTexts = Array.from(
+      controls!.querySelectorAll("button"),
+      (button) => button.textContent ?? "",
+    );
+
+    expect(buttonTexts[0]).toContain("Hold to talk");
+    expect(buttonTexts[1]).toContain("Reply to caller");
+  });
+
+  it("renders reply before hold to talk by default", () => {
+    const { container } = render(<StationIntercomView {...baseProps} />);
+
+    const controls = container.querySelector(".station-controls");
+    expect(controls).not.toBeNull();
+
+    const buttonTexts = Array.from(
+      controls!.querySelectorAll("button"),
+      (button) => button.textContent ?? "",
+    );
+
+    expect(buttonTexts[0]).toContain("Reply to caller");
+    expect(buttonTexts[1]).toContain("Hold to talk");
+  });
+
+  it("updates the swap setting from the user settings modal", async () => {
+    const user = userEvent.setup();
+    const onSwapPttAndReplyButtonsChange = vi.fn();
+
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onSwapPttAndReplyButtonsChange={onSwapPttAndReplyButtonsChange}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("checkbox", { name: "Swap PTT and reply buttons" }),
+    );
+
+    expect(onSwapPttAndReplyButtonsChange).toHaveBeenCalledWith(true);
   });
 });

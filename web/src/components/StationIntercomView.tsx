@@ -92,6 +92,8 @@ type StationIntercomViewProps = {
   onEnableDirectPptChange: (enabled: boolean) => void;
   enableDirectTabs: boolean;
   onEnableDirectTabsChange: (enabled: boolean) => void;
+  swapPttAndReplyButtons: boolean;
+  onSwapPttAndReplyButtonsChange: (enabled: boolean) => void;
   enableBackgroundAudioRecovery: boolean;
   onEnableBackgroundAudioRecoveryChange: (enabled: boolean) => void;
   keepScreenAwake: boolean;
@@ -172,6 +174,8 @@ export function StationIntercomView({
   onEnableDirectPptChange,
   enableDirectTabs,
   onEnableDirectTabsChange,
+  swapPttAndReplyButtons,
+  onSwapPttAndReplyButtonsChange,
   enableBackgroundAudioRecovery,
   onEnableBackgroundAudioRecoveryChange,
   keepScreenAwake,
@@ -342,6 +346,53 @@ export function StationIntercomView({
     (pttPressed || voiceMode === "always_on") &&
     !directPttPressedUserId &&
     !broadcastPttPressed;
+  const mainPttButton = (
+    <button
+      key="ptt"
+      className={`station-ptt ${pttPressed ? "active" : ""}`}
+      onPointerDown={startPtt}
+      onPointerUp={stopPtt}
+      onPointerLeave={stopPtt}
+      onPointerCancel={stopPtt}
+    >
+      Hold to talk
+    </button>
+  );
+  const replyButton = (
+    <button
+      key="reply"
+      className={`station-reply ${replyTargetUserId ? "" : "disabled"} ${
+        replyTargetUserId && directPttPressedUserId === replyTargetUserId
+          ? "active"
+          : ""
+      }`}
+      disabled={!replyTargetUserId}
+      onPointerDown={() =>
+        replyTargetUserId ? startDirectPtt(replyTargetUserId) : undefined
+      }
+      onPointerUp={() =>
+        replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined
+      }
+      onPointerLeave={() =>
+        replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined
+      }
+      onPointerCancel={() =>
+        replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined
+      }
+    >
+      Reply to caller
+      <small>
+        {replyTarget
+          ? replyTarget.username
+          : replyTargetUserId
+            ? "Recent caller"
+            : "No active caller"}
+      </small>
+    </button>
+  );
+  const footerButtons = swapPttAndReplyButtons
+    ? [mainPttButton, replyButton]
+    : [replyButton, mainPttButton];
 
   return (
     <div className="root app station-shell">
@@ -744,16 +795,12 @@ export function StationIntercomView({
         )}
       </section>
 
-      <section className="station-controls">
-        <button
-          className={`station-ptt ${pttPressed ? "active" : ""}`}
-          onPointerDown={startPtt}
-          onPointerUp={stopPtt}
-          onPointerLeave={stopPtt}
-          onPointerCancel={stopPtt}
-        >
-          Hold to talk
-        </button>
+      <section
+        className={`station-controls ${
+          isUserSettingsOpen ? "station-controls-hidden-mobile" : ""
+        }`}
+      >
+        {footerButtons}
         <button
           type="button"
           role="switch"
@@ -763,35 +810,6 @@ export function StationIntercomView({
         >
           <span className="station-always-on-indicator" aria-hidden="true" />
           <span className="station-always-on-text">Always on</span>
-        </button>
-        <button
-          className={`station-reply ${replyTargetUserId ? "" : "disabled"} ${
-            replyTargetUserId && directPttPressedUserId === replyTargetUserId
-              ? "active"
-              : ""
-          }`}
-          disabled={!replyTargetUserId}
-          onPointerDown={() =>
-            replyTargetUserId ? startDirectPtt(replyTargetUserId) : undefined
-          }
-          onPointerUp={() =>
-            replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined
-          }
-          onPointerLeave={() =>
-            replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined
-          }
-          onPointerCancel={() =>
-            replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined
-          }
-        >
-          Reply to caller
-          <small>
-            {replyTarget
-              ? replyTarget.username
-              : replyTargetUserId
-                ? "Recent caller"
-                : "No active caller"}
-          </small>
         </button>
       </section>
 
@@ -890,6 +908,16 @@ export function StationIntercomView({
                   onChange={(e) => onEnableDirectTabsChange(e.target.checked)}
                 />
                 <span>Show direct communication as tabs</span>
+              </label>
+              <label className="station-setting">
+                <input
+                  type="checkbox"
+                  checked={swapPttAndReplyButtons}
+                  onChange={(e) =>
+                    onSwapPttAndReplyButtonsChange(e.target.checked)
+                  }
+                />
+                <span>Swap PTT and reply buttons</span>
               </label>
               <label className="station-setting">
                 <input

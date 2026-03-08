@@ -40,6 +40,8 @@ export type UseSettingsResult = {
   setEnableDirectPpt: (v: boolean) => void;
   enableDirectTabs: boolean;
   setEnableDirectTabs: (v: boolean) => void;
+  swapPttAndReplyButtons: boolean;
+  setSwapPttAndReplyButtons: (v: boolean) => void;
   enableBackgroundAudioRecovery: boolean;
   setEnableBackgroundAudioRecovery: (v: boolean) => void;
   keepScreenAwake: boolean;
@@ -108,6 +110,9 @@ export function useSettings(): UseSettingsResult {
   );
   const [enableDirectTabs, setEnableDirectTabs] = useState(
     initialGlobalSettings.enableDirectTabs,
+  );
+  const [swapPttAndReplyButtons, setSwapPttAndReplyButtons] = useState(
+    initialGlobalSettings.swapPttAndReplyButtons,
   );
   const [enableBackgroundAudioRecovery, setEnableBackgroundAudioRecovery] =
     useState(initialGlobalSettings.enableBackgroundAudioRecovery);
@@ -183,6 +188,7 @@ export function useSettings(): UseSettingsResult {
         selectedOutputDeviceId,
         enableDirectPpt,
         enableDirectTabs,
+        swapPttAndReplyButtons,
         enableBackgroundAudioRecovery,
         keepScreenAwake,
         inputGainByDeviceId,
@@ -195,6 +201,7 @@ export function useSettings(): UseSettingsResult {
     selectedOutputDeviceId,
     enableDirectPpt,
     enableDirectTabs,
+    swapPttAndReplyButtons,
     enableBackgroundAudioRecovery,
     keepScreenAwake,
     inputGainByDeviceId,
@@ -270,6 +277,8 @@ export function useSettings(): UseSettingsResult {
     setEnableDirectPpt,
     enableDirectTabs,
     setEnableDirectTabs,
+    swapPttAndReplyButtons,
+    setSwapPttAndReplyButtons,
     enableBackgroundAudioRecovery,
     setEnableBackgroundAudioRecovery,
     keepScreenAwake,

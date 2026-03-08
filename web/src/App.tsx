@@ -678,6 +678,8 @@ export function App() {
         }}
         enableDirectTabs={settings.enableDirectTabs}
         onEnableDirectTabsChange={settings.setEnableDirectTabs}
+        swapPttAndReplyButtons={settings.swapPttAndReplyButtons}
+        onSwapPttAndReplyButtonsChange={settings.setSwapPttAndReplyButtons}
         enableBackgroundAudioRecovery={settings.enableBackgroundAudioRecovery}
         onEnableBackgroundAudioRecoveryChange={
           settings.setEnableBackgroundAudioRecovery

@@ -78,6 +78,7 @@ export type GlobalSettings = {
   selectedOutputDeviceId: string;
   enableDirectPpt: boolean;
   enableDirectTabs: boolean;
+  swapPttAndReplyButtons: boolean;
   enableBackgroundAudioRecovery: boolean;
   keepScreenAwake: boolean;
   inputGainByDeviceId: Record<string, number>;
@@ -138,6 +139,7 @@ export function loadGlobalSettings(): GlobalSettings {
         selectedOutputDeviceId: "",
         enableDirectPpt: false,
         enableDirectTabs: false,
+        swapPttAndReplyButtons: false,
         enableBackgroundAudioRecovery: true,
         keepScreenAwake: false,
         inputGainByDeviceId: {},
@@ -163,6 +165,10 @@ export function loadGlobalSettings(): GlobalSettings {
         typeof parsed.enableDirectTabs === "boolean"
           ? parsed.enableDirectTabs
           : false,
+      swapPttAndReplyButtons:
+        typeof parsed.swapPttAndReplyButtons === "boolean"
+          ? parsed.swapPttAndReplyButtons
+          : false,
       enableBackgroundAudioRecovery:
         typeof parsed.enableBackgroundAudioRecovery === "boolean"
           ? parsed.enableBackgroundAudioRecovery
@@ -181,6 +187,7 @@ export function loadGlobalSettings(): GlobalSettings {
       selectedOutputDeviceId: "",
       enableDirectPpt: false,
       enableDirectTabs: false,
+      swapPttAndReplyButtons: false,
       enableBackgroundAudioRecovery: true,
       keepScreenAwake: false,
       inputGainByDeviceId: {},

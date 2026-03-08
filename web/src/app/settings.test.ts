@@ -40,6 +40,21 @@ describe("settings helpers", () => {
     });
   });
 
+  it("defaults to unswapped footer buttons when global settings are unset", () => {
+    expect(loadGlobalSettings()).toEqual({
+      selectedInputDeviceId: "",
+      selectedOutputDeviceId: "",
+      enableDirectPpt: false,
+      enableDirectTabs: false,
+      swapPttAndReplyButtons: false,
+      enableBackgroundAudioRecovery: true,
+      keepScreenAwake: false,
+      inputGainByDeviceId: {},
+      roomGainById: {},
+      directGainByUserId: {},
+    });
+  });
+
   it("sanitizes global settings with safe defaults and clamped gain maps", () => {
     localStorage.setItem(
       globalSettingsStorageKey,
@@ -48,6 +63,7 @@ describe("settings helpers", () => {
         selectedOutputDeviceId: "spk-1",
         enableDirectPpt: true,
         enableDirectTabs: false,
+        swapPttAndReplyButtons: true,
         enableBackgroundAudioRecovery: false,
         keepScreenAwake: true,
         inputGainByDeviceId: { "mic-1": 0.9, broken: -3 },
@@ -61,6 +77,7 @@ describe("settings helpers", () => {
       selectedOutputDeviceId: "spk-1",
       enableDirectPpt: true,
       enableDirectTabs: false,
+      swapPttAndReplyButtons: true,
       enableBackgroundAudioRecovery: false,
       keepScreenAwake: true,
       inputGainByDeviceId: { "mic-1": 0.9, broken: 0 },
