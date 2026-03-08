@@ -166,6 +166,22 @@ describe("StationIntercomView", () => {
     expect(buttonTexts[1]).toContain("Hold to talk");
   });
 
+  it("renders the action controls inside the top header", () => {
+    const { container } = render(<StationIntercomView {...baseProps} />);
+
+    const header = container.querySelector(".station-header");
+    const controls = container.querySelector(".station-controls");
+    const contentGrid = container.querySelector(".station-content-grid");
+
+    expect(header).not.toBeNull();
+    expect(controls).not.toBeNull();
+    expect(contentGrid).not.toBeNull();
+    expect(header!.contains(controls!)).toBe(true);
+    expect(
+      header!.compareDocumentPosition(contentGrid!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
   it("updates the swap setting from the user settings modal", async () => {
     const user = userEvent.setup();
     const onSwapPttAndReplyButtonsChange = vi.fn();
@@ -183,5 +199,22 @@ describe("StationIntercomView", () => {
     );
 
     expect(onSwapPttAndReplyButtonsChange).toHaveBeenCalledWith(true);
+  });
+
+  it("renders chat content in a dedicated secondary column when provided", () => {
+    const { container } = render(
+      <StationIntercomView
+        {...baseProps}
+        chatAndSignalPanel={<div>Chat content</div>}
+      />,
+    );
+
+    const secondaryColumn = container.querySelector(
+      ".station-secondary-column",
+    );
+
+    expect(secondaryColumn).not.toBeNull();
+    expect(secondaryColumn).toHaveTextContent("Chat");
+    expect(secondaryColumn).toHaveTextContent("Chat content");
   });
 });

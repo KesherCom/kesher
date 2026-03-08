@@ -1427,11 +1427,26 @@ button.secondary {
   background: var(--surface);
   border: 1px solid var(--border-dim);
 }
+.station-header {
+  position: sticky;
+  top: max(0.75rem, env(safe-area-inset-top, 0px));
+  z-index: 40;
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.15rem;
+  background: linear-gradient(
+    180deg,
+    var(--surface) 0%,
+    rgba(26, 29, 35, 0.96) 85%,
+    rgba(26, 29, 35, 0) 100%
+  );
+}
 .station-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 1.2rem;
+  margin-bottom: 0;
 }
 .station-live {
   display: inline-flex;
@@ -1972,12 +1987,24 @@ button.secondary {
   border-color: var(--input-border-hover);
   background: var(--station-broadcast-active-hover-bg);
 }
+.station-content-grid {
+  display: grid;
+  gap: 1rem;
+  align-items: start;
+}
+.station-primary-column,
+.station-secondary-column {
+  min-width: 0;
+}
+.station-secondary-column {
+  display: flex;
+}
 .station-controls {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.75rem;
-  margin: 1rem 0;
+  margin: 0;
   padding: 0.6rem 0.85rem;
   border-radius: 14px;
   border: 1px solid var(--border-strong);
@@ -2223,10 +2250,26 @@ button.secondary {
   opacity: 0.5;
 }
 .station-utility {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.8rem;
-  margin-bottom: 1rem;
+  display: block;
+  margin-bottom: 0;
+}
+.station-utility-section {
+  width: 100%;
+}
+.station-chat-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.station-chat-panel .chat {
+  flex: 0 0 auto;
+}
+.station-chat-panel .chat-feed {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 .station-modal-backdrop {
   position: fixed;
@@ -2765,23 +2808,11 @@ button.secondary {
     flex-direction: column;
     padding-bottom: calc(13rem + env(safe-area-inset-bottom, 0px));
   }
-  .station-topbar {
-    order: 1;
-  }
-  .station-controls {
-    order: 2;
-  }
-  .station-talk-section {
-    order: 3;
-  }
-  .station-direct-section {
-    order: 4;
-  }
-  .station-broadcast-section {
-    order: 5;
-  }
-  .station-utility-section {
-    order: 6;
+  .station-header {
+    position: static;
+    margin-bottom: 0;
+    padding-bottom: 0;
+    background: none;
   }
   .station-talk-grid,
   .station-direct-grid {
@@ -2839,6 +2870,27 @@ button.secondary {
   }
   .station-utility {
     grid-template-columns: 1fr;
+  }
+}
+@media (min-width: 1200px) {
+  .station-content-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(400px, 460px);
+  }
+  .station-secondary-column {
+    align-self: start;
+  }
+  .station-utility-section {
+    position: sticky;
+    top: calc(7.5rem + env(safe-area-inset-top, 0px));
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    margin-bottom: 0;
+  }
+  .station-chat-panel {
+    height: calc(100vh - 12.25rem - env(safe-area-inset-top, 0px));
+    min-height: 0;
   }
 }
 @media (max-width: 780px) {

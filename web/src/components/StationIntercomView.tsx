@@ -393,6 +393,7 @@ export function StationIntercomView({
   const footerButtons = swapPttAndReplyButtons
     ? [mainPttButton, replyButton]
     : [replyButton, mainPttButton];
+  const hasChatAndSignalPanel = Boolean(chatAndSignalPanel);
 
   return (
     <div className="root app station-shell">
@@ -406,227 +407,349 @@ export function StationIntercomView({
               : "Offline"}
         </div>
       )}
-      <div className="station-topbar">
-        <div className="station-live">
-          <span
-            className={`station-live-dot ${
-              connectionState === "connected" ? "connected" : "disconnected"
-            }`}
-          />
-          Live: {appData.self.username.toUpperCase()}
+      <div className="station-header">
+        <div className="station-topbar">
+          <div className="station-live">
+            <span
+              className={`station-live-dot ${
+                connectionState === "connected" ? "connected" : "disconnected"
+              }`}
+            />
+            Live: {appData.self.username.toUpperCase()}
+          </div>
+          <div className="station-top-actions">
+            <button
+              className="station-top-admin"
+              onClick={() => setIsUserSettingsOpen(true)}
+            >
+              User settings
+            </button>
+            <button className="station-top-logout" onClick={doLogout}>
+              Logout / Lock
+            </button>
+          </div>
         </div>
-        <div className="station-top-actions">
+
+        <section
+          className={`station-controls ${
+            isUserSettingsOpen ? "station-controls-hidden-mobile" : ""
+          }`}
+        >
+          {footerButtons}
           <button
-            className="station-top-admin"
-            onClick={() => setIsUserSettingsOpen(true)}
+            type="button"
+            role="switch"
+            aria-checked={voiceMode === "always_on"}
+            className={`station-always-on ${voiceMode === "always_on" ? "active" : ""}`}
+            onClick={() => setAlwaysOn(voiceMode !== "always_on")}
           >
-            User settings
+            <span className="station-always-on-indicator" aria-hidden="true" />
+            <span className="station-always-on-text">Always on</span>
           </button>
-          <button className="station-top-logout" onClick={doLogout}>
-            Logout / Lock
-          </button>
-        </div>
+        </section>
       </div>
 
-      <section className="station-block station-talk-section">
-        <h3>Talk channels</h3>
-        <div className="station-filter-bar small">
-          <span className="station-filter-hint">
-            Pin rooms or users to keep focus when things get busy.
-          </span>
-        </div>
-        {visibleRooms.length === 0 ? (
-          <p className="station-empty">No channels to show.</p>
-        ) : null}
-        <div className="station-talk-grid">
-          {visibleRooms.map((room) => {
-            const listening = listenRoomIds.includes(room.id);
-            const talking = talkRoomIds.includes(room.id);
-            const canTalk = canRoleSendToRoom(room.id, appData.self.roleId);
-            const canListen = canRoleReceiveFromRoom(
-              room.id,
-              appData.self.roleId,
-            );
-            const isForced = (room.forcedListenRoleIds ?? []).includes(
-              appData.self.roleId,
-            );
-            const isPttPressed =
-              enableDirectPpt && pptPressedChannelId === room.id;
-
-            const handleTalkPointerDown = () => {
-              if (enableDirectPpt) {
-                onChannelPptStart(room.id);
-              }
-            };
-
-            const handleTalkPointerUp = () => {
-              if (enableDirectPpt) {
-                onChannelPptStop(room.id);
-              }
-            };
-
-            const listenerCount = roomListenerCounts[room.id] ?? 0;
-
-            return (
-              <article key={`station-room-${room.id}`} className="station-card">
-                {listenerCount > 0 ? (
-                  <span
-                    className="station-presence-badge"
-                    title={`${listenerCount} listener(s)`}
-                  >
-                    <span className="station-presence-dot" />
-                    {listenerCount}
-                  </span>
-                ) : null}
-                <button
-                  type="button"
-                  className={`station-pin-top ${pinnedRoomIds.includes(room.id) ? "active" : ""}`}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onPointerUp={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onTogglePinnedRoom(room.id);
-                  }}
-                  title={
-                    pinnedRoomIds.includes(room.id)
-                      ? "Unpin channel"
-                      : "Pin channel"
-                  }
-                >
-                  ★
-                </button>
-                <button
-                  className={`station-card-head ${
-                    enableDirectPpt
-                      ? isPttPressed && canTalk
-                        ? "ppt-active"
-                        : ""
-                      : ""
-                  } ${canTalk ? "" : "disabled"}${!enableDirectPpt && talking && canTalk ? " talk-armed" : ""}${!enableDirectPpt && talking && canTalk && isSendingOnTalkRooms ? " talk-live" : ""}`}
-                  onPointerDown={
-                    canTalk && enableDirectPpt
-                      ? handleTalkPointerDown
-                      : undefined
-                  }
-                  onPointerUp={
-                    canTalk && enableDirectPpt ? handleTalkPointerUp : undefined
-                  }
-                  onPointerLeave={
-                    canTalk && enableDirectPpt && isPttPressed
-                      ? handleTalkPointerUp
-                      : undefined
-                  }
-                  onPointerCancel={
-                    canTalk && enableDirectPpt && isPttPressed
-                      ? handleTalkPointerUp
-                      : undefined
-                  }
-                  onClick={
-                    !enableDirectPpt && canTalk
-                      ? () => toggleTalkRoom(room.id)
-                      : undefined
-                  }
-                  disabled={!canTalk}
-                  title={
-                    canTalk
-                      ? ""
-                      : "Your role is not allowed to send to this room"
-                  }
-                >
-                  {isReceivingRoom(room.id) ? (
-                    <span className="station-receiving-badge">🔊</span>
-                  ) : null}
-                  <small>Talk</small>
-                  <strong>{room.name}</strong>
-                </button>
-                <div className="station-gain-control">
-                  <label htmlFor={`room-gain-${room.id}`}>
-                    {gainToDbLabel(roomGainById[room.id] ?? 1)}
-                  </label>
-                  <input
-                    id={`room-gain-${room.id}`}
-                    type="range"
-                    min={MUTE_POS}
-                    max={DB_MAX}
-                    step={1}
-                    value={gainToSlider(roomGainById[room.id] ?? 1)}
-                    style={
-                      {
-                        "--fill": `${sliderFillPercent(roomGainById[room.id] ?? 1)}%`,
-                      } as React.CSSProperties
-                    }
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onPointerUp={(event) => event.stopPropagation()}
-                    onClick={(event) => event.stopPropagation()}
-                    onChange={(event) =>
-                      onRoomGainChange(
-                        room.id,
-                        sliderToGain(Number(event.currentTarget.value)),
-                      )
-                    }
-                  />
-                </div>
-                <div className="station-card-actions">
-                  <button
-                    className={`listen ${listening && canListen ? "on" : ""} ${canListen ? "" : "disabled"} ${isForced ? "forced" : ""}`}
-                    onClick={() => toggleListenRoom(room.id)}
-                    disabled={!canListen || isForced}
-                    title={
-                      isForced
-                        ? "Forced listen — cannot be deselected"
-                        : canListen
-                          ? ""
-                          : "Your role is not allowed to receive from this room"
-                    }
-                  >
-                    {isForced ? "🔒 Listen" : "Listen"}
-                  </button>
-                  <button
-                    className={`call ${canTalk ? "" : "disabled"}`}
-                    onClick={() => sendScopedSignal("room", room.id, "call")}
-                    disabled={!canTalk}
-                    title={
-                      canTalk
-                        ? ""
-                        : "Your role is not allowed to send to this room"
-                    }
-                  >
-                    Call
-                  </button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="station-block station-direct-section">
-        <h3>Direct communication</h3>
-        {enableDirectTabs && directGroups.length > 0 ? (
-          <>
-            <div
-              className="station-direct-tabs"
-              role="tablist"
-              aria-label="Direct communication tabs"
-            >
-              {directGroups.map((group) => (
-                <button
-                  key={`direct-tab-${group.tabId}`}
-                  role="tab"
-                  className={`station-direct-tab ${activeDirectTab === group.tabId ? "active" : ""}`}
-                  aria-selected={activeDirectTab === group.tabId}
-                  onClick={() => setActiveDirectTab(group.tabId)}
-                >
-                  <span>{group.label}</span>
-                  <small>{group.count}</small>
-                </button>
-              ))}
+      <div className="station-content-grid">
+        <div className="station-primary-column">
+          <section className="station-block station-talk-section">
+            <h3>Talk channels</h3>
+            <div className="station-filter-bar small">
+              <span className="station-filter-hint">
+                Pin rooms or users to keep focus when things get busy.
+              </span>
             </div>
-            {displayedDirectUsers.length === 0 ? (
-              <p className="station-empty">No users in this tab.</p>
+            {visibleRooms.length === 0 ? (
+              <p className="station-empty">No channels to show.</p>
+            ) : null}
+            <div className="station-talk-grid">
+              {visibleRooms.map((room) => {
+                const listening = listenRoomIds.includes(room.id);
+                const talking = talkRoomIds.includes(room.id);
+                const canTalk = canRoleSendToRoom(room.id, appData.self.roleId);
+                const canListen = canRoleReceiveFromRoom(
+                  room.id,
+                  appData.self.roleId,
+                );
+                const isForced = (room.forcedListenRoleIds ?? []).includes(
+                  appData.self.roleId,
+                );
+                const isPttPressed =
+                  enableDirectPpt && pptPressedChannelId === room.id;
+
+                const handleTalkPointerDown = () => {
+                  if (enableDirectPpt) {
+                    onChannelPptStart(room.id);
+                  }
+                };
+
+                const handleTalkPointerUp = () => {
+                  if (enableDirectPpt) {
+                    onChannelPptStop(room.id);
+                  }
+                };
+
+                const listenerCount = roomListenerCounts[room.id] ?? 0;
+
+                return (
+                  <article
+                    key={`station-room-${room.id}`}
+                    className="station-card"
+                  >
+                    {listenerCount > 0 ? (
+                      <span
+                        className="station-presence-badge"
+                        title={`${listenerCount} listener(s)`}
+                      >
+                        <span className="station-presence-dot" />
+                        {listenerCount}
+                      </span>
+                    ) : null}
+                    <button
+                      type="button"
+                      className={`station-pin-top ${pinnedRoomIds.includes(room.id) ? "active" : ""}`}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onPointerUp={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onTogglePinnedRoom(room.id);
+                      }}
+                      title={
+                        pinnedRoomIds.includes(room.id)
+                          ? "Unpin channel"
+                          : "Pin channel"
+                      }
+                    >
+                      ★
+                    </button>
+                    <button
+                      className={`station-card-head ${
+                        enableDirectPpt
+                          ? isPttPressed && canTalk
+                            ? "ppt-active"
+                            : ""
+                          : ""
+                      } ${canTalk ? "" : "disabled"}${!enableDirectPpt && talking && canTalk ? " talk-armed" : ""}${!enableDirectPpt && talking && canTalk && isSendingOnTalkRooms ? " talk-live" : ""}`}
+                      onPointerDown={
+                        canTalk && enableDirectPpt
+                          ? handleTalkPointerDown
+                          : undefined
+                      }
+                      onPointerUp={
+                        canTalk && enableDirectPpt
+                          ? handleTalkPointerUp
+                          : undefined
+                      }
+                      onPointerLeave={
+                        canTalk && enableDirectPpt && isPttPressed
+                          ? handleTalkPointerUp
+                          : undefined
+                      }
+                      onPointerCancel={
+                        canTalk && enableDirectPpt && isPttPressed
+                          ? handleTalkPointerUp
+                          : undefined
+                      }
+                      onClick={
+                        !enableDirectPpt && canTalk
+                          ? () => toggleTalkRoom(room.id)
+                          : undefined
+                      }
+                      disabled={!canTalk}
+                      title={
+                        canTalk
+                          ? ""
+                          : "Your role is not allowed to send to this room"
+                      }
+                    >
+                      {isReceivingRoom(room.id) ? (
+                        <span className="station-receiving-badge">🔊</span>
+                      ) : null}
+                      <small>Talk</small>
+                      <strong>{room.name}</strong>
+                    </button>
+                    <div className="station-gain-control">
+                      <label htmlFor={`room-gain-${room.id}`}>
+                        {gainToDbLabel(roomGainById[room.id] ?? 1)}
+                      </label>
+                      <input
+                        id={`room-gain-${room.id}`}
+                        type="range"
+                        min={MUTE_POS}
+                        max={DB_MAX}
+                        step={1}
+                        value={gainToSlider(roomGainById[room.id] ?? 1)}
+                        style={
+                          {
+                            "--fill": `${sliderFillPercent(roomGainById[room.id] ?? 1)}%`,
+                          } as React.CSSProperties
+                        }
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onPointerUp={(event) => event.stopPropagation()}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) =>
+                          onRoomGainChange(
+                            room.id,
+                            sliderToGain(Number(event.currentTarget.value)),
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="station-card-actions">
+                      <button
+                        className={`listen ${listening && canListen ? "on" : ""} ${canListen ? "" : "disabled"} ${isForced ? "forced" : ""}`}
+                        onClick={() => toggleListenRoom(room.id)}
+                        disabled={!canListen || isForced}
+                        title={
+                          isForced
+                            ? "Forced listen — cannot be deselected"
+                            : canListen
+                              ? ""
+                              : "Your role is not allowed to receive from this room"
+                        }
+                      >
+                        {isForced ? "🔒 Listen" : "Listen"}
+                      </button>
+                      <button
+                        className={`call ${canTalk ? "" : "disabled"}`}
+                        onClick={() =>
+                          sendScopedSignal("room", room.id, "call")
+                        }
+                        disabled={!canTalk}
+                        title={
+                          canTalk
+                            ? ""
+                            : "Your role is not allowed to send to this room"
+                        }
+                      >
+                        Call
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="station-block station-direct-section">
+            <h3>Direct communication</h3>
+            {enableDirectTabs && directGroups.length > 0 ? (
+              <>
+                <div
+                  className="station-direct-tabs"
+                  role="tablist"
+                  aria-label="Direct communication tabs"
+                >
+                  {directGroups.map((group) => (
+                    <button
+                      key={`direct-tab-${group.tabId}`}
+                      role="tab"
+                      className={`station-direct-tab ${activeDirectTab === group.tabId ? "active" : ""}`}
+                      aria-selected={activeDirectTab === group.tabId}
+                      onClick={() => setActiveDirectTab(group.tabId)}
+                    >
+                      <span>{group.label}</span>
+                      <small>{group.count}</small>
+                    </button>
+                  ))}
+                </div>
+                {displayedDirectUsers.length === 0 ? (
+                  <p className="station-empty">No users in this tab.</p>
+                ) : (
+                  <div className="station-direct-grid">
+                    {displayedDirectUsers.map((p) => (
+                      <article
+                        key={`station-direct-${p.userId}`}
+                        className="station-card station-direct-card"
+                      >
+                        <button
+                          type="button"
+                          className={`station-pin-top ${pinnedUserIds.includes(p.userId) ? "active" : ""}`}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onPointerUp={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onTogglePinnedUser(p.userId);
+                          }}
+                          title={
+                            pinnedUserIds.includes(p.userId)
+                              ? "Unpin user"
+                              : "Pin user"
+                          }
+                        >
+                          ★
+                        </button>
+                        <button
+                          className={`station-card-head direct-ptt ${directPttPressedUserId === p.userId ? "active" : ""}`}
+                          onPointerDown={() => startDirectPtt(p.userId)}
+                          onPointerUp={() => stopDirectPtt(p.userId)}
+                          onPointerLeave={() => stopDirectPtt(p.userId)}
+                          onPointerCancel={() => stopDirectPtt(p.userId)}
+                        >
+                          {isReceivingDirect(p.userId) ? (
+                            <span className="station-receiving-badge">🔊</span>
+                          ) : null}
+                          <small>Direct</small>
+                          <strong>{p.username}</strong>
+                          <em>
+                            {roleNameById.get(p.roleId) ||
+                              p.roleId ||
+                              "Unknown role"}
+                          </em>
+                        </button>
+                        <div className="station-gain-control">
+                          <label htmlFor={`direct-gain-${p.userId}`}>
+                            {gainToDbLabel(directGainByUserId[p.userId] ?? 1)}
+                          </label>
+                          <input
+                            id={`direct-gain-${p.userId}`}
+                            type="range"
+                            min={MUTE_POS}
+                            max={DB_MAX}
+                            step={1}
+                            value={gainToSlider(
+                              directGainByUserId[p.userId] ?? 1,
+                            )}
+                            style={
+                              {
+                                "--fill": `${sliderFillPercent(directGainByUserId[p.userId] ?? 1)}%`,
+                              } as React.CSSProperties
+                            }
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onPointerUp={(event) => event.stopPropagation()}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) =>
+                              onDirectGainChange(
+                                p.userId,
+                                sliderToGain(Number(event.currentTarget.value)),
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="station-card-actions single">
+                          <button
+                            className={`call ${/* disabled handled by class */ ""}`}
+                            onClick={() =>
+                              sendScopedSignal("direct", p.userId, "call")
+                            }
+                            title="Call user"
+                          >
+                            Call
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : directOnlineTargets.length === 0 ? (
+              <p className="station-empty">
+                {showPinnedOnly
+                  ? "No pinned users online."
+                  : "No other users online."}
+              </p>
             ) : (
               <div className="station-direct-grid">
-                {displayedDirectUsers.map((p) => (
+                {directOnlineTargets.map((p) => (
                   <article
                     key={`station-direct-${p.userId}`}
                     className="station-card station-direct-card"
@@ -708,161 +831,67 @@ export function StationIntercomView({
                 ))}
               </div>
             )}
-          </>
-        ) : directOnlineTargets.length === 0 ? (
-          <p className="station-empty">
-            {showPinnedOnly
-              ? "No pinned users online."
-              : "No other users online."}
-          </p>
-        ) : (
-          <div className="station-direct-grid">
-            {directOnlineTargets.map((p) => (
-              <article
-                key={`station-direct-${p.userId}`}
-                className="station-card station-direct-card"
-              >
-                <button
-                  type="button"
-                  className={`station-pin-top ${pinnedUserIds.includes(p.userId) ? "active" : ""}`}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onPointerUp={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onTogglePinnedUser(p.userId);
-                  }}
-                  title={
-                    pinnedUserIds.includes(p.userId) ? "Unpin user" : "Pin user"
-                  }
-                >
-                  ★
-                </button>
-                <button
-                  className={`station-card-head direct-ptt ${directPttPressedUserId === p.userId ? "active" : ""}`}
-                  onPointerDown={() => startDirectPtt(p.userId)}
-                  onPointerUp={() => stopDirectPtt(p.userId)}
-                  onPointerLeave={() => stopDirectPtt(p.userId)}
-                  onPointerCancel={() => stopDirectPtt(p.userId)}
-                >
-                  {isReceivingDirect(p.userId) ? (
-                    <span className="station-receiving-badge">🔊</span>
-                  ) : null}
-                  <small>Direct</small>
-                  <strong>{p.username}</strong>
-                  <em>
-                    {roleNameById.get(p.roleId) || p.roleId || "Unknown role"}
-                  </em>
-                </button>
-                <div className="station-gain-control">
-                  <label htmlFor={`direct-gain-${p.userId}`}>
-                    {gainToDbLabel(directGainByUserId[p.userId] ?? 1)}
-                  </label>
-                  <input
-                    id={`direct-gain-${p.userId}`}
-                    type="range"
-                    min={MUTE_POS}
-                    max={DB_MAX}
-                    step={1}
-                    value={gainToSlider(directGainByUserId[p.userId] ?? 1)}
-                    style={
-                      {
-                        "--fill": `${sliderFillPercent(directGainByUserId[p.userId] ?? 1)}%`,
-                      } as React.CSSProperties
-                    }
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onPointerUp={(event) => event.stopPropagation()}
-                    onClick={(event) => event.stopPropagation()}
-                    onChange={(event) =>
-                      onDirectGainChange(
-                        p.userId,
-                        sliderToGain(Number(event.currentTarget.value)),
-                      )
-                    }
-                  />
-                </div>
-                <div className="station-card-actions single">
-                  <button
-                    className={`call ${/* disabled handled by class */ ""}`}
-                    onClick={() => sendScopedSignal("direct", p.userId, "call")}
-                    title="Call user"
-                  >
-                    Call
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+          </section>
 
-      <section
-        className={`station-controls ${
-          isUserSettingsOpen ? "station-controls-hidden-mobile" : ""
-        }`}
-      >
-        {footerButtons}
-        <button
-          type="button"
-          role="switch"
-          aria-checked={voiceMode === "always_on"}
-          className={`station-always-on ${voiceMode === "always_on" ? "active" : ""}`}
-          onClick={() => setAlwaysOn(voiceMode !== "always_on")}
-        >
-          <span className="station-always-on-indicator" aria-hidden="true" />
-          <span className="station-always-on-text">Always on</span>
-        </button>
-      </section>
+          {broadcastGroups.length > 0 ? (
+            <section className="station-block station-broadcast-section">
+              <h3>Broadcast channels</h3>
+              <div className="station-broadcast-grid">
+                {broadcastGroups.map((group) => {
+                  const allowedRoleIds = Array.isArray(group.allowedRoleIds)
+                    ? group.allowedRoleIds
+                    : [];
+                  const canSend =
+                    allowedRoleIds.length === 0 ||
+                    allowedRoleIds.includes(appData.self.roleId);
+                  return (
+                    <button
+                      key={group.id}
+                      className={`station-broadcast-button ${broadcastPttPressed === group.id ? "active" : ""} ${
+                        canSend ? "" : "disabled"
+                      }`}
+                      onPointerDown={() =>
+                        canSend ? startBroadcastPtt(group.id) : undefined
+                      }
+                      onPointerUp={() =>
+                        canSend ? stopBroadcastPtt(group.id) : undefined
+                      }
+                      onPointerLeave={() =>
+                        canSend ? stopBroadcastPtt(group.id) : undefined
+                      }
+                      onPointerCancel={() =>
+                        canSend ? stopBroadcastPtt(group.id) : undefined
+                      }
+                      disabled={!canSend}
+                      title={
+                        canSend
+                          ? ""
+                          : "Your role is not allowed to send to this broadcast channel"
+                      }
+                    >
+                      {isReceivingBroadcast(group.id) ? (
+                        <span className="station-broadcast-receiving">🔊</span>
+                      ) : null}
+                      {group.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
+        </div>
 
-      {broadcastGroups.length > 0 ? (
-        <section className="station-block station-broadcast-section">
-          <h3>Broadcast channels</h3>
-          <div className="station-broadcast-grid">
-            {broadcastGroups.map((group) => {
-              const allowedRoleIds = Array.isArray(group.allowedRoleIds)
-                ? group.allowedRoleIds
-                : [];
-              const canSend =
-                allowedRoleIds.length === 0 ||
-                allowedRoleIds.includes(appData.self.roleId);
-              return (
-                <button
-                  key={group.id}
-                  className={`station-broadcast-button ${broadcastPttPressed === group.id ? "active" : ""} ${
-                    canSend ? "" : "disabled"
-                  }`}
-                  onPointerDown={() =>
-                    canSend ? startBroadcastPtt(group.id) : undefined
-                  }
-                  onPointerUp={() =>
-                    canSend ? stopBroadcastPtt(group.id) : undefined
-                  }
-                  onPointerLeave={() =>
-                    canSend ? stopBroadcastPtt(group.id) : undefined
-                  }
-                  onPointerCancel={() =>
-                    canSend ? stopBroadcastPtt(group.id) : undefined
-                  }
-                  disabled={!canSend}
-                  title={
-                    canSend
-                      ? ""
-                      : "Your role is not allowed to send to this broadcast channel"
-                  }
-                >
-                  {isReceivingBroadcast(group.id) ? (
-                    <span className="station-broadcast-receiving">🔊</span>
-                  ) : null}
-                  {group.name}
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="station-utility station-utility-section">
-        <div className="panel">{chatAndSignalPanel}</div>
-      </section>
+        {hasChatAndSignalPanel ? (
+          <aside className="station-secondary-column">
+            <section className="station-block station-utility station-utility-section">
+              <h3>Chat</h3>
+              <div className="panel station-chat-panel">
+                {chatAndSignalPanel}
+              </div>
+            </section>
+          </aside>
+        ) : null}
+      </div>
       {showDebug ? (
         <section className="panel">{realtimeDebugBlock}</section>
       ) : null}
