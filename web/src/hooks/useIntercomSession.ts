@@ -609,7 +609,7 @@ export function useIntercomSession({
         targetID,
         label,
       });
-    } else if (body === "ptt_stop") {
+    } else if (body === "ptt_stop" || body === "always_off") {
       activeVoiceRoutesRef.current.delete(routeKey);
     }
     refreshActiveVoiceChannelState();
@@ -837,6 +837,8 @@ export function useIntercomSession({
       for (const track of stream.getAudioTracks()) {
         if (state === "always_on" || state === "ptt_start") {
           track.enabled = true;
+        } else if (state === "always_off") {
+          track.enabled = false;
         } else if (state === "ptt_stop") {
           track.enabled = voiceModeRef.current === "always_on";
         }
@@ -881,23 +883,27 @@ export function useIntercomSession({
 
   // ── Voice mode actions ──
   function setAlwaysOn(enabled: boolean) {
-    if (enableDirectPpt) {
+    if (enabled && enableDirectPpt) {
       if (voiceModeRef.current !== "ptt") {
         setVoiceMode("ptt");
         voiceModeRef.current = "ptt";
       }
       if (pttPressed) setPttPressed(false);
-      sendVoiceState("ptt_stop");
+      sendVoiceState("always_off");
       return;
     }
     if (enabled) {
       setVoiceMode("always_on");
       voiceModeRef.current = "always_on";
+      setPttPressed(false);
+      setPttPressedChannelId(null);
       sendVoiceState("always_on");
     } else {
       setVoiceMode("ptt");
       voiceModeRef.current = "ptt";
-      sendVoiceState("ptt_stop");
+      setPttPressed(false);
+      setPttPressedChannelId(null);
+      sendVoiceState("always_off");
     }
   }
 
@@ -1703,14 +1709,8 @@ export function useIntercomSession({
       setVoiceMode(nextVoiceMode);
       voiceModeRef.current = nextVoiceMode;
     }
-    if (nextVoiceMode === "always_on") {
+    if (nextVoiceMode !== "always_on" && !selfPresence.micEnabled) {
       setPttPressed(false);
-      setdirectPttPressedUserId(null);
-      setBroadcastPttPressed(null);
-      return;
-    }
-    setPttPressed(selfPresence.micEnabled);
-    if (!selfPresence.micEnabled) {
       setdirectPttPressedUserId(null);
       setBroadcastPttPressed(null);
     }

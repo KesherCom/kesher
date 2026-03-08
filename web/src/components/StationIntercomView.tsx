@@ -754,16 +754,16 @@ export function StationIntercomView({
         >
           Hold to talk
         </button>
-        <label
+        <button
+          type="button"
+          role="switch"
+          aria-checked={voiceMode === "always_on"}
           className={`station-always-on ${voiceMode === "always_on" ? "active" : ""}`}
+          onClick={() => setAlwaysOn(voiceMode !== "always_on")}
         >
-          <input
-            type="checkbox"
-            checked={voiceMode === "always_on"}
-            onChange={(e) => setAlwaysOn(e.target.checked)}
-          />
-          <span>Always on</span>
-        </label>
+          <span className="station-always-on-indicator" aria-hidden="true" />
+          <span className="station-always-on-text">Always on</span>
+        </button>
         <button
           className={`station-reply ${replyTargetUserId ? "" : "disabled"} ${
             replyTargetUserId && directPttPressedUserId === replyTargetUserId

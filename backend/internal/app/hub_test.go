@@ -18,6 +18,31 @@ func drain(ch chan WSOutbound) {
 	}
 }
 
+func TestHubSetVoiceStatePreservesAlwaysOnAcrossTransientPTT(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	c := &client{session: Session{Token: "a"}, user: User{ID: "u1", Username: "a", RoleID: "audio"}, send: make(chan WSOutbound, 4)}
+	hub.Add(c)
+
+	hub.SetVoiceState("a", "always_on")
+	hub.SetVoiceState("a", "ptt_start")
+	presence, ok := hub.PresenceForUsername("a")
+	if !ok || presence.VoiceMode != "always_on" || !presence.MicEnabled {
+		t.Fatalf("unexpected always_on ptt_start presence: %+v", presence)
+	}
+
+	hub.SetVoiceState("a", "ptt_stop")
+	presence, ok = hub.PresenceForUsername("a")
+	if !ok || presence.VoiceMode != "always_on" || !presence.MicEnabled {
+		t.Fatalf("unexpected always_on ptt_stop presence: %+v", presence)
+	}
+}
+
 func TestHubRoomRoutingRespectsReceiverRoleRestrictions(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
@@ -279,7 +304,12 @@ func TestHubSetVoiceStateTransitions(t *testing.T) {
 	}
 	hub.SetVoiceState("a", "ptt_stop")
 	presence, ok = hub.PresenceForUsername("a")
+	if !ok || presence.VoiceMode != "always_on" || !presence.MicEnabled {
+		t.Fatalf("unexpected always_on ptt_stop presence: %+v", presence)
+	}
+	hub.SetVoiceState("a", "always_off")
+	presence, ok = hub.PresenceForUsername("a")
 	if !ok || presence.VoiceMode != "ptt" || presence.MicEnabled {
-		t.Fatalf("unexpected ptt_stop presence: %+v", presence)
+		t.Fatalf("unexpected always_off presence: %+v", presence)
 	}
 }

@@ -368,12 +368,21 @@ func (h *Hub) SetVoiceState(token, state string) {
 		case "always_on":
 			c.voiceMode = "always_on"
 			c.micEnabled = true
-		case "ptt_start":
-			c.voiceMode = "ptt"
-			c.micEnabled = true
-		case "ptt_stop":
+		case "always_off":
 			c.voiceMode = "ptt"
 			c.micEnabled = false
+		case "ptt_start":
+			c.micEnabled = true
+			if c.voiceMode != "always_on" {
+				c.voiceMode = "ptt"
+			}
+		case "ptt_stop":
+			if c.voiceMode == "always_on" {
+				c.micEnabled = true
+			} else {
+				c.voiceMode = "ptt"
+				c.micEnabled = false
+			}
 		}
 	}
 	h.mu.Unlock()

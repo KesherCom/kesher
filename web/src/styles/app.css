@@ -2056,33 +2056,32 @@ button.secondary {
 .station-always-on {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.55rem;
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   padding: 0.45rem 0.7rem 0.45rem 0.55rem;
   background: var(--station-dock-bg);
   box-shadow: none;
+  cursor: pointer;
   transition:
     border-color 140ms ease,
     box-shadow 140ms ease,
     background 140ms ease;
 }
-.station-always-on input {
-  appearance: none;
-  -webkit-appearance: none;
+.station-always-on-indicator {
   width: 1.95rem;
   height: 1.1rem;
-  margin: 0;
   border-radius: 999px;
   border: 1px solid var(--station-direct-reply-active-border);
   background: var(--station-direct-reply-active-bg);
   position: relative;
-  cursor: pointer;
+  flex: 0 0 auto;
   transition:
     background 140ms ease,
     border-color 140ms ease;
 }
-.station-always-on input::after {
+.station-always-on-indicator::after {
   content: "";
   position: absolute;
   left: 2px;
@@ -2096,7 +2095,7 @@ button.secondary {
     transform 140ms ease,
     background 140ms ease;
 }
-.station-always-on span {
+.station-always-on-text {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 700;
@@ -2108,15 +2107,15 @@ button.secondary {
   background: var(--station-broadcast-active-bg-from);
   box-shadow: none;
 }
-.station-always-on.active input {
+.station-always-on.active .station-always-on-indicator {
   background: var(--station-broadcast-active-hover-bg);
   border-color: var(--station-broadcast-active-hover-border);
 }
-.station-always-on.active input::after {
+.station-always-on.active .station-always-on-indicator::after {
   transform: translateX(0.82rem);
   background: var(--station-broadcast-active-badge);
 }
-.station-always-on.active span {
+.station-always-on.active .station-always-on-text {
   color: var(--text-bright-alt2);
 }
 .station-reply {
