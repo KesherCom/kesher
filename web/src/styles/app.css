@@ -2877,11 +2877,11 @@ button.secondary {
     grid-template-columns: minmax(0, 1fr) minmax(400px, 460px);
   }
   .station-secondary-column {
+    position: sticky;
+    top: calc(7.5rem + env(safe-area-inset-top, 0px));
     align-self: start;
   }
   .station-utility-section {
-    position: sticky;
-    top: calc(7.5rem + env(safe-area-inset-top, 0px));
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
