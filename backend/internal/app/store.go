@@ -307,6 +307,11 @@ func NewStore(dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if dbPath == ":memory:" || strings.Contains(dbPath, "mode=memory") {
+		// Keep one connection for in-memory SQLite so schema/data remain visible.
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(1)
+	}
 	s := &Store{db: db}
 	s.resetPolicyCaches()
 	if err := s.migrate(context.Background()); err != nil {

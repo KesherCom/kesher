@@ -1306,6 +1306,16 @@ func (s *Server) routeInbound(ctx context.Context, sender Session, in WSInbound,
 	if err := json.Unmarshal(raw, &e); err != nil {
 		return
 	}
+	if outType == "chat" {
+		resolved, status, ok := s.resolveChatRouting(ctx, sender, e)
+		if !ok {
+			if status != nil {
+				s.sendRoutingStatus(sender.Token, *status)
+			}
+			return
+		}
+		e = resolved
+	}
 	if e.Scope == "" || e.TargetID == "" {
 		return
 	}
@@ -1313,6 +1323,137 @@ func (s *Server) routeInbound(ctx context.Context, sender Session, in WSInbound,
 		return
 	}
 	s.hub.RouteEvent(sender.Token, outType, e)
+}
+
+func (s *Server) resolveChatRouting(ctx context.Context, sender Session, e RoutedEvent) (RoutedEvent, *RoutingStatusEvent, bool) {
+	body := strings.TrimSpace(e.Body)
+	if body == "" {
+		return RoutedEvent{}, nil, false
+	}
+
+	prefix, targetLabel, messageBody, hasPrefix := parseChatPrefix(body)
+	if !hasPrefix {
+		talkRoomID, ok := s.hub.ActiveTalkRoomForToken(sender.Token)
+		if !ok {
+			return RoutedEvent{}, &RoutingStatusEvent{
+				Code:       "unzustellbar",
+				TargetType: "room",
+				Message:    "Unzustellbar: Keine aktive Talk-Partyline.",
+			}, false
+		}
+		e.Scope = "room"
+		e.TargetType = "room"
+		e.TargetID = talkRoomID
+		e.Body = body
+		return e, nil, true
+	}
+
+	if messageBody == "" {
+		return RoutedEvent{}, nil, false
+	}
+
+	switch prefix {
+	case '#':
+		roomID, ok := s.resolveRoomTargetID(ctx, targetLabel)
+		if !ok {
+			return RoutedEvent{}, &RoutingStatusEvent{
+				Code:       "unzustellbar",
+				TargetType: "room",
+				Target:     targetLabel,
+				Message:    "Unzustellbar: Partyline nicht gefunden.",
+			}, false
+		}
+		e.Scope = "room"
+		e.TargetType = "room"
+		e.TargetID = roomID
+		e.Body = messageBody
+		return e, nil, true
+	case '@':
+		if activeUser, ok := s.hub.ActiveUserByUsername(targetLabel); ok {
+			e.Scope = "direct"
+			e.TargetType = "user"
+			e.TargetID = activeUser.ID
+			e.Body = messageBody
+			return e, nil, true
+		}
+		roleID, ok := s.resolveRoleTargetID(ctx, targetLabel)
+		if !ok {
+			return RoutedEvent{}, &RoutingStatusEvent{
+				Code:       "unzustellbar",
+				TargetType: "user",
+				Target:     targetLabel,
+				Message:    "Unzustellbar: Benutzer oder Rolle nicht gefunden.",
+			}, false
+		}
+		if !s.hub.HasActiveSessionsForRole(roleID) {
+			return RoutedEvent{}, &RoutingStatusEvent{
+				Code:       "unzustellbar",
+				TargetType: "role",
+				Target:     targetLabel,
+				Message:    "Unzustellbar: Keine aktiven Nutzer fuer diese Rolle.",
+			}, false
+		}
+		e.Scope = "direct"
+		e.TargetType = "role"
+		e.TargetID = roleID
+		e.Body = messageBody
+		return e, nil, true
+	default:
+		return RoutedEvent{}, nil, false
+	}
+}
+
+func parseChatPrefix(body string) (rune, string, string, bool) {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return 0, "", "", false
+	}
+	if !strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "@") {
+		return 0, "", "", false
+	}
+	parts := strings.Fields(trimmed)
+	if len(parts) == 0 {
+		return 0, "", "", false
+	}
+	prefixToken := parts[0]
+	prefix := rune(prefixToken[0])
+	target := strings.TrimSpace(prefixToken[1:])
+	message := strings.TrimSpace(strings.TrimPrefix(trimmed, prefixToken))
+	if target == "" {
+		return 0, "", "", false
+	}
+	return prefix, target, message, true
+}
+
+func (s *Server) resolveRoomTargetID(ctx context.Context, target string) (string, bool) {
+	rooms, err := s.store.ListRooms(ctx)
+	if err != nil {
+		return "", false
+	}
+	for _, room := range rooms {
+		if strings.EqualFold(room.ID, target) || strings.EqualFold(room.Name, target) {
+			return room.ID, true
+		}
+	}
+	return "", false
+}
+
+func (s *Server) resolveRoleTargetID(ctx context.Context, target string) (string, bool) {
+	roles, err := s.store.ListRoles(ctx)
+	if err != nil {
+		return "", false
+	}
+	for _, role := range roles {
+		if strings.EqualFold(role.ID, target) || strings.EqualFold(role.Name, target) {
+			return role.ID, true
+		}
+	}
+	return "", false
+}
+
+func (s *Server) sendRoutingStatus(token string, status RoutingStatusEvent) {
+	status.Timestamp = time.Now().UnixMilli()
+	s.hub.SendToToken(token, WSOutbound{Type: "status", Data: status})
 }
 
 func (s *Server) isInboundAllowed(ctx context.Context, sender Session, e RoutedEvent) bool {

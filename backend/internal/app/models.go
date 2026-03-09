@@ -112,12 +112,21 @@ type PresenceState struct {
 }
 
 type RoutedEvent struct {
-	Scope     string `json:"scope"`
-	TargetID  string `json:"targetId"`
-	Body      string `json:"body"`
-	Signal    string `json:"signal,omitempty"`
-	FromUser  User   `json:"fromUser"`
-	Timestamp int64  `json:"timestamp"`
+	Scope      string `json:"scope"`
+	TargetType string `json:"targetType,omitempty"`
+	TargetID   string `json:"targetId"`
+	Body       string `json:"body"`
+	Signal     string `json:"signal,omitempty"`
+	FromUser   User   `json:"fromUser"`
+	Timestamp  int64  `json:"timestamp"`
+}
+
+type RoutingStatusEvent struct {
+	Code       string `json:"code"`
+	TargetType string `json:"targetType,omitempty"`
+	Target     string `json:"target,omitempty"`
+	Message    string `json:"message"`
+	Timestamp  int64  `json:"timestamp"`
 }
 
 type WebRTCOffer struct {

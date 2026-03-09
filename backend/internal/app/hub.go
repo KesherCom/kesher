@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -443,6 +444,18 @@ func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
 			}
 			h.mu.Unlock()
 		}
+		if eventType == "chat" && e.TargetType == "user" {
+			h.sendToLatestUserSession(e.TargetID, out)
+			h.sendToToken(senderToken, out)
+			break
+		}
+		if eventType == "chat" && e.TargetType == "role" {
+			h.sendToRoleSessions(e.TargetID, out)
+			if sender.session.RoleID != e.TargetID {
+				h.sendToToken(senderToken, out)
+			}
+			break
+		}
 		h.sendToUser(e.TargetID, out)
 		h.sendToToken(senderToken, out)
 	case "room":
@@ -488,6 +501,50 @@ func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
 	}
 }
 
+func (h *Hub) ActiveTalkRoomForToken(token string) (string, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	c, ok := h.clients[token]
+	if !ok || len(c.talkRooms) == 0 {
+		return "", false
+	}
+	rooms := make([]string, 0, len(c.talkRooms))
+	for roomID := range c.talkRooms {
+		rooms = append(rooms, roomID)
+	}
+	slices.Sort(rooms)
+	return rooms[0], true
+}
+
+func (h *Hub) ActiveUserByUsername(username string) (User, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var selected *client
+	for _, c := range h.clients {
+		if !strings.EqualFold(c.user.Username, username) {
+			continue
+		}
+		if selected == nil || c.connectedAt.After(selected.connectedAt) {
+			selected = c
+		}
+	}
+	if selected == nil {
+		return User{}, false
+	}
+	return selected.user, true
+}
+
+func (h *Hub) HasActiveSessionsForRole(roleID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, c := range h.clients {
+		if c.session.RoleID == roleID {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *Hub) sendToUser(userID string, msg WSOutbound) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -495,6 +552,35 @@ func (h *Hub) sendToUser(userID string, msg WSOutbound) {
 		if c.user.ID == userID {
 			h.enqueueOutbound(c, msg)
 		}
+	}
+}
+
+func (h *Hub) sendToLatestUserSession(userID string, msg WSOutbound) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var selected *client
+	for _, c := range h.clients {
+		if c.user.ID != userID {
+			continue
+		}
+		if selected == nil || c.connectedAt.After(selected.connectedAt) {
+			selected = c
+		}
+	}
+	if selected == nil {
+		return
+	}
+	h.enqueueOutbound(selected, msg)
+}
+
+func (h *Hub) sendToRoleSessions(roleID string, msg WSOutbound) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, c := range h.clients {
+		if c.session.RoleID != roleID {
+			continue
+		}
+		h.enqueueOutbound(c, msg)
 	}
 }
 

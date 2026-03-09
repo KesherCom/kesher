@@ -436,6 +436,248 @@ func TestServerRouteInboundRejectsInvalidPayload(t *testing.T) {
 	}
 }
 
+func TestServerRouteInboundChatDefaultsToActiveTalkRoom(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"video"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sender := &client{
+		session:   Session{Token: "sender-token", RoleID: "audio"},
+		user:      User{ID: "u1", Username: "sender", RoleID: "audio"},
+		send:      make(chan WSOutbound, 8),
+		talkRooms: toRoomSet([]string{"foh"}),
+	}
+	receiver := &client{
+		session:     Session{Token: "receiver-token", RoleID: "video"},
+		user:        User{ID: "u2", Username: "receiver", RoleID: "video"},
+		send:        make(chan WSOutbound, 8),
+		listenRooms: toRoomSet([]string{"foh"}),
+	}
+	hub.Add(sender)
+	hub.Add(receiver)
+	drain(sender.send)
+	drain(receiver.send)
+
+	s := &Server{store: store, hub: hub}
+	s.routeInbound(context.Background(), sender.session, WSInbound{Data: RoutedEvent{Body: "hello team"}}, "chat")
+
+	select {
+	case out := <-receiver.send:
+		routed, ok := out.Data.(RoutedEvent)
+		if !ok {
+			t.Fatalf("expected RoutedEvent payload, got %T", out.Data)
+		}
+		if routed.Scope != "room" || routed.TargetType != "room" || routed.TargetID != "foh" {
+			t.Fatalf("unexpected routed event: %+v", routed)
+		}
+		if routed.Body != "hello team" {
+			t.Fatalf("unexpected body: %q", routed.Body)
+		}
+	default:
+		t.Fatal("expected routed chat message for receiver")
+	}
+}
+
+func TestServerRouteInboundChatHashPrefixRoutesByRoomName(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"video"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sender := &client{
+		session: Session{Token: "sender-token", RoleID: "audio"},
+		user:    User{ID: "u1", Username: "sender", RoleID: "audio"},
+		send:    make(chan WSOutbound, 8),
+	}
+	receiver := &client{
+		session:     Session{Token: "receiver-token", RoleID: "video"},
+		user:        User{ID: "u2", Username: "receiver", RoleID: "video"},
+		send:        make(chan WSOutbound, 8),
+		listenRooms: toRoomSet([]string{"foh"}),
+	}
+	hub.Add(sender)
+	hub.Add(receiver)
+	drain(sender.send)
+	drain(receiver.send)
+
+	s := &Server{store: store, hub: hub}
+	s.routeInbound(context.Background(), sender.session, WSInbound{Data: RoutedEvent{Body: "#FOH check one"}}, "chat")
+
+	select {
+	case out := <-receiver.send:
+		routed, ok := out.Data.(RoutedEvent)
+		if !ok {
+			t.Fatalf("expected RoutedEvent payload, got %T", out.Data)
+		}
+		if routed.Scope != "room" || routed.TargetType != "room" || routed.TargetID != "foh" {
+			t.Fatalf("unexpected routed event: %+v", routed)
+		}
+		if routed.Body != "check one" {
+			t.Fatalf("unexpected body: %q", routed.Body)
+		}
+	default:
+		t.Fatal("expected routed chat message for receiver")
+	}
+}
+
+func TestServerRouteInboundChatAtUserRoutesToLatestActiveSession(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sender := &client{
+		session: Session{Token: "sender-token", RoleID: "audio"},
+		user:    User{ID: "u1", Username: "sender", RoleID: "audio"},
+		send:    make(chan WSOutbound, 8),
+	}
+	receiverOld := &client{
+		session: Session{Token: "receiver-old", RoleID: "video"},
+		user:    User{ID: "u2", Username: "receiver", RoleID: "video"},
+		send:    make(chan WSOutbound, 8),
+	}
+	receiverNew := &client{
+		session: Session{Token: "receiver-new", RoleID: "video"},
+		user:    User{ID: "u2", Username: "receiver", RoleID: "video"},
+		send:    make(chan WSOutbound, 8),
+	}
+	hub.Add(sender)
+	hub.Add(receiverOld)
+	time.Sleep(2 * time.Millisecond)
+	hub.Add(receiverNew)
+	drain(sender.send)
+	drain(receiverOld.send)
+	drain(receiverNew.send)
+
+	s := &Server{store: store, hub: hub}
+	s.routeInbound(context.Background(), sender.session, WSInbound{Data: RoutedEvent{Body: "@receiver hi there"}}, "chat")
+
+	select {
+	case <-receiverOld.send:
+		t.Fatal("did not expect old receiver session to get direct chat")
+	default:
+	}
+	select {
+	case out := <-receiverNew.send:
+		routed, ok := out.Data.(RoutedEvent)
+		if !ok {
+			t.Fatalf("expected RoutedEvent payload, got %T", out.Data)
+		}
+		if routed.Scope != "direct" || routed.TargetType != "user" || routed.TargetID != "u2" {
+			t.Fatalf("unexpected routed event: %+v", routed)
+		}
+		if routed.Body != "hi there" {
+			t.Fatalf("unexpected body: %q", routed.Body)
+		}
+	default:
+		t.Fatal("expected latest receiver session to get direct chat")
+	}
+}
+
+func TestServerRouteInboundChatAtRoleRoutesToActiveRoleSessions(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sender := &client{
+		session: Session{Token: "sender-token", RoleID: "video"},
+		user:    User{ID: "u1", Username: "sender", RoleID: "video"},
+		send:    make(chan WSOutbound, 8),
+	}
+	audioA := &client{
+		session: Session{Token: "audio-a", RoleID: "audio"},
+		user:    User{ID: "u2", Username: "audioA", RoleID: "audio"},
+		send:    make(chan WSOutbound, 8),
+	}
+	audioB := &client{
+		session: Session{Token: "audio-b", RoleID: "audio"},
+		user:    User{ID: "u3", Username: "audioB", RoleID: "audio"},
+		send:    make(chan WSOutbound, 8),
+	}
+	hub.Add(sender)
+	hub.Add(audioA)
+	hub.Add(audioB)
+	drain(sender.send)
+	drain(audioA.send)
+	drain(audioB.send)
+
+	s := &Server{store: store, hub: hub}
+	s.routeInbound(context.Background(), sender.session, WSInbound{Data: RoutedEvent{Body: "@Audio check role"}}, "chat")
+
+	assertRoleMsg := func(out WSOutbound) {
+		routed, ok := out.Data.(RoutedEvent)
+		if !ok {
+			t.Fatalf("expected RoutedEvent payload, got %T", out.Data)
+		}
+		if routed.Scope != "direct" || routed.TargetType != "role" || routed.TargetID != "audio" {
+			t.Fatalf("unexpected routed event: %+v", routed)
+		}
+		if routed.Body != "check role" {
+			t.Fatalf("unexpected body: %q", routed.Body)
+		}
+	}
+
+	select {
+	case out := <-audioA.send:
+		assertRoleMsg(out)
+	default:
+		t.Fatal("expected first active audio session to get role chat")
+	}
+	select {
+	case out := <-audioB.send:
+		assertRoleMsg(out)
+	default:
+		t.Fatal("expected second active audio session to get role chat")
+	}
+}
+
+func TestServerRouteInboundChatAtRoleWithoutActiveUsersReturnsStatus(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sender := &client{
+		session: Session{Token: "sender-token", RoleID: "video"},
+		user:    User{ID: "u1", Username: "sender", RoleID: "video"},
+		send:    make(chan WSOutbound, 8),
+	}
+	hub.Add(sender)
+	drain(sender.send)
+
+	s := &Server{store: store, hub: hub}
+	s.routeInbound(context.Background(), sender.session, WSInbound{Data: RoutedEvent{Body: "@audio check"}}, "chat")
+
+	select {
+	case out := <-sender.send:
+		if out.Type != "status" {
+			t.Fatalf("expected status event, got %s", out.Type)
+		}
+		status, ok := out.Data.(RoutingStatusEvent)
+		if !ok {
+			t.Fatalf("expected RoutingStatusEvent payload, got %T", out.Data)
+		}
+		if status.Code != "unzustellbar" || status.TargetType != "role" {
+			t.Fatalf("unexpected status payload: %+v", status)
+		}
+	default:
+		t.Fatal("expected undeliverable status event for inactive role")
+	}
+}
+
 func TestDefaultRoomForSessionPrefersRoleDefaultThenFirstRoom(t *testing.T) {
 	session := Session{RoleID: "audio"}
 	roles := []Role{
