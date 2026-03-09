@@ -98,6 +98,8 @@ type StationIntercomViewProps = {
   onEnableBackgroundAudioRecoveryChange: (enabled: boolean) => void;
   keepScreenAwake: boolean;
   onKeepScreenAwakeChange: (enabled: boolean) => void;
+  showVolumeControls: boolean;
+  onShowVolumeControlsChange: (enabled: boolean) => void;
   mediaSessionSupported: boolean;
   wakeLockSupported: boolean;
   wakeLockActive: boolean;
@@ -180,6 +182,8 @@ export function StationIntercomView({
   onEnableBackgroundAudioRecoveryChange,
   keepScreenAwake,
   onKeepScreenAwakeChange,
+  showVolumeControls,
+  onShowVolumeControlsChange,
   mediaSessionSupported,
   wakeLockSupported,
   wakeLockActive,
@@ -567,33 +571,35 @@ export function StationIntercomView({
                       <small>Talk</small>
                       <strong>{room.name}</strong>
                     </button>
-                    <div className="station-gain-control">
-                      <label htmlFor={`room-gain-${room.id}`}>
-                        {gainToDbLabel(roomGainById[room.id] ?? 1)}
-                      </label>
-                      <input
-                        id={`room-gain-${room.id}`}
-                        type="range"
-                        min={MUTE_POS}
-                        max={DB_MAX}
-                        step={1}
-                        value={gainToSlider(roomGainById[room.id] ?? 1)}
-                        style={
-                          {
-                            "--fill": `${sliderFillPercent(roomGainById[room.id] ?? 1)}%`,
-                          } as React.CSSProperties
-                        }
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onPointerUp={(event) => event.stopPropagation()}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) =>
-                          onRoomGainChange(
-                            room.id,
-                            sliderToGain(Number(event.currentTarget.value)),
-                          )
-                        }
-                      />
-                    </div>
+                    {showVolumeControls ? (
+                      <div className="station-gain-control">
+                        <label htmlFor={`room-gain-${room.id}`}>
+                          {gainToDbLabel(roomGainById[room.id] ?? 1)}
+                        </label>
+                        <input
+                          id={`room-gain-${room.id}`}
+                          type="range"
+                          min={MUTE_POS}
+                          max={DB_MAX}
+                          step={1}
+                          value={gainToSlider(roomGainById[room.id] ?? 1)}
+                          style={
+                            {
+                              "--fill": `${sliderFillPercent(roomGainById[room.id] ?? 1)}%`,
+                            } as React.CSSProperties
+                          }
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onPointerUp={(event) => event.stopPropagation()}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) =>
+                            onRoomGainChange(
+                              room.id,
+                              sliderToGain(Number(event.currentTarget.value)),
+                            )
+                          }
+                        />
+                      </div>
+                    ) : null}
                     <div className="station-card-actions">
                       <button
                         className={`listen ${listening && canListen ? "on" : ""} ${canListen ? "" : "disabled"} ${isForced ? "forced" : ""}`}
@@ -696,35 +702,37 @@ export function StationIntercomView({
                               "Unknown role"}
                           </em>
                         </button>
-                        <div className="station-gain-control">
-                          <label htmlFor={`direct-gain-${p.userId}`}>
-                            {gainToDbLabel(directGainByUserId[p.userId] ?? 1)}
-                          </label>
-                          <input
-                            id={`direct-gain-${p.userId}`}
-                            type="range"
-                            min={MUTE_POS}
-                            max={DB_MAX}
-                            step={1}
-                            value={gainToSlider(
-                              directGainByUserId[p.userId] ?? 1,
-                            )}
-                            style={
-                              {
-                                "--fill": `${sliderFillPercent(directGainByUserId[p.userId] ?? 1)}%`,
-                              } as React.CSSProperties
-                            }
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onPointerUp={(event) => event.stopPropagation()}
-                            onClick={(event) => event.stopPropagation()}
-                            onChange={(event) =>
-                              onDirectGainChange(
-                                p.userId,
-                                sliderToGain(Number(event.currentTarget.value)),
-                              )
-                            }
-                          />
-                        </div>
+                        {showVolumeControls ? (
+                          <div className="station-gain-control">
+                            <label htmlFor={`direct-gain-${p.userId}`}>
+                              {gainToDbLabel(directGainByUserId[p.userId] ?? 1)}
+                            </label>
+                            <input
+                              id={`direct-gain-${p.userId}`}
+                              type="range"
+                              min={MUTE_POS}
+                              max={DB_MAX}
+                              step={1}
+                              value={gainToSlider(
+                                directGainByUserId[p.userId] ?? 1,
+                              )}
+                              style={
+                                {
+                                  "--fill": `${sliderFillPercent(directGainByUserId[p.userId] ?? 1)}%`,
+                                } as React.CSSProperties
+                              }
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onPointerUp={(event) => event.stopPropagation()}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) =>
+                                onDirectGainChange(
+                                  p.userId,
+                                  sliderToGain(Number(event.currentTarget.value)),
+                                )
+                              }
+                            />
+                          </div>
+                        ) : null}
                         <div className="station-card-actions single">
                           <button
                             className={`call ${/* disabled handled by class */ ""}`}
@@ -789,33 +797,35 @@ export function StationIntercomView({
                           "Unknown role"}
                       </em>
                     </button>
-                    <div className="station-gain-control">
-                      <label htmlFor={`direct-gain-${p.userId}`}>
-                        {gainToDbLabel(directGainByUserId[p.userId] ?? 1)}
-                      </label>
-                      <input
-                        id={`direct-gain-${p.userId}`}
-                        type="range"
-                        min={MUTE_POS}
-                        max={DB_MAX}
-                        step={1}
-                        value={gainToSlider(directGainByUserId[p.userId] ?? 1)}
-                        style={
-                          {
-                            "--fill": `${sliderFillPercent(directGainByUserId[p.userId] ?? 1)}%`,
-                          } as React.CSSProperties
-                        }
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onPointerUp={(event) => event.stopPropagation()}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) =>
-                          onDirectGainChange(
-                            p.userId,
-                            sliderToGain(Number(event.currentTarget.value)),
-                          )
-                        }
-                      />
-                    </div>
+                    {showVolumeControls ? (
+                      <div className="station-gain-control">
+                        <label htmlFor={`direct-gain-${p.userId}`}>
+                          {gainToDbLabel(directGainByUserId[p.userId] ?? 1)}
+                        </label>
+                        <input
+                          id={`direct-gain-${p.userId}`}
+                          type="range"
+                          min={MUTE_POS}
+                          max={DB_MAX}
+                          step={1}
+                          value={gainToSlider(directGainByUserId[p.userId] ?? 1)}
+                          style={
+                            {
+                              "--fill": `${sliderFillPercent(directGainByUserId[p.userId] ?? 1)}%`,
+                            } as React.CSSProperties
+                          }
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onPointerUp={(event) => event.stopPropagation()}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) =>
+                            onDirectGainChange(
+                              p.userId,
+                              sliderToGain(Number(event.currentTarget.value)),
+                            )
+                          }
+                        />
+                      </div>
+                    ) : null}
                     <div className="station-card-actions single">
                       <button
                         className={`call ${/* disabled handled by class */ ""}`}
@@ -967,6 +977,14 @@ export function StationIntercomView({
                 />
                 <span>Keep device awake while connected</span>
               </label>
+              <label className="station-setting">
+                <input
+                  type="checkbox"
+                  checked={showVolumeControls}
+                  onChange={(e) => onShowVolumeControlsChange(e.target.checked)}
+                />
+                <span>Show volume controls</span>
+              </label>
               <div style={{ display: "grid", gap: "0.35rem" }}>
                 <small>
                   Media controls:{" "}
@@ -1067,31 +1085,33 @@ export function StationIntercomView({
                               : "audio level ok"}
                           </small>
                         </div>
-                        <div className="station-gain-control input-gain-control">
-                          <label htmlFor="input-gain">
-                            {gainToDbLabel(inputGain)}
-                          </label>
-                          <input
-                            id="input-gain"
-                            type="range"
-                            min={MUTE_POS}
-                            max={DB_MAX}
-                            step={1}
-                            value={gainToSlider(inputGain)}
-                            style={
-                              {
-                                "--fill": `${sliderFillPercent(inputGain)}%`,
-                              } as React.CSSProperties
-                            }
-                            onChange={(event) =>
-                              onInputGainChange(
-                                selectedInputDeviceId,
-                                sliderToGain(Number(event.currentTarget.value)),
-                              )
-                            }
-                            aria-label="Input gain"
-                          />
-                        </div>
+                        {showVolumeControls ? (
+                          <div className="station-gain-control input-gain-control">
+                            <label htmlFor="input-gain">
+                              {gainToDbLabel(inputGain)}
+                            </label>
+                            <input
+                              id="input-gain"
+                              type="range"
+                              min={MUTE_POS}
+                              max={DB_MAX}
+                              step={1}
+                              value={gainToSlider(inputGain)}
+                              style={
+                                {
+                                  "--fill": `${sliderFillPercent(inputGain)}%`,
+                                } as React.CSSProperties
+                              }
+                              onChange={(event) =>
+                                onInputGainChange(
+                                  selectedInputDeviceId,
+                                  sliderToGain(Number(event.currentTarget.value)),
+                                )
+                              }
+                              aria-label="Input gain"
+                            />
+                          </div>
+                        ) : null}
                       </div>
                       <div className="audio-right">
                         <h4>Speaker output</h4>

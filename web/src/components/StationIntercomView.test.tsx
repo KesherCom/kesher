@@ -60,6 +60,8 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
   onEnableBackgroundAudioRecoveryChange: vi.fn(),
   keepScreenAwake: false,
   onKeepScreenAwakeChange: vi.fn(),
+  showVolumeControls: true,
+  onShowVolumeControlsChange: vi.fn(),
   mediaSessionSupported: true,
   wakeLockSupported: true,
   wakeLockActive: false,

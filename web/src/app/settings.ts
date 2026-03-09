@@ -81,6 +81,7 @@ export type GlobalSettings = {
   swapPttAndReplyButtons: boolean;
   enableBackgroundAudioRecovery: boolean;
   keepScreenAwake: boolean;
+  showVolumeControls: boolean;
   inputGainByDeviceId: Record<string, number>;
   roomGainById: Record<string, number>;
   directGainByUserId: Record<string, number>;
@@ -142,6 +143,7 @@ export function loadGlobalSettings(): GlobalSettings {
         swapPttAndReplyButtons: false,
         enableBackgroundAudioRecovery: true,
         keepScreenAwake: false,
+        showVolumeControls: true,
         inputGainByDeviceId: {},
         roomGainById: {},
         directGainByUserId: {},
@@ -177,6 +179,10 @@ export function loadGlobalSettings(): GlobalSettings {
         typeof parsed.keepScreenAwake === "boolean"
           ? parsed.keepScreenAwake
           : false,
+      showVolumeControls:
+        typeof parsed.showVolumeControls === "boolean"
+          ? parsed.showVolumeControls
+          : true,
       inputGainByDeviceId: sanitizeGainMap(parsed.inputGainByDeviceId),
       roomGainById: sanitizeGainMap(parsed.roomGainById),
       directGainByUserId: sanitizeGainMap(parsed.directGainByUserId),
@@ -190,6 +196,7 @@ export function loadGlobalSettings(): GlobalSettings {
       swapPttAndReplyButtons: false,
       enableBackgroundAudioRecovery: true,
       keepScreenAwake: false,
+      showVolumeControls: true,
       inputGainByDeviceId: {},
       roomGainById: {},
       directGainByUserId: {},
