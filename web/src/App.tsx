@@ -684,6 +684,8 @@ export function App() {
         }
         keepScreenAwake={settings.keepScreenAwake}
         onKeepScreenAwakeChange={settings.setKeepScreenAwake}
+        showVolumeControls={settings.showVolumeControls}
+        onShowVolumeControlsChange={settings.setShowVolumeControls}
         mediaSessionSupported={session.mediaSessionSupported}
         wakeLockSupported={session.wakeLockSupported}
         wakeLockActive={session.wakeLockActive}

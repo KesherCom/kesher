@@ -50,6 +50,7 @@ describe("settings helpers", () => {
         enableDirectTabs: false,
         enableBackgroundAudioRecovery: false,
         keepScreenAwake: true,
+        showVolumeControls: false,
         inputGainByDeviceId: { "mic-1": 0.9, broken: -3 },
         roomGainById: { a: 1.5, b: -2 },
         directGainByUserId: { u1: 5, u2: 0.5 },
@@ -63,10 +64,15 @@ describe("settings helpers", () => {
       enableDirectTabs: false,
       enableBackgroundAudioRecovery: false,
       keepScreenAwake: true,
+      showVolumeControls: false,
       inputGainByDeviceId: { "mic-1": 0.9, broken: 0 },
       roomGainById: { a: 1.5, b: 0 },
       directGainByUserId: { u1: 2, u2: 0.5 },
     });
+  });
+
+  it("defaults showVolumeControls to true when not stored", () => {
+    expect(loadGlobalSettings().showVolumeControls).toBe(true);
   });
 
   it("filters favorite settings to valid values only", () => {

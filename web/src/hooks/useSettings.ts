@@ -44,6 +44,8 @@ export type UseSettingsResult = {
   setEnableBackgroundAudioRecovery: (v: boolean) => void;
   keepScreenAwake: boolean;
   setKeepScreenAwake: (v: boolean) => void;
+  showVolumeControls: boolean;
+  setShowVolumeControls: (v: boolean) => void;
   inputGainByDeviceId: Record<string, number>;
   setInputGainByDeviceId: React.Dispatch<
     React.SetStateAction<Record<string, number>>
@@ -113,6 +115,9 @@ export function useSettings(): UseSettingsResult {
     useState(initialGlobalSettings.enableBackgroundAudioRecovery);
   const [keepScreenAwake, setKeepScreenAwake] = useState(
     initialGlobalSettings.keepScreenAwake,
+  );
+  const [showVolumeControls, setShowVolumeControls] = useState(
+    initialGlobalSettings.showVolumeControls,
   );
   const [inputGainByDeviceId, setInputGainByDeviceId] = useState<
     Record<string, number>
@@ -185,6 +190,7 @@ export function useSettings(): UseSettingsResult {
         enableDirectTabs,
         enableBackgroundAudioRecovery,
         keepScreenAwake,
+        showVolumeControls,
         inputGainByDeviceId,
         roomGainById,
         directGainByUserId,
@@ -197,6 +203,7 @@ export function useSettings(): UseSettingsResult {
     enableDirectTabs,
     enableBackgroundAudioRecovery,
     keepScreenAwake,
+    showVolumeControls,
     inputGainByDeviceId,
     roomGainById,
     directGainByUserId,
@@ -274,6 +281,8 @@ export function useSettings(): UseSettingsResult {
     setEnableBackgroundAudioRecovery,
     keepScreenAwake,
     setKeepScreenAwake,
+    showVolumeControls,
+    setShowVolumeControls,
     inputGainByDeviceId,
     setInputGainByDeviceId,
     inputGainByDeviceIdRef,
