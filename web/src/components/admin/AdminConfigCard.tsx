@@ -46,7 +46,12 @@ export function AdminConfigCard({
       />
       <AdminTelegramCard token={token} adminPin={adminPin} appData={appData} />
 
-      <AdminChatHistoryCard token={token} adminPin={adminPin} />
+      <AdminChatHistoryCard
+        token={token}
+        adminPin={adminPin}
+        appData={appData}
+        refreshBootstrapData={refreshBootstrapData}
+      />
 
       <AdminRoutingMatrixCard
         token={token}

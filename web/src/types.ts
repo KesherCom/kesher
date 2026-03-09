@@ -38,6 +38,7 @@ export type PublicBootstrap = {
   roles: Role[];
   rooms: Room[];
   broadcastGroups: BroadcastGroup[];
+  ackEnabled: boolean;
 };
 
 export type Bootstrap = PublicBootstrap & {

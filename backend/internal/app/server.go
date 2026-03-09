@@ -22,6 +22,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type AckSettings struct {
+	Enabled bool `json:"enabled"`
+}
+
 type Server struct {
 	cfg         Config
 	logger      *slog.Logger
@@ -34,6 +38,9 @@ type Server struct {
 	httpSrv     *http.Server
 	redirectSrv *http.Server
 	upgrader    websocket.Upgrader
+	ackMu       sync.RWMutex
+	ackEnabled  bool
+	ackSet      bool
 }
 
 type tlsProvider interface {
@@ -364,11 +371,13 @@ func NewServer(cfg Config) (*Server, error) {
 		}
 	}
 	s := &Server{
-		cfg:      cfg,
-		logger:   logger,
-		store:    store,
-		sessions: NewSessionManager(cfg.SessionTTL),
-		hub:      NewHub(store, logger),
+		cfg:        cfg,
+		logger:     logger,
+		store:      store,
+		sessions:   NewSessionManager(cfg.SessionTTL),
+		hub:        NewHub(store, logger),
+		ackEnabled: true,
+		ackSet:     true,
 		upgrader: websocket.Upgrader{
 			CheckOrigin:      func(r *http.Request) bool { return true },
 			HandshakeTimeout: 10 * time.Second,
@@ -404,6 +413,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/broadcast-groups/", s.withAuth(s.handleAdminBroadcastGroupByID))
 	mux.HandleFunc("/api/admin/pin", s.withAuth(s.handleAdminPin))
 	mux.HandleFunc("/api/admin/chat-history/clear", s.withAuth(s.handleAdminClearChatHistory))
+	mux.HandleFunc("/api/admin/ack-settings", s.withAuth(s.handleAdminAckSettings))
 	mux.HandleFunc("/api/admin/routing-matrix", s.withAuth(s.handleAdminRoutingMatrix))
 	mux.HandleFunc("/api/companion/discovery", s.handleCompanionDiscovery)
 	mux.HandleFunc("/api/companion/ws", s.handleCompanionWS)
@@ -564,6 +574,7 @@ func (s *Server) handlePublicBootstrap(w http.ResponseWriter, r *http.Request) {
 		Roles:           roles,
 		Rooms:           rooms,
 		BroadcastGroups: groups,
+		AckEnabled:      s.isAckEnabled(),
 	})
 }
 
@@ -648,6 +659,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request, session
 		Rooms:           rooms,
 		BroadcastGroups: groups,
 		Users:           users,
+		AckEnabled:      s.isAckEnabled(),
 	})
 }
 
@@ -941,6 +953,59 @@ func (s *Server) handleAdminClearChatHistory(w http.ResponseWriter, r *http.Requ
 	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+func (s *Server) handleAdminAckSettings(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		s.writeJSON(w, http.StatusOK, AckSettings{Enabled: s.isAckEnabled()})
+	case http.MethodPut:
+		var req AckSettings
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		s.setAckEnabled(req.Enabled)
+		if s.hub != nil {
+			roles, err := s.store.ListRoles(r.Context())
+			if err == nil {
+				rooms, err := s.store.ListRooms(r.Context())
+				if err == nil {
+					groups, err := s.store.ListBroadcastGroups(r.Context())
+					if err == nil {
+						s.hub.BroadcastConfigUpdate(PublicBootstrapResponse{
+							Roles:           roles,
+							Rooms:           rooms,
+							BroadcastGroups: groups,
+							AckEnabled:      s.isAckEnabled(),
+						})
+					}
+				}
+			}
+		}
+		s.writeJSON(w, http.StatusOK, AckSettings{Enabled: s.isAckEnabled()})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) isAckEnabled() bool {
+	s.ackMu.RLock()
+	defer s.ackMu.RUnlock()
+	if !s.ackSet {
+		return true
+	}
+	return s.ackEnabled
+}
+
+func (s *Server) setAckEnabled(enabled bool) {
+	s.ackMu.Lock()
+	s.ackEnabled = enabled
+	s.ackSet = true
+	s.ackMu.Unlock()
+}
+
 func (s *Server) handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 	if s.telegram == nil {
 		http.Error(w, "telegram bot not configured", http.StatusServiceUnavailable)
@@ -1063,6 +1128,7 @@ func (s *Server) handleAdminRoutingMatrix(w http.ResponseWriter, r *http.Request
 						Roles:           roles,
 						Rooms:           rooms,
 						BroadcastGroups: groups,
+						AckEnabled:      s.isAckEnabled(),
 					})
 				}
 			}
@@ -1269,6 +1335,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case "chat":
 			s.routeInbound(r.Context(), session, in, "chat")
 		case "chat_ack":
+			if !s.isAckEnabled() {
+				continue
+			}
 			raw, _ := json.Marshal(in.Data)
 			var e ChatAckInbound
 			_ = json.Unmarshal(raw, &e)
@@ -1344,6 +1413,9 @@ func (s *Server) routeInbound(ctx context.Context, sender Session, in WSInbound,
 		e = resolved
 		if strings.TrimSpace(e.MessageID) == "" {
 			e.MessageID = newID()
+		}
+		if !s.isAckEnabled() {
+			e.AckRequired = false
 		}
 	}
 	if e.Scope == "" || e.TargetID == "" {

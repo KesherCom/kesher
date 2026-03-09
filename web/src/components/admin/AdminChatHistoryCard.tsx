@@ -1,19 +1,30 @@
-import { useState } from "react";
-import { clearChatHistory } from "../../api";
+import { useEffect, useState } from "react";
+import { clearChatHistory, updateAckSettings } from "../../api";
+import type { Bootstrap } from "../../types";
 
 type AdminChatHistoryCardProps = {
   token: string;
   adminPin: string;
+  appData: Bootstrap;
+  refreshBootstrapData: () => Promise<void>;
 };
 
 export function AdminChatHistoryCard({
   token,
   adminPin,
+  appData,
+  refreshBootstrapData,
 }: AdminChatHistoryCardProps) {
   const [isOpen, setIsOpen] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [busyAck, setBusyAck] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [ackEnabled, setAckEnabled] = useState(appData.ackEnabled);
+
+  useEffect(() => {
+    setAckEnabled(appData.ackEnabled);
+  }, [appData.ackEnabled]);
 
   async function handleClear() {
     const confirmed = window.confirm(
@@ -34,10 +45,30 @@ export function AdminChatHistoryCard({
     }
   }
 
+  async function handleAckToggle(nextValue: boolean) {
+    setBusyAck(true);
+    setMessage("");
+    setError("");
+    try {
+      const updated = await updateAckSettings(token, adminPin, nextValue);
+      setAckEnabled(updated.enabled);
+      setMessage(
+        updated.enabled
+          ? "ACK-Nachrichten sind jetzt aktiviert."
+          : "ACK-Nachrichten sind jetzt deaktiviert.",
+      );
+      await refreshBootstrapData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to update ack settings");
+    } finally {
+      setBusyAck(false);
+    }
+  }
+
   return (
     <div className="admin-card">
       <div className="admin-card-header">
-        <div className="admin-card-title">Chat History Reset</div>
+        <div className="admin-card-title">Chat</div>
         <div className="admin-card-actions">
           <button
             className="admin-toggle-button"
@@ -50,6 +81,18 @@ export function AdminChatHistoryCard({
       </div>
       {isOpen ? (
         <div className="admin-card-body">
+          <p>Aktiviert oder deaktiviert ACK-Cue-Nachrichten global.</p>
+          <label className="admin-checkbox-row">
+            <input
+              type="checkbox"
+              checked={ackEnabled}
+              disabled={busyAck}
+              onChange={(e) => {
+                void handleAckToggle(e.target.checked);
+              }}
+            />
+            ACK-Nachrichten aktivieren
+          </label>
           <p>
             Leert den fluechtigen Chat-Verlauf fuer alle Party-Lines und
             Direktnachrichten, z. B. vor Show-Beginn.

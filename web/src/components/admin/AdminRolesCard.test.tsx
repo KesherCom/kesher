@@ -25,6 +25,7 @@ const appData: Bootstrap = {
     },
   ],
   broadcastGroups: [],
+  ackEnabled: true,
 };
 
 describe("AdminRolesCard", () => {

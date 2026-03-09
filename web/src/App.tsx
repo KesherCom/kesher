@@ -374,6 +374,7 @@ export function App() {
       roles: data.roles,
       rooms: data.rooms,
       broadcastGroups: data.broadcastGroups,
+      ackEnabled: data.ackEnabled,
     });
     session.applyBootstrapData(data, false);
   }
@@ -528,6 +529,7 @@ export function App() {
       onMessageChange={session.setMessage}
       onSendChat={session.sendChat}
       onAcknowledge={session.acknowledgeChatMessage}
+      showAckOption={appData.ackEnabled}
       chatMessages={session.chatMessages}
       listenRoomIds={session.listenRoomIds}
       rooms={appData.rooms.map((room) => ({ id: room.id, name: room.name }))}

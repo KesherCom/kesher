@@ -27,6 +27,7 @@ const appData: Bootstrap = {
   broadcastGroups: [
     { id: "bg1", name: "All Call", roomIds: ["r1"], allowedRoleIds: ["op"] },
   ],
+  ackEnabled: true,
 };
 
 describe("AdminChannelsCard", () => {

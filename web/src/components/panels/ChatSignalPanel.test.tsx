@@ -62,7 +62,7 @@ describe("ChatSignalPanel", () => {
     );
 
     await user.type(screen.getByPlaceholderText("Type chat message…"), "!");
-    await user.click(screen.getByLabelText("Requires ACK (Cue)"));
+    await user.click(screen.getByLabelText("Requires ACK"));
     await user.click(screen.getByPlaceholderText("Type chat message…"));
     await user.keyboard("{Enter}");
     await user.click(screen.getByRole("button", { name: "Send chat" }));
@@ -71,6 +71,27 @@ describe("ChatSignalPanel", () => {
     expect(onSendChat).toHaveBeenCalledTimes(2);
     expect(onSendChat).toHaveBeenNthCalledWith(1, true);
     expect(onSendChat).toHaveBeenNthCalledWith(2, false);
+  });
+
+  it("hides ack toggle and sends without ack when ack option is disabled", async () => {
+    const user = userEvent.setup();
+    const onSendChat = vi.fn();
+
+    render(
+      <ChatSignalPanel
+        message="hello"
+        onMessageChange={vi.fn()}
+        onSendChat={onSendChat}
+        onAcknowledge={vi.fn()}
+        showAckOption={false}
+        chatMessages={[]}
+        {...defaultProps}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Requires ACK")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send chat" }));
+    expect(onSendChat).toHaveBeenCalledWith(false);
   });
 
   it("prefills @username when sender is clicked", async () => {
@@ -369,5 +390,53 @@ describe("ChatSignalPanel", () => {
     );
 
     expect(screen.getByText("ACK by Sarah")).toBeVisible();
+  });
+
+  it("hides ack status and acknowledge action when ack option is disabled", () => {
+    render(
+      <ChatSignalPanel
+        message=""
+        onMessageChange={vi.fn()}
+        onSendChat={vi.fn()}
+        onAcknowledge={vi.fn()}
+        showAckOption={false}
+        chatMessages={[
+          {
+            from: "Me",
+            fromUserId: "u1",
+            body: "Go",
+            at: "10:11",
+            room: "FOH",
+            self: true,
+            scope: "room",
+            targetId: "foh",
+            messageId: "m-2",
+            ackRequired: true,
+            acked: true,
+            ackedBy: "Sarah",
+          },
+          {
+            from: "Regie",
+            fromUserId: "u9",
+            body: "Standby",
+            at: "10:10",
+            room: "Direct",
+            self: false,
+            scope: "direct",
+            targetId: "u1",
+            targetType: "user",
+            messageId: "m-1",
+            ackRequired: true,
+            acked: false,
+          },
+        ]}
+        {...defaultProps}
+      />,
+    );
+
+    expect(screen.queryByText("ACK by Sarah")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Acknowledge" }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -1017,7 +1017,7 @@ export function useIntercomSession({
           scope: chatScope,
           targetId: resolvedTargetId,
           body: message.trim(),
-          ackRequired,
+          ackRequired: ackRequired && (appDataRef.current?.ackEnabled ?? true),
         },
       }),
     );
@@ -1333,6 +1333,7 @@ export function useIntercomSession({
               roles: updated.roles,
               rooms: updated.rooms,
               broadcastGroups: updated.broadcastGroups,
+              ackEnabled: updated.ackEnabled,
             };
           });
           onUpdatePublicData(updated);

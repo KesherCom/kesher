@@ -48,6 +48,8 @@ export function normalizePublicBootstrap(data: unknown): PublicBootstrap {
         allowedRoleIds: toStringArray(entry.allowedRoleIds),
       };
     }),
+    ackEnabled:
+      typeof raw.ackEnabled === "boolean" ? raw.ackEnabled : true,
   };
 }
 
@@ -393,4 +395,24 @@ export async function clearChatHistory(
     "POST",
     adminPin,
   );
+}
+
+export async function updateAckSettings(
+  token: string,
+  adminPin: string,
+  enabled: boolean,
+): Promise<{ enabled: boolean }> {
+  const res = await fetch("/api/admin/ack-settings", {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  return res.json() as Promise<{ enabled: boolean }>;
 }

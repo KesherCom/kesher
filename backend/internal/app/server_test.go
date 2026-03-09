@@ -575,6 +575,50 @@ func TestServerRouteInboundChatAddsMessageIDAndAckRequired(t *testing.T) {
 	}
 }
 
+func TestServerRouteInboundChatForcesAckDisabledWhenAckSettingOff(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"video"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sender := &client{
+		session: Session{Token: "sender-token", RoleID: "audio"},
+		user:    User{ID: "u1", Username: "sender", RoleID: "audio"},
+		send:    make(chan WSOutbound, 8),
+	}
+	receiver := &client{
+		session:     Session{Token: "receiver-token", RoleID: "video"},
+		user:        User{ID: "u2", Username: "receiver", RoleID: "video"},
+		send:        make(chan WSOutbound, 8),
+		listenRooms: toRoomSet([]string{"foh"}),
+	}
+	hub.Add(sender)
+	hub.Add(receiver)
+	drain(sender.send)
+	drain(receiver.send)
+
+	s := &Server{store: store, hub: hub}
+	s.setAckEnabled(false)
+	s.routeInbound(context.Background(), sender.session, WSInbound{Data: RoutedEvent{Body: "#foh standby", AckRequired: true}}, "chat")
+
+	select {
+	case out := <-receiver.send:
+		routed, ok := out.Data.(RoutedEvent)
+		if !ok {
+			t.Fatalf("expected RoutedEvent payload, got %T", out.Data)
+		}
+		if routed.AckRequired {
+			t.Fatal("expected ackRequired to be forced off when ack setting is disabled")
+		}
+	default:
+		t.Fatal("expected routed chat message for receiver")
+	}
+}
+
 func TestServerRouteInboundChatAtUserRoutesToLatestActiveSession(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
@@ -903,6 +947,44 @@ func TestServerHandleAdminClearChatHistoryMethodNotAllowed(t *testing.T) {
 	s.handleAdminClearChatHistory(rec, req, session)
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+}
+
+func TestServerHandleAdminAckSettingsUpdateAndGet(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := &Server{store: store, hub: hub, sessions: NewSessionManager(time.Minute)}
+	s.setAckEnabled(true)
+	session := s.sessions.Create(User{ID: "u1", Username: "tim", RoleID: "audio"})
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/admin/ack-settings", bytes.NewBufferString(`{"enabled":false}`))
+	putReq.Header.Set("X-Admin-Pin", "123456")
+	putRec := httptest.NewRecorder()
+	s.handleAdminAckSettings(putRec, putReq, session)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for PUT, got %d", putRec.Code)
+	}
+	if s.isAckEnabled() {
+		t.Fatal("expected ack to be disabled after PUT")
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/admin/ack-settings", nil)
+	getReq.Header.Set("X-Admin-Pin", "123456")
+	getRec := httptest.NewRecorder()
+	s.handleAdminAckSettings(getRec, getReq, session)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for GET, got %d", getRec.Code)
+	}
+	var out AckSettings
+	if err := json.Unmarshal(getRec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("failed to decode ack settings response: %v", err)
+	}
+	if out.Enabled {
+		t.Fatal("expected GET response to report disabled ack setting")
 	}
 }
 func TestServerWithCORSOptionsRequest(t *testing.T) {

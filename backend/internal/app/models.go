@@ -68,12 +68,14 @@ type BootstrapResponse struct {
 	Rooms           []Room           `json:"rooms"`
 	BroadcastGroups []BroadcastGroup `json:"broadcastGroups"`
 	Users           []User           `json:"users"`
+	AckEnabled      bool             `json:"ackEnabled"`
 }
 
 type PublicBootstrapResponse struct {
 	Roles           []Role           `json:"roles"`
 	Rooms           []Room           `json:"rooms"`
 	BroadcastGroups []BroadcastGroup `json:"broadcastGroups"`
+	AckEnabled      bool             `json:"ackEnabled"`
 }
 
 type LoginRequest struct {

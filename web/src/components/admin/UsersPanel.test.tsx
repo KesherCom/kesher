@@ -16,6 +16,7 @@ const appData: Bootstrap = {
   ],
   rooms: [],
   broadcastGroups: [],
+  ackEnabled: true,
 };
 
 describe("UsersPanel", () => {

@@ -11,6 +11,7 @@ const baseProps = {
     ],
     rooms: [],
     broadcastGroups: [],
+    ackEnabled: true,
   },
   username: "",
   roleId: "",

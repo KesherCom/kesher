@@ -30,6 +30,7 @@ type ChatSignalPanelProps = {
   onMessageChange: (value: string) => void;
   onSendChat: (ackRequired?: boolean) => void;
   onAcknowledge: (messageId: string, senderUserId: string) => void;
+  showAckOption?: boolean;
   chatMessages: ChatEntry[];
   listenRoomIds: string[];
   rooms: Array<{ id: string; name: string }>;
@@ -65,6 +66,7 @@ export function ChatSignalPanel({
   onMessageChange,
   onSendChat,
   onAcknowledge,
+  showAckOption = true,
   chatMessages,
   listenRoomIds,
   rooms,
@@ -76,7 +78,7 @@ export function ChatSignalPanel({
   const [requiresAck, setRequiresAck] = useState(false);
 
   function submitChat() {
-    onSendChat(requiresAck);
+    onSendChat(showAckOption ? requiresAck : false);
     if (message.trim()) {
       setRequiresAck(false);
     }
@@ -226,14 +228,16 @@ export function ChatSignalPanel({
           placeholder="Type chat message…"
         />
         <div className="chat-actions">
-          <label className="chat-ack-toggle">
-            <input
-              type="checkbox"
-              checked={requiresAck}
-              onChange={(e) => setRequiresAck(e.target.checked)}
-            />
-            Requires ACK (Cue)
-          </label>
+          {showAckOption ? (
+            <label className="chat-ack-toggle">
+              <input
+                type="checkbox"
+                checked={requiresAck}
+                onChange={(e) => setRequiresAck(e.target.checked)}
+              />
+              Requires ACK
+            </label>
+          ) : null}
           <button onClick={submitChat}>Send chat</button>
         </div>
         {suggestions.length > 0 ? (
@@ -278,7 +282,7 @@ export function ChatSignalPanel({
                     {entry.from}
                   </button>
                   <span className="chat-feed-room">{entry.room}</span>
-                  {entry.self && entry.ackRequired ? (
+                  {showAckOption && entry.self && entry.ackRequired ? (
                     <span
                       className={`chat-feed-ack-status ${entry.acked ? "acked" : "pending"}`}
                     >
@@ -289,7 +293,8 @@ export function ChatSignalPanel({
                   ) : null}
                 </div>
                 <p>{entry.body}</p>
-                {!entry.self &&
+                {showAckOption &&
+                !entry.self &&
                 entry.ackRequired &&
                 !entry.acked &&
                 entry.messageId ? (
