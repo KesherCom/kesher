@@ -611,6 +611,31 @@ func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
 	}
 }
 
+func (h *Hub) RouteChatAck(senderToken string, in ChatAckInbound) {
+	h.mu.RLock()
+	sender, ok := h.clients[senderToken]
+	h.mu.RUnlock()
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(in.MessageID) == "" || strings.TrimSpace(in.SenderUserID) == "" {
+		return
+	}
+	if in.SenderUserID == sender.user.ID {
+		return
+	}
+	out := WSOutbound{
+		Type: "chat_ack",
+		Data: ChatAckUpdate{
+			MessageID:    in.MessageID,
+			SenderUserID: in.SenderUserID,
+			AckedBy:      sender.user,
+			AckedAt:      time.Now().UnixMilli(),
+		},
+	}
+	h.sendToUser(in.SenderUserID, out)
+}
+
 func (h *Hub) ActiveTalkRoomForToken(token string) (string, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

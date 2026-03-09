@@ -410,3 +410,42 @@ func TestHubBroadcastChatHistoryCleared(t *testing.T) {
 		t.Fatal("expected chat_history_cleared message to be delivered")
 	}
 }
+
+func TestHubRouteChatAckRoutesToOriginalSender(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	sender := &client{session: Session{Token: "sender-token"}, user: User{ID: "u1", Username: "sender", RoleID: "audio"}, send: make(chan WSOutbound, 4)}
+	acker := &client{session: Session{Token: "acker-token"}, user: User{ID: "u2", Username: "acker", RoleID: "video"}, send: make(chan WSOutbound, 4)}
+	hub.Add(sender)
+	hub.Add(acker)
+	drain(sender.send)
+	drain(acker.send)
+
+	hub.RouteChatAck("acker-token", ChatAckInbound{MessageID: "m-123", SenderUserID: "u1"})
+
+	select {
+	case msg := <-sender.send:
+		if msg.Type != "chat_ack" {
+			t.Fatalf("expected chat_ack event, got %s", msg.Type)
+		}
+		update, ok := msg.Data.(ChatAckUpdate)
+		if !ok {
+			t.Fatalf("expected ChatAckUpdate payload, got %T", msg.Data)
+		}
+		if update.MessageID != "m-123" || update.SenderUserID != "u1" || update.AckedBy.ID != "u2" {
+			t.Fatalf("unexpected chat ack payload: %+v", update)
+		}
+	default:
+		t.Fatal("expected chat ack update for original sender")
+	}
+	select {
+	case <-acker.send:
+		t.Fatal("did not expect acker to receive chat ack update")
+	default:
+	}
+}

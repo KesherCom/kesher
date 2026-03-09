@@ -16,6 +16,7 @@ import {
 } from "../app/utils";
 import type {
   Bootstrap,
+  ChatAckUpdate,
   Presence,
   PublicBootstrap,
   RoutedEvent,
@@ -48,6 +49,7 @@ type NavigatorWithAudioSession = Navigator & {
 type WsMessage =
   | { type: "presence"; data: Presence[] }
   | { type: "chat"; data: RoutedEvent }
+  | { type: "chat_ack"; data: ChatAckUpdate }
   | { type: "chat_history_cleared"; data: { timestamp?: number } }
   | { type: "signal"; data: RoutedEvent }
   | { type: "voice_state"; data: RoutedEvent }
@@ -215,6 +217,11 @@ export type UseIntercomSessionResult = {
     scope: "direct" | "room" | "broadcast";
     targetId: string;
     targetType?: "room" | "user" | "role";
+    messageId?: string;
+    ackRequired?: boolean;
+    acked?: boolean;
+    ackedBy?: string;
+    ackedAt?: string;
   }>;
   events: Array<{ label: string; at: string }>;
   rtpStats: { inKbps: number; outKbps: number };
@@ -257,7 +264,8 @@ export type UseIntercomSessionResult = {
     targetId: string,
     signal: string,
   ) => void;
-  sendChat: () => void;
+  sendChat: (ackRequired?: boolean) => void;
+  acknowledgeChatMessage: (messageId: string, senderUserId: string) => void;
   handleChannelPttStart: (channelId: string) => void;
   handleChannelPttStop: (channelId: string) => void;
   toggleListenRoom: (roomId: string) => void;
@@ -314,6 +322,11 @@ export function useIntercomSession({
       scope: "direct" | "room" | "broadcast";
       targetId: string;
       targetType?: "room" | "user" | "role";
+      messageId?: string;
+      ackRequired?: boolean;
+      acked?: boolean;
+      ackedBy?: string;
+      ackedAt?: string;
     }>
   >([]);
   const [events, setEvents] = useState<Array<{ label: string; at: string }>>(
@@ -985,7 +998,7 @@ export function useIntercomSession({
   // ── Chat ──
   const chatScope: "direct" | "room" | "broadcast" = "room";
 
-  function sendChat() {
+  function sendChat(ackRequired = false) {
     if (
       !wsRef.current ||
       wsRef.current.readyState !== WebSocket.OPEN ||
@@ -1004,10 +1017,41 @@ export function useIntercomSession({
           scope: chatScope,
           targetId: resolvedTargetId,
           body: message.trim(),
+          ackRequired,
         },
       }),
     );
     setMessage("");
+  }
+
+  function acknowledgeChatMessage(messageId: string, senderUserId: string) {
+    if (
+      !wsRef.current ||
+      wsRef.current.readyState !== WebSocket.OPEN ||
+      !messageId ||
+      !senderUserId
+    ) {
+      return;
+    }
+    wsRef.current.send(
+      JSON.stringify({
+        type: "chat_ack",
+        data: { messageId, senderUserId },
+      }),
+    );
+    setChatMessages((old) =>
+      old.map((entry) => {
+        if (entry.messageId !== messageId) {
+          return entry;
+        }
+        return {
+          ...entry,
+          acked: true,
+          ackedBy: appDataRef.current?.self.username || entry.ackedBy,
+          ackedAt: new Date().toLocaleTimeString(),
+        };
+      }),
+    );
   }
 
   // ── Bootstrap data application ──
@@ -1506,11 +1550,34 @@ export function useIntercomSession({
                   scope: chatScope,
                   targetId: chatTargetId,
                   targetType: msg.data.targetType,
+                  messageId: msg.data.messageId,
+                  ackRequired: !!msg.data.ackRequired,
+                  acked: !!msg.data.acked,
+                  ackedBy: msg.data.ackedBy?.username,
+                  ackedAt: msg.data.ackedAt
+                    ? new Date(msg.data.ackedAt).toLocaleTimeString()
+                    : undefined,
                 },
                 ...old,
               ].slice(0, 120),
             );
           }
+        }
+        if (msg.type === "chat_ack") {
+          setChatMessages((old) =>
+            old.map((entry) => {
+              if (entry.messageId !== msg.data.messageId) {
+                return entry;
+              }
+              return {
+                ...entry,
+                acked: true,
+                ackedBy: msg.data.ackedBy.username,
+                ackedAt: new Date(msg.data.ackedAt).toLocaleTimeString(),
+              };
+            }),
+          );
+          return;
         }
         if (msg.type === "chat_history_cleared") {
           setChatMessages([]);
@@ -1798,6 +1865,7 @@ export function useIntercomSession({
     handleEnableDirectPptChange,
     sendScopedSignal,
     sendChat,
+    acknowledgeChatMessage,
     handleChannelPttStart,
     handleChannelPttStop,
     toggleListenRoom,

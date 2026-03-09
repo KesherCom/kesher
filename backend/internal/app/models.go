@@ -112,13 +112,30 @@ type PresenceState struct {
 }
 
 type RoutedEvent struct {
-	Scope      string `json:"scope"`
-	TargetType string `json:"targetType,omitempty"`
-	TargetID   string `json:"targetId"`
-	Body       string `json:"body"`
-	Signal     string `json:"signal,omitempty"`
-	FromUser   User   `json:"fromUser"`
-	Timestamp  int64  `json:"timestamp"`
+	Scope       string `json:"scope"`
+	TargetType  string `json:"targetType,omitempty"`
+	TargetID    string `json:"targetId"`
+	Body        string `json:"body"`
+	Signal      string `json:"signal,omitempty"`
+	MessageID   string `json:"messageId,omitempty"`
+	AckRequired bool   `json:"ackRequired,omitempty"`
+	Acked       bool   `json:"acked,omitempty"`
+	AckedBy     *User  `json:"ackedBy,omitempty"`
+	AckedAt     int64  `json:"ackedAt,omitempty"`
+	FromUser    User   `json:"fromUser"`
+	Timestamp   int64  `json:"timestamp"`
+}
+
+type ChatAckInbound struct {
+	MessageID    string `json:"messageId"`
+	SenderUserID string `json:"senderUserId"`
+}
+
+type ChatAckUpdate struct {
+	MessageID    string `json:"messageId"`
+	SenderUserID string `json:"senderUserId"`
+	AckedBy      User   `json:"ackedBy"`
+	AckedAt      int64  `json:"ackedAt"`
 }
 
 type RoutingStatusEvent struct {

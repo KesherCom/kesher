@@ -529,6 +529,52 @@ func TestServerRouteInboundChatHashPrefixRoutesByRoomName(t *testing.T) {
 	}
 }
 
+func TestServerRouteInboundChatAddsMessageIDAndAckRequired(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.UpdateRoom(context.Background(), "foh", "FOH", []string{"audio"}, []string{"video"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sender := &client{
+		session: Session{Token: "sender-token", RoleID: "audio"},
+		user:    User{ID: "u1", Username: "sender", RoleID: "audio"},
+		send:    make(chan WSOutbound, 8),
+	}
+	receiver := &client{
+		session:     Session{Token: "receiver-token", RoleID: "video"},
+		user:        User{ID: "u2", Username: "receiver", RoleID: "video"},
+		send:        make(chan WSOutbound, 8),
+		listenRooms: toRoomSet([]string{"foh"}),
+	}
+	hub.Add(sender)
+	hub.Add(receiver)
+	drain(sender.send)
+	drain(receiver.send)
+
+	s := &Server{store: store, hub: hub}
+	s.routeInbound(context.Background(), sender.session, WSInbound{Data: RoutedEvent{Body: "#foh standby", AckRequired: true}}, "chat")
+
+	select {
+	case out := <-receiver.send:
+		routed, ok := out.Data.(RoutedEvent)
+		if !ok {
+			t.Fatalf("expected RoutedEvent payload, got %T", out.Data)
+		}
+		if routed.MessageID == "" {
+			t.Fatal("expected non-empty message ID")
+		}
+		if !routed.AckRequired {
+			t.Fatal("expected ackRequired to be preserved")
+		}
+	default:
+		t.Fatal("expected routed chat message for receiver")
+	}
+}
+
 func TestServerRouteInboundChatAtUserRoutesToLatestActiveSession(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {

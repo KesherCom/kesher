@@ -108,6 +108,18 @@ export type RoutedEvent = {
   targetId: string;
   body: string;
   signal?: string;
+  messageId?: string;
+  ackRequired?: boolean;
+  acked?: boolean;
+  ackedBy?: User;
+  ackedAt?: number;
   fromUser: User;
   timestamp: number;
+};
+
+export type ChatAckUpdate = {
+  messageId: string;
+  senderUserId: string;
+  ackedBy: User;
+  ackedAt: number;
 };

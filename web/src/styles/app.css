@@ -205,6 +205,17 @@ button {
   flex: 1;
   min-width: 220px;
 }
+.chat-ack-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  user-select: none;
+}
+.chat-ack-toggle input {
+  margin: 0;
+}
 .chat-feed {
   border: 1px solid var(--border-light);
   background: var(--panel);
@@ -260,11 +271,32 @@ button {
   padding: 0.05rem 0.42rem;
   line-height: 1.2;
 }
+.chat-feed-ack-status {
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  line-height: 1.2;
+  border: 1px solid;
+}
+.chat-feed-ack-status.pending {
+  color: #9ca3af;
+  border-color: #6b7280;
+}
+.chat-feed-ack-status.acked {
+  color: #065f46;
+  border-color: #10b981;
+  background: color-mix(in srgb, #10b981 16%, transparent);
+}
 .chat-feed-list li p {
   margin: 0.16rem 0 0;
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
+}
+.chat-feed-ack-btn {
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  padding: 0.18rem 0.45rem;
+  border-radius: 8px;
 }
 .chat-feed-list li.chat-feed-direct {
   border-left: 3px solid #d97706;

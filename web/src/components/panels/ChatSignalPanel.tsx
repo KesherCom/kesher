@@ -10,6 +10,11 @@ type ChatEntry = {
   scope: "direct" | "room" | "broadcast";
   targetId: string;
   targetType?: "room" | "user" | "role";
+  messageId?: string;
+  ackRequired?: boolean;
+  acked?: boolean;
+  ackedBy?: string;
+  ackedAt?: string;
 };
 
 type AutocompleteItem = {
@@ -23,7 +28,8 @@ type AutocompleteItem = {
 type ChatSignalPanelProps = {
   message: string;
   onMessageChange: (value: string) => void;
-  onSendChat: () => void;
+  onSendChat: (ackRequired?: boolean) => void;
+  onAcknowledge: (messageId: string, senderUserId: string) => void;
   chatMessages: ChatEntry[];
   listenRoomIds: string[];
   rooms: Array<{ id: string; name: string }>;
@@ -58,6 +64,7 @@ export function ChatSignalPanel({
   message,
   onMessageChange,
   onSendChat,
+  onAcknowledge,
   chatMessages,
   listenRoomIds,
   rooms,
@@ -66,6 +73,14 @@ export function ChatSignalPanel({
 }: ChatSignalPanelProps) {
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
   const [caret, setCaret] = useState(message.length);
+  const [requiresAck, setRequiresAck] = useState(false);
+
+  function submitChat() {
+    onSendChat(requiresAck);
+    if (message.trim()) {
+      setRequiresAck(false);
+    }
+  }
 
   const visibleMessages = useMemo(
     () =>
@@ -172,7 +187,7 @@ export function ChatSignalPanel({
           onKeyDown={(e) => {
             if (suggestions.length === 0) {
               if (e.key === "Enter") {
-                onSendChat();
+                submitChat();
               }
               return;
             }
@@ -210,7 +225,15 @@ export function ChatSignalPanel({
           }}
           placeholder="Type chat message…"
         />
-        <button onClick={onSendChat}>Send chat</button>
+        <label className="chat-ack-toggle">
+          <input
+            type="checkbox"
+            checked={requiresAck}
+            onChange={(e) => setRequiresAck(e.target.checked)}
+          />
+          Requires ACK (Cue)
+        </label>
+        <button onClick={submitChat}>Send chat</button>
         {suggestions.length > 0 ? (
           <ul className="chat-autocomplete" role="listbox" aria-label="chat-autocomplete">
             {suggestions.map((item, idx) => (
@@ -253,8 +276,29 @@ export function ChatSignalPanel({
                     {entry.from}
                   </button>
                   <span className="chat-feed-room">{entry.room}</span>
+                  {entry.self && entry.ackRequired ? (
+                    <span
+                      className={`chat-feed-ack-status ${entry.acked ? "acked" : "pending"}`}
+                    >
+                      {entry.acked
+                        ? `ACK by ${entry.ackedBy || "receiver"}`
+                        : "ACK pending"}
+                    </span>
+                  ) : null}
                 </div>
                 <p>{entry.body}</p>
+                {!entry.self &&
+                entry.ackRequired &&
+                !entry.acked &&
+                entry.messageId ? (
+                  <button
+                    type="button"
+                    className="chat-feed-ack-btn"
+                    onClick={() => onAcknowledge(entry.messageId || "", entry.fromUserId)}
+                  >
+                    Acknowledge
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>

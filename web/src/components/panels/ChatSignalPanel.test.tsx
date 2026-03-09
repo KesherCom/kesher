@@ -36,6 +36,7 @@ describe("ChatSignalPanel", () => {
         message=""
         onMessageChange={vi.fn()}
         onSendChat={vi.fn()}
+        onAcknowledge={vi.fn()}
         chatMessages={[]}
         {...defaultProps}
       />,
@@ -54,17 +55,22 @@ describe("ChatSignalPanel", () => {
         message="hello"
         onMessageChange={onMessageChange}
         onSendChat={onSendChat}
+        onAcknowledge={vi.fn()}
         chatMessages={[]}
         {...defaultProps}
       />,
     );
 
     await user.type(screen.getByPlaceholderText("Type chat message…"), "!");
+    await user.click(screen.getByLabelText("Requires ACK (Cue)"));
+    await user.click(screen.getByPlaceholderText("Type chat message…"));
     await user.keyboard("{Enter}");
     await user.click(screen.getByRole("button", { name: "Send chat" }));
 
     expect(onMessageChange).toHaveBeenCalled();
     expect(onSendChat).toHaveBeenCalledTimes(2);
+    expect(onSendChat).toHaveBeenNthCalledWith(1, true);
+    expect(onSendChat).toHaveBeenNthCalledWith(2, false);
   });
 
   it("prefills @username when sender is clicked", async () => {
@@ -76,6 +82,7 @@ describe("ChatSignalPanel", () => {
         message=""
         onMessageChange={onMessageChange}
         onSendChat={vi.fn()}
+        onAcknowledge={vi.fn()}
         chatMessages={[
           {
             from: "Sarah",
@@ -103,6 +110,7 @@ describe("ChatSignalPanel", () => {
         message=""
         onMessageChange={vi.fn()}
         onSendChat={vi.fn()}
+        onAcknowledge={vi.fn()}
         chatMessages={[
           {
             from: "A",
@@ -154,6 +162,7 @@ describe("ChatSignalPanel", () => {
         message="@"
         onMessageChange={onMessageChange}
         onSendChat={vi.fn()}
+        onAcknowledge={vi.fn()}
         chatMessages={[]}
         {...defaultProps}
       />,
@@ -182,6 +191,7 @@ describe("ChatSignalPanel", () => {
         message="@"
         onMessageChange={onMessageChange}
         onSendChat={vi.fn()}
+        onAcknowledge={vi.fn()}
         chatMessages={[]}
         {...propsWithEmptyRole}
       />,
@@ -202,6 +212,7 @@ describe("ChatSignalPanel", () => {
         message="#"
         onMessageChange={onMessageChange}
         onSendChat={vi.fn()}
+        onAcknowledge={vi.fn()}
         chatMessages={[]}
         {...defaultProps}
       />,
@@ -220,6 +231,7 @@ describe("ChatSignalPanel", () => {
         message="@"
         onMessageChange={onMessageChange}
         onSendChat={vi.fn()}
+        onAcknowledge={vi.fn()}
         chatMessages={[]}
         {...defaultProps}
       />,
@@ -247,6 +259,7 @@ describe("ChatSignalPanel", () => {
         message="@s"
         onMessageChange={onMessageChange}
         onSendChat={vi.fn()}
+        onAcknowledge={vi.fn()}
         chatMessages={[]}
         {...defaultProps}
       />,
@@ -270,6 +283,7 @@ describe("ChatSignalPanel", () => {
         message="@"
         onMessageChange={onMessageChange}
         onSendChat={vi.fn()}
+        onAcknowledge={vi.fn()}
         chatMessages={[]}
         {...defaultProps}
       />,
@@ -291,5 +305,69 @@ describe("ChatSignalPanel", () => {
     await user.keyboard("{ArrowUp}");
     buttons = container.querySelectorAll(".chat-autocomplete button");
     expect(buttons[0]).toHaveClass("active");
+  });
+
+  it("shows acknowledge button for incoming cue messages and calls handler", async () => {
+    const user = userEvent.setup();
+    const onAcknowledge = vi.fn();
+
+    render(
+      <ChatSignalPanel
+        message=""
+        onMessageChange={vi.fn()}
+        onSendChat={vi.fn()}
+        onAcknowledge={onAcknowledge}
+        chatMessages={[
+          {
+            from: "Regie",
+            fromUserId: "u9",
+            body: "Standby",
+            at: "10:10",
+            room: "Direct",
+            self: false,
+            scope: "direct",
+            targetId: "u1",
+            targetType: "user",
+            messageId: "m-1",
+            ackRequired: true,
+            acked: false,
+          },
+        ]}
+        {...defaultProps}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Acknowledge" }));
+    expect(onAcknowledge).toHaveBeenCalledWith("m-1", "u9");
+  });
+
+  it("shows sender ack status for own cue messages", () => {
+    render(
+      <ChatSignalPanel
+        message=""
+        onMessageChange={vi.fn()}
+        onSendChat={vi.fn()}
+        onAcknowledge={vi.fn()}
+        chatMessages={[
+          {
+            from: "Me",
+            fromUserId: "u1",
+            body: "Go",
+            at: "10:11",
+            room: "FOH",
+            self: true,
+            scope: "room",
+            targetId: "foh",
+            messageId: "m-2",
+            ackRequired: true,
+            acked: true,
+            ackedBy: "Sarah",
+          },
+        ]}
+        {...defaultProps}
+      />,
+    );
+
+    expect(screen.getByText("ACK by Sarah")).toBeVisible();
   });
 });

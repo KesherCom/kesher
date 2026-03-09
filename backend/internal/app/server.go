@@ -1268,6 +1268,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 		case "chat":
 			s.routeInbound(r.Context(), session, in, "chat")
+		case "chat_ack":
+			raw, _ := json.Marshal(in.Data)
+			var e ChatAckInbound
+			_ = json.Unmarshal(raw, &e)
+			s.hub.RouteChatAck(session.Token, e)
 		case "signal":
 			s.routeInbound(r.Context(), session, in, "signal")
 		case "voice_state":
@@ -1337,6 +1342,9 @@ func (s *Server) routeInbound(ctx context.Context, sender Session, in WSInbound,
 			return
 		}
 		e = resolved
+		if strings.TrimSpace(e.MessageID) == "" {
+			e.MessageID = newID()
+		}
 	}
 	if e.Scope == "" || e.TargetID == "" {
 		return

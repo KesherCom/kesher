@@ -527,6 +527,7 @@ export function App() {
       message={session.message}
       onMessageChange={session.setMessage}
       onSendChat={session.sendChat}
+      onAcknowledge={session.acknowledgeChatMessage}
       chatMessages={session.chatMessages}
       listenRoomIds={session.listenRoomIds}
       rooms={appData.rooms.map((room) => ({ id: room.id, name: room.name }))}
