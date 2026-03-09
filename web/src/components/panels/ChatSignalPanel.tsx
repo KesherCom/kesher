@@ -225,15 +225,17 @@ export function ChatSignalPanel({
           }}
           placeholder="Type chat message…"
         />
-        <label className="chat-ack-toggle">
-          <input
-            type="checkbox"
-            checked={requiresAck}
-            onChange={(e) => setRequiresAck(e.target.checked)}
-          />
-          Requires ACK (Cue)
-        </label>
-        <button onClick={submitChat}>Send chat</button>
+        <div className="chat-actions">
+          <label className="chat-ack-toggle">
+            <input
+              type="checkbox"
+              checked={requiresAck}
+              onChange={(e) => setRequiresAck(e.target.checked)}
+            />
+            Requires ACK (Cue)
+          </label>
+          <button onClick={submitChat}>Send chat</button>
+        </div>
         {suggestions.length > 0 ? (
           <ul className="chat-autocomplete" role="listbox" aria-label="chat-autocomplete">
             {suggestions.map((item, idx) => (
