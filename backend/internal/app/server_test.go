@@ -584,6 +584,41 @@ func TestServerRouteInboundChatAtUserRoutesToLatestActiveSession(t *testing.T) {
 	}
 }
 
+func TestServerRouteInboundChatAtSelfReturnsStatus(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sender := &client{
+		session: Session{Token: "sender-token", UserID: "u1", RoleID: "audio", Username: "sender"},
+		user:    User{ID: "u1", Username: "sender", RoleID: "audio"},
+		send:    make(chan WSOutbound, 8),
+	}
+	hub.Add(sender)
+	drain(sender.send)
+
+	s := &Server{store: store, hub: hub}
+	s.routeInbound(context.Background(), sender.session, WSInbound{Data: RoutedEvent{Body: "@sender hi me"}}, "chat")
+
+	select {
+	case out := <-sender.send:
+		if out.Type != "status" {
+			t.Fatalf("expected status event, got %s", out.Type)
+		}
+		status, ok := out.Data.(RoutingStatusEvent)
+		if !ok {
+			t.Fatalf("expected RoutingStatusEvent payload, got %T", out.Data)
+		}
+		if status.Code != "unzustellbar" || status.TargetType != "user" {
+			t.Fatalf("unexpected status payload: %+v", status)
+		}
+	default:
+		t.Fatal("expected status event for self-directed chat")
+	}
+}
+
 func TestServerRouteInboundChatAtRoleRoutesToActiveRoleSessions(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {

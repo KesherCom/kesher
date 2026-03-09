@@ -1392,6 +1392,14 @@ func (s *Server) resolveChatRouting(ctx context.Context, sender Session, e Route
 		return e, nil, true
 	case '@':
 		if activeUser, ok := s.hub.ActiveUserByUsername(targetLabel); ok {
+			if activeUser.ID == sender.UserID {
+				return RoutedEvent{}, &RoutingStatusEvent{
+					Code:       "unzustellbar",
+					TargetType: "user",
+					Target:     targetLabel,
+					Message:    "Unzustellbar: Du kannst dir selbst keine Nachricht schicken.",
+				}, false
+			}
 			e.Scope = "direct"
 			e.TargetType = "user"
 			e.TargetID = activeUser.ID
