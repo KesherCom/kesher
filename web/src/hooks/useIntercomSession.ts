@@ -206,10 +206,14 @@ export type UseIntercomSessionResult = {
   presence: Presence[];
   chatMessages: Array<{
     from: string;
+    fromUserId: string;
     body: string;
     at: string;
     room: string;
     self: boolean;
+    scope: "direct" | "room" | "broadcast";
+    targetId: string;
+    targetType?: "room" | "user" | "role";
   }>;
   events: Array<{ label: string; at: string }>;
   rtpStats: { inKbps: number; outKbps: number };
@@ -301,10 +305,14 @@ export function useIntercomSession({
   const [chatMessages, setChatMessages] = useState<
     Array<{
       from: string;
+      fromUserId: string;
       body: string;
       at: string;
       room: string;
       self: boolean;
+      scope: "direct" | "room" | "broadcast";
+      targetId: string;
+      targetType?: "room" | "user" | "role";
     }>
   >([]);
   const [events, setEvents] = useState<Array<{ label: string; at: string }>>(
@@ -1474,23 +1482,29 @@ export function useIntercomSession({
         if (msg.type === "chat") {
           const chatBody = (msg.data.body || "").toString().trim();
           if (chatBody) {
+            const chatScope = msg.data.scope;
+            const chatTargetId = msg.data.targetId;
             const roomLabel =
-              msg.data.scope === "room"
-                ? ad?.rooms.find((room) => room.id === msg.data.targetId)
-                    ?.name || msg.data.targetId
-                : msg.data.scope === "broadcast"
+              chatScope === "room"
+                ? ad?.rooms.find((room) => room.id === chatTargetId)?.name ||
+                  chatTargetId
+                : chatScope === "broadcast"
                   ? ad?.broadcastGroups.find(
-                      (group) => group.id === msg.data.targetId,
-                    )?.name || msg.data.targetId
+                      (group) => group.id === chatTargetId,
+                    )?.name || chatTargetId
                   : "Direct";
             setChatMessages((old) =>
               [
                 {
                   from: msg.data.fromUser.username,
+                  fromUserId: msg.data.fromUser.id,
                   body: chatBody,
                   at: new Date(msg.data.timestamp).toLocaleTimeString(),
                   room: roomLabel,
                   self: msg.data.fromUser.id === ad?.self.id,
+                  scope: chatScope,
+                  targetId: chatTargetId,
+                  targetType: msg.data.targetType,
                 },
                 ...old,
               ].slice(0, 120),

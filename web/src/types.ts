@@ -104,6 +104,7 @@ export type StatusResponse = {
 
 export type RoutedEvent = {
   scope: "direct" | "room" | "broadcast";
+  targetType?: "room" | "user" | "role";
   targetId: string;
   body: string;
   signal?: string;

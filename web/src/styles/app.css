@@ -199,6 +199,7 @@ button {
   flex-wrap: wrap;
   gap: 0.6rem;
   margin-bottom: 0.75rem;
+  position: relative;
 }
 .chat input {
   flex: 1;
@@ -265,8 +266,56 @@ button {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.chat-feed-list li.self strong {
+.chat-feed-list li.chat-feed-direct {
+  border-left: 3px solid #d97706;
+  padding-left: 0.45rem;
+  background: color-mix(in srgb, #d97706 10%, var(--panel));
+  border-radius: 6px;
+}
+.chat-feed-list li.self .chat-feed-sender {
   color: var(--station-call-text);
+}
+.chat-feed-sender {
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.84rem;
+  font-weight: 700;
+  padding: 0;
+}
+.chat-feed-sender:hover {
+  color: var(--accent-primary);
+  text-decoration: underline;
+}
+.chat-autocomplete {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 0.2rem);
+  z-index: 20;
+  width: min(460px, 100%);
+  list-style: none;
+  margin: 0;
+  padding: 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
+}
+.chat-autocomplete li {
+  margin: 0;
+  padding: 0;
+}
+.chat-autocomplete button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  border-radius: 8px;
+  padding: 0.42rem 0.5rem;
+}
+.chat-autocomplete button:hover,
+.chat-autocomplete button.active {
+  background: var(--btn-bg-hover);
 }
 .mic-dropdown {
   position: relative;

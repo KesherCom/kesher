@@ -506,12 +506,30 @@ export function App() {
   }
 
   // ── Operator view ──
+  const activeUsersForChat = Array.from(
+    new Map(
+      session.presence.map((p) => [
+        p.username.toLowerCase(),
+        {
+          userId: p.userId,
+          username: p.username,
+          roleId: p.roleId,
+          roleName: roleNameById.get(p.roleId) || p.roleId,
+        },
+      ]),
+    ).values(),
+  ).sort((a, b) => a.username.localeCompare(b.username));
+
   const chatAndSignalBlock = (
     <ChatSignalPanel
       message={session.message}
       onMessageChange={session.setMessage}
       onSendChat={session.sendChat}
       chatMessages={session.chatMessages}
+      listenRoomIds={session.listenRoomIds}
+      rooms={appData.rooms.map((room) => ({ id: room.id, name: room.name }))}
+      roles={appData.roles.map((role) => ({ id: role.id, name: role.name }))}
+      activeUsers={activeUsersForChat}
     />
   );
   const realtimeDebugBlock = <RealtimeEventsPanel events={session.events} />;
