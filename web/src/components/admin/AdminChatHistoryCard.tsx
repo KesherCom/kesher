@@ -57,7 +57,9 @@ export function AdminChatHistoryCard({
           ? "ACK-Nachrichten sind jetzt aktiviert."
           : "ACK-Nachrichten sind jetzt deaktiviert.",
       );
-      await refreshBootstrapData();
+      // Do not call refreshBootstrapData() here because it triggers an unnecessary room matrix resync
+      // which causes the last chat message to be re-broadcasted. The config_updated WebSocket
+      // message will update the ackEnabled state throughout the application.
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to update ack settings");
     } finally {

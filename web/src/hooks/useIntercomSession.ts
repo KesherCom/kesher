@@ -401,6 +401,7 @@ export function useIntercomSession({
   const appDataRef = useRef(appData);
   const listenRoomIdsRef = useRef<string[]>(initialListenRoomIds);
   const talkRoomIdsRef = useRef<string[]>(initialTalkRoomIds);
+  const seenChatKeysRef = useRef<Set<string>>(new Set());
 
   // Sync refs
   useEffect(() => {
@@ -1140,6 +1141,7 @@ export function useIntercomSession({
     setConnectionState("offline");
     setPresence([]);
     setChatMessages([]);
+    seenChatKeysRef.current.clear();
     setEvents([]);
     setPttPressed(false);
     setBroadcastPttPressed(null);
@@ -1343,14 +1345,20 @@ export function useIntercomSession({
               const room = updated.rooms.find((r) => r.id === id);
               return !!room && roleAllowed(room.receiverRoleIds, selfRoleId);
             });
-            return mergeForcedListenRooms(filtered, updated.rooms, selfRoleId);
+            const next = mergeForcedListenRooms(
+              filtered,
+              updated.rooms,
+              selfRoleId,
+            );
+            return sameStringArray(prev, next) ? prev : next;
           });
-          setTalkRoomIds((prev) =>
-            prev.filter((id) => {
+          setTalkRoomIds((prev) => {
+            const next = prev.filter((id) => {
               const room = updated.rooms.find((r) => r.id === id);
               return !!room && roleAllowed(room.senderRoleIds, selfRoleId);
-            }),
-          );
+            });
+            return sameStringArray(prev, next) ? prev : next;
+          });
           return;
         }
         if (msg.type === "companion_command") {
@@ -1539,29 +1547,65 @@ export function useIntercomSession({
                       (group) => group.id === chatTargetId,
                     )?.name || chatTargetId
                   : "Direct";
-            setChatMessages((old) =>
-              [
-                {
-                  from: msg.data.fromUser.username,
-                  fromUserId: msg.data.fromUser.id,
-                  body: chatBody,
-                  at: new Date(msg.data.timestamp).toLocaleTimeString(),
-                  room: roomLabel,
-                  self: msg.data.fromUser.id === ad?.self.id,
-                  scope: chatScope,
-                  targetId: chatTargetId,
-                  targetType: msg.data.targetType,
-                  messageId: msg.data.messageId,
-                  ackRequired: !!msg.data.ackRequired,
-                  acked: !!msg.data.acked,
-                  ackedBy: msg.data.ackedBy?.username,
-                  ackedAt: msg.data.ackedAt
-                    ? new Date(msg.data.ackedAt).toLocaleTimeString()
-                    : undefined,
-                },
-                ...old,
-              ].slice(0, 120),
-            );
+            setChatMessages((old) => {
+              const nextEntry = {
+                from: msg.data.fromUser.username,
+                fromUserId: msg.data.fromUser.id,
+                body: chatBody,
+                at: new Date(msg.data.timestamp).toLocaleTimeString(),
+                room: roomLabel,
+                self: msg.data.fromUser.id === ad?.self.id,
+                scope: chatScope,
+                targetId: chatTargetId,
+                targetType: msg.data.targetType,
+                messageId: msg.data.messageId,
+                ackRequired: !!msg.data.ackRequired,
+                acked: !!msg.data.acked,
+                ackedBy: msg.data.ackedBy?.username,
+                ackedAt: msg.data.ackedAt
+                  ? new Date(msg.data.ackedAt).toLocaleTimeString()
+                  : undefined,
+              };
+              const stableKey = nextEntry.messageId
+                ? `id:${nextEntry.messageId}`
+                : [
+                    "fallback",
+                    nextEntry.at,
+                    nextEntry.fromUserId,
+                    nextEntry.scope,
+                    nextEntry.targetId,
+                    nextEntry.body,
+                  ].join("|");
+              if (seenChatKeysRef.current.has(stableKey)) {
+                return old;
+              }
+              const nextIdentity = [
+                nextEntry.at,
+                nextEntry.fromUserId,
+                nextEntry.scope,
+                nextEntry.targetId,
+                nextEntry.body,
+              ].join("|");
+              const alreadyPresent = old.some((entry) => {
+                if (nextEntry.messageId && entry.messageId) {
+                  return entry.messageId === nextEntry.messageId;
+                }
+                const entryIdentity = [
+                  entry.at,
+                  entry.fromUserId,
+                  entry.scope,
+                  entry.targetId,
+                  entry.body,
+                ].join("|");
+                return entryIdentity === nextIdentity;
+              });
+              if (alreadyPresent) {
+                seenChatKeysRef.current.add(stableKey);
+                return old;
+              }
+              seenChatKeysRef.current.add(stableKey);
+              return [nextEntry, ...old].slice(0, 120);
+            });
           }
         }
         if (msg.type === "chat_ack") {
@@ -1582,6 +1626,7 @@ export function useIntercomSession({
         }
         if (msg.type === "chat_history_cleared") {
           setChatMessages([]);
+          seenChatKeysRef.current.clear();
           if (showDebug) {
             pushDebugEvent("system · chat history cleared");
           }

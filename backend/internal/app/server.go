@@ -969,20 +969,26 @@ func (s *Server) handleAdminAckSettings(w http.ResponseWriter, r *http.Request, 
 		s.setAckEnabled(req.Enabled)
 		if s.hub != nil {
 			roles, err := s.store.ListRoles(r.Context())
-			if err == nil {
-				rooms, err := s.store.ListRooms(r.Context())
-				if err == nil {
-					groups, err := s.store.ListBroadcastGroups(r.Context())
-					if err == nil {
-						s.hub.BroadcastConfigUpdate(PublicBootstrapResponse{
-							Roles:           roles,
-							Rooms:           rooms,
-							BroadcastGroups: groups,
-							AckEnabled:      s.isAckEnabled(),
-						})
-					}
-				}
+			if err != nil {
+				http.Error(w, "failed to fetch roles", http.StatusInternalServerError)
+				return
 			}
+			rooms, err := s.store.ListRooms(r.Context())
+			if err != nil {
+				http.Error(w, "failed to fetch rooms", http.StatusInternalServerError)
+				return
+			}
+			groups, err := s.store.ListBroadcastGroups(r.Context())
+			if err != nil {
+				http.Error(w, "failed to fetch broadcast groups", http.StatusInternalServerError)
+				return
+			}
+			s.hub.BroadcastConfigUpdate(PublicBootstrapResponse{
+				Roles:           roles,
+				Rooms:           rooms,
+				BroadcastGroups: groups,
+				AckEnabled:      s.isAckEnabled(),
+			})
 		}
 		s.writeJSON(w, http.StatusOK, AckSettings{Enabled: s.isAckEnabled()})
 	default:
