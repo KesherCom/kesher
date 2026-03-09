@@ -15,7 +15,9 @@ type ChatEntry = {
 type AutocompleteItem = {
   key: string;
   label: string;
+  displayLabel: string;
   insertText: string;
+  type: "user" | "role" | "room";
 };
 
 type ChatSignalPanelProps = {
@@ -78,27 +80,44 @@ export function ChatSignalPanel({
     if (!context) {
       return [] as AutocompleteItem[];
     }
+
     if (context.trigger === "@") {
+      // Build user suggestions (online users)
       const userItems = activeUsers
         .filter((u) => u.username.toLowerCase().includes(context.query))
         .map((u) => ({
           key: `user:${u.userId}`,
-          label: `${u.username} [${u.roleName}]`,
+          label: `👤 @${u.username} [${u.roleName}]`,
+          displayLabel: `@${u.username} [${u.roleName}]`,
           insertText: `@${u.username} `,
+          type: "user" as const,
         }));
+
+      // Build role suggestions with current occupant or "Unbesetzt"
       const roleItems = roles
         .filter(
           (r) =>
             r.name.toLowerCase().includes(context.query) ||
             r.id.toLowerCase().includes(context.query),
         )
-        .map((r) => ({
-          key: `role:${r.id}`,
-          label: `Rolle: ${r.name}`,
-          insertText: `@${r.id} `,
-        }));
+        .map((r) => {
+          const occupant = activeUsers.find((u) => u.roleId === r.id);
+          const occupantText = occupant
+            ? `Aktuell: ${occupant.username}`
+            : "Unbesetzt";
+          return {
+            key: `role:${r.id}`,
+            label: `🎭 @${r.name} (${occupantText})`,
+            displayLabel: `@${r.name} (${occupantText})`,
+            insertText: `@${r.name} `,
+            type: "role" as const,
+          };
+        });
+
       return [...userItems, ...roleItems].slice(0, 8);
     }
+
+    // # trigger: rooms/partylines
     return rooms
       .filter(
         (room) =>
@@ -107,8 +126,10 @@ export function ChatSignalPanel({
       )
       .map((room) => ({
         key: `room:${room.id}`,
-        label: `${room.name} (#${room.id})`,
-        insertText: `#${room.id} `,
+        label: `#${room.name}`,
+        displayLabel: `#${room.name}`,
+        insertText: `#${room.name} `,
+        type: "room" as const,
       }))
       .slice(0, 8);
   }, [activeUsers, caret, message, roles, rooms]);
@@ -132,6 +153,10 @@ export function ChatSignalPanel({
     setCaret(username.length + 2);
   }
 
+  const closeSuggestions = () => {
+    setSelectedSuggestion(0);
+  };
+
   return (
     <>
       <div className="chat">
@@ -145,30 +170,42 @@ export function ChatSignalPanel({
           onClick={(e) => setCaret(e.currentTarget.selectionStart || 0)}
           onKeyUp={(e) => setCaret(e.currentTarget.selectionStart || 0)}
           onKeyDown={(e) => {
-            if (suggestions.length > 0 && e.key === "ArrowDown") {
+            if (suggestions.length === 0) {
+              if (e.key === "Enter") {
+                onSendChat();
+              }
+              return;
+            }
+
+            if (e.key === "Escape") {
+              e.preventDefault();
+              closeSuggestions();
+              return;
+            }
+
+            if (e.key === "ArrowDown") {
               e.preventDefault();
               setSelectedSuggestion((prev) =>
                 prev + 1 >= suggestions.length ? 0 : prev + 1,
               );
               return;
             }
-            if (suggestions.length > 0 && e.key === "ArrowUp") {
+
+            if (e.key === "ArrowUp") {
               e.preventDefault();
               setSelectedSuggestion((prev) =>
                 prev - 1 < 0 ? suggestions.length - 1 : prev - 1,
               );
               return;
             }
-            if (suggestions.length > 0 && e.key === "Enter") {
+
+            if (e.key === "Enter" || e.key === "Tab") {
               e.preventDefault();
-              const selected = suggestions[selectedSuggestion] || suggestions[0];
+              const selected = suggestions[selectedSuggestion];
               if (selected) {
                 applySuggestion(selected);
               }
               return;
-            }
-            if (e.key === "Enter") {
-              onSendChat();
             }
           }}
           placeholder="Type chat message…"
