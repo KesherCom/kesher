@@ -21,7 +21,7 @@ This document tracks only unimplemented core-app items that remain from the orig
 ## Done and intentionally removed from this plan
 
 - Core voice/chat/signal routing and presence.
-- Room/broadcast role policy enforcement for normal realtime flows.
+- Party-line/broadcast role policy enforcement for normal realtime flows.
 - WebRTC/media path.
 - Session TTL support.
 - HTTP/HTTPS + production redirect modes.

@@ -2,29 +2,29 @@ import { type Dispatch, type SetStateAction } from "react";
 import type { Room } from "../../types";
 import { EntityMultiSelect } from "./EntityMultiSelect";
 
-type RoomMultiSelectProps = {
+type PartyLineMultiSelectProps = {
   label: string;
-  selectedRoomIds: string[];
+  selectedPartyLineIds: string[];
   setState: Dispatch<SetStateAction<string[]>>;
   keyPrefix: string;
-  rooms: Room[];
+  partyLines: Room[]; // still using Room type for data
 };
 
-export function RoomMultiSelect({
+export function PartyLineMultiSelect({
   label,
-  selectedRoomIds,
+  selectedPartyLineIds,
   setState,
   keyPrefix,
-  rooms,
-}: RoomMultiSelectProps) {
+  partyLines,
+}: PartyLineMultiSelectProps) {
   return (
     <EntityMultiSelect
       label={label}
-      selectedIds={selectedRoomIds}
+      selectedIds={selectedPartyLineIds}
       setState={setState}
       keyPrefix={keyPrefix}
-      options={rooms.map((room) => ({ id: room.id, label: room.name }))}
-      noneSelectedLabel="No rooms selected"
+      options={partyLines.map((pl) => ({ id: pl.id, label: pl.name }))}
+      noneSelectedLabel="No party lines selected"
       clearLabel="Clear selection"
     />
   );

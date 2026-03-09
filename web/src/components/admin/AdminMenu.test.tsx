@@ -24,7 +24,7 @@ const appData: Bootstrap = {
   rooms: [
     {
       id: "r1",
-      name: "Room 1",
+      name: "Party Line 1",
       senderRoleIds: ["op"],
       receiverRoleIds: ["op"],
       forcedListenRoleIds: [],

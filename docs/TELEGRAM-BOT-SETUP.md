@@ -1,6 +1,6 @@
 # Telegram Bot Integration
 
-Kesher can bridge chat messages between intercom rooms and Telegram groups/channels. Messages sent in a mapped Telegram chat appear in the intercom room, and messages sent in the intercom room are forwarded to Telegram.
+Kesher can bridge chat messages between intercom party‑lines and Telegram groups/channels. Messages sent in a mapped Telegram chat appear in the intercom party‑line, and messages sent in the intercom party‑line are forwarded to Telegram.
 
 ## Table of Contents
 
@@ -8,7 +8,7 @@ Kesher can bridge chat messages between intercom rooms and Telegram groups/chann
 - [Step 1: Create a Telegram Bot](#step-1-create-a-telegram-bot)
 - [Step 2: Get the Chat ID](#step-2-get-the-chat-id)
 - [Step 3: Configure Kesher](#step-3-configure-kesher)
-- [Step 4: Create Chat–Room Mappings](#step-4-create-chatroom-mappings)
+- [Step 4: Create Chat–Party‑Line Mappings](#step-4-create-chat-party‑line-mappings)
 - [How It Works](#how-it-works)
 - [Polling vs. Webhook Mode](#polling-vs-webhook-mode)
 - [Environment Variables Reference](#environment-variables-reference)
@@ -132,23 +132,23 @@ If you see "✗ Not configured", the token was not picked up. Check that the env
 
 ---
 
-## Step 4: Create Chat–Room Mappings
+## Step 4: Create Chat–Party‑Line Mappings
 
-Mappings connect a Telegram chat to an intercom room. You can create multiple mappings (e.g., one Telegram group per room).
+Mappings connect a Telegram chat to an intercom party‑line. You can create multiple mappings (e.g., one Telegram group per party‑line).
 
 1. In the Kesher web UI, go to **Admin Panel** → **Telegram Bot Integration** → **Show**.
 2. Click **Add mapping**.
 3. Fill in:
    - **Telegram chat ID**: The numeric chat ID from Step 2 (e.g. `-1001234567890`)
    - **Label**: A human-readable name for this mapping (e.g. `FOH Team`)
-   - **Room**: Select the intercom room to bridge to
+   - **Party‑Line**: Select the intercom party‑line to bridge to
 4. Click **Add mapping** to save.
 
 You can create, edit, and delete mappings at any time. Changes take effect immediately.
 
 ### Example mappings
 
-| Label | Chat ID | Room |
+| Label | Chat ID | Party‑Line |
 |---|---|---|
 | FOH Team | `-1001111111111` | foh |
 | Stage Crew | `-1002222222222` | stage |
@@ -162,13 +162,13 @@ You can create, edit, and delete mappings at any time. Changes take effect immed
 
 1. A user sends a message in the mapped Telegram group.
 2. The Kesher server receives the message (via polling or webhook).
-3. The message is injected into the mapped intercom room as a chat event.
-4. All intercom users listening to that room see the message, prefixed with the Telegram sender's name (e.g. `[@alice] Hello everyone`).
+3. The message is injected into the mapped intercom party‑line as a chat event.
+4. All intercom users listening to that party‑line see the message, prefixed with the Telegram sender's name (e.g. `[@alice] Hello everyone`).
 
 ### Intercom → Telegram
 
-1. An intercom user sends a chat message to a room.
-2. If that room has one or more Telegram mappings, the message is forwarded to each mapped Telegram chat.
+1. An intercom user sends a chat message to a party‑line.
+2. If that party‑line has one or more Telegram mappings, the message is forwarded to each mapped Telegram chat.
 3. The message appears in Telegram as `[username] message text`.
 
 ---
@@ -250,7 +250,7 @@ Or use the webhook URL shown in the Kesher admin panel.
 1. **Check Group Privacy** — Make sure you disabled Group Privacy in @BotFather (see Step 1). Without this, the bot only sees `/commands` in groups.
 2. **Check the bot is in the group** — The bot must be a member of the Telegram group.
 3. **Check the Chat ID** — Verify the Chat ID is correct by calling `https://api.telegram.org/bot<TOKEN>/getUpdates` after sending a message.
-4. **Check server logs** — Look for `telegram message from unmapped chat` log entries, which indicate messages are arriving but not mapped to a room.
+4. **Check server logs** — Look for `telegram message from unmapped chat` log entries, which indicate messages are arriving but not mapped to a party‑line.
 5. **Check internet access** — The server needs outbound HTTPS access to `api.telegram.org` on port 443.
 
 ### Messages appear in the intercom but not in Telegram

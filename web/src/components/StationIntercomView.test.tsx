@@ -12,7 +12,7 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
     rooms: [
       {
         id: "room-1",
-        name: "Room 1",
+        name: "Party Line 1",
         senderRoleIds: ["op"],
         receiverRoleIds: ["op"],
         forcedListenRoleIds: [],

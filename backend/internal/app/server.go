@@ -397,6 +397,9 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/roles/", s.withAuth(s.handleAdminRoleByID))
 	mux.HandleFunc("/api/admin/rooms", s.withAuth(s.handleAdminRooms))
 	mux.HandleFunc("/api/admin/rooms/", s.withAuth(s.handleAdminRoomByID))
+	// backwards-compatible aliases using new terminology
+	mux.HandleFunc("/api/admin/party-lines", s.withAuth(s.handleAdminRooms))
+	mux.HandleFunc("/api/admin/party-lines/", s.withAuth(s.handleAdminRoomByID))
 	mux.HandleFunc("/api/admin/broadcast-groups", s.withAuth(s.handleAdminBroadcastGroups))
 	mux.HandleFunc("/api/admin/broadcast-groups/", s.withAuth(s.handleAdminBroadcastGroupByID))
 	mux.HandleFunc("/api/admin/pin", s.withAuth(s.handleAdminPin))

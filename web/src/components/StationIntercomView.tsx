@@ -459,7 +459,7 @@ export function StationIntercomView({
             <h3>Talk channels</h3>
             <div className="station-filter-bar small">
               <span className="station-filter-hint">
-                Pin rooms or users to keep focus when things get busy.
+                Pin party lines or users to keep focus when things get busy.
               </span>
             </div>
             {visibleRooms.length === 0 ? (
@@ -562,7 +562,7 @@ export function StationIntercomView({
                       title={
                         canTalk
                           ? ""
-                          : "Your role is not allowed to send to this room"
+                          : "Your role is not allowed to send to this party line"
                       }
                     >
                       {isReceivingRoom(room.id) ? (
@@ -610,7 +610,7 @@ export function StationIntercomView({
                             ? "Forced listen — cannot be deselected"
                             : canListen
                               ? ""
-                              : "Your role is not allowed to receive from this room"
+                              : "Your role is not allowed to receive from this party line"
                         }
                       >
                         {isForced ? "🔒 Listen" : "Listen"}

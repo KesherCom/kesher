@@ -167,7 +167,7 @@ export function AdminMonitoringCard({
             </div>
           </div>
           <div className="admin-metric">
-            <div className="admin-metric-label">Room policy cache hit rate</div>
+            <div className="admin-metric-label">Party line policy cache hit rate</div>
             <div className="admin-metric-value">
               {stats
                 ? formatHitRate(
@@ -189,7 +189,7 @@ export function AdminMonitoringCard({
             </div>
           </div>
           <div className="admin-metric">
-            <div className="admin-metric-label">Broadcast room hit rate</div>
+            <div className="admin-metric-label">Broadcast party line hit rate</div>
             <div className="admin-metric-value">
               {stats
                 ? formatHitRate(

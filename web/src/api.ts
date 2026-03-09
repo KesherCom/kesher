@@ -248,6 +248,13 @@ export async function deleteRoom(
   );
 }
 
+// new terminology aliases (party-line) kept for compatibility with UI docs
+// and future external integrations. These simply call the existing room
+// helpers so that the underlying API paths remain unchanged.
+export const createPartyLine = createRoom;
+export const updatePartyLine = updateRoom;
+export const deletePartyLine = deleteRoom;
+
 export async function createBroadcastGroup(
   token: string,
   adminPin: string,

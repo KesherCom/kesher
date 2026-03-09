@@ -1,5 +1,13 @@
 package app
 
+// NOTE: The term "room" is used throughout the backend for historical reasons
+// (database table names, JSON fields, internal APIs). The user-facing
+// terminology has been updated to "party line"; API consumers within this
+// repo still see "rooms" in JSON payloads for backwards compatibility.
+// New code should use "party line" in comments and documentation when
+// referring to the concept, but avoid renaming JSON tags without a proper
+// migration plan.
+
 import "time"
 
 type Role struct {

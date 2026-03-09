@@ -6,7 +6,7 @@ import {
   updateBroadcastGroup,
 } from "../../api";
 import { RoleMultiSelect } from "./RoleMultiSelect";
-import { RoomMultiSelect } from "./RoomMultiSelect";
+import { PartyLineMultiSelect } from "./PartyLineMultiSelect";
 import { useAdminAction } from "./useAdminAction";
 
 type AdminChannelsCardProps = {
@@ -173,12 +173,12 @@ export function AdminChannelsCard({
                   </button>
                 </div>
                 <div className="admin-grid admin-grid-roles">
-                  <RoomMultiSelect
-                    label="Included rooms"
-                    selectedRoomIds={groupCreateRoomIds}
+                  <PartyLineMultiSelect
+                    label="Included party lines"
+                    selectedPartyLineIds={groupCreateRoomIds}
                     setState={setGroupCreateRoomIds}
-                    keyPrefix="group-create-room"
-                    rooms={appData.rooms}
+                    keyPrefix="group-create-party-line"
+                    partyLines={appData.rooms}
                   />
                   <RoleMultiSelect
                     label="Allowed roles"
@@ -221,12 +221,12 @@ export function AdminChannelsCard({
                   </button>
                 </div>
                 <div className="admin-grid admin-grid-roles">
-                  <RoomMultiSelect
-                    label="Included rooms"
-                    selectedRoomIds={groupEditRoomIds}
+                  <PartyLineMultiSelect
+                    label="Included party lines"
+                    selectedPartyLineIds={groupEditRoomIds}
                     setState={setGroupEditRoomIds}
-                    keyPrefix="group-edit-room"
-                    rooms={appData.rooms}
+                    keyPrefix="group-edit-party-line"
+                    partyLines={appData.rooms}
                   />
                   <RoleMultiSelect
                     label="Allowed roles"

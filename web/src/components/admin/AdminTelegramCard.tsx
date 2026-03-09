@@ -205,9 +205,9 @@ export function AdminTelegramCard({
                   <select
                     value={createRoomId}
                     onChange={(e) => setCreateRoomId(e.target.value)}
-                    aria-label="Room"
+                    aria-label="Party line"
                   >
-                    <option value="">Select room…</option>
+                    <option value="">Select party line…</option>
                     {appData.rooms.map((room) => (
                       <option key={room.id} value={room.id}>
                         {room.name}
@@ -258,9 +258,9 @@ export function AdminTelegramCard({
                   <select
                     value={editRoomId}
                     onChange={(e) => setEditRoomId(e.target.value)}
-                    aria-label="Room"
+                    aria-label="Party line"
                   >
-                    <option value="">Select room…</option>
+                    <option value="">Select party line…</option>
                     {appData.rooms.map((room) => (
                       <option key={room.id} value={room.id}>
                         {room.name}

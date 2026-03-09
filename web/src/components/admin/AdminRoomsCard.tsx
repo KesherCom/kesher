@@ -106,7 +106,7 @@ export function AdminRoomsCard({
   return (
     <div className="admin-card">
       <div className="admin-card-header">
-        <div className="admin-card-title">Configuration · Rooms</div>
+        <div className="admin-card-title">Configuration · Party Lines</div>
         <div className="admin-card-actions">
           <button
             className="admin-toggle-button"
@@ -121,7 +121,7 @@ export function AdminRoomsCard({
         <div className="admin-card-body">
           <div className="admin-block">
             <div className="admin-block-header">
-              <h4>Rooms ({appData.rooms.length})</h4>
+              <h4>Party Lines ({appData.rooms.length})</h4>
               {!roomEditId ? (
                 <button
                   type="button"
@@ -134,7 +134,7 @@ export function AdminRoomsCard({
                   }}
                   disabled={adminBusy}
                 >
-                  {showRoomCreateForm ? "Cancel" : "Create room"}
+                  {showRoomCreateForm ? "Cancel" : "Create party line"}
                 </button>
               ) : null}
             </div>
@@ -142,17 +142,17 @@ export function AdminRoomsCard({
 
             {showRoomCreateForm && !roomEditId ? (
               <div className="admin-edit-panel">
-                <div className="admin-edit-title">New room</div>
+                <div className="admin-edit-title">New party line</div>
                 <div className="admin-grid">
                   <input
                     value={roomCreateId}
                     onChange={(e) => setRoomCreateId(e.target.value)}
-                    placeholder="room-id"
+                    placeholder="party-line-id"
                   />
                   <input
                     value={roomCreateName}
                     onChange={(e) => setRoomCreateName(e.target.value)}
-                    placeholder="Room name"
+                    placeholder="Party line name"
                   />
                   <button
                     onClick={createRoomConfig}
@@ -162,7 +162,7 @@ export function AdminRoomsCard({
                       !roomCreateName.trim()
                     }
                   >
-                    Create room
+                    Create party line
                   </button>
                   <button
                     type="button"
@@ -205,13 +205,13 @@ export function AdminRoomsCard({
             {roomEditId ? (
               <div className="admin-edit-panel">
                 <div className="admin-edit-title">
-                  Editing room: {roomEditId}
+                  Editing party line: {roomEditId}
                 </div>
                 <div className="admin-grid">
                   <input
                     value={roomEditName}
                     onChange={(e) => setRoomEditName(e.target.value)}
-                    placeholder="Room name"
+                    placeholder="Party line name"
                   />
                   <button
                     onClick={saveRoomEdit}

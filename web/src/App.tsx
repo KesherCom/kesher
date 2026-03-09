@@ -576,7 +576,7 @@ export function App() {
   );
   const simplePttTargetLabel =
     appData.rooms.find((room) => room.id === simpleVoiceTargetId)?.name ||
-    "No room selected";
+    "No party line selected";
 
   const attentionFlashOverlay = session.incomingAttention ? (
     <div

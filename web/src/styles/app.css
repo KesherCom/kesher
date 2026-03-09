@@ -252,7 +252,7 @@ button {
 .chat-feed-meta span {
   margin-right: 0;
 }
-.chat-feed-room {
+.chat-feed-room, .chat-feed-party-line {
   color: var(--text-secondary);
   border: 1px solid var(--border-strong);
   border-radius: 999px;
@@ -1040,7 +1040,7 @@ button {
   padding: 0.9rem;
   background: rgba(16, 26, 36, 0.3);
 }
-.admin-room-picker {
+.admin-room-picker, .admin-party-line-picker {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem 0.75rem;
@@ -2955,7 +2955,7 @@ button.secondary {
    - --admin-status-online, --admin-status-offline: User status
 
    Station-Specific:
-   - --station-pin-active-bg: Pinned room highlight
+   - --station-pin-active-bg: Pinned party-line highlight
    - --station-call-active-bg: Active call/signal button
    - --station-listen-on-bg: Active listen state
    - --station-card-head-active-bg: Selected station card

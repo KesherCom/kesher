@@ -5,6 +5,10 @@ export type Role = {
   defaultVoiceMode?: "always_on" | "ptt";
   defaultSimpleView?: boolean;
 };
+// NOTE: this type is still called Room for backwards compatibility with
+// the server API JSON, but user-facing UI now refers to these entities as
+// "party lines". When communicating with new code or documentation, prefer
+// the term party line instead of room.
 export type Room = {
   id: string;
   name: string;
