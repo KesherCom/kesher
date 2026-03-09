@@ -393,7 +393,7 @@ func TestServerRouteInboundAllowedRoutesToHub(t *testing.T) {
 	drain(receiver.send)
 	s := &Server{store: store, hub: hub}
 	s.routeInbound(context.Background(), sender.session, WSInbound{
-		Data: RoutedEvent{Scope: "room", TargetID: "foh", Body: "hello"},
+		Data: RoutedEvent{Body: "#foh hello"},
 	}, "chat")
 	select {
 	case out := <-receiver.send:
@@ -762,6 +762,68 @@ func TestServerWithAuthValidTokenCallsNext(t *testing.T) {
 	}
 }
 
+func TestAddedRooms(t *testing.T) {
+	got := addedRooms([]string{"foh", "stage"}, []string{"stage", "vip", "foh", "ops"})
+	if len(got) != 2 || got[0] != "vip" || got[1] != "ops" {
+		t.Fatalf("unexpected added rooms: %#v", got)
+	}
+}
+
+func TestServerHandleAdminClearChatHistorySuccess(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	hub.chatHistory.AppendForRoom("foh", RoutedEvent{Scope: "room", TargetID: "foh", Body: "persisted", Timestamp: 1})
+	listener := &client{
+		session: Session{Token: "listener-token", RoleID: "video"},
+		user:    User{ID: "u2", Username: "listener", RoleID: "video"},
+		send:    make(chan WSOutbound, 8),
+	}
+	hub.Add(listener)
+	drain(listener.send)
+
+	s := &Server{store: store, hub: hub, sessions: NewSessionManager(time.Minute)}
+	session := s.sessions.Create(User{ID: "u1", Username: "tim", RoleID: "audio"})
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/chat-history/clear", nil)
+	req.Header.Set("X-Admin-Pin", "123456")
+	rec := httptest.NewRecorder()
+	s.handleAdminClearChatHistory(rec, req, session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if events := hub.chatHistory.HistoryForRooms([]string{"foh"}); len(events) != 0 {
+		t.Fatalf("expected cleared chat history, got %d entries", len(events))
+	}
+	select {
+	case msg := <-listener.send:
+		if msg.Type != "chat_history_cleared" {
+			t.Fatalf("expected chat_history_cleared event, got %s", msg.Type)
+		}
+	default:
+		t.Fatal("expected chat_history_cleared event")
+	}
+}
+
+func TestServerHandleAdminClearChatHistoryMethodNotAllowed(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := &Server{store: store, hub: hub, sessions: NewSessionManager(time.Minute)}
+	session := s.sessions.Create(User{ID: "u1", Username: "tim", RoleID: "audio"})
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/chat-history/clear", nil)
+	req.Header.Set("X-Admin-Pin", "123456")
+	rec := httptest.NewRecorder()
+	s.handleAdminClearChatHistory(rec, req, session)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+}
 func TestServerWithCORSOptionsRequest(t *testing.T) {
 	s := &Server{cfg: Config{AllowCORS: true}}
 	h := s.withCORS(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {

@@ -403,6 +403,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/broadcast-groups", s.withAuth(s.handleAdminBroadcastGroups))
 	mux.HandleFunc("/api/admin/broadcast-groups/", s.withAuth(s.handleAdminBroadcastGroupByID))
 	mux.HandleFunc("/api/admin/pin", s.withAuth(s.handleAdminPin))
+	mux.HandleFunc("/api/admin/chat-history/clear", s.withAuth(s.handleAdminClearChatHistory))
 	mux.HandleFunc("/api/admin/routing-matrix", s.withAuth(s.handleAdminRoutingMatrix))
 	mux.HandleFunc("/api/companion/discovery", s.handleCompanionDiscovery)
 	mux.HandleFunc("/api/companion/ws", s.handleCompanionWS)
@@ -925,6 +926,21 @@ func (s *Server) handleAdminPin(w http.ResponseWriter, r *http.Request, session 
 	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+func (s *Server) handleAdminClearChatHistory(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.hub != nil {
+		s.hub.ClearChatHistory()
+		s.hub.BroadcastChatHistoryCleared()
+	}
+	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func (s *Server) handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 	if s.telegram == nil {
 		http.Error(w, "telegram bot not configured", http.StatusServiceUnavailable)
@@ -1171,6 +1187,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		sendPriority:    make(chan WSOutbound, 128),
 	}
 	s.hub.Add(c)
+	s.hub.SendChatHistorySnapshot(session.Token)
 	if err := s.media.EnsurePeer(session.Token, user); err != nil {
 		s.logger.Error("failed to initialize media peer", "error", err)
 	}
@@ -1237,10 +1254,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			raw, _ := json.Marshal(in.Data)
 			var e RoomMatrixEvent
 			_ = json.Unmarshal(raw, &e)
+			prevListen := s.hub.ListenRoomsForToken(session.Token)
 			allowedListen := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, e.ListenRoomIDs, false)
 			allowedListen = s.mergeForcedListenRooms(r.Context(), session.RoleID, allowedListen)
 			allowedTalk := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, e.TalkRoomIDs, true)
 			s.hub.SetRoomMatrix(session.Token, allowedListen, allowedTalk)
+			newlyListened := addedRooms(prevListen, allowedListen)
+			if len(newlyListened) > 0 {
+				s.hub.SendRoomChatHistory(session.Token, newlyListened)
+			}
 			if mediaReady {
 				s.media.SyncRouting()
 			}
@@ -1423,6 +1445,27 @@ func parseChatPrefix(body string) (rune, string, string, bool) {
 		return 0, "", "", false
 	}
 	return prefix, target, message, true
+}
+
+func addedRooms(previous []string, next []string) []string {
+	prevSet := make(map[string]struct{}, len(previous))
+	for _, roomID := range previous {
+		if roomID == "" {
+			continue
+		}
+		prevSet[roomID] = struct{}{}
+	}
+	added := make([]string, 0, len(next))
+	for _, roomID := range next {
+		if roomID == "" {
+			continue
+		}
+		if _, exists := prevSet[roomID]; exists {
+			continue
+		}
+		added = append(added, roomID)
+	}
+	return added
 }
 
 func (s *Server) resolveRoomTargetID(ctx context.Context, target string) (string, bool) {

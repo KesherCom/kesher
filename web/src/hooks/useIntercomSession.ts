@@ -48,6 +48,7 @@ type NavigatorWithAudioSession = Navigator & {
 type WsMessage =
   | { type: "presence"; data: Presence[] }
   | { type: "chat"; data: RoutedEvent }
+  | { type: "chat_history_cleared"; data: { timestamp?: number } }
   | { type: "signal"; data: RoutedEvent }
   | { type: "voice_state"; data: RoutedEvent }
   | {
@@ -1510,6 +1511,13 @@ export function useIntercomSession({
               ].slice(0, 120),
             );
           }
+        }
+        if (msg.type === "chat_history_cleared") {
+          setChatMessages([]);
+          if (showDebug) {
+            pushDebugEvent("system · chat history cleared");
+          }
+          return;
         }
         const body = (msg.data.signal || msg.data.body || "").toString();
         if (showDebug) {

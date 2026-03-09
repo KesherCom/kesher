@@ -382,3 +382,15 @@ export async function updateRoutingMatrix(
     entries,
   );
 }
+
+export async function clearChatHistory(
+  token: string,
+  adminPin: string,
+): Promise<void> {
+  await apiMutation(
+    "/api/admin/chat-history/clear",
+    token,
+    "POST",
+    adminPin,
+  );
+}

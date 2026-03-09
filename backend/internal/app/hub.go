@@ -33,6 +33,7 @@ type client struct {
 
 const incomingSignalAttentionWindow = 2200 * time.Millisecond
 const presenceBroadcastDebounceBase = 75 * time.Millisecond
+const chatHistoryEntriesPerTarget = 100
 
 type HubRealtimeStats struct {
 	ConnectedClients         int               `json:"connectedClients"`
@@ -89,6 +90,7 @@ type Hub struct {
 	store               *Store
 	logger              *slog.Logger
 	media               *MediaManager
+	chatHistory         *ChatHistory
 	presenceSubscribers map[chan []PresenceState]struct{}
 	chatHook            func(eventType string, e RoutedEvent)
 	presenceCoalesceMu  sync.Mutex
@@ -109,8 +111,115 @@ func NewHub(store *Store, logger *slog.Logger) *Hub {
 		clients:             make(map[string]*client),
 		store:               store,
 		logger:              logger,
+		chatHistory:         NewChatHistory(chatHistoryEntriesPerTarget),
 		presenceSubscribers: make(map[chan []PresenceState]struct{}),
 		droppedByType:       make(map[string]uint64),
+	}
+}
+
+func (h *Hub) ListenRoomsForToken(token string) []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	c, ok := h.clients[token]
+	if !ok {
+		return nil
+	}
+	return roomSetToSortedSlice(c.listenRooms)
+}
+
+func (h *Hub) SendChatHistorySnapshot(token string) int {
+	h.mu.RLock()
+	c, ok := h.clients[token]
+	var userID string
+	var listenRooms []string
+	if ok {
+		userID = c.user.ID
+		listenRooms = roomSetToSortedSlice(c.listenRooms)
+	}
+	h.mu.RUnlock()
+	if !ok || h.chatHistory == nil {
+		return 0
+	}
+	events := h.chatHistory.HistoryForUserAndRooms(userID, listenRooms)
+	for _, event := range events {
+		h.SendToToken(token, WSOutbound{Type: "chat", Data: event})
+	}
+	return len(events)
+}
+
+func (h *Hub) SendRoomChatHistory(token string, roomIDs []string) int {
+	if h.chatHistory == nil {
+		return 0
+	}
+	events := h.chatHistory.HistoryForRooms(roomIDs)
+	for _, event := range events {
+		h.SendToToken(token, WSOutbound{Type: "chat", Data: event})
+	}
+	return len(events)
+}
+
+func (h *Hub) ClearChatHistory() {
+	if h.chatHistory != nil {
+		h.chatHistory.Clear()
+	}
+}
+
+func (h *Hub) BroadcastChatHistoryCleared() {
+	msg := WSOutbound{
+		Type: "chat_history_cleared",
+		Data: map[string]int64{"timestamp": time.Now().UnixMilli()},
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, c := range h.clients {
+		h.enqueueOutbound(c, msg)
+	}
+}
+
+func (h *Hub) roleUserIDs(roleID string) []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	set := make(map[string]struct{})
+	for _, c := range h.clients {
+		if c.session.RoleID != roleID {
+			continue
+		}
+		if c.user.ID == "" {
+			continue
+		}
+		set[c.user.ID] = struct{}{}
+	}
+	ids := make([]string, 0, len(set))
+	for userID := range set {
+		ids = append(ids, userID)
+	}
+	return ids
+}
+
+func (h *Hub) recordChatHistory(sender *client, e RoutedEvent) {
+	if h.chatHistory == nil {
+		return
+	}
+	switch e.Scope {
+	case "room":
+		h.chatHistory.AppendForRoom(e.TargetID, e)
+	case "broadcast":
+		roomIDs, err := h.store.BroadcastGroupRoomIDs(context.Background(), e.TargetID)
+		if err != nil {
+			return
+		}
+		for _, roomID := range roomIDs {
+			h.chatHistory.AppendForRoom(roomID, e)
+		}
+	case "direct":
+		h.chatHistory.AppendForUser(sender.user.ID, e)
+		if e.TargetType == "role" {
+			for _, userID := range h.roleUserIDs(e.TargetID) {
+				h.chatHistory.AppendForUser(userID, e)
+			}
+			return
+		}
+		h.chatHistory.AppendForUser(e.TargetID, e)
 	}
 }
 
@@ -492,6 +601,7 @@ func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
 	}
 
 	if eventType == "chat" {
+		h.recordChatHistory(sender, e)
 		h.mu.RLock()
 		hook := h.chatHook
 		h.mu.RUnlock()
