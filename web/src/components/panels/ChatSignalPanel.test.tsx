@@ -439,4 +439,31 @@ describe("ChatSignalPanel", () => {
       screen.queryByRole("button", { name: "Acknowledge" }),
     ).not.toBeInTheDocument();
   });
+
+  it("renders telegram source icon when source is telegram", () => {
+    render(
+      <ChatSignalPanel
+        message=""
+        onMessageChange={vi.fn()}
+        onSendChat={vi.fn()}
+        onAcknowledge={vi.fn()}
+        chatMessages={[
+          {
+            from: "TelegramUser",
+            fromUserId: "tg1",
+            body: "Hallo aus Telegram",
+            at: "10:12",
+            room: "FOH",
+            self: false,
+            scope: "room",
+            targetId: "foh",
+            source: "telegram",
+          },
+        ]}
+        {...defaultProps}
+      />,
+    );
+
+    expect(screen.getByTitle("Message from Telegram")).toBeVisible();
+  });
 });

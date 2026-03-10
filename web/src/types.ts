@@ -108,6 +108,7 @@ export type RoutedEvent = {
   targetType?: "room" | "user" | "role";
   targetId: string;
   body: string;
+  source?: string;
   signal?: string;
   messageId?: string;
   ackRequired?: boolean;

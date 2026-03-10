@@ -441,6 +441,11 @@ button {
   color: var(--accent-primary);
   text-decoration: underline;
 }
+.chat-feed-source-icon {
+  font-size: 0.75rem;
+  line-height: 1;
+  opacity: 0.72;
+}
 .chat-autocomplete {
   position: absolute;
   left: 0;

@@ -118,6 +118,7 @@ type RoutedEvent struct {
 	TargetType  string `json:"targetType,omitempty"`
 	TargetID    string `json:"targetId"`
 	Body        string `json:"body"`
+	Source      string `json:"source,omitempty"`
 	Signal      string `json:"signal,omitempty"`
 	MessageID   string `json:"messageId,omitempty"`
 	AckRequired bool   `json:"ackRequired,omitempty"`
@@ -198,11 +199,11 @@ type TelegramMapping struct {
 }
 
 type TelegramUserMapping struct {
-	ID              string `json:"id"`
-	TelegramUserID  string `json:"telegramUserId"`
-	Username        string `json:"username"`
-	PrivateChatID   string `json:"privateChatId"`
-	CreatedAt       int64  `json:"createdAt"`
+	ID             string `json:"id"`
+	TelegramUserID string `json:"telegramUserId"`
+	Username       string `json:"username"`
+	PrivateChatID  string `json:"privateChatId"`
+	CreatedAt      int64  `json:"createdAt"`
 }
 
 type TelegramStatusResponse struct {

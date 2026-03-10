@@ -15,6 +15,7 @@ type ChatEntry = {
   acked?: boolean;
   ackedBy?: string;
   ackedAt?: string;
+  source?: string;
 };
 
 type AutocompleteItem = {
@@ -281,6 +282,11 @@ export function ChatSignalPanel({
                   >
                     {entry.from}
                   </button>
+                  {entry.source === "telegram" ? (
+                    <span className="chat-feed-source-icon" title="Message from Telegram">
+                      📱
+                    </span>
+                  ) : null}
                   <span className="chat-feed-room">{entry.room}</span>
                   {showAckOption && entry.self && entry.ackRequired ? (
                     <span

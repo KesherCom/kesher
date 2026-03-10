@@ -1427,6 +1427,9 @@ func (s *Server) routeInbound(ctx context.Context, sender Session, in WSInbound,
 	if e.Scope == "" || e.TargetID == "" {
 		return
 	}
+	if e.Source == "" {
+		e.Source = "web"
+	}
 	if !s.isInboundAllowed(ctx, sender, e) {
 		return
 	}

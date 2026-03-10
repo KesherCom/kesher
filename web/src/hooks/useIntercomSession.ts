@@ -222,6 +222,7 @@ export type UseIntercomSessionResult = {
     acked?: boolean;
     ackedBy?: string;
     ackedAt?: string;
+    source?: string;
   }>;
   events: Array<{ label: string; at: string }>;
   rtpStats: { inKbps: number; outKbps: number };
@@ -327,6 +328,7 @@ export function useIntercomSession({
       acked?: boolean;
       ackedBy?: string;
       ackedAt?: string;
+      source?: string;
     }>
   >([]);
   const [events, setEvents] = useState<Array<{ label: string; at: string }>>(
@@ -1565,6 +1567,7 @@ export function useIntercomSession({
                 ackedAt: msg.data.ackedAt
                   ? new Date(msg.data.ackedAt).toLocaleTimeString()
                   : undefined,
+                source: msg.data.source,
               };
               const stableKey = nextEntry.messageId
                 ? `id:${nextEntry.messageId}`

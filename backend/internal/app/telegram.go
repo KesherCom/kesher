@@ -256,6 +256,7 @@ func (t *TelegramBot) forwardMessageToRoom(ctx context.Context, msg *TelegramMes
 		Scope:     "room",
 		TargetID:  roomID,
 		Body:      msg.Text,
+		Source:    "telegram",
 		FromUser:  fromUser,
 		Timestamp: time.Now().UnixMilli(),
 	}
