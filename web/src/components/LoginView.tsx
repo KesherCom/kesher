@@ -26,6 +26,7 @@ export function LoginView({
   onAdminLogin,
   adminError,
 }: LoginViewProps) {
+  const stripWhitespace = (value: string) => value.replace(/\s+/g, "");
   const [showAdmin, setShowAdmin] = useState(false);
   return (
     <div className="root login">
@@ -39,7 +40,7 @@ export function LoginView({
             <span className="login-label-text">Display name</span>
             <input
               value={username}
-              onChange={(e) => onUsernameChange(e.target.value)}
+              onChange={(e) => onUsernameChange(stripWhitespace(e.target.value))}
               placeholder="e.g. Tim FOH"
             />
           </label>

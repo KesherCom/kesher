@@ -196,10 +196,35 @@ describe("ChatSignalPanel", () => {
     expect(screen.getByText(/👤 @Lukas \[Licht\]/)).toBeVisible();
   });
 
-  it("marks non-web-online users in @-autocomplete", () => {
+  it("excludes non-web-online users from @-autocomplete", () => {
     render(
       <ChatSignalPanel
         message="@"
+        onMessageChange={vi.fn()}
+        onSendChat={vi.fn()}
+        onAcknowledge={vi.fn()}
+        chatMessages={[]}
+        {...defaultProps}
+        activeUsers={[
+          ...defaultProps.activeUsers,
+          {
+            userId: "u3",
+            username: "TelegramOnly",
+            roleId: "audio",
+            roleName: "Audio",
+            isWebOnline: false,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByText(/TelegramOnly/)).not.toBeInTheDocument();
+  });
+
+  it("shows non-web-online users when query is specific", () => {
+    render(
+      <ChatSignalPanel
+        message="@Tel"
         onMessageChange={vi.fn()}
         onSendChat={vi.fn()}
         onAcknowledge={vi.fn()}

@@ -213,7 +213,7 @@ func (t *TelegramBot) processUpdate(update TelegramUpdate) {
 			return
 		}
 		// User not mapped, inform them to use /login
-		t.sendMessage(ctx, chatID, "Not logged in. Use /login <username> to link your Telegram account to Kesher.")
+		t.sendMessage(ctx, chatID, "Not logged in. Use /login to link your Telegram account to Kesher.")
 		return
 	}
 
@@ -358,7 +358,7 @@ func (t *TelegramBot) handleRoomsCommand(ctx context.Context, msg *TelegramMessa
 	// Verify the user is logged in (has a mapping)
 	userMapping, err := t.store.FindTelegramUserMappingByTelegramID(ctx, telegramUserID)
 	if err != nil {
-		t.sendMessage(ctx, chatID, "Not logged in. Use /login <username> to link your Telegram account to Kesher first.")
+		t.sendMessage(ctx, chatID, "Not logged in. Use /login to link your Telegram account to Kesher first.")
 		return
 	}
 
@@ -425,7 +425,7 @@ func (t *TelegramBot) handleOnlineCommand(ctx context.Context, msg *TelegramMess
 	// Verify the user is logged in (has a mapping)
 	_, err := t.store.FindTelegramUserMappingByTelegramID(ctx, telegramUserID)
 	if err != nil {
-		t.sendMessage(ctx, chatID, "Not logged in. Use /login <username> to link your Telegram account to Kesher first.")
+		t.sendMessage(ctx, chatID, "Not logged in. Use /login to link your Telegram account to Kesher first.")
 		return
 	}
 
@@ -476,9 +476,9 @@ func (t *TelegramBot) handleInlineQuery(ctx context.Context, query *TelegramInli
 			Type:        "article",
 			ID:          "not_logged_in",
 			Title:       "Not logged in",
-			Description: "Use /login <username> to link your account first",
+			Description: "Use /login to link your account first",
 			InputMessageContent: TelegramInputMessageContent{
-				MessageText: "Not logged in. Use /login <username> to link your Telegram account to Kesher.",
+				MessageText: "Not logged in. Use /login to link your Telegram account to Kesher.",
 			},
 		}
 		t.answerInlineQuery(ctx, query.ID, []TelegramInlineQueryResultArticle{emptyResult})
@@ -567,70 +567,6 @@ func (t *TelegramBot) handleInlineQuery(ctx context.Context, query *TelegramInli
 		"results", len(results))
 }
 
-// fuzzyMatchClients performs fuzzy matching on active clients based on username and role name.
-// Returns matches sorted by relevance (best matches first).
-func (t *TelegramBot) fuzzyMatchClients(query string, clients []ActiveClient) []ActiveClient {
-	if query == "" {
-		return clients
-	}
-
-	queryLower := strings.ToLower(query)
-	type scoredMatch struct {
-		client ActiveClient
-		score  int
-	}
-	var scored []scoredMatch
-
-	for _, client := range clients {
-		score := 0
-		usernameLower := strings.ToLower(client.Username)
-		roleNameLower := strings.ToLower(client.RoleName)
-
-		// Exact match (highest priority)
-		if usernameLower == queryLower || roleNameLower == queryLower {
-			score = 1000
-		} else if strings.HasPrefix(usernameLower, queryLower) {
-			// Username prefix match
-			score = 500
-		} else if strings.HasPrefix(roleNameLower, queryLower) {
-			// Role name prefix match
-			score = 400
-		} else if strings.Contains(usernameLower, queryLower) {
-			// Username contains query
-			score = 300
-		} else if strings.Contains(roleNameLower, queryLower) {
-			// Role name contains query
-			score = 200
-		} else {
-			// Fuzzy match: count matching characters in order
-			score = fuzzyScore(queryLower, usernameLower)
-			roleScore := fuzzyScore(queryLower, roleNameLower)
-			if roleScore > score {
-				score = roleScore
-			}
-		}
-
-		if score > 0 {
-			scored = append(scored, scoredMatch{client: client, score: score})
-		}
-	}
-
-	// Sort by score (descending) then by username
-	sort.Slice(scored, func(i, j int) bool {
-		if scored[i].score != scored[j].score {
-			return scored[i].score > scored[j].score
-		}
-		return scored[i].client.Username < scored[j].client.Username
-	})
-
-	// Extract clients
-	matches := make([]ActiveClient, len(scored))
-	for i, s := range scored {
-		matches[i] = s.client
-	}
-	return matches
-}
-
 // fuzzyScore calculates a fuzzy matching score between query and target.
 // Returns score based on how many characters from query appear in target in order.
 func fuzzyScore(query, target string) int {
@@ -701,11 +637,39 @@ func parseInlineQueryMode(queryText string) (mode string, targetQuery string, me
 
 func (t *TelegramBot) inlineTargetsForUsersAndRoles(ctx context.Context) []inlineTarget {
 	activeClients := t.hub.GetActiveClients(ctx)
-	targets := make([]inlineTarget, 0, len(activeClients))
+	if len(activeClients) == 0 {
+		return nil
+	}
+
+	entries, err := t.store.ListTelegramAllowlistEntries(ctx)
+	if err != nil {
+		t.logger.Warn("failed to load telegram allowlist for inline targets", "error", err)
+		return nil
+	}
+
+	allowedUsernames := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		username := strings.ToLower(strings.TrimSpace(entry.KesherUsername))
+		if username != "" {
+			allowedUsernames[username] = struct{}{}
+		}
+	}
+	if len(allowedUsernames) == 0 {
+		return nil
+	}
+
+	filteredClients := make([]ActiveClient, 0, len(activeClients))
+	for _, client := range activeClients {
+		if _, ok := allowedUsernames[strings.ToLower(strings.TrimSpace(client.Username))]; ok {
+			filteredClients = append(filteredClients, client)
+		}
+	}
+
+	targets := make([]inlineTarget, 0, len(filteredClients))
 	seenUsers := make(map[string]struct{})
 	seenRoles := make(map[string]struct{})
 
-	for _, c := range activeClients {
+	for _, c := range filteredClients {
 		if c.UserID != "" {
 			if _, ok := seenUsers[c.UserID]; !ok {
 				title := c.Username
@@ -740,27 +704,6 @@ func (t *TelegramBot) inlineTargetsForRooms(ctx context.Context) []inlineTarget 
 		targets = append(targets, inlineTarget{Kind: "room", ID: room.ID, Title: "#" + room.Name, SearchValue: room.Name + " " + room.ID})
 	}
 	return targets
-}
-
-func (t *TelegramBot) inlineDefaultTalkRoomTarget(ctx context.Context, username string) (inlineTarget, bool) {
-	token, ok := t.hub.LatestTokenForUsername(username)
-	if !ok {
-		return inlineTarget{}, false
-	}
-	roomID, ok := t.hub.ActiveTalkRoomForToken(token)
-	if !ok {
-		return inlineTarget{}, false
-	}
-	rooms, err := t.store.ListRooms(ctx)
-	if err != nil {
-		return inlineTarget{Kind: "room", ID: roomID, Title: "#" + roomID, SearchValue: roomID}, true
-	}
-	for _, room := range rooms {
-		if room.ID == roomID {
-			return inlineTarget{Kind: "room", ID: room.ID, Title: "#" + room.Name, SearchValue: room.Name + " " + room.ID}, true
-		}
-	}
-	return inlineTarget{Kind: "room", ID: roomID, Title: "#" + roomID, SearchValue: roomID}, true
 }
 
 func fuzzyMatchInlineTargets(query string, targets []inlineTarget) []inlineTarget {

@@ -183,3 +183,22 @@ func TestBulkUpdateRoomPermissionsRejectsUnknownRole(t *testing.T) {
 		t.Fatalf("expected ErrInvalidInput, got %v", err)
 	}
 }
+
+func TestCreateTelegramAllowlistEntryRejectsWhitespaceNames(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	err = store.CreateTelegramAllowlistEntry(ctx, "a1", "tg user", "validuser")
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput for telegram username with whitespace, got %v", err)
+	}
+
+	err = store.CreateTelegramAllowlistEntry(ctx, "a2", "tg_user", "valid user")
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput for kesher username with whitespace, got %v", err)
+	}
+}

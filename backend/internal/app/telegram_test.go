@@ -322,3 +322,54 @@ func TestTelegramStatusIncludesMode(t *testing.T) {
 		t.Fatalf("expected mode=polling, got %s", status.Mode)
 	}
 }
+
+func TestInlineTargetsForUsersAndRoles_FilteredByAllowlist(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	bot := NewTelegramBot("fake-token", "", "polling", store, hub, logger)
+
+	ctx := context.Background()
+
+	// Two active Kesher clients are connected.
+	hub.Add(&client{
+		session: Session{Token: "tok-alice", UserID: "u-alice", Username: "alice", RoleID: "audio"},
+		user:    User{ID: "u-alice", Username: "alice", RoleID: "audio"},
+	})
+	hub.Add(&client{
+		session: Session{Token: "tok-bob", UserID: "u-bob", Username: "bob", RoleID: "audio"},
+		user:    User{ID: "u-bob", Username: "bob", RoleID: "audio"},
+	})
+
+	// Only alice is allowlisted for Telegram usage.
+	if err := store.CreateTelegramAllowlistEntry(ctx, "allow-1", "tg_alice", "alice"); err != nil {
+		t.Fatalf("failed to create allowlist entry: %v", err)
+	}
+
+	targets := bot.inlineTargetsForUsersAndRoles(ctx)
+	if len(targets) == 0 {
+		t.Fatal("expected at least one inline target")
+	}
+
+	for _, target := range targets {
+		if target.Kind == "user" && target.ID == "u-bob" {
+			t.Fatalf("unexpected non-allowlisted user in inline targets: %+v", target)
+		}
+	}
+
+	var hasAlice bool
+	for _, target := range targets {
+		if target.Kind == "user" && target.ID == "u-alice" {
+			hasAlice = true
+			break
+		}
+	}
+	if !hasAlice {
+		t.Fatal("expected allowlisted user alice in inline targets")
+	}
+}

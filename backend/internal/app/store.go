@@ -19,6 +19,10 @@ var (
 	ErrNotFound     = errors.New("not found")
 )
 
+func hasWhitespace(value string) bool {
+	return strings.ContainsAny(value, " \t\n\r")
+}
+
 const defaultAdminPIN = "123456"
 
 type Store struct {
@@ -533,6 +537,11 @@ func (s *Store) RoleExists(ctx context.Context, roleID string) (bool, error) {
 }
 
 func (s *Store) UpsertUser(ctx context.Context, username, roleID string) (User, error) {
+	username = strings.TrimSpace(username)
+	roleID = strings.TrimSpace(roleID)
+	if username == "" || roleID == "" || hasWhitespace(username) {
+		return User{}, ErrInvalidInput
+	}
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO users (id, username, role_id) VALUES (lower(hex(randomblob(16))), ?, ?)
 	ON CONFLICT(username) DO UPDATE SET role_id = excluded.role_id`, username, roleID); err != nil {
 		return User{}, err
@@ -1416,23 +1425,6 @@ func (s *Store) FindTelegramMappingByChatID(ctx context.Context, chatID string) 
 	return m, err
 }
 
-func (s *Store) FindTelegramMappingsByRoomID(ctx context.Context, roomID string) ([]TelegramMapping, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, chat_id, label, room_id FROM telegram_mappings WHERE room_id = ?`, roomID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var mappings []TelegramMapping
-	for rows.Next() {
-		var m TelegramMapping
-		if err := rows.Scan(&m.ID, &m.ChatID, &m.Label, &m.RoomID); err != nil {
-			return nil, err
-		}
-		mappings = append(mappings, m)
-	}
-	return mappings, nil
-}
-
 // Telegram user mapping operations (linking Telegram users to Kesher identities)
 
 func (s *Store) CreateTelegramUserMapping(ctx context.Context, id, telegramUserID, username, privateChatID string) error {
@@ -1484,45 +1476,6 @@ func (s *Store) UpdateTelegramUserMapping(ctx context.Context, id, username stri
 		return ErrNotFound
 	}
 	return nil
-}
-
-func (s *Store) DeleteTelegramUserMapping(ctx context.Context, id string) error {
-	if strings.TrimSpace(id) == "" {
-		return ErrInvalidInput
-	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM telegram_user_mappings WHERE id = ?`, id)
-	if err != nil {
-		return err
-	}
-	if affected, err := res.RowsAffected(); err != nil {
-		return err
-	} else if affected == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (s *Store) FindTelegramChatIDForTelegramUser(ctx context.Context, telegramUserID string) (string, error) {
-	var chatID string
-	err := s.db.QueryRowContext(ctx, `SELECT private_chat_id FROM telegram_user_mappings WHERE telegram_user_id = ?`, telegramUserID).Scan(&chatID)
-	return chatID, err
-}
-
-func (s *Store) ListTelegramUserMappings(ctx context.Context) ([]TelegramUserMapping, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, telegram_user_id, username, private_chat_id, created_at FROM telegram_user_mappings ORDER BY username`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var mappings []TelegramUserMapping
-	for rows.Next() {
-		var m TelegramUserMapping
-		if err := rows.Scan(&m.ID, &m.TelegramUserID, &m.Username, &m.PrivateChatID, &m.CreatedAt); err != nil {
-			return nil, err
-		}
-		mappings = append(mappings, m)
-	}
-	return mappings, nil
 }
 
 // GetTelegramUserRoomSubscriptions returns all room IDs that a telegram user is subscribed to.
@@ -1600,7 +1553,7 @@ func (s *Store) GetSubscribedTelegramUsersForRoom(ctx context.Context, roomID st
 func (s *Store) CreateTelegramAllowlistEntry(ctx context.Context, id, telegramUsername, kesherUsername string) error {
 	telegramUsername = strings.TrimSpace(telegramUsername)
 	kesherUsername = strings.TrimSpace(kesherUsername)
-	if id == "" || telegramUsername == "" || kesherUsername == "" {
+	if id == "" || telegramUsername == "" || kesherUsername == "" || hasWhitespace(telegramUsername) || hasWhitespace(kesherUsername) {
 		return ErrInvalidInput
 	}
 	// Remove @ prefix if present

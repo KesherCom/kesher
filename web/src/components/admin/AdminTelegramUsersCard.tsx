@@ -16,6 +16,8 @@ export function AdminTelegramUsersCard({
   token,
   adminPin,
 }: AdminTelegramUsersCardProps) {
+  const containsWhitespace = (value: string) => /\s/.test(value);
+  const stripWhitespace = (value: string) => value.replace(/\s+/g, "");
   const [isOpen, setIsOpen] = useState(false);
   const [entries, setEntries] = useState<TelegramAllowlistEntry[]>([]);
   const {
@@ -30,6 +32,7 @@ export function AdminTelegramUsersCard({
   const [createTelegramUsername, setCreateTelegramUsername] = useState("");
   const [createKesherUsername, setCreateKesherUsername] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createValidationError, setCreateValidationError] = useState("");
 
   async function loadAllowlist() {
     try {
@@ -50,12 +53,18 @@ export function AdminTelegramUsersCard({
   function resetCreateForm() {
     setCreateTelegramUsername("");
     setCreateKesherUsername("");
+    setCreateValidationError("");
   }
 
   function handleCreate() {
     const telegramUsername = createTelegramUsername.trim();
     const kesherUsername = createKesherUsername.trim();
     if (!telegramUsername || !kesherUsername) return;
+    if (containsWhitespace(telegramUsername) || containsWhitespace(kesherUsername)) {
+      setCreateValidationError("Usernames must not contain spaces.");
+      return;
+    }
+    setCreateValidationError("");
     void runAction(async () => {
       await createTelegramAllowlistEntry(token, adminPin, {
         telegramUsername,
@@ -118,22 +127,33 @@ export function AdminTelegramUsersCard({
                 <div className="admin-grid">
                   <input
                     value={createTelegramUsername}
-                    onChange={(e) => setCreateTelegramUsername(e.target.value)}
+                    onChange={(e) => {
+                      setCreateTelegramUsername(stripWhitespace(e.target.value));
+                      setCreateValidationError("");
+                    }}
                     placeholder="Telegram @username"
                   />
                   <input
                     value={createKesherUsername}
-                    onChange={(e) => setCreateKesherUsername(e.target.value)}
+                    onChange={(e) => {
+                      setCreateKesherUsername(stripWhitespace(e.target.value));
+                      setCreateValidationError("");
+                    }}
                     placeholder="Kesher username (e.g., Sarah)"
                   />
                 </div>
+                {createValidationError ? (
+                  <p className="admin-error">{createValidationError}</p>
+                ) : null}
                 <div className="admin-form-actions">
                   <button
                     onClick={handleCreate}
                     disabled={
                       busy ||
                       !createTelegramUsername.trim() ||
-                      !createKesherUsername.trim()
+                      !createKesherUsername.trim() ||
+                      containsWhitespace(createTelegramUsername.trim()) ||
+                      containsWhitespace(createKesherUsername.trim())
                     }
                   >
                     Add user

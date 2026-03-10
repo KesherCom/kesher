@@ -244,6 +244,22 @@ func TestServerHandleLoginSuccess(t *testing.T) {
 	}
 }
 
+func TestServerHandleLoginRejectsWhitespaceInUsername(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute)}
+	body := bytes.NewBufferString("{\"username\":\"tim test\",\"roleId\":\"audio\"}")
+	req := httptest.NewRequest(http.MethodPost, "/api/login", body)
+	rec := httptest.NewRecorder()
+	s.handleLogin(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
 func TestServerHandlePublicBootstrapMethodNotAllowed(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {

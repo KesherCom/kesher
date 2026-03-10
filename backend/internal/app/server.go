@@ -595,6 +595,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "username and roleId required", http.StatusBadRequest)
 		return
 	}
+	if strings.ContainsAny(req.Username, " \t\n\r") {
+		http.Error(w, "username must not contain whitespace", http.StatusBadRequest)
+		return
+	}
 	ok, err := s.store.RoleExists(r.Context(), req.RoleID)
 	if err != nil {
 		s.internalErr(w, err)
@@ -606,6 +610,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := s.store.UpsertUser(r.Context(), req.Username, req.RoleID)
 	if err != nil {
+		if errors.Is(err, ErrInvalidInput) {
+			http.Error(w, "username must not contain whitespace", http.StatusBadRequest)
+			return
+		}
 		s.internalErr(w, err)
 		return
 	}
@@ -1149,6 +1157,9 @@ func (s *Server) handleAdminTelegramUsers(w http.ResponseWriter, r *http.Request
 		// Automatically create or upsert the Kesher user with the default role
 		_, err = s.store.UpsertUser(r.Context(), req.KesherUsername, defaultRoleID)
 		if err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
 			s.internalErr(w, fmt.Errorf("failed to create kesher user: %w", err))
 			return
 		}

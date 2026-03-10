@@ -100,17 +100,35 @@ export function ChatSignalPanel({
       return [] as AutocompleteItem[];
     }
 
+    // Keep the initial @ list focused on online users, but allow finding
+    // external/telegram users once a specific query is typed.
+    const onlineUsers = activeUsers.filter((u) => u.isWebOnline !== false);
+    const externalUsers = activeUsers.filter((u) => u.isWebOnline === false);
+
     if (context.trigger === "@") {
-      // Build user suggestions (online users)
-      const userItems = activeUsers
+      // Build user suggestions (online users only)
+      const userItems = onlineUsers
         .filter((u) => u.username.toLowerCase().includes(context.query))
         .map((u) => ({
           key: `user:${u.userId}`,
-          label: `👤 @${u.username} [${u.roleName}]${u.isWebOnline === false ? " (Telegram/extern)" : ""}`,
-          displayLabel: `@${u.username} [${u.roleName}]${u.isWebOnline === false ? " (Telegram/extern)" : ""}`,
+          label: `👤 @${u.username} [${u.roleName}]`,
+          displayLabel: `@${u.username} [${u.roleName}]`,
           insertText: `@${u.username} `,
           type: "user" as const,
         }));
+
+      const externalUserItems =
+        context.query.length >= 2
+          ? externalUsers
+              .filter((u) => u.username.toLowerCase().includes(context.query))
+              .map((u) => ({
+                key: `external-user:${u.userId}`,
+                label: `👤 @${u.username} [${u.roleName}] (Telegram/extern)`,
+                displayLabel: `@${u.username} [${u.roleName}] (Telegram/extern)`,
+                insertText: `@${u.username} `,
+                type: "user" as const,
+              }))
+          : [];
 
       // Build role suggestions with current occupant or "Unbesetzt"
       const roleItems = roles
@@ -120,7 +138,7 @@ export function ChatSignalPanel({
             r.id.toLowerCase().includes(context.query),
         )
         .map((r) => {
-          const occupant = activeUsers.find((u) => u.roleId === r.id);
+          const occupant = onlineUsers.find((u) => u.roleId === r.id);
           const occupantText = occupant
             ? `Aktuell: ${occupant.username}`
             : "Unbesetzt";
@@ -133,7 +151,7 @@ export function ChatSignalPanel({
           };
         });
 
-      return [...userItems, ...roleItems].slice(0, 8);
+      return [...userItems, ...externalUserItems, ...roleItems].slice(0, 8);
     }
 
     // # trigger: rooms/partylines
