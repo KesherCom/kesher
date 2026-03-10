@@ -138,16 +138,30 @@ func (t *TelegramBot) getUpdates(ctx context.Context, client *http.Client, offse
 
 // processUpdate handles a single Telegram update (used by both polling and webhook).
 func (t *TelegramBot) processUpdate(update TelegramUpdate) {
+	ctx := context.Background()
+
+	// Handle callback queries (button clicks)
+	if update.CallbackQuery != nil {
+		t.handleCallbackQuery(ctx, update.CallbackQuery)
+		return
+	}
+
+	// Handle messages
 	if update.Message == nil || strings.TrimSpace(update.Message.Text) == "" {
 		return
 	}
 
 	chatID := strconv.FormatInt(update.Message.Chat.ID, 10)
-	ctx := context.Background()
 
 	// Check if this is a login command in a private chat
 	if update.Message.Chat.Type == "private" && strings.HasPrefix(strings.TrimSpace(update.Message.Text), "/login") {
 		t.handleLoginCommand(ctx, update.Message, chatID)
+		return
+	}
+
+	// Check if this is a rooms command in a private chat
+	if update.Message.Chat.Type == "private" && strings.HasPrefix(strings.TrimSpace(update.Message.Text), "/rooms") {
+		t.handleRoomsCommand(ctx, update.Message, chatID)
 		return
 	}
 
@@ -225,6 +239,153 @@ func (t *TelegramBot) handleLoginCommand(ctx context.Context, msg *TelegramMessa
 		}
 		t.logger.Info("telegram user mapped", "telegramUserID", telegramUserID, "username", username)
 		t.sendMessage(ctx, chatID, fmt.Sprintf("Successfully logged in as %s. You can now receive direct messages.", username))
+	}
+}
+
+// handleRoomsCommand processes the /rooms command in private chats.
+// It displays an inline keyboard with all available rooms and their subscription status.
+func (t *TelegramBot) handleRoomsCommand(ctx context.Context, msg *TelegramMessage, chatID string) {
+	if msg.From == nil {
+		return
+	}
+
+	telegramUserID := strconv.FormatInt(msg.From.ID, 10)
+
+	// Verify the user is logged in (has a mapping)
+	userMapping, err := t.store.FindTelegramUserMappingByTelegramID(ctx, telegramUserID)
+	if err != nil {
+		t.sendMessage(ctx, chatID, "Not logged in. Use /login <username> to link your Telegram account to Kesher first.")
+		return
+	}
+
+	// Get all available rooms
+	rooms, err := t.store.ListRooms(ctx)
+	if err != nil {
+		t.logger.Warn("failed to list rooms", "error", err)
+		t.sendMessage(ctx, chatID, "Error loading rooms. Please try again.")
+		return
+	}
+
+	if len(rooms) == 0 {
+		t.sendMessage(ctx, chatID, "No rooms available.")
+		return
+	}
+
+	// Get the user's current subscriptions
+	subscribedRoomIDs, err := t.store.GetTelegramUserRoomSubscriptions(ctx, telegramUserID)
+	if err != nil {
+		t.logger.Warn("failed to get room subscriptions", "error", err)
+		t.sendMessage(ctx, chatID, "Error loading subscriptions. Please try again.")
+		return
+	}
+
+	// Create a set for quick lookup
+	subscribedSet := make(map[string]bool)
+	for _, roomID := range subscribedRoomIDs {
+		subscribedSet[roomID] = true
+	}
+
+	// Build inline keyboard
+	var keyboard [][]TelegramInlineKeyboardButton
+	for _, room := range rooms {
+		icon := "🔴" // Not subscribed
+		if subscribedSet[room.ID] {
+			icon = "🟢" // Subscribed
+		}
+		buttonText := fmt.Sprintf("%s #%s", icon, room.Name)
+		button := TelegramInlineKeyboardButton{
+			Text:         buttonText,
+			CallbackData: fmt.Sprintf("toggle_room:%s", room.ID),
+		}
+		// Add one button per row for better readability
+		keyboard = append(keyboard, []TelegramInlineKeyboardButton{button})
+	}
+
+	// Send the message with inline keyboard
+	text := fmt.Sprintf("Room subscriptions for %s:\n\n🟢 = Listening\n🔴 = Not listening\n\nTap a room to toggle:", userMapping.Username)
+	if err := t.sendMessageWithKeyboard(ctx, chatID, text, keyboard); err != nil {
+		t.logger.Warn("failed to send rooms keyboard", "error", err)
+		t.sendMessage(ctx, chatID, "Error displaying rooms. Please try again.")
+	}
+}
+
+// handleCallbackQuery processes callback queries from inline keyboard buttons.
+func (t *TelegramBot) handleCallbackQuery(ctx context.Context, query *TelegramCallbackQuery) {
+	// Answer the callback query immediately to remove the loading indicator
+	if err := t.answerCallbackQuery(ctx, query.ID); err != nil {
+		t.logger.Warn("failed to answer callback query", "error", err)
+	}
+
+	if query.From == nil || query.Message == nil {
+		return
+	}
+
+	telegramUserID := strconv.FormatInt(query.From.ID, 10)
+	chatID := strconv.FormatInt(query.Message.Chat.ID, 10)
+
+	// Verify the user is logged in
+	userMapping, err := t.store.FindTelegramUserMappingByTelegramID(ctx, telegramUserID)
+	if err != nil {
+		t.logger.Warn("callback from unmapped telegram user", "telegramUserID", telegramUserID)
+		return
+	}
+
+	// Parse the callback data (format: "toggle_room:room_id")
+	if !strings.HasPrefix(query.Data, "toggle_room:") {
+		t.logger.Warn("unknown callback data format", "data", query.Data)
+		return
+	}
+
+	roomID := strings.TrimPrefix(query.Data, "toggle_room:")
+
+	// Toggle the subscription
+	isSubscribed, err := t.store.ToggleTelegramUserRoomSubscription(ctx, telegramUserID, roomID)
+	if err != nil {
+		t.logger.Warn("failed to toggle room subscription", "error", err, "telegramUserID", telegramUserID, "roomID", roomID)
+		return
+	}
+
+	action := "unsubscribed from"
+	if isSubscribed {
+		action = "subscribed to"
+	}
+	t.logger.Info("telegram user toggled room subscription", "username", userMapping.Username, "roomID", roomID, "action", action)
+
+	// Rebuild the keyboard with updated subscription states
+	rooms, err := t.store.ListRooms(ctx)
+	if err != nil {
+		t.logger.Warn("failed to list rooms for keyboard update", "error", err)
+		return
+	}
+
+	subscribedRoomIDs, err := t.store.GetTelegramUserRoomSubscriptions(ctx, telegramUserID)
+	if err != nil {
+		t.logger.Warn("failed to get room subscriptions for keyboard update", "error", err)
+		return
+	}
+
+	subscribedSet := make(map[string]bool)
+	for _, id := range subscribedRoomIDs {
+		subscribedSet[id] = true
+	}
+
+	var keyboard [][]TelegramInlineKeyboardButton
+	for _, room := range rooms {
+		icon := "🔴"
+		if subscribedSet[room.ID] {
+			icon = "🟢"
+		}
+		buttonText := fmt.Sprintf("%s #%s", icon, room.Name)
+		button := TelegramInlineKeyboardButton{
+			Text:         buttonText,
+			CallbackData: fmt.Sprintf("toggle_room:%s", room.ID),
+		}
+		keyboard = append(keyboard, []TelegramInlineKeyboardButton{button})
+	}
+
+	// Update the original message's keyboard
+	if err := t.editMessageReplyMarkup(ctx, chatID, query.Message.MessageID, keyboard); err != nil {
+		t.logger.Warn("failed to update keyboard", "error", err)
 	}
 }
 
@@ -368,6 +529,101 @@ func (t *TelegramBot) sendMessage(ctx context.Context, chatID, text string) erro
 	payload := map[string]string{
 		"chat_id": chatID,
 		"text":    text,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("telegram API error %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+func (t *TelegramBot) sendMessageWithKeyboard(ctx context.Context, chatID, text string, keyboard [][]TelegramInlineKeyboardButton) error {
+	if t.token == "" {
+		return fmt.Errorf("telegram bot token not configured")
+	}
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", t.token)
+	payload := map[string]interface{}{
+		"chat_id": chatID,
+		"text":    text,
+		"reply_markup": TelegramInlineKeyboardMarkup{
+			InlineKeyboard: keyboard,
+		},
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("telegram API error %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+func (t *TelegramBot) editMessageReplyMarkup(ctx context.Context, chatID string, messageID int64, keyboard [][]TelegramInlineKeyboardButton) error {
+	if t.token == "" {
+		return fmt.Errorf("telegram bot token not configured")
+	}
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/editMessageReplyMarkup", t.token)
+	payload := map[string]interface{}{
+		"chat_id":    chatID,
+		"message_id": messageID,
+		"reply_markup": TelegramInlineKeyboardMarkup{
+			InlineKeyboard: keyboard,
+		},
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("telegram API error %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+func (t *TelegramBot) answerCallbackQuery(ctx context.Context, callbackQueryID string) error {
+	if t.token == "" {
+		return fmt.Errorf("telegram bot token not configured")
+	}
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/answerCallbackQuery", t.token)
+	payload := map[string]string{
+		"callback_query_id": callbackQueryID,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {

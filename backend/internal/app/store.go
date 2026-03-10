@@ -406,6 +406,14 @@ func (s *Store) migrate(ctx context.Context) error {
 	)`); err != nil {
 		return err
 	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS telegram_user_room_subscriptions (
+		telegram_user_id TEXT NOT NULL,
+		room_id TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		PRIMARY KEY (telegram_user_id, room_id)
+	)`); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1506,4 +1514,57 @@ func (s *Store) ListTelegramUserMappings(ctx context.Context) ([]TelegramUserMap
 		mappings = append(mappings, m)
 	}
 	return mappings, nil
+}
+
+// GetTelegramUserRoomSubscriptions returns all room IDs that a telegram user is subscribed to.
+func (s *Store) GetTelegramUserRoomSubscriptions(ctx context.Context, telegramUserID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT room_id FROM telegram_user_room_subscriptions WHERE telegram_user_id = ?`, telegramUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var roomIDs []string
+	for rows.Next() {
+		var roomID string
+		if err := rows.Scan(&roomID); err != nil {
+			return nil, err
+		}
+		roomIDs = append(roomIDs, roomID)
+	}
+	return roomIDs, nil
+}
+
+// IsTelegramUserSubscribedToRoom checks if a telegram user is subscribed to a specific room.
+func (s *Store) IsTelegramUserSubscribedToRoom(ctx context.Context, telegramUserID, roomID string) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM telegram_user_room_subscriptions WHERE telegram_user_id = ? AND room_id = ?`, telegramUserID, roomID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// ToggleTelegramUserRoomSubscription toggles the subscription status (subscribe if not subscribed, unsubscribe if subscribed).
+// Returns the new subscription status (true if subscribed, false if unsubscribed).
+func (s *Store) ToggleTelegramUserRoomSubscription(ctx context.Context, telegramUserID, roomID string) (bool, error) {
+	isSubscribed, err := s.IsTelegramUserSubscribedToRoom(ctx, telegramUserID, roomID)
+	if err != nil {
+		return false, err
+	}
+
+	if isSubscribed {
+		// Unsubscribe
+		_, err := s.db.ExecContext(ctx, `DELETE FROM telegram_user_room_subscriptions WHERE telegram_user_id = ? AND room_id = ?`, telegramUserID, roomID)
+		if err != nil {
+			return false, err
+		}
+		return false, nil
+	} else {
+		// Subscribe
+		_, err := s.db.ExecContext(ctx, `INSERT INTO telegram_user_room_subscriptions (telegram_user_id, room_id, created_at) VALUES (?, ?, ?)`, telegramUserID, roomID, time.Now().Unix())
+		if err != nil {
+			return false, err
+		}
+		return true, nil
+	}
 }

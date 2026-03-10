@@ -213,8 +213,9 @@ type TelegramStatusResponse struct {
 }
 
 type TelegramUpdate struct {
-	UpdateID int64            `json:"update_id"`
-	Message  *TelegramMessage `json:"message,omitempty"`
+	UpdateID      int64                  `json:"update_id"`
+	Message       *TelegramMessage       `json:"message,omitempty"`
+	CallbackQuery *TelegramCallbackQuery `json:"callback_query,omitempty"`
 }
 
 type TelegramMessage struct {
@@ -233,4 +234,20 @@ type TelegramUser struct {
 type TelegramChat struct {
 	ID   int64  `json:"id"`
 	Type string `json:"type"`
+}
+
+type TelegramCallbackQuery struct {
+	ID      string           `json:"id"`
+	From    *TelegramUser    `json:"from"`
+	Message *TelegramMessage `json:"message,omitempty"`
+	Data    string           `json:"data"`
+}
+
+type TelegramInlineKeyboardMarkup struct {
+	InlineKeyboard [][]TelegramInlineKeyboardButton `json:"inline_keyboard"`
+}
+
+type TelegramInlineKeyboardButton struct {
+	Text         string `json:"text"`
+	CallbackData string `json:"callback_data"`
 }
