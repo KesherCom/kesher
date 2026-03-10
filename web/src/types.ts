@@ -58,6 +58,17 @@ export type TelegramStatus = {
   mode: "polling" | "webhook" | "";
   mappings: TelegramMapping[];
 };
+
+export type TelegramAllowlistEntry = {
+  id: string;
+  telegramUsername: string;
+  telegramNumericId?: string;
+  kesherUsername: string;
+  createdAt: number;
+  status: string;
+  isBound: boolean;
+};
+
 export type HubRealtimeStats = {
   connectedClients: number;
   normalQueueDepthTotal: number;

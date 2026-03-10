@@ -3,6 +3,7 @@ import type {
   PublicBootstrap,
   RealtimeStatsResponse,
   StatusResponse,
+  TelegramAllowlistEntry,
   TelegramStatus,
   User,
 } from "./types";
@@ -348,6 +349,47 @@ export async function deleteTelegramMapping(
 ): Promise<void> {
   await apiMutation(
     `/api/admin/telegram/${encodeURIComponent(id)}`,
+    token,
+    "DELETE",
+    adminPin,
+  );
+}
+
+export async function getTelegramAllowlist(
+  token: string,
+  adminPin: string,
+): Promise<TelegramAllowlistEntry[]> {
+  const res = await fetch("/api/admin/telegram-users", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+    },
+  });
+  if (!res.ok) throw new Error("failed to load telegram allowlist");
+  return res.json() as Promise<TelegramAllowlistEntry[]>;
+}
+
+export async function createTelegramAllowlistEntry(
+  token: string,
+  adminPin: string,
+  payload: { telegramUsername: string; kesherUsername: string },
+): Promise<void> {
+  await apiMutation(
+    "/api/admin/telegram-users",
+    token,
+    "POST",
+    adminPin,
+    payload,
+  );
+}
+
+export async function deleteTelegramAllowlistEntry(
+  token: string,
+  adminPin: string,
+  id: string,
+): Promise<void> {
+  await apiMutation(
+    `/api/admin/telegram-users/${encodeURIComponent(id)}`,
     token,
     "DELETE",
     adminPin,

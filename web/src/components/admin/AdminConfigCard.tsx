@@ -4,6 +4,7 @@ import { AdminRoomsCard } from "./AdminRoomsCard";
 import { AdminChannelsCard } from "./AdminChannelsCard";
 import { AdminUsersCard } from "./AdminUsersCard";
 import { AdminTelegramCard } from "./AdminTelegramCard";
+import { AdminTelegramUsersCard } from "./AdminTelegramUsersCard";
 import { AdminRoutingMatrixCard } from "./AdminRoutingMatrixCard";
 import { AdminChatHistoryCard } from "./AdminChatHistoryCard";
 
@@ -45,6 +46,8 @@ export function AdminConfigCard({
         refreshBootstrapData={refreshBootstrapData}
       />
       <AdminTelegramCard token={token} adminPin={adminPin} appData={appData} />
+
+      <AdminTelegramUsersCard token={token} adminPin={adminPin} />
 
       <AdminChatHistoryCard
         token={token}

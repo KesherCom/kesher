@@ -141,6 +141,32 @@ func (t *TelegramBot) getUpdates(ctx context.Context, client *http.Client, offse
 func (t *TelegramBot) processUpdate(update TelegramUpdate) {
 	ctx := context.Background()
 
+	// Security: Check if user is on allowlist before processing any updates
+	// Extract the sender from the update
+	var sender *TelegramUser
+	if update.Message != nil && update.Message.From != nil {
+		sender = update.Message.From
+	} else if update.CallbackQuery != nil && update.CallbackQuery.From != nil {
+		sender = update.CallbackQuery.From
+	} else if update.InlineQuery != nil && update.InlineQuery.From != nil {
+		sender = update.InlineQuery.From
+	}
+
+	// If we can identify a sender, enforce allowlist
+	if sender != nil {
+		allowed, chatID := t.checkTelegramUserAllowed(ctx, sender)
+		if !allowed {
+			// Silently reject or send generic access denied message
+			if chatID != "" {
+				t.sendMessage(ctx, chatID, "🚫 Access Denied. Contact the system administrator.")
+			}
+			t.logger.Warn("telegram access denied: user not on allowlist",
+				"telegramUsername", sender.Username,
+				"telegramUserID", sender.ID)
+			return
+		}
+	}
+
 	// Handle inline queries (autocomplete for @bot <query>)
 	if update.InlineQuery != nil {
 		t.handleInlineQuery(ctx, update.InlineQuery)
@@ -200,58 +226,123 @@ func (t *TelegramBot) processUpdate(update TelegramUpdate) {
 	t.forwardMessageToRoom(ctx, update.Message, chatID, mapping.RoomID)
 }
 
-// handleLoginCommand processes the /login <username> command in private chats.
+// checkTelegramUserAllowed verifies if a Telegram user is on the allowlist and implements TOFU (Trust On First Use).
+// Returns (allowed, chatID) where chatID is the private chat ID for sending error messages.
+func (t *TelegramBot) checkTelegramUserAllowed(ctx context.Context, user *TelegramUser) (bool, string) {
+	numericID := strconv.FormatInt(user.ID, 10)
+	username := user.Username
+
+	// Try to find by numeric ID first (fast path for already bound users)
+	entry, err := t.store.FindTelegramAllowlistEntryByNumericID(ctx, numericID)
+	if err == nil {
+		// User is bound and allowed
+		return true, ""
+	}
+
+	// Try to find by username (case-insensitive)
+	if username != "" {
+		entry, err = t.store.FindTelegramAllowlistEntryByUsername(ctx, username)
+		if err == nil {
+			// User is on allowlist but not yet bound
+			// Implement TOFU: bind the numeric ID now
+			if entry.TelegramNumericID == "" {
+				err = t.store.BindTelegramAllowlistEntryNumericID(ctx, username, numericID)
+				if err != nil {
+					t.logger.Warn("failed to bind telegram numeric ID (TOFU)", "username", username, "numericID", numericID, "error", err)
+					// Continue anyway - user is still on allowlist
+				} else {
+					t.logger.Info("telegram numeric ID bound (TOFU)", "username", username, "numericID", numericID)
+				}
+			}
+			return true, ""
+		}
+	}
+
+	// User not on allowlist
+	// If this is a private chat, return the chat ID for sending error message
+	chatID := ""
+	// Note: we don't have update.Message here, so caller must handle message sending
+	return false, chatID
+}
+
+// handleLoginCommand processes the /login command in private chats.
+// Automatically maps the user via Telegram username/ID to their pre-approved Kesher username.
+// No username argument needed - just /login
 func (t *TelegramBot) handleLoginCommand(ctx context.Context, msg *TelegramMessage, chatID string) {
 	if msg.From == nil {
 		return
 	}
 
-	parts := strings.Fields(strings.TrimSpace(msg.Text))
-	if len(parts) < 2 {
-		t.sendMessage(ctx, chatID, "Usage: /login <username>")
-		return
-	}
-
-	username := parts[1]
-
-	// Verify the username exists in Kesher
-	_, err := t.store.FindUserByUsername(ctx, username)
-	if err != nil {
-		t.logger.Warn("login attempt with non-existent user", "username", username)
-		t.sendMessage(ctx, chatID, fmt.Sprintf("User '%s' not found.", username))
-		return
-	}
-
-	// Create or update the mapping
 	telegramUserID := strconv.FormatInt(msg.From.ID, 10)
+	telegramUsername := msg.From.Username
+
+	if telegramUsername == "" {
+		t.sendMessage(ctx, chatID, "❌ Your Telegram account must have a username (@username) to login.")
+		return
+	}
+
+	// Step 1: Check if user is on the allowlist
+	allowlistEntry, err := t.store.FindTelegramAllowlistEntryByUsername(ctx, telegramUsername)
+	if err != nil {
+		t.logger.Warn("login attempt by non-allowlisted user",
+			"telegramUsername", telegramUsername,
+			"telegramUserID", telegramUserID)
+		t.sendMessage(ctx, chatID, "❌ Your Telegram account is not approved to use this bot. Contact the administrator.")
+		return
+	}
+
+	kesherUsername := allowlistEntry.KesherUsername
+
+	// Step 2: Verify the mapped Kesher username exists
+	_, err = t.store.FindUserByUsername(ctx, kesherUsername)
+	if err != nil {
+		t.logger.Warn("allowlisted user mapped to non-existent kesher user",
+			"telegramUsername", telegramUsername,
+			"kesherUsername", kesherUsername)
+		t.sendMessage(ctx, chatID, fmt.Sprintf("⚠️ Your approved account '%s' does not exist. Contact the administrator.", kesherUsername))
+		return
+	}
+
+	// Step 3: Perform TOFU binding if this is the first login (numeric ID not yet bound)
+	if !allowlistEntry.IsBound {
+		err = t.store.BindTelegramAllowlistEntryNumericID(ctx, telegramUsername, telegramUserID)
+		if err != nil && err != ErrNotFound {
+			t.logger.Warn("failed to bind telegram numeric ID (TOFU)", "error", err)
+			// Continue anyway - user is still on allowlist
+		} else if err == nil {
+			t.logger.Info("telegram numeric ID bound (TOFU)", "username", telegramUsername, "numericID", telegramUserID)
+		}
+	}
+
+	// Step 4: Create or update the Kesher session mapping
 	mappingID := fmt.Sprintf("telegram_user_%s", telegramUserID)
 
 	// Try to find existing mapping
 	existing, err := t.store.FindTelegramUserMappingByTelegramID(ctx, telegramUserID)
 	if err == nil {
 		// Update existing mapping
-		err := t.store.UpdateTelegramUserMapping(ctx, existing.ID, username)
+		err := t.store.UpdateTelegramUserMapping(ctx, existing.ID, kesherUsername)
 		if err != nil {
 			t.logger.Warn("failed to update telegram user mapping", "error", err)
 			t.sendMessage(ctx, chatID, "Error updating mapping. Please try again.")
 			return
 		}
-		t.logger.Info("telegram user remapped", "telegramUserID", telegramUserID, "username", username)
-		t.sendMessage(ctx, chatID, fmt.Sprintf("Account updated: you are now logged in as %s", username))
+		t.logger.Info("telegram user remapped", "telegramUserID", telegramUserID, "username", kesherUsername)
+		t.sendMessage(ctx, chatID, fmt.Sprintf("✓ Welcome back! Logged in as %s", kesherUsername))
 	} else {
 		// Create new mapping with the private chat ID
-		err := t.store.CreateTelegramUserMapping(ctx, mappingID, telegramUserID, username, chatID)
+		err := t.store.CreateTelegramUserMapping(ctx, mappingID, telegramUserID, kesherUsername, chatID)
 		if err != nil {
 			if err == ErrConflict {
-				t.sendMessage(ctx, chatID, "This Telegram account is already linked to another Kesher user.")
+				t.sendMessage(ctx, chatID, "❌ This Telegram account is already linked to another Kesher user.")
 			} else {
 				t.logger.Warn("failed to create telegram user mapping", "error", err)
 				t.sendMessage(ctx, chatID, "Error creating mapping. Please try again.")
 			}
 			return
 		}
-		t.logger.Info("telegram user mapped", "telegramUserID", telegramUserID, "username", username)
-		t.sendMessage(ctx, chatID, fmt.Sprintf("Successfully logged in as %s. You can now receive direct messages.", username))
+		t.logger.Info("telegram user mapped", "telegramUserID", telegramUserID, "username", kesherUsername)
+		t.sendMessage(ctx, chatID, fmt.Sprintf("✓ Successfully logged in as %s. You can now receive direct messages.", kesherUsername))
 	}
 }
 

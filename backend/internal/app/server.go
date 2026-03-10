@@ -420,6 +420,8 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/telegram/webhook", s.handleTelegramWebhook)
 	mux.HandleFunc("/api/admin/telegram", s.withAuth(s.handleAdminTelegram))
 	mux.HandleFunc("/api/admin/telegram/", s.withAuth(s.handleAdminTelegramByID))
+	mux.HandleFunc("/api/admin/telegram-users", s.withAuth(s.handleAdminTelegramUsers))
+	mux.HandleFunc("/api/admin/telegram-users/", s.withAuth(s.handleAdminTelegramUserByID))
 	mux.HandleFunc("/api/realtime-stats", s.withAuth(s.handleRealtimeStats))
 	mux.HandleFunc("/ws", s.handleWS)
 	if cfg.StaticDir != "" || embeddedStaticAvailable() {
@@ -1026,6 +1028,11 @@ type upsertTelegramMappingRequest struct {
 	RoomID string `json:"roomId"`
 }
 
+type createTelegramAllowlistRequest struct {
+	TelegramUsername string `json:"telegramUsername"`
+	KesherUsername   string `json:"kesherUsername"`
+}
+
 func (s *Server) handleAdminTelegram(w http.ResponseWriter, r *http.Request, session Session) {
 	if !s.requireAdmin(w, r, session) {
 		return
@@ -1101,6 +1108,86 @@ func (s *Server) handleAdminTelegramByID(w http.ResponseWriter, r *http.Request,
 			s.internalErr(w, err)
 			return
 		}
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleAdminTelegramUsers(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		entries, err := s.store.ListTelegramAllowlistEntries(r.Context())
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		if entries == nil {
+			entries = []TelegramAllowlistEntry{}
+		}
+		s.writeJSON(w, http.StatusOK, entries)
+	case http.MethodPost:
+		var req createTelegramAllowlistRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+
+		// Get all available roles to pick a default one
+		roles, err := s.store.ListRoles(r.Context())
+		if err != nil || len(roles) == 0 {
+			s.internalErr(w, fmt.Errorf("no roles available for new user"))
+			return
+		}
+
+		// Use the first available role (usually "producer" or similar)
+		defaultRoleID := roles[0].ID
+
+		// Automatically create or upsert the Kesher user with the default role
+		_, err = s.store.UpsertUser(r.Context(), req.KesherUsername, defaultRoleID)
+		if err != nil {
+			s.internalErr(w, fmt.Errorf("failed to create kesher user: %w", err))
+			return
+		}
+
+		// Create the allowlist entry
+		id := newID()
+		if err := s.store.CreateTelegramAllowlistEntry(r.Context(), id, req.TelegramUsername, req.KesherUsername); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleAdminTelegramUserByID(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/admin/telegram-users/")
+	if id == "" || strings.Contains(id, "/") {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.store.DeleteTelegramAllowlistEntry(r.Context(), id); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		// If there's an active Telegram session for this user, disconnect it
+		// (Implementation note: telegram.go will enforce this on next message)
 		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

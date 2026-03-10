@@ -414,6 +414,15 @@ func (s *Store) migrate(ctx context.Context) error {
 	)`); err != nil {
 		return err
 	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS telegram_allowlist (
+		id TEXT PRIMARY KEY,
+		telegram_username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+		telegram_numeric_id TEXT UNIQUE,
+		kesher_username TEXT NOT NULL,
+		created_at INTEGER NOT NULL
+	)`); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1568,3 +1577,138 @@ func (s *Store) ToggleTelegramUserRoomSubscription(ctx context.Context, telegram
 		return true, nil
 	}
 }
+
+// CreateTelegramAllowlistEntry adds a new Telegram user to the allowlist. The telegramNumericID is initially empty and will be bound on first login (TOFU).
+func (s *Store) CreateTelegramAllowlistEntry(ctx context.Context, id, telegramUsername, kesherUsername string) error {
+	telegramUsername = strings.TrimSpace(telegramUsername)
+	kesherUsername = strings.TrimSpace(kesherUsername)
+	if id == "" || telegramUsername == "" || kesherUsername == "" {
+		return ErrInvalidInput
+	}
+	// Remove @ prefix if present
+	telegramUsername = strings.TrimPrefix(telegramUsername, "@")
+	createdAt := time.Now().Unix()
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO telegram_allowlist (id, telegram_username, kesher_username, created_at) VALUES (?, ?, ?, ?)`,
+		id, telegramUsername, kesherUsername, createdAt)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return ErrConflict
+		}
+		return err
+	}
+	return nil
+}
+
+// ListTelegramAllowlistEntries returns all allowlist entries with computed status.
+func (s *Store) ListTelegramAllowlistEntries(ctx context.Context) ([]TelegramAllowlistEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, telegram_username, telegram_numeric_id, kesher_username, created_at FROM telegram_allowlist ORDER BY telegram_username`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var entries []TelegramAllowlistEntry
+	for rows.Next() {
+		var entry TelegramAllowlistEntry
+		var numericID sql.NullString
+		if err := rows.Scan(&entry.ID, &entry.TelegramUsername, &numericID, &entry.KesherUsername, &entry.CreatedAt); err != nil {
+			return nil, err
+		}
+		if numericID.Valid {
+			entry.TelegramNumericID = numericID.String
+			entry.Status = "Active (Bound)"
+			entry.IsBound = true
+		} else {
+			entry.Status = "Pending"
+			entry.IsBound = false
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
+}
+
+// FindTelegramAllowlistEntryByUsername finds an allowlist entry by Telegram username (case-insensitive).
+func (s *Store) FindTelegramAllowlistEntryByUsername(ctx context.Context, telegramUsername string) (TelegramAllowlistEntry, error) {
+	telegramUsername = strings.TrimSpace(telegramUsername)
+	telegramUsername = strings.TrimPrefix(telegramUsername, "@")
+	var entry TelegramAllowlistEntry
+	var numericID sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, telegram_username, telegram_numeric_id, kesher_username, created_at FROM telegram_allowlist WHERE LOWER(telegram_username) = LOWER(?)`,
+		telegramUsername).Scan(&entry.ID, &entry.TelegramUsername, &numericID, &entry.KesherUsername, &entry.CreatedAt)
+	if err != nil {
+		return TelegramAllowlistEntry{}, err
+	}
+	if numericID.Valid {
+		entry.TelegramNumericID = numericID.String
+		entry.Status = "Active (Bound)"
+		entry.IsBound = true
+	} else {
+		entry.Status = "Pending"
+		entry.IsBound = false
+	}
+	return entry, nil
+}
+
+// FindTelegramAllowlistEntryByNumericID finds an allowlist entry by numeric Telegram ID.
+func (s *Store) FindTelegramAllowlistEntryByNumericID(ctx context.Context, numericID string) (TelegramAllowlistEntry, error) {
+	var entry TelegramAllowlistEntry
+	var numID sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, telegram_username, telegram_numeric_id, kesher_username, created_at FROM telegram_allowlist WHERE telegram_numeric_id = ?`,
+		numericID).Scan(&entry.ID, &entry.TelegramUsername, &numID, &entry.KesherUsername, &entry.CreatedAt)
+	if err != nil {
+		return TelegramAllowlistEntry{}, err
+	}
+	if numID.Valid {
+		entry.TelegramNumericID = numID.String
+		entry.Status = "Active (Bound)"
+		entry.IsBound = true
+	} else {
+		entry.Status = "Pending"
+		entry.IsBound = false
+	}
+	return entry, nil
+}
+
+// BindTelegramAllowlistEntryNumericID binds the telegram_numeric_id for a user (TOFU - Trust On First Use).
+func (s *Store) BindTelegramAllowlistEntryNumericID(ctx context.Context, telegramUsername, numericID string) error {
+	telegramUsername = strings.TrimSpace(telegramUsername)
+	telegramUsername = strings.TrimPrefix(telegramUsername, "@")
+	if numericID == "" {
+		return ErrInvalidInput
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE telegram_allowlist SET telegram_numeric_id = ? WHERE LOWER(telegram_username) = LOWER(?) AND telegram_numeric_id IS NULL`,
+		numericID, telegramUsername)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return ErrConflict
+		}
+		return err
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteTelegramAllowlistEntry removes a user from the allowlist.
+func (s *Store) DeleteTelegramAllowlistEntry(ctx context.Context, id string) error {
+	if strings.TrimSpace(id) == "" {
+		return ErrInvalidInput
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM telegram_allowlist WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+

@@ -198,6 +198,16 @@ type TelegramMapping struct {
 	RoomID string `json:"roomId"`
 }
 
+type TelegramAllowlistEntry struct {
+	ID                 string `json:"id"`
+	TelegramUsername   string `json:"telegramUsername"`
+	TelegramNumericID  string `json:"telegramNumericId,omitempty"`
+	KesherUsername     string `json:"kesherUsername"`
+	CreatedAt          int64  `json:"createdAt"`
+	Status             string `json:"status"`
+	IsBound            bool   `json:"isBound"`
+}
+
 type TelegramUserMapping struct {
 	ID             string `json:"id"`
 	TelegramUserID string `json:"telegramUserId"`
