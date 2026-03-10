@@ -501,15 +501,22 @@ func (t *TelegramBot) handleInlineQuery(ctx context.Context, query *TelegramInli
 		targets = fuzzyMatchInlineTargets(targetQuery, roomTargets)
 		noMatchTitle = fmt.Sprintf("⚠️ No matching room found for '%s'", targetQuery)
 	default:
-		promptResult := TelegramInlineQueryResultArticle{
-			Type:                "article",
-			ID:                  "await_prefix",
-			Title:               "Type @user or #room",
-			Description:         "Autocomplete starts after @ or # appears in your text",
-			InputMessageContent: TelegramInputMessageContent{MessageText: "Use @ for users/roles or # for rooms."},
+		// In default mode, show active users for direct messaging
+		userTargets := t.inlineTargetsForUsersAndRoles(ctx)
+		targets = fuzzyMatchInlineTargets(queryText, userTargets)
+		noMatchTitle = fmt.Sprintf("⚠️ No matching user found for '%s'", queryText)
+		if len(targets) == 0 {
+			// If no users match, show help prompt
+			promptResult := TelegramInlineQueryResultArticle{
+				Type:                "article",
+				ID:                  "await_prefix",
+				Title:               "Direct Message",
+				Description:         "Start typing a user/role name or use @user, #room",
+				InputMessageContent: TelegramInputMessageContent{MessageText: "Use @ for users/roles, # for rooms, or type a name for direct messages."},
+			}
+			t.answerInlineQuery(ctx, query.ID, []TelegramInlineQueryResultArticle{promptResult})
+			return
 		}
-		t.answerInlineQuery(ctx, query.ID, []TelegramInlineQueryResultArticle{promptResult})
-		return
 	}
 
 	if len(targets) > 10 {
@@ -1060,16 +1067,33 @@ func (t *TelegramBot) onChatEvent(eventType string, e RoutedEvent) {
 
 	ctx := context.Background()
 
+	t.logger.Debug("telegram onChatEvent received", "scope", e.Scope, "targetType", e.TargetType, "targetID", e.TargetID, "from", e.FromUser.Username)
+
 	// Handle room-based messages
 	if e.Scope == "room" {
-		mappings, err := t.store.FindTelegramMappingsByRoomID(ctx, e.TargetID)
-		if err != nil || len(mappings) == 0 {
+		// Get all telegram users subscribed to this room
+		subscribedUserIDs, err := t.store.GetSubscribedTelegramUsersForRoom(ctx, e.TargetID)
+		if err != nil || len(subscribedUserIDs) == 0 {
 			return
 		}
+
 		text := fmt.Sprintf("[%s] %s", e.FromUser.Username, e.Body)
-		for _, m := range mappings {
-			if err := t.sendMessage(ctx, m.ChatID, text); err != nil {
-				t.logger.Warn("failed to forward chat to telegram", "chatId", m.ChatID, "error", err)
+
+		// For each subscribed telegram user, find their chat mapping and send the message
+		for _, telegramUserID := range subscribedUserIDs {
+			// Get the user mapping for this telegram user
+			userMapping, err := t.store.FindTelegramUserMappingByTelegramID(ctx, telegramUserID)
+			if err != nil {
+				// User mapping not found, skip
+				continue
+			}
+
+			if userMapping.PrivateChatID == "" {
+				continue
+			}
+
+			if err := t.sendMessage(ctx, userMapping.PrivateChatID, text); err != nil {
+				t.logger.Warn("failed to forward chat to telegram", "chatId", userMapping.PrivateChatID, "error", err)
 			}
 		}
 		return
@@ -1080,6 +1104,7 @@ func (t *TelegramBot) onChatEvent(eventType string, e RoutedEvent) {
 		// Find the user by ID
 		user, err := t.store.FindUserByID(ctx, e.TargetID)
 		if err != nil {
+			t.logger.Debug("telegram user not found for direct message", "targetID", e.TargetID, "error", err)
 			return
 		}
 
@@ -1087,20 +1112,60 @@ func (t *TelegramBot) onChatEvent(eventType string, e RoutedEvent) {
 		userMapping, err := t.store.FindTelegramUserMappingByUsername(ctx, user.Username)
 		if err != nil {
 			// User doesn't have a Telegram mapping
+			t.logger.Debug("telegram user mapping not found", "username", user.Username, "error", err)
 			return
 		}
 
-		// Look up the private chat ID for this telegram user
-		// For now, we'll use the FindTelegramChatIDForUser method (to be added to store)
-		chatID, err := t.store.FindTelegramChatIDForTelegramUser(ctx, userMapping.TelegramUserID)
-		if err != nil {
-			t.logger.Warn("failed to find telegram chat for user", "username", user.Username, "error", err)
+		// Use the private chat ID from the mapping
+		chatID := userMapping.PrivateChatID
+		if chatID == "" {
+			t.logger.Warn("telegram user mapping has no private chat ID", "username", user.Username)
 			return
 		}
 
 		text := fmt.Sprintf("DM from %s: %s", e.FromUser.Username, e.Body)
+		t.logger.Debug("sending direct message to telegram", "username", user.Username, "chatID", chatID, "text", text)
 		if err := t.sendMessage(ctx, chatID, text); err != nil {
 			t.logger.Warn("failed to send direct message via telegram", "chatId", chatID, "error", err)
+		}
+		return
+	}
+
+	// Handle direct messages to roles
+	if e.Scope == "direct" && e.TargetType == "role" {
+		// Get all active clients
+		allClients := t.hub.GetActiveClients(ctx)
+
+		// Filter clients that belong to this role
+		var roleUsers []ActiveClient
+		for _, client := range allClients {
+			if client.RoleID == e.TargetID {
+				roleUsers = append(roleUsers, client)
+			}
+		}
+
+		if len(roleUsers) == 0 {
+			return
+		}
+
+		text := fmt.Sprintf("DM to %s from %s: %s", e.TargetID, e.FromUser.Username, e.Body)
+		for _, roleUser := range roleUsers {
+			// Check if each user has a Telegram mapping
+			userMapping, err := t.store.FindTelegramUserMappingByUsername(ctx, roleUser.Username)
+			if err != nil {
+				// User doesn't have a Telegram mapping, skip
+				continue
+			}
+
+			// Use the private chat ID from the mapping
+			chatID := userMapping.PrivateChatID
+			if chatID == "" {
+				continue
+			}
+
+			if err := t.sendMessage(ctx, chatID, text); err != nil {
+				t.logger.Warn("failed to send role DM via telegram", "chatId", chatID, "roleID", e.TargetID, "error", err)
+			}
 		}
 		return
 	}

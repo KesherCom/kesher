@@ -490,14 +490,29 @@ func (h *Hub) SetChatHook(fn func(eventType string, e RoutedEvent)) {
 }
 
 func (h *Hub) SendChatToRoom(roomID string, e RoutedEvent) {
+	e.Timestamp = time.Now().UnixMilli()
 	msg := WSOutbound{Type: "chat", Data: e}
 	h.mu.RLock()
-	defer h.mu.RUnlock()
 	for _, c := range h.clients {
 		if _, ok := c.listenRooms[roomID]; ok {
 			h.enqueueOutbound(c, msg)
 		}
 	}
+	h.mu.RUnlock()
+
+	// Record in chat history if enabled
+	h.recordChatHistory(nil, e)
+
+	// Trigger chat hook for further routing (e.g., to Telegram)
+	h.mu.RLock()
+	hook := h.chatHook
+	h.mu.RUnlock()
+
+	if hook != nil {
+		hook("chat", e)
+	}
+
+	h.logger.Debug("chat sent to room", "roomID", roomID, "from", e.FromUser.Username)
 }
 
 // SendChatToUser sends a chat message to all sessions of a specific user.

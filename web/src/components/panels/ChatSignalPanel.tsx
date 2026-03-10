@@ -41,6 +41,7 @@ type ChatSignalPanelProps = {
     username: string;
     roleId: string;
     roleName: string;
+    isWebOnline?: boolean;
   }>;
 };
 
@@ -105,8 +106,8 @@ export function ChatSignalPanel({
         .filter((u) => u.username.toLowerCase().includes(context.query))
         .map((u) => ({
           key: `user:${u.userId}`,
-          label: `👤 @${u.username} [${u.roleName}]`,
-          displayLabel: `@${u.username} [${u.roleName}]`,
+          label: `👤 @${u.username} [${u.roleName}]${u.isWebOnline === false ? " (Telegram/extern)" : ""}`,
+          displayLabel: `@${u.username} [${u.roleName}]${u.isWebOnline === false ? " (Telegram/extern)" : ""}`,
           insertText: `@${u.username} `,
           type: "user" as const,
         }));

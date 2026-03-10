@@ -674,6 +674,48 @@ func TestServerRouteInboundChatAtUserRoutesToLatestActiveSession(t *testing.T) {
 	}
 }
 
+func TestServerRouteInboundChatAtUserRoutesToPersistedOfflineUser(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sender := &client{
+		session: Session{Token: "sender-token", UserID: "u1", RoleID: "audio", Username: "sender"},
+		user:    User{ID: "u1", Username: "sender", RoleID: "audio"},
+		send:    make(chan WSOutbound, 8),
+	}
+	hub.Add(sender)
+	drain(sender.send)
+
+	if _, err := store.UpsertUser(context.Background(), "receiver-offline", "video"); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{store: store, hub: hub}
+	s.routeInbound(context.Background(), sender.session, WSInbound{Data: RoutedEvent{Body: "@receiver-offline hi offline"}}, "chat")
+
+	select {
+	case out := <-sender.send:
+		if out.Type != "chat" {
+			t.Fatalf("expected chat echo to sender, got %s", out.Type)
+		}
+		routed, ok := out.Data.(RoutedEvent)
+		if !ok {
+			t.Fatalf("expected RoutedEvent payload, got %T", out.Data)
+		}
+		if routed.Scope != "direct" || routed.TargetType != "user" {
+			t.Fatalf("unexpected routed scope/targetType: %+v", routed)
+		}
+		if routed.Body != "hi offline" {
+			t.Fatalf("unexpected routed body: %q", routed.Body)
+		}
+	default:
+		t.Fatal("expected sender to receive routed chat echo")
+	}
+}
+
 func TestServerRouteInboundChatAtSelfReturnsStatus(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {

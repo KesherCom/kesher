@@ -1582,6 +1582,21 @@ func (s *Server) resolveChatRouting(ctx context.Context, sender Session, e Route
 			e.Body = messageBody
 			return e, nil, true
 		}
+		if persistedUser, err := s.store.FindUserByUsername(ctx, targetLabel); err == nil {
+			if persistedUser.ID == sender.UserID {
+				return RoutedEvent{}, &RoutingStatusEvent{
+					Code:       "unzustellbar",
+					TargetType: "user",
+					Target:     targetLabel,
+					Message:    "Unzustellbar: Du kannst dir selbst keine Nachricht schicken.",
+				}, false
+			}
+			e.Scope = "direct"
+			e.TargetType = "user"
+			e.TargetID = persistedUser.ID
+			e.Body = messageBody
+			return e, nil, true
+		}
 		roleID, ok := s.resolveRoleTargetID(ctx, targetLabel)
 		if !ok {
 			return RoutedEvent{}, &RoutingStatusEvent{

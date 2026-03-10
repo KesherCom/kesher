@@ -20,12 +20,14 @@ describe("ChatSignalPanel", () => {
         username: "Sarah",
         roleId: "audio",
         roleName: "Audio",
+        isWebOnline: true,
       },
       {
         userId: "u2",
         username: "Lukas",
         roleId: "lights",
         roleName: "Licht",
+        isWebOnline: true,
       },
     ],
   };
@@ -192,6 +194,33 @@ describe("ChatSignalPanel", () => {
     // The @ trigger should show both users and roles
     expect(screen.getByText(/👤 @Sarah \[Audio\]/)).toBeVisible();
     expect(screen.getByText(/👤 @Lukas \[Licht\]/)).toBeVisible();
+  });
+
+  it("marks non-web-online users in @-autocomplete", () => {
+    render(
+      <ChatSignalPanel
+        message="@"
+        onMessageChange={vi.fn()}
+        onSendChat={vi.fn()}
+        onAcknowledge={vi.fn()}
+        chatMessages={[]}
+        {...defaultProps}
+        activeUsers={[
+          ...defaultProps.activeUsers,
+          {
+            userId: "u3",
+            username: "TelegramOnly",
+            roleId: "audio",
+            roleName: "Audio",
+            isWebOnline: false,
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByText(/👤 @TelegramOnly \[Audio\] \(Telegram\/extern\)/),
+    ).toBeVisible();
   });
 
   it("shows @-autocomplete for roles with current occupant or 'Unbesetzt'", async () => {

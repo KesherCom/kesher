@@ -1464,7 +1464,7 @@ func (s *Store) FindTelegramUserMappingByTelegramID(ctx context.Context, telegra
 func (s *Store) FindTelegramUserMappingByUsername(ctx context.Context, username string) (TelegramUserMapping, error) {
 	username = strings.TrimSpace(username)
 	var m TelegramUserMapping
-	err := s.db.QueryRowContext(ctx, `SELECT id, telegram_user_id, username, private_chat_id, created_at FROM telegram_user_mappings WHERE username = ?`, username).
+	err := s.db.QueryRowContext(ctx, `SELECT id, telegram_user_id, username, private_chat_id, created_at FROM telegram_user_mappings WHERE username = ? COLLATE NOCASE`, username).
 		Scan(&m.ID, &m.TelegramUserID, &m.Username, &m.PrivateChatID, &m.CreatedAt)
 	return m, err
 }
@@ -1576,6 +1576,24 @@ func (s *Store) ToggleTelegramUserRoomSubscription(ctx context.Context, telegram
 		}
 		return true, nil
 	}
+}
+
+// GetSubscribedTelegramUsersForRoom returns all telegram user IDs subscribed to a specific room.
+func (s *Store) GetSubscribedTelegramUsersForRoom(ctx context.Context, roomID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT telegram_user_id FROM telegram_user_room_subscriptions WHERE room_id = ?`, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var telegramUserIDs []string
+	for rows.Next() {
+		var telegramUserID string
+		if err := rows.Scan(&telegramUserID); err != nil {
+			return nil, err
+		}
+		telegramUserIDs = append(telegramUserIDs, telegramUserID)
+	}
+	return telegramUserIDs, nil
 }
 
 // CreateTelegramAllowlistEntry adds a new Telegram user to the allowlist. The telegramNumericID is initially empty and will be bound on first login (TOFU).
@@ -1711,4 +1729,3 @@ func (s *Store) DeleteTelegramAllowlistEntry(ctx context.Context, id string) err
 	}
 	return nil
 }
-

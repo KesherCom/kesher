@@ -509,17 +509,26 @@ export function App() {
   // ── Operator view ──
   const activeUsersForChat = Array.from(
     new Map(
-      session.presence
-        .filter((p) => p.userId !== appData.self.id)
-        .map((p) => [
-          p.username.toLowerCase(),
-          {
+      [
+        ...appData.users
+          .filter((u) => u.id !== appData.self.id)
+          .map((u) => ({
+            userId: u.id,
+            username: u.username,
+            roleId: u.roleId,
+            roleName: roleNameById.get(u.roleId) || u.roleId,
+            isWebOnline: false,
+          })),
+        ...session.presence
+          .filter((p) => p.userId !== appData.self.id)
+          .map((p) => ({
             userId: p.userId,
             username: p.username,
             roleId: p.roleId,
             roleName: roleNameById.get(p.roleId) || p.roleId,
-          },
-        ]),
+            isWebOnline: true,
+          })),
+      ].map((u) => [u.username.toLowerCase(), u]),
     ).values(),
   ).sort((a, b) => a.username.localeCompare(b.username));
 
