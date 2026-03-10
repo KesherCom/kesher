@@ -214,69 +214,52 @@ button {
   gap: 0.75rem;
 }
 
-/* ===== ACK Toggle (Compact Switch) ===== */
-.chat-ack-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  color: var(--text-secondary);
-  font-size: 0.76rem;
-  font-weight: 500;
-  user-select: none;
-  cursor: pointer;
-  transition: color 160ms ease;
-  flex: 0 1 auto;
-}
-.chat-ack-toggle:hover {
-  color: var(--text-primary);
-}
-.chat-ack-toggle input {
+/* ===== ACK Button (Compact Icon) ===== */
+.chat-ack-btn {
   position: relative;
   appearance: none;
-  width: 28px;
-  height: 16px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
   cursor: pointer;
-  transition: all 180ms cubic-bezier(0.4, 0, 0.2, 1);
-  margin: 0;
+  transition: all 140ms ease;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.chat-ack-toggle input::before {
-  content: '';
-  position: absolute;
-  left: 1.5px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 11px;
-  height: 11px;
-  background: linear-gradient(135deg, #d1d5db 0%, #9ca3af 100%);
-  border-radius: 50%;
-  transition: all 180ms cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-}
-.chat-ack-toggle input:hover {
-  background: rgba(255, 255, 255, 0.09);
+.chat-ack-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.2);
 }
-.chat-ack-toggle input:checked {
-  background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);
-  border-color: rgba(251, 191, 36, 0.6);
-  box-shadow: 
-    0 0 8px rgba(245, 158, 11, 0.3),
-    inset 0 1px 2px rgba(0, 0, 0, 0.15);
-}
-.chat-ack-toggle input:checked::before {
-  left: calc(100% - 12.5px);
-  background: linear-gradient(135deg, #fff 0%, #fef3c7 100%);
-  box-shadow: 
-    0 1px 3px rgba(0, 0, 0, 0.4),
-    0 0 4px rgba(251, 191, 36, 0.5);
-}
-.chat-ack-toggle input:focus-visible {
+.chat-ack-btn:focus-visible {
   outline: 2px solid rgba(245, 158, 11, 0.5);
   outline-offset: 1px;
+}
+.chat-ack-indicator {
+  display: block;
+  width: 10px;
+  height: 10px;
+  background: #9ca3af;
+  border-radius: 2px;
+  transition: all 140ms ease;
+}
+.chat-ack-btn.active {
+  background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
+  border-color: rgba(251, 191, 36, 0.7);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
+}
+.chat-ack-btn.active:hover {
+  background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
+  border-color: rgba(251, 191, 36, 0.8);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
+}
+.chat-ack-btn.active .chat-ack-indicator {
+  background: #fef3c7;
+  box-shadow: 0 0 4px rgba(251, 191, 36, 0.6);
 }
 .chat-actions button {
   flex-shrink: 0;

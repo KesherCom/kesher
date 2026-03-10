@@ -249,14 +249,15 @@ export function ChatSignalPanel({
         />
         <div className="chat-actions">
           {showAckOption ? (
-            <label className="chat-ack-toggle">
-              <input
-                type="checkbox"
-                checked={requiresAck}
-                onChange={(e) => setRequiresAck(e.target.checked)}
-              />
-              Requires ACK
-            </label>
+            <button
+              type="button"
+              className={`chat-ack-btn ${requiresAck ? "active" : ""}`}
+              onClick={() => setRequiresAck(!requiresAck)}
+              title={requiresAck ? "ACK required (click to disable)" : "Click to require acknowledgement"}
+              aria-label="Requires ACK"
+            >
+              <span className="chat-ack-indicator" />
+            </button>
           ) : null}
           <button type="button" onClick={submitChat}>Send chat</button>
         </div>
