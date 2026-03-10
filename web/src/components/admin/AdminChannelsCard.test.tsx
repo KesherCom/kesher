@@ -28,6 +28,7 @@ const appData: Bootstrap = {
     { id: "bg1", name: "All Call", roomIds: ["r1"], allowedRoleIds: ["op"] },
   ],
   ackEnabled: true,
+  appVersion: { version: "dev", buildTimestamp: "2026-03-10" },
 };
 
 describe("AdminChannelsCard", () => {

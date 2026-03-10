@@ -1175,6 +1175,12 @@ export function StationIntercomView({
                 </div>
               </div>
 
+              <div style={{ display: "grid", gap: "0.5rem", marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid var(--border-color, #ddd)" }}>
+                <small style={{ fontWeight: "500", display: "block" }}>App Version</small>
+                <small>{appData.appVersion.version}</small>
+                <small style={{ opacity: 0.7, fontSize: "0.85em" }}>Built: {appData.appVersion.buildTimestamp}</small>
+              </div>
+
               <p className="station-modal-hint">
                 Preferences apply only to you on this device.
               </p>

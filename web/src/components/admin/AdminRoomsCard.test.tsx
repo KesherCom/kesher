@@ -29,6 +29,7 @@ const appData: Bootstrap = {
   ],
   broadcastGroups: [],
   ackEnabled: true,
+  appVersion: { version: "dev", buildTimestamp: "2026-03-10" },
 };
 
 describe("AdminRoomsCard", () => {

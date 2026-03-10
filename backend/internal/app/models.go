@@ -69,6 +69,7 @@ type BootstrapResponse struct {
 	BroadcastGroups []BroadcastGroup `json:"broadcastGroups"`
 	Users           []User           `json:"users"`
 	AckEnabled      bool             `json:"ackEnabled"`
+	AppVersion      VersionInfo      `json:"appVersion"`
 }
 
 type PublicBootstrapResponse struct {
@@ -76,6 +77,7 @@ type PublicBootstrapResponse struct {
 	Rooms           []Room           `json:"rooms"`
 	BroadcastGroups []BroadcastGroup `json:"broadcastGroups"`
 	AckEnabled      bool             `json:"ackEnabled"`
+	AppVersion      VersionInfo      `json:"appVersion"`
 }
 
 type LoginRequest struct {

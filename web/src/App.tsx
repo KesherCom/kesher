@@ -375,6 +375,7 @@ export function App() {
       rooms: data.rooms,
       broadcastGroups: data.broadcastGroups,
       ackEnabled: data.ackEnabled,
+      appVersion: data.appVersion,
     });
     session.applyBootstrapData(data, false);
   }

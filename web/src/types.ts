@@ -5,6 +5,12 @@ export type Role = {
   defaultVoiceMode?: "always_on" | "ptt";
   defaultSimpleView?: boolean;
 };
+
+export type VersionInfo = {
+  version: string;
+  buildTimestamp: string;
+};
+
 // NOTE: this type is still called Room for backwards compatibility with
 // the server API JSON, but user-facing UI now refers to these entities as
 // "party lines". When communicating with new code or documentation, prefer
@@ -39,6 +45,7 @@ export type PublicBootstrap = {
   rooms: Room[];
   broadcastGroups: BroadcastGroup[];
   ackEnabled: boolean;
+  appVersion: VersionInfo;
 };
 
 export type Bootstrap = PublicBootstrap & {

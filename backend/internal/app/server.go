@@ -577,6 +577,7 @@ func (s *Server) handlePublicBootstrap(w http.ResponseWriter, r *http.Request) {
 		Rooms:           rooms,
 		BroadcastGroups: groups,
 		AckEnabled:      s.isAckEnabled(),
+		AppVersion:      GetVersionInfo(),
 	})
 }
 
@@ -670,6 +671,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request, session
 		BroadcastGroups: groups,
 		Users:           users,
 		AckEnabled:      s.isAckEnabled(),
+		AppVersion:      GetVersionInfo(),
 	})
 }
 
@@ -998,6 +1000,7 @@ func (s *Server) handleAdminAckSettings(w http.ResponseWriter, r *http.Request, 
 				Rooms:           rooms,
 				BroadcastGroups: groups,
 				AckEnabled:      s.isAckEnabled(),
+				AppVersion:      GetVersionInfo(),
 			})
 		}
 		s.writeJSON(w, http.StatusOK, AckSettings{Enabled: s.isAckEnabled()})
@@ -1233,6 +1236,7 @@ func (s *Server) handleAdminRoutingMatrix(w http.ResponseWriter, r *http.Request
 						Rooms:           rooms,
 						BroadcastGroups: groups,
 						AckEnabled:      s.isAckEnabled(),
+						AppVersion:      GetVersionInfo(),
 					})
 				}
 			}

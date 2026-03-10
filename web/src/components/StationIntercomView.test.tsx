@@ -20,6 +20,7 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
     ],
     broadcastGroups: [],
     ackEnabled: true,
+    appVersion: { version: "dev", buildTimestamp: "2026-03-10" },
   },
   doLogout: vi.fn(),
   listenRoomIds: ["room-1"],

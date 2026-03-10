@@ -51,6 +51,10 @@ export function normalizePublicBootstrap(data: unknown): PublicBootstrap {
     }),
     ackEnabled:
       typeof raw.ackEnabled === "boolean" ? raw.ackEnabled : true,
+    appVersion: {
+      version: typeof (raw.appVersion as any)?.version === "string" ? (raw.appVersion as any).version : "unknown",
+      buildTimestamp: typeof (raw.appVersion as any)?.buildTimestamp === "string" ? (raw.appVersion as any).buildTimestamp : "unknown",
+    },
   };
 }
 

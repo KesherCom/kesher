@@ -13,6 +13,7 @@ const baseProps = {
     rooms: [],
     broadcastGroups: [],
     ackEnabled: true,
+    appVersion: { version: "dev", buildTimestamp: "2026-03-10" },
   },
   username: "",
   roleId: "",
