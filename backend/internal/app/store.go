@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -396,6 +397,15 @@ func (s *Store) migrate(ctx context.Context) error {
 	)`); err != nil {
 		return err
 	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS telegram_user_mappings (
+		id TEXT PRIMARY KEY,
+		telegram_user_id TEXT NOT NULL UNIQUE,
+		username TEXT NOT NULL,
+		private_chat_id TEXT NOT NULL,
+		created_at INTEGER NOT NULL
+	)`); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -516,6 +526,12 @@ func (s *Store) UpsertUser(ctx context.Context, username, roleID string) (User, 
 func (s *Store) FindUserByUsername(ctx context.Context, username string) (User, error) {
 	var u User
 	err := s.db.QueryRowContext(ctx, `SELECT id, username, role_id FROM users WHERE username = ?`, username).Scan(&u.ID, &u.Username, &u.RoleID)
+	return u, err
+}
+
+func (s *Store) FindUserByID(ctx context.Context, id string) (User, error) {
+	var u User
+	err := s.db.QueryRowContext(ctx, `SELECT id, username, role_id FROM users WHERE id = ?`, id).Scan(&u.ID, &u.Username, &u.RoleID)
 	return u, err
 }
 
@@ -1393,6 +1409,98 @@ func (s *Store) FindTelegramMappingsByRoomID(ctx context.Context, roomID string)
 	for rows.Next() {
 		var m TelegramMapping
 		if err := rows.Scan(&m.ID, &m.ChatID, &m.Label, &m.RoomID); err != nil {
+			return nil, err
+		}
+		mappings = append(mappings, m)
+	}
+	return mappings, nil
+}
+
+// Telegram user mapping operations (linking Telegram users to Kesher identities)
+
+func (s *Store) CreateTelegramUserMapping(ctx context.Context, id, telegramUserID, username, privateChatID string) error {
+	telegramUserID = strings.TrimSpace(telegramUserID)
+	username = strings.TrimSpace(username)
+	privateChatID = strings.TrimSpace(privateChatID)
+	if telegramUserID == "" || username == "" || privateChatID == "" {
+		return ErrInvalidInput
+	}
+	createdAt := time.Now().Unix()
+	_, err := s.db.ExecContext(ctx, `INSERT INTO telegram_user_mappings (id, telegram_user_id, username, private_chat_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+		id, telegramUserID, username, privateChatID, createdAt)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return ErrConflict
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Store) FindTelegramUserMappingByTelegramID(ctx context.Context, telegramUserID string) (TelegramUserMapping, error) {
+	var m TelegramUserMapping
+	err := s.db.QueryRowContext(ctx, `SELECT id, telegram_user_id, username, private_chat_id, created_at FROM telegram_user_mappings WHERE telegram_user_id = ?`, telegramUserID).
+		Scan(&m.ID, &m.TelegramUserID, &m.Username, &m.PrivateChatID, &m.CreatedAt)
+	return m, err
+}
+
+func (s *Store) FindTelegramUserMappingByUsername(ctx context.Context, username string) (TelegramUserMapping, error) {
+	username = strings.TrimSpace(username)
+	var m TelegramUserMapping
+	err := s.db.QueryRowContext(ctx, `SELECT id, telegram_user_id, username, private_chat_id, created_at FROM telegram_user_mappings WHERE username = ?`, username).
+		Scan(&m.ID, &m.TelegramUserID, &m.Username, &m.PrivateChatID, &m.CreatedAt)
+	return m, err
+}
+
+func (s *Store) UpdateTelegramUserMapping(ctx context.Context, id, username string) error {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return ErrInvalidInput
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE telegram_user_mappings SET username = ? WHERE id = ?`, username, id)
+	if err != nil {
+		return err
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteTelegramUserMapping(ctx context.Context, id string) error {
+	if strings.TrimSpace(id) == "" {
+		return ErrInvalidInput
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM telegram_user_mappings WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) FindTelegramChatIDForTelegramUser(ctx context.Context, telegramUserID string) (string, error) {
+	var chatID string
+	err := s.db.QueryRowContext(ctx, `SELECT private_chat_id FROM telegram_user_mappings WHERE telegram_user_id = ?`, telegramUserID).Scan(&chatID)
+	return chatID, err
+}
+
+func (s *Store) ListTelegramUserMappings(ctx context.Context) ([]TelegramUserMapping, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, telegram_user_id, username, private_chat_id, created_at FROM telegram_user_mappings ORDER BY username`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var mappings []TelegramUserMapping
+	for rows.Next() {
+		var m TelegramUserMapping
+		if err := rows.Scan(&m.ID, &m.TelegramUserID, &m.Username, &m.PrivateChatID, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		mappings = append(mappings, m)

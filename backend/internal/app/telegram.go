@@ -141,18 +141,110 @@ func (t *TelegramBot) processUpdate(update TelegramUpdate) {
 	if update.Message == nil || strings.TrimSpace(update.Message.Text) == "" {
 		return
 	}
+
 	chatID := strconv.FormatInt(update.Message.Chat.ID, 10)
-	mapping, err := t.store.FindTelegramMappingByChatID(context.Background(), chatID)
+	ctx := context.Background()
+
+	// Check if this is a login command in a private chat
+	if update.Message.Chat.Type == "private" && strings.HasPrefix(strings.TrimSpace(update.Message.Text), "/login") {
+		t.handleLoginCommand(ctx, update.Message, chatID)
+		return
+	}
+
+	// For private chats, check if user is mapped and route as direct message
+	if update.Message.Chat.Type == "private" {
+		userMapping, err := t.store.FindTelegramUserMappingByTelegramID(ctx, strconv.FormatInt(update.Message.From.ID, 10))
+		if err == nil {
+			// User is mapped, route as direct message
+			t.handleDirectMessage(ctx, update.Message, chatID, userMapping.Username)
+			return
+		}
+		// User not mapped, inform them to use /login
+		t.sendMessage(ctx, chatID, "Not logged in. Use /login <username> to link your Telegram account to Kesher.")
+		return
+	}
+
+	// For group chats, handle as room-based message (existing behavior)
+	mapping, err := t.store.FindTelegramMappingByChatID(ctx, chatID)
 	if err != nil {
 		t.logger.Info("telegram message from unmapped chat", "chatId", chatID)
 		return
 	}
+	t.forwardMessageToRoom(ctx, update.Message, chatID, mapping.RoomID)
+}
+
+// handleLoginCommand processes the /login <username> command in private chats.
+func (t *TelegramBot) handleLoginCommand(ctx context.Context, msg *TelegramMessage, chatID string) {
+	if msg.From == nil {
+		return
+	}
+
+	parts := strings.Fields(strings.TrimSpace(msg.Text))
+	if len(parts) < 2 {
+		t.sendMessage(ctx, chatID, "Usage: /login <username>")
+		return
+	}
+
+	username := parts[1]
+
+	// Verify the username exists in Kesher
+	_, err := t.store.FindUserByUsername(ctx, username)
+	if err != nil {
+		t.logger.Warn("login attempt with non-existent user", "username", username)
+		t.sendMessage(ctx, chatID, fmt.Sprintf("User '%s' not found.", username))
+		return
+	}
+
+	// Create or update the mapping
+	telegramUserID := strconv.FormatInt(msg.From.ID, 10)
+	mappingID := fmt.Sprintf("telegram_user_%s", telegramUserID)
+
+	// Try to find existing mapping
+	existing, err := t.store.FindTelegramUserMappingByTelegramID(ctx, telegramUserID)
+	if err == nil {
+		// Update existing mapping
+		err := t.store.UpdateTelegramUserMapping(ctx, existing.ID, username)
+		if err != nil {
+			t.logger.Warn("failed to update telegram user mapping", "error", err)
+			t.sendMessage(ctx, chatID, "Error updating mapping. Please try again.")
+			return
+		}
+		t.logger.Info("telegram user remapped", "telegramUserID", telegramUserID, "username", username)
+		t.sendMessage(ctx, chatID, fmt.Sprintf("Account updated: you are now logged in as %s", username))
+	} else {
+		// Create new mapping with the private chat ID
+		err := t.store.CreateTelegramUserMapping(ctx, mappingID, telegramUserID, username, chatID)
+		if err != nil {
+			if err == ErrConflict {
+				t.sendMessage(ctx, chatID, "This Telegram account is already linked to another Kesher user.")
+			} else {
+				t.logger.Warn("failed to create telegram user mapping", "error", err)
+				t.sendMessage(ctx, chatID, "Error creating mapping. Please try again.")
+			}
+			return
+		}
+		t.logger.Info("telegram user mapped", "telegramUserID", telegramUserID, "username", username)
+		t.sendMessage(ctx, chatID, fmt.Sprintf("Successfully logged in as %s. You can now receive direct messages.", username))
+	}
+}
+
+// handleDirectMessage processes a message from a mapped user in a private chat.
+func (t *TelegramBot) handleDirectMessage(ctx context.Context, msg *TelegramMessage, chatID string, username string) {
+	// Route this as a direct message event
+	// This will be handled by the hub routing logic (to be implemented)
+	t.logger.Info("telegram direct message received", "chatId", chatID, "from", username)
+	// For now, just acknowledge receipt
+	// The actual routing to other users will be implemented in hub routing logic
+}
+
+// forwardMessageToRoom forwards a message from a group chat to a Kesher room (original behavior).
+func (t *TelegramBot) forwardMessageToRoom(ctx context.Context, msg *TelegramMessage, chatID string, roomID string) {
 	senderName := "Telegram"
-	if update.Message.From != nil {
-		if update.Message.From.Username != "" {
-			senderName = "@" + update.Message.From.Username
-		} else if update.Message.From.FirstName != "" {
-			senderName = update.Message.From.FirstName
+	if msg.From != nil {
+		if msg.From.Username != "" {
+			senderName = "@" + msg.From.Username
+		} else if msg.From.FirstName != "" {
+			senderName = msg.From.FirstName
 		}
 	}
 	fromUser := User{
@@ -162,13 +254,13 @@ func (t *TelegramBot) processUpdate(update TelegramUpdate) {
 	}
 	e := RoutedEvent{
 		Scope:     "room",
-		TargetID:  mapping.RoomID,
-		Body:      update.Message.Text,
+		TargetID:  roomID,
+		Body:      msg.Text,
 		FromUser:  fromUser,
 		Timestamp: time.Now().UnixMilli(),
 	}
-	t.hub.SendChatToRoom(mapping.RoomID, e)
-	t.logger.Info("telegram message forwarded to room", "chatId", chatID, "room", mapping.RoomID, "sender", senderName)
+	t.hub.SendChatToRoom(roomID, e)
+	t.logger.Info("telegram message forwarded to room", "chatId", chatID, "room", roomID, "sender", senderName)
 }
 
 // DeleteWebhook removes any previously set webhook so polling works cleanly.
@@ -191,20 +283,57 @@ func (t *TelegramBot) DeleteWebhook() error {
 }
 
 // onChatEvent is called by the hub whenever a chat event is routed.
-// It forwards the message to any Telegram chats mapped to the target room.
+// It forwards the message to any Telegram chats mapped to the target room/user.
 func (t *TelegramBot) onChatEvent(eventType string, e RoutedEvent) {
-	if eventType != "chat" || e.Scope != "room" || e.TargetID == "" {
+	if eventType != "chat" || e.TargetID == "" {
 		return
 	}
-	mappings, err := t.store.FindTelegramMappingsByRoomID(context.Background(), e.TargetID)
-	if err != nil || len(mappings) == 0 {
-		return
-	}
-	text := fmt.Sprintf("[%s] %s", e.FromUser.Username, e.Body)
-	for _, m := range mappings {
-		if err := t.sendMessage(context.Background(), m.ChatID, text); err != nil {
-			t.logger.Warn("failed to forward chat to telegram", "chatId", m.ChatID, "error", err)
+
+	ctx := context.Background()
+
+	// Handle room-based messages
+	if e.Scope == "room" {
+		mappings, err := t.store.FindTelegramMappingsByRoomID(ctx, e.TargetID)
+		if err != nil || len(mappings) == 0 {
+			return
 		}
+		text := fmt.Sprintf("[%s] %s", e.FromUser.Username, e.Body)
+		for _, m := range mappings {
+			if err := t.sendMessage(ctx, m.ChatID, text); err != nil {
+				t.logger.Warn("failed to forward chat to telegram", "chatId", m.ChatID, "error", err)
+			}
+		}
+		return
+	}
+
+	// Handle direct messages to users
+	if e.Scope == "direct" && e.TargetType == "user" {
+		// Find the user by ID
+		user, err := t.store.FindUserByID(ctx, e.TargetID)
+		if err != nil {
+			return
+		}
+
+		// Check if the user has a Telegram mapping
+		userMapping, err := t.store.FindTelegramUserMappingByUsername(ctx, user.Username)
+		if err != nil {
+			// User doesn't have a Telegram mapping
+			return
+		}
+
+		// Look up the private chat ID for this telegram user
+		// For now, we'll use the FindTelegramChatIDForUser method (to be added to store)
+		chatID, err := t.store.FindTelegramChatIDForTelegramUser(ctx, userMapping.TelegramUserID)
+		if err != nil {
+			t.logger.Warn("failed to find telegram chat for user", "username", user.Username, "error", err)
+			return
+		}
+
+		text := fmt.Sprintf("DM from %s: %s", e.FromUser.Username, e.Body)
+		if err := t.sendMessage(ctx, chatID, text); err != nil {
+			t.logger.Warn("failed to send direct message via telegram", "chatId", chatID, "error", err)
+		}
+		return
 	}
 }
 

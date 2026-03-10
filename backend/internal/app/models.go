@@ -197,6 +197,14 @@ type TelegramMapping struct {
 	RoomID string `json:"roomId"`
 }
 
+type TelegramUserMapping struct {
+	ID              string `json:"id"`
+	TelegramUserID  string `json:"telegramUserId"`
+	Username        string `json:"username"`
+	PrivateChatID   string `json:"privateChatId"`
+	CreatedAt       int64  `json:"createdAt"`
+}
+
 type TelegramStatusResponse struct {
 	BotConfigured bool              `json:"botConfigured"`
 	Mode          string            `json:"mode"` // "polling" or "webhook"
