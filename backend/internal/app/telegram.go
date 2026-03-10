@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -360,8 +361,10 @@ func (t *TelegramBot) handleOnlineCommand(ctx context.Context, msg *TelegramMess
 	t.logger.Info("telegram /online command processed", "chatID", chatID, "onlineCount", len(activeClients))
 }
 
-// handleInlineQuery processes inline queries for autocomplete functionality.
-// When a user types @botname <query>, this provides live suggestions.
+// handleInlineQuery processes inline queries with smart search and live message preview.
+// Query format: "@botname target message..."
+// - targetQuery: first word (fuzzy matched against usernames/roles)
+// - messagePayload: rest of the string (the actual message to send)
 func (t *TelegramBot) handleInlineQuery(ctx context.Context, query *TelegramInlineQuery) {
 	if query.From == nil {
 		return
@@ -374,9 +377,9 @@ func (t *TelegramBot) handleInlineQuery(ctx context.Context, query *TelegramInli
 	if err != nil {
 		// User not logged in - return empty results with a helpful message
 		emptyResult := TelegramInlineQueryResultArticle{
-			Type:  "article",
-			ID:    "not_logged_in",
-			Title: "Not logged in",
+			Type:        "article",
+			ID:          "not_logged_in",
+			Title:       "Not logged in",
 			Description: "Use /login <username> to link your account first",
 			InputMessageContent: TelegramInputMessageContent{
 				MessageText: "Not logged in. Use /login <username> to link your Telegram account to Kesher.",
@@ -392,9 +395,9 @@ func (t *TelegramBot) handleInlineQuery(ctx context.Context, query *TelegramInli
 	if len(activeClients) == 0 {
 		// No one online
 		emptyResult := TelegramInlineQueryResultArticle{
-			Type:  "article",
-			ID:    "no_users_online",
-			Title: "No users online",
+			Type:        "article",
+			ID:          "no_users_online",
+			Title:       "No users online",
 			Description: "No active users to send messages to",
 			InputMessageContent: TelegramInputMessageContent{
 				MessageText: "No users currently online.",
@@ -404,62 +407,179 @@ func (t *TelegramBot) handleInlineQuery(ctx context.Context, query *TelegramInli
 		return
 	}
 
-	// Filter and build results based on the query
-	queryLower := strings.ToLower(strings.TrimSpace(query.Query))
+	// Split query into targetQuery (first word) and messagePayload (rest)
+	queryText := strings.TrimSpace(query.Query)
+	parts := strings.SplitN(queryText, " ", 2)
+	targetQuery := ""
+	messagePayload := ""
+	if len(parts) > 0 {
+		targetQuery = parts[0]
+	}
+	if len(parts) > 1 {
+		messagePayload = strings.TrimSpace(parts[1])
+	}
+
+	// Fuzzy match targetQuery against active clients
+	matches := t.fuzzyMatchClients(targetQuery, activeClients)
+
+	// Limit to top 10 matches for better UX
+	maxResults := 10
+	if len(matches) > maxResults {
+		matches = matches[:maxResults]
+	}
+
+	// Build results based on state
 	var results []TelegramInlineQueryResultArticle
 
-	for _, client := range activeClients {
-		// Match username or role name
-		usernameMatch := strings.Contains(strings.ToLower(client.Username), queryLower)
-		roleMatch := strings.Contains(strings.ToLower(client.RoleName), queryLower)
-
-		if queryLower == "" || usernameMatch || roleMatch {
-			// Build description with role if available
-			description := "Send direct message"
-			if client.RoleName != "" {
-				description = fmt.Sprintf("Role: %s", client.RoleName)
-			}
-
-			// Build the title
-			title := client.Username
-			if client.RoleName != "" {
-				title = fmt.Sprintf("%s [%s]", client.Username, client.RoleName)
+	if len(matches) == 0 && targetQuery != "" {
+		// No matches found
+		noMatchResult := TelegramInlineQueryResultArticle{
+			Type:        "article",
+			ID:          "no_matches",
+			Title:       "⚠️ No matching user/role found",
+			Description: fmt.Sprintf("No users matching '%s'", targetQuery),
+			InputMessageContent: TelegramInputMessageContent{
+				MessageText: fmt.Sprintf("⚠️ No users found matching '%s'", targetQuery),
+			},
+		}
+		results = []TelegramInlineQueryResultArticle{noMatchResult}
+	} else if messagePayload == "" {
+		// State 1: Typing Target (no message yet)
+		for _, match := range matches {
+			title := match.Username
+			if match.RoleName != "" {
+				title = fmt.Sprintf("%s [%s]", match.Username, match.RoleName)
 			}
 
 			result := TelegramInlineQueryResultArticle{
 				Type:        "article",
-				ID:          fmt.Sprintf("user_%s", client.UserID),
+				ID:          fmt.Sprintf("typing_%s", match.UserID),
 				Title:       title,
-				Description: description,
+				Description: "Keep typing your message...",
 				InputMessageContent: TelegramInputMessageContent{
-					MessageText: fmt.Sprintf("@%s ", client.Username),
+					MessageText: fmt.Sprintf("Continue typing to send a message to %s", title),
+				},
+			}
+			results = append(results, result)
+		}
+	} else {
+		// State 2: Message Ready (target + message)
+		for _, match := range matches {
+			title := match.Username
+			if match.RoleName != "" {
+				title = fmt.Sprintf("%s [%s]", match.Username, match.RoleName)
+			}
+
+			result := TelegramInlineQueryResultArticle{
+				Type:        "article",
+				ID:          fmt.Sprintf("send_%s_%d", match.UserID, time.Now().UnixNano()),
+				Title:       fmt.Sprintf("✉️ Send to %s", title),
+				Description: messagePayload,
+				InputMessageContent: TelegramInputMessageContent{
+					MessageText: fmt.Sprintf("@DM_%s %s", match.Username, messagePayload),
 				},
 			}
 			results = append(results, result)
 		}
 	}
 
-	// Limit results to 50 (Telegram API limit)
-	if len(results) > 50 {
-		results = results[:50]
-	}
-
-	if len(results) == 0 {
-		// No matches found
-		noMatchResult := TelegramInlineQueryResultArticle{
-			Type:  "article",
-			ID:    "no_matches",
-			Title: "No matches found",
-			Description: fmt.Sprintf("No users matching '%s'", query.Query),
-			InputMessageContent: TelegramInputMessageContent{
-				MessageText: fmt.Sprintf("No users found matching '%s'", query.Query),
-			},
-		}
-		results = []TelegramInlineQueryResultArticle{noMatchResult}
-	}
-
 	t.answerInlineQuery(ctx, query.ID, results)
-	t.logger.Info("telegram inline query processed", "query", query.Query, "results", len(results))
+	t.logger.Info("telegram inline query processed",
+		"query", query.Query,
+		"targetQuery", targetQuery,
+		"hasMessage", messagePayload != "",
+		"matches", len(matches),
+		"results", len(results))
+}
+
+// fuzzyMatchClients performs fuzzy matching on active clients based on username and role name.
+// Returns matches sorted by relevance (best matches first).
+func (t *TelegramBot) fuzzyMatchClients(query string, clients []ActiveClient) []ActiveClient {
+	if query == "" {
+		return clients
+	}
+
+	queryLower := strings.ToLower(query)
+	type scoredMatch struct {
+		client ActiveClient
+		score  int
+	}
+	var scored []scoredMatch
+
+	for _, client := range clients {
+		score := 0
+		usernameLower := strings.ToLower(client.Username)
+		roleNameLower := strings.ToLower(client.RoleName)
+
+		// Exact match (highest priority)
+		if usernameLower == queryLower || roleNameLower == queryLower {
+			score = 1000
+		} else if strings.HasPrefix(usernameLower, queryLower) {
+			// Username prefix match
+			score = 500
+		} else if strings.HasPrefix(roleNameLower, queryLower) {
+			// Role name prefix match
+			score = 400
+		} else if strings.Contains(usernameLower, queryLower) {
+			// Username contains query
+			score = 300
+		} else if strings.Contains(roleNameLower, queryLower) {
+			// Role name contains query
+			score = 200
+		} else {
+			// Fuzzy match: count matching characters in order
+			score = fuzzyScore(queryLower, usernameLower)
+			roleScore := fuzzyScore(queryLower, roleNameLower)
+			if roleScore > score {
+				score = roleScore
+			}
+		}
+
+		if score > 0 {
+			scored = append(scored, scoredMatch{client: client, score: score})
+		}
+	}
+
+	// Sort by score (descending) then by username
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		return scored[i].client.Username < scored[j].client.Username
+	})
+
+	// Extract clients
+	matches := make([]ActiveClient, len(scored))
+	for i, s := range scored {
+		matches[i] = s.client
+	}
+	return matches
+}
+
+// fuzzyScore calculates a fuzzy matching score between query and target.
+// Returns score based on how many characters from query appear in target in order.
+func fuzzyScore(query, target string) int {
+	if query == "" || target == "" {
+		return 0
+	}
+	score := 0
+	targetIdx := 0
+	for _, ch := range query {
+		found := false
+		for targetIdx < len(target) {
+			if rune(target[targetIdx]) == ch {
+				score += 10
+				found = true
+				targetIdx++
+				break
+			}
+			targetIdx++
+		}
+		if !found {
+			break
+		}
+	}
+	return score
 }
 
 // handleCallbackQuery processes callback queries from inline keyboard buttons.
@@ -543,12 +663,60 @@ func (t *TelegramBot) handleCallbackQuery(ctx context.Context, query *TelegramCa
 }
 
 // handleDirectMessage processes a message from a mapped user in a private chat.
+// This handles both regular messages and messages sent via inline query (@DM_username message).
 func (t *TelegramBot) handleDirectMessage(ctx context.Context, msg *TelegramMessage, chatID string, username string) {
-	// Route this as a direct message event
-	// This will be handled by the hub routing logic (to be implemented)
-	t.logger.Info("telegram direct message received", "chatId", chatID, "from", username)
-	// For now, just acknowledge receipt
-	// The actual routing to other users will be implemented in hub routing logic
+	text := strings.TrimSpace(msg.Text)
+
+	// Check if this is a direct message command from inline query (@DM_username message)
+	if strings.HasPrefix(text, "@DM_") {
+		parts := strings.SplitN(text, " ", 2)
+		if len(parts) < 2 {
+			t.sendMessage(ctx, chatID, "Invalid message format. Use inline query to send messages.")
+			return
+		}
+
+		targetUsername := strings.TrimPrefix(parts[0], "@DM_")
+		messageBody := parts[1]
+
+		// Find the target user
+		targetUser, err := t.store.FindUserByUsername(ctx, targetUsername)
+		if err != nil {
+			t.logger.Warn("target user not found for DM", "targetUsername", targetUsername, "error", err)
+			t.sendMessage(ctx, chatID, fmt.Sprintf("User '%s' not found or offline.", targetUsername))
+			return
+		}
+
+		// Find the sender's Kesher user info
+		senderUser, err := t.store.FindUserByUsername(ctx, username)
+		if err != nil {
+			t.logger.Warn("sender user not found", "username", username, "error", err)
+			t.sendMessage(ctx, chatID, "Your user account could not be found.")
+			return
+		}
+
+		// Create and route the message through the hub
+		routedEvent := RoutedEvent{
+			Scope:      "direct",
+			TargetType: "user",
+			TargetID:   targetUser.ID,
+			Body:       messageBody,
+			Source:     "telegram",
+			FromUser:   senderUser,
+			Timestamp:  time.Now().UnixMilli(),
+		}
+
+		// Send via hub to all clients of the target user
+		t.hub.SendChatToUser(targetUser.ID, routedEvent)
+
+		// Confirm to sender
+		t.sendMessage(ctx, chatID, fmt.Sprintf("✅ Message sent to %s: %s", targetUsername, messageBody))
+		t.logger.Info("telegram direct message routed", "from", username, "to", targetUsername, "body", messageBody)
+		return
+	}
+
+	// Regular message in private chat (not a DM command)
+	t.logger.Info("telegram private message received", "chatId", chatID, "from", username, "text", text)
+	t.sendMessage(ctx, chatID, "Use inline query (@botname target message) to send direct messages to other users.")
 }
 
 // forwardMessageToRoom forwards a message from a group chat to a Kesher room (original behavior).
