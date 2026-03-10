@@ -3,6 +3,7 @@ import { bootstrap, normalizePublicBootstrap } from "../api";
 import {
   matrixAnchorRoomId,
   mergeForcedListenRooms,
+  resolveChatTargetRoomId,
   roleAllowed,
   toggleRoomSelectionState,
 } from "../lib/intercom";
@@ -1008,9 +1009,14 @@ export function useIntercomSession({
       !message.trim()
     )
       return;
-    const resolvedTargetId = matrixAnchorRoomId(
+    const resolvedTargetId = resolveChatTargetRoomId(
       listenRoomIdsRef.current,
       talkRoomIdsRef.current,
+      appDataRef.current?.rooms || [],
+      appDataRef.current?.roles.find(
+        (role) => role.id === appDataRef.current?.self.roleId,
+      ),
+      appDataRef.current?.self.roleId || "",
     );
     if (!resolvedTargetId) return;
     wsRef.current.send(

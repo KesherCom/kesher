@@ -221,10 +221,10 @@ describe("ChatSignalPanel", () => {
     expect(screen.queryByText(/TelegramOnly/)).not.toBeInTheDocument();
   });
 
-  it("shows non-web-online users when query is specific", () => {
+  it("shows non-web-online users when the first query character is typed", () => {
     render(
       <ChatSignalPanel
-        message="@Tel"
+        message="@T"
         onMessageChange={vi.fn()}
         onSendChat={vi.fn()}
         onAcknowledge={vi.fn()}

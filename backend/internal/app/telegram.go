@@ -469,7 +469,7 @@ func (t *TelegramBot) handleInlineQuery(ctx context.Context, query *TelegramInli
 	telegramUserID := strconv.FormatInt(query.From.ID, 10)
 
 	// Verify the user is logged in
-	_, err := t.store.FindTelegramUserMappingByTelegramID(ctx, telegramUserID)
+	userMapping, err := t.store.FindTelegramUserMappingByTelegramID(ctx, telegramUserID)
 	if err != nil {
 		// User not logged in - return empty results with a helpful message
 		emptyResult := TelegramInlineQueryResultArticle{
@@ -493,7 +493,7 @@ func (t *TelegramBot) handleInlineQuery(ctx context.Context, query *TelegramInli
 
 	switch mode {
 	case "users_roles":
-		targets = t.inlineTargetsForUsersAndRoles(ctx)
+		targets = t.inlineTargetsForUsersAndRoles(ctx, userMapping.Username)
 		targets = fuzzyMatchInlineTargets(targetQuery, targets)
 		noMatchTitle = fmt.Sprintf("⚠️ No matching user/role found for '%s'", targetQuery)
 	case "rooms":
@@ -502,7 +502,7 @@ func (t *TelegramBot) handleInlineQuery(ctx context.Context, query *TelegramInli
 		noMatchTitle = fmt.Sprintf("⚠️ No matching room found for '%s'", targetQuery)
 	default:
 		// In default mode, show active users for direct messaging
-		userTargets := t.inlineTargetsForUsersAndRoles(ctx)
+		userTargets := t.inlineTargetsForUsersAndRoles(ctx, userMapping.Username)
 		targets = fuzzyMatchInlineTargets(queryText, userTargets)
 		noMatchTitle = fmt.Sprintf("⚠️ No matching user found for '%s'", queryText)
 		if len(targets) == 0 {
@@ -635,17 +635,13 @@ func parseInlineQueryMode(queryText string) (mode string, targetQuery string, me
 	return mode, strings.TrimSpace(rawTarget), strings.TrimSpace(strings.Join(payloadParts, " "))
 }
 
-func (t *TelegramBot) inlineTargetsForUsersAndRoles(ctx context.Context) []inlineTarget {
-	activeClients := t.hub.GetActiveClients(ctx)
-	if len(activeClients) == 0 {
-		return nil
-	}
-
+func (t *TelegramBot) inlineTargetsForUsersAndRoles(ctx context.Context, excludeUsername string) []inlineTarget {
 	entries, err := t.store.ListTelegramAllowlistEntries(ctx)
 	if err != nil {
 		t.logger.Warn("failed to load telegram allowlist for inline targets", "error", err)
 		return nil
 	}
+	excludeUsername = strings.ToLower(strings.TrimSpace(excludeUsername))
 
 	allowedUsernames := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
@@ -658,39 +654,112 @@ func (t *TelegramBot) inlineTargetsForUsersAndRoles(ctx context.Context) []inlin
 		return nil
 	}
 
-	filteredClients := make([]ActiveClient, 0, len(activeClients))
-	for _, client := range activeClients {
-		if _, ok := allowedUsernames[strings.ToLower(strings.TrimSpace(client.Username))]; ok {
-			filteredClients = append(filteredClients, client)
+	roleNameByID := make(map[string]string)
+	roles, err := t.store.ListRoles(ctx)
+	if err != nil {
+		t.logger.Warn("failed to load roles for telegram inline targets", "error", err)
+	} else {
+		for _, role := range roles {
+			roleNameByID[role.ID] = role.Name
 		}
 	}
 
-	targets := make([]inlineTarget, 0, len(filteredClients))
+	persistedUsers, err := t.store.ListUsers(ctx)
+	if err != nil {
+		t.logger.Warn("failed to load users for telegram inline targets", "error", err)
+		return nil
+	}
+
+	activeClients := t.hub.GetActiveClients(ctx)
+	activeUsersByUsername := make(map[string]ActiveClient, len(activeClients))
+	for _, client := range activeClients {
+		username := strings.ToLower(strings.TrimSpace(client.Username))
+		if username == "" {
+			continue
+		}
+		if _, ok := allowedUsernames[username]; !ok {
+			continue
+		}
+		activeUsersByUsername[username] = client
+		if client.RoleName != "" {
+			roleNameByID[client.RoleID] = client.RoleName
+		}
+	}
+
+	targets := make([]inlineTarget, 0, len(persistedUsers)+len(activeClients))
 	seenUsers := make(map[string]struct{})
 	seenRoles := make(map[string]struct{})
 
-	for _, c := range filteredClients {
-		if c.UserID != "" {
-			if _, ok := seenUsers[c.UserID]; !ok {
-				title := c.Username
-				if c.RoleName != "" {
-					title = fmt.Sprintf("%s [%s]", c.Username, c.RoleName)
-				}
-				targets = append(targets, inlineTarget{Kind: "user", ID: c.UserID, Title: title, SearchValue: c.Username + " " + c.RoleName})
-				seenUsers[c.UserID] = struct{}{}
+	for _, user := range persistedUsers {
+		usernameKey := strings.ToLower(strings.TrimSpace(user.Username))
+		if _, ok := allowedUsernames[usernameKey]; !ok {
+			continue
+		}
+		roleName := roleNameByID[user.RoleID]
+		if activeUser, ok := activeUsersByUsername[usernameKey]; ok {
+			if activeUser.UserID != "" {
+				user.ID = activeUser.UserID
+			}
+			if activeUser.RoleID != "" {
+				user.RoleID = activeUser.RoleID
+			}
+			if activeUser.RoleName != "" {
+				roleName = activeUser.RoleName
 			}
 		}
-		if c.RoleID != "" {
-			if _, ok := seenRoles[c.RoleID]; !ok {
-				roleTitle := c.RoleName
-				if roleTitle == "" {
-					roleTitle = c.RoleID
+		if user.ID != "" && usernameKey != excludeUsername {
+			if _, ok := seenUsers[user.ID]; !ok {
+				title := user.Username
+				searchValue := user.Username
+				if roleName != "" {
+					title = fmt.Sprintf("%s [%s]", user.Username, roleName)
+					searchValue += " " + roleName
 				}
-				targets = append(targets, inlineTarget{Kind: "role", ID: c.RoleID, Title: "Role: " + roleTitle, SearchValue: roleTitle})
-				seenRoles[c.RoleID] = struct{}{}
+				targets = append(targets, inlineTarget{Kind: "user", ID: user.ID, Title: title, SearchValue: searchValue})
+				seenUsers[user.ID] = struct{}{}
+			}
+		}
+		if user.RoleID != "" {
+			if _, ok := seenRoles[user.RoleID]; !ok {
+				roleTitle := roleName
+				if roleTitle == "" {
+					roleTitle = user.RoleID
+				}
+				targets = append(targets, inlineTarget{Kind: "role", ID: user.RoleID, Title: "Role: " + roleTitle, SearchValue: roleTitle + " " + user.Username})
+				seenRoles[user.RoleID] = struct{}{}
 			}
 		}
 	}
+
+	for _, client := range activeClients {
+		usernameKey := strings.ToLower(strings.TrimSpace(client.Username))
+		if _, ok := allowedUsernames[usernameKey]; !ok {
+			continue
+		}
+		if client.UserID != "" && usernameKey != excludeUsername {
+			if _, ok := seenUsers[client.UserID]; !ok {
+				title := client.Username
+				searchValue := client.Username
+				if client.RoleName != "" {
+					title = fmt.Sprintf("%s [%s]", client.Username, client.RoleName)
+					searchValue += " " + client.RoleName
+				}
+				targets = append(targets, inlineTarget{Kind: "user", ID: client.UserID, Title: title, SearchValue: searchValue})
+				seenUsers[client.UserID] = struct{}{}
+			}
+		}
+		if client.RoleID != "" {
+			if _, ok := seenRoles[client.RoleID]; !ok {
+				roleTitle := client.RoleName
+				if roleTitle == "" {
+					roleTitle = client.RoleID
+				}
+				targets = append(targets, inlineTarget{Kind: "role", ID: client.RoleID, Title: "Role: " + roleTitle, SearchValue: roleTitle + " " + client.Username})
+				seenRoles[client.RoleID] = struct{}{}
+			}
+		}
+	}
+
 	return targets
 }
 
@@ -717,18 +786,7 @@ func fuzzyMatchInlineTargets(query string, targets []inlineTarget) []inlineTarge
 	}
 	scored := make([]scoredTarget, 0, len(targets))
 	for _, target := range targets {
-		search := strings.ToLower(target.SearchValue)
-		score := 0
-		switch {
-		case search == queryLower:
-			score = 1000
-		case strings.HasPrefix(search, queryLower):
-			score = 500
-		case strings.Contains(search, queryLower):
-			score = 300
-		default:
-			score = fuzzyScore(queryLower, search)
-		}
+		score := inlineTargetMatchScore(queryLower, target)
 		if score > 0 {
 			scored = append(scored, scoredTarget{target: target, score: score})
 		}
@@ -737,6 +795,9 @@ func fuzzyMatchInlineTargets(query string, targets []inlineTarget) []inlineTarge
 		if scored[i].score != scored[j].score {
 			return scored[i].score > scored[j].score
 		}
+		if inlineTargetKindRank(scored[i].target.Kind) != inlineTargetKindRank(scored[j].target.Kind) {
+			return inlineTargetKindRank(scored[i].target.Kind) < inlineTargetKindRank(scored[j].target.Kind)
+		}
 		return scored[i].target.Title < scored[j].target.Title
 	})
 	out := make([]inlineTarget, 0, len(scored))
@@ -744,6 +805,56 @@ func fuzzyMatchInlineTargets(query string, targets []inlineTarget) []inlineTarge
 		out = append(out, s.target)
 	}
 	return out
+}
+
+func inlineTargetPrimaryTerm(target inlineTarget) string {
+	parts := strings.Fields(strings.ToLower(strings.TrimSpace(target.SearchValue)))
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[0]
+}
+
+func inlineTargetKindRank(kind string) int {
+	switch kind {
+	case "user":
+		return 0
+	case "role":
+		return 1
+	case "room":
+		return 2
+	default:
+		return 3
+	}
+}
+
+func inlineTargetMatchScore(query string, target inlineTarget) int {
+	search := strings.ToLower(strings.TrimSpace(target.SearchValue))
+	primary := inlineTargetPrimaryTerm(target)
+	kindBonus := 0
+	switch target.Kind {
+	case "user":
+		kindBonus = 30
+	case "role":
+		kindBonus = 15
+	}
+
+	switch {
+	case primary != "" && primary == query:
+		return 1400 + kindBonus
+	case search == query:
+		return 1200 + kindBonus
+	case primary != "" && strings.HasPrefix(primary, query):
+		return 900 + kindBonus
+	case strings.HasPrefix(search, query):
+		return 700 + kindBonus
+	case primary != "" && strings.Contains(primary, query):
+		return 520 + kindBonus
+	case strings.Contains(search, query):
+		return 360 + kindBonus
+	default:
+		return fuzzyScore(query, search) + kindBonus
+	}
 }
 
 func encodeInlineRouteCommand(target inlineTarget, messagePayload string) string {

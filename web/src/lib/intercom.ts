@@ -1,8 +1,45 @@
+import type { Role, Room } from "../types";
+
 export function matrixAnchorRoomId(
   listenIds: string[],
   talkIds: string[],
 ): string {
   return talkIds[0] || listenIds[0] || "";
+}
+
+export function resolveChatTargetRoomId(
+  listenIds: string[],
+  talkIds: string[],
+  rooms: Room[],
+  role: Role | undefined,
+  currentRoleId: string,
+): string {
+  const anchorRoomId = matrixAnchorRoomId(listenIds, talkIds);
+  if (anchorRoomId) {
+    return anchorRoomId;
+  }
+
+  const canUseRoom = (room: Room | undefined) =>
+    !!room &&
+    (roleAllowed(room.senderRoleIds, currentRoleId) ||
+      roleAllowed(room.receiverRoleIds, currentRoleId));
+
+  const defaultRoom = rooms.find((room) => room.id === role?.defaultRoomId);
+  if (defaultRoom && canUseRoom(defaultRoom)) {
+    return defaultRoom.id;
+  }
+
+  const firstAllowedTalkRoom = rooms.find((room) =>
+    roleAllowed(room.senderRoleIds, currentRoleId),
+  );
+  if (firstAllowedTalkRoom) {
+    return firstAllowedTalkRoom.id;
+  }
+
+  const firstAllowedListenRoom = rooms.find((room) =>
+    roleAllowed(room.receiverRoleIds, currentRoleId),
+  );
+  return firstAllowedListenRoom?.id || "";
 }
 
 export function roleAllowed(

@@ -118,7 +118,7 @@ export function ChatSignalPanel({
         }));
 
       const externalUserItems =
-        context.query.length >= 2
+        context.query.length > 0
           ? externalUsers
               .filter((u) => u.username.toLowerCase().includes(context.query))
               .map((u) => ({
@@ -258,7 +258,7 @@ export function ChatSignalPanel({
               Requires ACK
             </label>
           ) : null}
-          <button onClick={submitChat}>Send chat</button>
+          <button type="button" onClick={submitChat}>Send chat</button>
         </div>
         {suggestions.length > 0 ? (
           <ul className="chat-autocomplete" role="listbox" aria-label="chat-autocomplete">

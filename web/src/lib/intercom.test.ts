@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   matrixAnchorRoomId,
+  resolveChatTargetRoomId,
   roleAllowed,
   toggleRoomSelectionState,
 } from "./intercom";
@@ -14,6 +15,53 @@ describe("intercom utility helpers", () => {
 
   it("falls back to first listen room for matrix anchor", () => {
     expect(matrixAnchorRoomId(["listen-1", "listen-2"], [])).toBe("listen-1");
+  });
+
+  it("falls back to the role default room for chat when no anchor room is selected", () => {
+    expect(
+      resolveChatTargetRoomId(
+        [],
+        [],
+        [
+          {
+            id: "foh",
+            name: "FOH",
+            senderRoleIds: ["audio"],
+            receiverRoleIds: ["audio"],
+            forcedListenRoleIds: [],
+          },
+        ],
+        { id: "audio", name: "Audio", defaultRoomId: "foh" },
+        "audio",
+      ),
+    ).toBe("foh");
+  });
+
+  it("falls back to the first allowed room for chat when no anchor or usable default exists", () => {
+    expect(
+      resolveChatTargetRoomId(
+        [],
+        [],
+        [
+          {
+            id: "stage",
+            name: "Stage",
+            senderRoleIds: [],
+            receiverRoleIds: ["audio"],
+            forcedListenRoleIds: [],
+          },
+          {
+            id: "foh",
+            name: "FOH",
+            senderRoleIds: ["audio"],
+            receiverRoleIds: ["audio"],
+            forcedListenRoleIds: [],
+          },
+        ],
+        { id: "audio", name: "Audio", defaultRoomId: "missing" },
+        "audio",
+      ),
+    ).toBe("foh");
   });
 
   it("denies access when no role restriction exists", () => {

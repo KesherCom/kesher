@@ -251,10 +251,10 @@ func toStringSet(values []string) map[string]struct{} {
 	return out
 }
 
-func (s *Store) ensureColumn(ctx context.Context, table, column, columnType string) error {
+func (s *Store) tableHasColumn(ctx context.Context, table, column string) (bool, error) {
 	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, table))
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -265,14 +265,96 @@ func (s *Store) ensureColumn(ctx context.Context, table, column, columnType stri
 		var dflt sql.NullString
 		var pk int
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return err
+			return false, err
 		}
 		if strings.EqualFold(name, column) {
-			return nil
+			return true, nil
 		}
+	}
+	return false, rows.Err()
+}
+
+func (s *Store) ensureColumn(ctx context.Context, table, column, columnType string) error {
+	hasColumn, err := s.tableHasColumn(ctx, table, column)
+	if err != nil {
+		return err
+	}
+	if hasColumn {
+		return nil
 	}
 	_, err = s.db.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, columnType))
 	return err
+}
+
+func (s *Store) ensureTelegramUserMappingsSchema(ctx context.Context) error {
+	hasTelegramUserID, err := s.tableHasColumn(ctx, "telegram_user_mappings", "telegram_user_id")
+	if err != nil {
+		return err
+	}
+	hasUsername, err := s.tableHasColumn(ctx, "telegram_user_mappings", "username")
+	if err != nil {
+		return err
+	}
+	hasID, err := s.tableHasColumn(ctx, "telegram_user_mappings", "id")
+	if err != nil {
+		return err
+	}
+	hasPrivateChatID, err := s.tableHasColumn(ctx, "telegram_user_mappings", "private_chat_id")
+	if err != nil {
+		return err
+	}
+	hasCreatedAt, err := s.tableHasColumn(ctx, "telegram_user_mappings", "created_at")
+	if err != nil {
+		return err
+	}
+	if hasTelegramUserID && hasUsername && hasID && hasPrivateChatID && hasCreatedAt {
+		return nil
+	}
+	if !hasTelegramUserID || !hasUsername {
+		return fmt.Errorf("telegram_user_mappings schema missing required legacy columns")
+	}
+
+	idExpr := `'telegram_user_' || telegram_user_id`
+	if hasID {
+		idExpr = "id"
+	}
+	privateChatIDExpr := "telegram_user_id"
+	if hasPrivateChatID {
+		privateChatIDExpr = "private_chat_id"
+	}
+	createdAtExpr := "CAST(strftime('%s','now') AS INTEGER)"
+	if hasCreatedAt {
+		createdAtExpr = "created_at"
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `CREATE TABLE telegram_user_mappings_new (
+		id TEXT PRIMARY KEY,
+		telegram_user_id TEXT NOT NULL UNIQUE,
+		username TEXT NOT NULL,
+		private_chat_id TEXT NOT NULL,
+		created_at INTEGER NOT NULL
+	)`); err != nil {
+		return err
+	}
+	insertQuery := fmt.Sprintf(`INSERT INTO telegram_user_mappings_new (id, telegram_user_id, username, private_chat_id, created_at)
+		SELECT %s, telegram_user_id, username, %s, %s
+		FROM telegram_user_mappings`, idExpr, privateChatIDExpr, createdAtExpr)
+	if _, err := tx.ExecContext(ctx, insertQuery); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DROP TABLE telegram_user_mappings`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE telegram_user_mappings_new RENAME TO telegram_user_mappings`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) validateRoleDefaults(ctx context.Context, defaultRoomID, defaultVoiceMode string) error {
@@ -408,6 +490,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		private_chat_id TEXT NOT NULL,
 		created_at INTEGER NOT NULL
 	)`); err != nil {
+		return err
+	}
+	if err := s.ensureTelegramUserMappingsSchema(ctx); err != nil {
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS telegram_user_room_subscriptions (
