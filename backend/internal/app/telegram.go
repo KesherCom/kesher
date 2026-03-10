@@ -361,10 +361,15 @@ func (t *TelegramBot) handleOnlineCommand(ctx context.Context, msg *TelegramMess
 	t.logger.Info("telegram /online command processed", "chatID", chatID, "onlineCount", len(activeClients))
 }
 
-// handleInlineQuery processes inline queries with smart search and live message preview.
-// Query format: "@botname target message..."
-// - targetQuery: first word (fuzzy matched against usernames/roles)
-// - messagePayload: rest of the string (the actual message to send)
+type inlineTarget struct {
+	Kind        string // user|role|room
+	ID          string
+	Title       string
+	SearchValue string
+}
+
+// handleInlineQuery processes inline queries with prefix-based routing modes:
+// @ -> users/roles, # -> rooms, default -> active talk room.
 func (t *TelegramBot) handleInlineQuery(ctx context.Context, query *TelegramInlineQuery) {
 	if query.From == nil {
 		return
@@ -389,106 +394,78 @@ func (t *TelegramBot) handleInlineQuery(ctx context.Context, query *TelegramInli
 		return
 	}
 
-	// Get active clients from the hub
-	activeClients := t.hub.GetActiveClients(ctx)
+	queryText := strings.TrimSpace(query.Query)
+	mode, targetQuery, messagePayload := parseInlineQueryMode(queryText)
 
-	if len(activeClients) == 0 {
-		// No one online
-		emptyResult := TelegramInlineQueryResultArticle{
-			Type:        "article",
-			ID:          "no_users_online",
-			Title:       "No users online",
-			Description: "No active users to send messages to",
-			InputMessageContent: TelegramInputMessageContent{
-				MessageText: "No users currently online.",
-			},
+	var targets []inlineTarget
+	var noMatchTitle string
+
+	switch mode {
+	case "users_roles":
+		targets = t.inlineTargetsForUsersAndRoles(ctx)
+		targets = fuzzyMatchInlineTargets(targetQuery, targets)
+		noMatchTitle = fmt.Sprintf("⚠️ No matching user/role found for '%s'", targetQuery)
+	case "rooms":
+		roomTargets := t.inlineTargetsForRooms(ctx)
+		targets = fuzzyMatchInlineTargets(targetQuery, roomTargets)
+		noMatchTitle = fmt.Sprintf("⚠️ No matching room found for '%s'", targetQuery)
+	default:
+		promptResult := TelegramInlineQueryResultArticle{
+			Type:                "article",
+			ID:                  "await_prefix",
+			Title:               "Type @user or #room",
+			Description:         "Autocomplete starts after @ or # appears in your text",
+			InputMessageContent: TelegramInputMessageContent{MessageText: "Use @ for users/roles or # for rooms."},
 		}
-		t.answerInlineQuery(ctx, query.ID, []TelegramInlineQueryResultArticle{emptyResult})
+		t.answerInlineQuery(ctx, query.ID, []TelegramInlineQueryResultArticle{promptResult})
 		return
 	}
 
-	// Split query into targetQuery (first word) and messagePayload (rest)
-	queryText := strings.TrimSpace(query.Query)
-	parts := strings.SplitN(queryText, " ", 2)
-	targetQuery := ""
-	messagePayload := ""
-	if len(parts) > 0 {
-		targetQuery = parts[0]
-	}
-	if len(parts) > 1 {
-		messagePayload = strings.TrimSpace(parts[1])
+	if len(targets) > 10 {
+		targets = targets[:10]
 	}
 
-	// Fuzzy match targetQuery against active clients
-	matches := t.fuzzyMatchClients(targetQuery, activeClients)
-
-	// Limit to top 10 matches for better UX
-	maxResults := 10
-	if len(matches) > maxResults {
-		matches = matches[:maxResults]
-	}
-
-	// Build results based on state
-	var results []TelegramInlineQueryResultArticle
-
-	if len(matches) == 0 && targetQuery != "" {
-		// No matches found
-		noMatchResult := TelegramInlineQueryResultArticle{
-			Type:        "article",
-			ID:          "no_matches",
-			Title:       "⚠️ No matching user/role found",
-			Description: fmt.Sprintf("No users matching '%s'", targetQuery),
-			InputMessageContent: TelegramInputMessageContent{
-				MessageText: fmt.Sprintf("⚠️ No users found matching '%s'", targetQuery),
-			},
-		}
-		results = []TelegramInlineQueryResultArticle{noMatchResult}
-	} else if messagePayload == "" {
-		// State 1: Typing Target (no message yet)
-		for _, match := range matches {
-			title := match.Username
-			if match.RoleName != "" {
-				title = fmt.Sprintf("%s [%s]", match.Username, match.RoleName)
-			}
-
-			result := TelegramInlineQueryResultArticle{
-				Type:        "article",
-				ID:          fmt.Sprintf("typing_%s", match.UserID),
-				Title:       title,
-				Description: "Keep typing your message...",
-				InputMessageContent: TelegramInputMessageContent{
-					MessageText: fmt.Sprintf("Continue typing to send a message to %s", title),
-				},
-			}
-			results = append(results, result)
-		}
+	results := make([]TelegramInlineQueryResultArticle, 0, len(targets))
+	if len(targets) == 0 && targetQuery != "" && noMatchTitle != "" {
+		results = append(results, TelegramInlineQueryResultArticle{
+			Type:                "article",
+			ID:                  "no_matches",
+			Title:               noMatchTitle,
+			Description:         "Try a different search",
+			InputMessageContent: TelegramInputMessageContent{MessageText: noMatchTitle},
+		})
 	} else {
-		// State 2: Message Ready (target + message)
-		for _, match := range matches {
-			title := match.Username
-			if match.RoleName != "" {
-				title = fmt.Sprintf("%s [%s]", match.Username, match.RoleName)
+		for _, target := range targets {
+			if strings.TrimSpace(messagePayload) == "" {
+				results = append(results, TelegramInlineQueryResultArticle{
+					Type:                "article",
+					ID:                  fmt.Sprintf("typing_%s_%s", target.Kind, target.ID),
+					Title:               target.Title,
+					Description:         "Keep typing your message...",
+					InputMessageContent: TelegramInputMessageContent{MessageText: fmt.Sprintf("Continue typing to send to %s", target.Title)},
+				})
+				continue
 			}
 
-			result := TelegramInlineQueryResultArticle{
+			results = append(results, TelegramInlineQueryResultArticle{
 				Type:        "article",
-				ID:          fmt.Sprintf("send_%s_%d", match.UserID, time.Now().UnixNano()),
-				Title:       fmt.Sprintf("✉️ Send to %s", title),
+				ID:          fmt.Sprintf("send_%s_%s_%d", target.Kind, target.ID, time.Now().UnixNano()),
+				Title:       fmt.Sprintf("✉️ Send to %s", target.Title),
 				Description: messagePayload,
 				InputMessageContent: TelegramInputMessageContent{
-					MessageText: fmt.Sprintf("@DM_%s %s", match.Username, messagePayload),
+					MessageText: encodeInlineRouteCommand(target, messagePayload),
 				},
-			}
-			results = append(results, result)
+			})
 		}
 	}
 
 	t.answerInlineQuery(ctx, query.ID, results)
 	t.logger.Info("telegram inline query processed",
 		"query", query.Query,
+		"mode", mode,
 		"targetQuery", targetQuery,
-		"hasMessage", messagePayload != "",
-		"matches", len(matches),
+		"hasMessage", strings.TrimSpace(messagePayload) != "",
+		"matches", len(targets),
 		"results", len(results))
 }
 
@@ -582,6 +559,164 @@ func fuzzyScore(query, target string) int {
 	return score
 }
 
+func parseInlineQueryMode(queryText string) (mode string, targetQuery string, messagePayload string) {
+	if queryText == "" {
+		return "default", "", ""
+	}
+	words := strings.Fields(queryText)
+	mode = "default"
+	targetIndex := -1
+	rawTarget := ""
+
+	for i, w := range words {
+		if len(w) == 0 {
+			continue
+		}
+		if w[0] == '@' {
+			mode = "users_roles"
+			rawTarget = strings.TrimPrefix(w, "@")
+			targetIndex = i
+			break
+		}
+		if w[0] == '#' {
+			mode = "rooms"
+			rawTarget = strings.TrimPrefix(w, "#")
+			targetIndex = i
+			break
+		}
+	}
+
+	if mode == "default" {
+		return "default", "", ""
+	}
+
+	payloadParts := make([]string, 0, len(words)-1)
+	for i, w := range words {
+		if i == targetIndex {
+			continue
+		}
+		payloadParts = append(payloadParts, w)
+	}
+
+	return mode, strings.TrimSpace(rawTarget), strings.TrimSpace(strings.Join(payloadParts, " "))
+}
+
+func (t *TelegramBot) inlineTargetsForUsersAndRoles(ctx context.Context) []inlineTarget {
+	activeClients := t.hub.GetActiveClients(ctx)
+	targets := make([]inlineTarget, 0, len(activeClients))
+	seenUsers := make(map[string]struct{})
+	seenRoles := make(map[string]struct{})
+
+	for _, c := range activeClients {
+		if c.UserID != "" {
+			if _, ok := seenUsers[c.UserID]; !ok {
+				title := c.Username
+				if c.RoleName != "" {
+					title = fmt.Sprintf("%s [%s]", c.Username, c.RoleName)
+				}
+				targets = append(targets, inlineTarget{Kind: "user", ID: c.UserID, Title: title, SearchValue: c.Username + " " + c.RoleName})
+				seenUsers[c.UserID] = struct{}{}
+			}
+		}
+		if c.RoleID != "" {
+			if _, ok := seenRoles[c.RoleID]; !ok {
+				roleTitle := c.RoleName
+				if roleTitle == "" {
+					roleTitle = c.RoleID
+				}
+				targets = append(targets, inlineTarget{Kind: "role", ID: c.RoleID, Title: "Role: " + roleTitle, SearchValue: roleTitle})
+				seenRoles[c.RoleID] = struct{}{}
+			}
+		}
+	}
+	return targets
+}
+
+func (t *TelegramBot) inlineTargetsForRooms(ctx context.Context) []inlineTarget {
+	rooms, err := t.store.ListRooms(ctx)
+	if err != nil {
+		return nil
+	}
+	targets := make([]inlineTarget, 0, len(rooms))
+	for _, room := range rooms {
+		targets = append(targets, inlineTarget{Kind: "room", ID: room.ID, Title: "#" + room.Name, SearchValue: room.Name + " " + room.ID})
+	}
+	return targets
+}
+
+func (t *TelegramBot) inlineDefaultTalkRoomTarget(ctx context.Context, username string) (inlineTarget, bool) {
+	token, ok := t.hub.LatestTokenForUsername(username)
+	if !ok {
+		return inlineTarget{}, false
+	}
+	roomID, ok := t.hub.ActiveTalkRoomForToken(token)
+	if !ok {
+		return inlineTarget{}, false
+	}
+	rooms, err := t.store.ListRooms(ctx)
+	if err != nil {
+		return inlineTarget{Kind: "room", ID: roomID, Title: "#" + roomID, SearchValue: roomID}, true
+	}
+	for _, room := range rooms {
+		if room.ID == roomID {
+			return inlineTarget{Kind: "room", ID: room.ID, Title: "#" + room.Name, SearchValue: room.Name + " " + room.ID}, true
+		}
+	}
+	return inlineTarget{Kind: "room", ID: roomID, Title: "#" + roomID, SearchValue: roomID}, true
+}
+
+func fuzzyMatchInlineTargets(query string, targets []inlineTarget) []inlineTarget {
+	if strings.TrimSpace(query) == "" {
+		return targets
+	}
+	queryLower := strings.ToLower(query)
+	type scoredTarget struct {
+		target inlineTarget
+		score  int
+	}
+	scored := make([]scoredTarget, 0, len(targets))
+	for _, target := range targets {
+		search := strings.ToLower(target.SearchValue)
+		score := 0
+		switch {
+		case search == queryLower:
+			score = 1000
+		case strings.HasPrefix(search, queryLower):
+			score = 500
+		case strings.Contains(search, queryLower):
+			score = 300
+		default:
+			score = fuzzyScore(queryLower, search)
+		}
+		if score > 0 {
+			scored = append(scored, scoredTarget{target: target, score: score})
+		}
+	}
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		return scored[i].target.Title < scored[j].target.Title
+	})
+	out := make([]inlineTarget, 0, len(scored))
+	for _, s := range scored {
+		out = append(out, s.target)
+	}
+	return out
+}
+
+func encodeInlineRouteCommand(target inlineTarget, messagePayload string) string {
+	messagePayload = strings.TrimSpace(messagePayload)
+	switch target.Kind {
+	case "user":
+		return fmt.Sprintf("/ksh_user:%s %s", target.ID, messagePayload)
+	case "role":
+		return fmt.Sprintf("/ksh_role:%s %s", target.ID, messagePayload)
+	default:
+		return fmt.Sprintf("/ksh_room:%s %s", target.ID, messagePayload)
+	}
+}
+
 // handleCallbackQuery processes callback queries from inline keyboard buttons.
 func (t *TelegramBot) handleCallbackQuery(ctx context.Context, query *TelegramCallbackQuery) {
 	// Answer the callback query immediately to remove the loading indicator
@@ -666,6 +801,66 @@ func (t *TelegramBot) handleCallbackQuery(ctx context.Context, query *TelegramCa
 // This handles both regular messages and messages sent via inline query (@DM_username message).
 func (t *TelegramBot) handleDirectMessage(ctx context.Context, msg *TelegramMessage, chatID string, username string) {
 	text := strings.TrimSpace(msg.Text)
+
+	// Handle inline-route commands inserted by inline query selection.
+	if strings.HasPrefix(text, "/ksh_") {
+		parts := strings.SplitN(text, " ", 2)
+		if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+			t.sendMessage(ctx, chatID, "Please provide a message payload.")
+			return
+		}
+		targetSpec := strings.TrimPrefix(parts[0], "/ksh_")
+		messageBody := strings.TrimSpace(parts[1])
+
+		senderUser, err := t.store.FindUserByUsername(ctx, username)
+		if err != nil {
+			t.logger.Warn("sender user not found", "username", username, "error", err)
+			t.sendMessage(ctx, chatID, "Your user account could not be found.")
+			return
+		}
+
+		targetParts := strings.SplitN(targetSpec, ":", 2)
+		if len(targetParts) != 2 || targetParts[1] == "" {
+			t.sendMessage(ctx, chatID, "Invalid inline target.")
+			return
+		}
+
+		targetType := targetParts[0]
+		targetID := targetParts[1]
+
+		e := RoutedEvent{
+			Body:      messageBody,
+			Source:    "telegram",
+			FromUser:  senderUser,
+			Timestamp: time.Now().UnixMilli(),
+		}
+
+		switch targetType {
+		case "user":
+			e.Scope = "direct"
+			e.TargetType = "user"
+			e.TargetID = targetID
+			t.hub.SendChatToUser(targetID, e)
+			t.sendMessage(ctx, chatID, "✅ Message sent.")
+			return
+		case "role":
+			e.Scope = "direct"
+			e.TargetType = "role"
+			e.TargetID = targetID
+			t.hub.SendChatToRole(targetID, e)
+			t.sendMessage(ctx, chatID, "✅ Message sent.")
+			return
+		case "room":
+			e.Scope = "room"
+			e.TargetID = targetID
+			t.hub.SendChatToRoom(targetID, e)
+			t.sendMessage(ctx, chatID, "✅ Message sent.")
+			return
+		default:
+			t.sendMessage(ctx, chatID, "Unknown inline target.")
+			return
+		}
+	}
 
 	// Check if this is a direct message command from inline query (@DM_username message)
 	if strings.HasPrefix(text, "@DM_") {

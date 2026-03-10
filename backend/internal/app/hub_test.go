@@ -449,3 +449,45 @@ func TestHubRouteChatAckRoutesToOriginalSender(t *testing.T) {
 	default:
 	}
 }
+
+func TestHubSendChatToUserDoesNotPanicWithoutSenderClient(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+
+	receiver := &client{session: Session{Token: "receiver-token"}, user: User{ID: "u2", Username: "receiver", RoleID: "video"}, send: make(chan WSOutbound, 4)}
+	hub.Add(receiver)
+	drain(receiver.send)
+
+	e := RoutedEvent{
+		Scope:      "direct",
+		TargetType: "user",
+		TargetID:   "u2",
+		Body:       "hello from telegram",
+		Source:     "telegram",
+		FromUser:   User{ID: "u1", Username: "sender", RoleID: "audio"},
+	}
+
+	hub.SendChatToUser("u2", e)
+
+	select {
+	case msg := <-receiver.send:
+		if msg.Type != "chat" {
+			t.Fatalf("expected chat message, got %s", msg.Type)
+		}
+		routed, ok := msg.Data.(RoutedEvent)
+		if !ok {
+			t.Fatalf("expected RoutedEvent payload, got %T", msg.Data)
+		}
+		if routed.Body != "hello from telegram" {
+			t.Fatalf("unexpected routed body: %q", routed.Body)
+		}
+	default:
+		t.Fatal("expected message to be delivered to target user")
+	}
+}

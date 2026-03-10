@@ -266,7 +266,15 @@ func (h *Hub) recordChatHistory(sender *client, e RoutedEvent) {
 			h.chatHistory.AppendForRoom(roomID, e)
 		}
 	case "direct":
-		h.chatHistory.AppendForUser(sender.user.ID, e)
+		senderUserID := ""
+		if sender != nil {
+			senderUserID = sender.user.ID
+		} else {
+			senderUserID = e.FromUser.ID
+		}
+		if senderUserID != "" {
+			h.chatHistory.AppendForUser(senderUserID, e)
+		}
 		if e.TargetType == "role" {
 			for _, userID := range h.roleUserIDs(e.TargetID) {
 				h.chatHistory.AppendForUser(userID, e)
@@ -499,23 +507,53 @@ func (h *Hub) SendChatToUser(userID string, e RoutedEvent) {
 	msg := WSOutbound{Type: "chat", Data: e}
 
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-
 	for _, c := range h.clients {
 		if c.user.ID == userID {
 			h.enqueueOutbound(c, msg)
 		}
 	}
+	h.mu.RUnlock()
 
 	// Record in chat history if enabled
 	h.recordChatHistory(nil, e)
 
 	// Trigger chat hook for further routing (e.g., to other Telegram users)
-	if h.chatHook != nil {
-		h.chatHook("chat", e)
+	h.mu.RLock()
+	hook := h.chatHook
+	h.mu.RUnlock()
+
+	if hook != nil {
+		hook("chat", e)
 	}
 
 	h.logger.Debug("chat sent to user", "userID", userID, "from", e.FromUser.Username)
+}
+
+// SendChatToRole sends a chat message to all active sessions of a role.
+// Used by external systems (like Telegram) for role-targeted messages.
+func (h *Hub) SendChatToRole(roleID string, e RoutedEvent) {
+	e.Timestamp = time.Now().UnixMilli()
+	msg := WSOutbound{Type: "chat", Data: e}
+
+	h.mu.RLock()
+	for _, c := range h.clients {
+		if c.session.RoleID == roleID {
+			h.enqueueOutbound(c, msg)
+		}
+	}
+	h.mu.RUnlock()
+
+	h.recordChatHistory(nil, e)
+
+	h.mu.RLock()
+	hook := h.chatHook
+	h.mu.RUnlock()
+
+	if hook != nil {
+		hook("chat", e)
+	}
+
+	h.logger.Debug("chat sent to role", "roleID", roleID, "from", e.FromUser.Username)
 }
 
 func (h *Hub) Add(c *client) {
