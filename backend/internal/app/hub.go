@@ -84,6 +84,60 @@ func (h *Hub) SignalStateForUsername(username string) (string, string, bool) {
 	return selected.signalFrom, selected.signalMessage, true
 }
 
+type ActiveClient struct {
+	Username  string
+	RoleID    string
+	RoleName  string
+	UserID    string
+	VoiceMode string
+}
+
+// GetActiveClients returns a list of currently connected clients with their basic info.
+// The list is sorted by username for consistent ordering.
+func (h *Hub) GetActiveClients(ctx context.Context) []ActiveClient {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	// Use a map to deduplicate by username (in case multiple sessions exist)
+	clientMap := make(map[string]*client)
+	for _, c := range h.clients {
+		if existing, exists := clientMap[c.user.Username]; !exists || c.connectedAt.After(existing.connectedAt) {
+			clientMap[c.user.Username] = c
+		}
+	}
+
+	// Get all roles for mapping roleID to roleName
+	roleMap := make(map[string]string)
+	if h.store != nil {
+		roles, err := h.store.ListRoles(ctx)
+		if err == nil {
+			for _, role := range roles {
+				roleMap[role.ID] = role.Name
+			}
+		}
+	}
+
+	// Convert to slice
+	result := make([]ActiveClient, 0, len(clientMap))
+	for _, c := range clientMap {
+		roleName := roleMap[c.session.RoleID]
+		result = append(result, ActiveClient{
+			Username:  c.user.Username,
+			RoleID:    c.session.RoleID,
+			RoleName:  roleName,
+			UserID:    c.user.ID,
+			VoiceMode: c.voiceMode,
+		})
+	}
+
+	// Sort by username for consistent ordering
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Username < result[j].Username
+	})
+
+	return result
+}
+
 type Hub struct {
 	mu                  sync.RWMutex
 	clients             map[string]*client

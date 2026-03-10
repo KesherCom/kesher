@@ -140,6 +140,12 @@ func (t *TelegramBot) getUpdates(ctx context.Context, client *http.Client, offse
 func (t *TelegramBot) processUpdate(update TelegramUpdate) {
 	ctx := context.Background()
 
+	// Handle inline queries (autocomplete for @bot <query>)
+	if update.InlineQuery != nil {
+		t.handleInlineQuery(ctx, update.InlineQuery)
+		return
+	}
+
 	// Handle callback queries (button clicks)
 	if update.CallbackQuery != nil {
 		t.handleCallbackQuery(ctx, update.CallbackQuery)
@@ -156,6 +162,12 @@ func (t *TelegramBot) processUpdate(update TelegramUpdate) {
 	// Check if this is a login command in a private chat
 	if update.Message.Chat.Type == "private" && strings.HasPrefix(strings.TrimSpace(update.Message.Text), "/login") {
 		t.handleLoginCommand(ctx, update.Message, chatID)
+		return
+	}
+
+	// Check if this is an online command in a private chat
+	if update.Message.Chat.Type == "private" && strings.HasPrefix(strings.TrimSpace(update.Message.Text), "/online") {
+		t.handleOnlineCommand(ctx, update.Message, chatID)
 		return
 	}
 
@@ -307,6 +319,147 @@ func (t *TelegramBot) handleRoomsCommand(ctx context.Context, msg *TelegramMessa
 		t.logger.Warn("failed to send rooms keyboard", "error", err)
 		t.sendMessage(ctx, chatID, "Error displaying rooms. Please try again.")
 	}
+}
+
+// handleOnlineCommand processes the /online command in private chats.
+// It returns a text list of all currently active users and their roles.
+func (t *TelegramBot) handleOnlineCommand(ctx context.Context, msg *TelegramMessage, chatID string) {
+	if msg.From == nil {
+		return
+	}
+
+	telegramUserID := strconv.FormatInt(msg.From.ID, 10)
+
+	// Verify the user is logged in (has a mapping)
+	_, err := t.store.FindTelegramUserMappingByTelegramID(ctx, telegramUserID)
+	if err != nil {
+		t.sendMessage(ctx, chatID, "Not logged in. Use /login <username> to link your Telegram account to Kesher first.")
+		return
+	}
+
+	// Get active clients from the hub
+	activeClients := t.hub.GetActiveClients(ctx)
+
+	if len(activeClients) == 0 {
+		t.sendMessage(ctx, chatID, "No users currently online.")
+		return
+	}
+
+	// Build the response text
+	var sb strings.Builder
+	sb.WriteString("🟢 Currently online:\n\n")
+	for _, client := range activeClients {
+		if client.RoleName != "" {
+			sb.WriteString(fmt.Sprintf("• %s [%s]\n", client.Username, client.RoleName))
+		} else {
+			sb.WriteString(fmt.Sprintf("• %s\n", client.Username))
+		}
+	}
+
+	t.sendMessage(ctx, chatID, sb.String())
+	t.logger.Info("telegram /online command processed", "chatID", chatID, "onlineCount", len(activeClients))
+}
+
+// handleInlineQuery processes inline queries for autocomplete functionality.
+// When a user types @botname <query>, this provides live suggestions.
+func (t *TelegramBot) handleInlineQuery(ctx context.Context, query *TelegramInlineQuery) {
+	if query.From == nil {
+		return
+	}
+
+	telegramUserID := strconv.FormatInt(query.From.ID, 10)
+
+	// Verify the user is logged in
+	_, err := t.store.FindTelegramUserMappingByTelegramID(ctx, telegramUserID)
+	if err != nil {
+		// User not logged in - return empty results with a helpful message
+		emptyResult := TelegramInlineQueryResultArticle{
+			Type:  "article",
+			ID:    "not_logged_in",
+			Title: "Not logged in",
+			Description: "Use /login <username> to link your account first",
+			InputMessageContent: TelegramInputMessageContent{
+				MessageText: "Not logged in. Use /login <username> to link your Telegram account to Kesher.",
+			},
+		}
+		t.answerInlineQuery(ctx, query.ID, []TelegramInlineQueryResultArticle{emptyResult})
+		return
+	}
+
+	// Get active clients from the hub
+	activeClients := t.hub.GetActiveClients(ctx)
+
+	if len(activeClients) == 0 {
+		// No one online
+		emptyResult := TelegramInlineQueryResultArticle{
+			Type:  "article",
+			ID:    "no_users_online",
+			Title: "No users online",
+			Description: "No active users to send messages to",
+			InputMessageContent: TelegramInputMessageContent{
+				MessageText: "No users currently online.",
+			},
+		}
+		t.answerInlineQuery(ctx, query.ID, []TelegramInlineQueryResultArticle{emptyResult})
+		return
+	}
+
+	// Filter and build results based on the query
+	queryLower := strings.ToLower(strings.TrimSpace(query.Query))
+	var results []TelegramInlineQueryResultArticle
+
+	for _, client := range activeClients {
+		// Match username or role name
+		usernameMatch := strings.Contains(strings.ToLower(client.Username), queryLower)
+		roleMatch := strings.Contains(strings.ToLower(client.RoleName), queryLower)
+
+		if queryLower == "" || usernameMatch || roleMatch {
+			// Build description with role if available
+			description := "Send direct message"
+			if client.RoleName != "" {
+				description = fmt.Sprintf("Role: %s", client.RoleName)
+			}
+
+			// Build the title
+			title := client.Username
+			if client.RoleName != "" {
+				title = fmt.Sprintf("%s [%s]", client.Username, client.RoleName)
+			}
+
+			result := TelegramInlineQueryResultArticle{
+				Type:        "article",
+				ID:          fmt.Sprintf("user_%s", client.UserID),
+				Title:       title,
+				Description: description,
+				InputMessageContent: TelegramInputMessageContent{
+					MessageText: fmt.Sprintf("@%s ", client.Username),
+				},
+			}
+			results = append(results, result)
+		}
+	}
+
+	// Limit results to 50 (Telegram API limit)
+	if len(results) > 50 {
+		results = results[:50]
+	}
+
+	if len(results) == 0 {
+		// No matches found
+		noMatchResult := TelegramInlineQueryResultArticle{
+			Type:  "article",
+			ID:    "no_matches",
+			Title: "No matches found",
+			Description: fmt.Sprintf("No users matching '%s'", query.Query),
+			InputMessageContent: TelegramInputMessageContent{
+				MessageText: fmt.Sprintf("No users found matching '%s'", query.Query),
+			},
+		}
+		results = []TelegramInlineQueryResultArticle{noMatchResult}
+	}
+
+	t.answerInlineQuery(ctx, query.ID, results)
+	t.logger.Info("telegram inline query processed", "query", query.Query, "results", len(results))
 }
 
 // handleCallbackQuery processes callback queries from inline keyboard buttons.
@@ -624,6 +777,37 @@ func (t *TelegramBot) answerCallbackQuery(ctx context.Context, callbackQueryID s
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/answerCallbackQuery", t.token)
 	payload := map[string]string{
 		"callback_query_id": callbackQueryID,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("telegram API error %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+func (t *TelegramBot) answerInlineQuery(ctx context.Context, inlineQueryID string, results []TelegramInlineQueryResultArticle) error {
+	if t.token == "" {
+		return fmt.Errorf("telegram bot token not configured")
+	}
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/answerInlineQuery", t.token)
+	payload := map[string]interface{}{
+		"inline_query_id": inlineQueryID,
+		"results":         results,
+		"cache_time":      10, // Cache results for 10 seconds
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
