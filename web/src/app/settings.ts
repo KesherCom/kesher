@@ -78,8 +78,10 @@ export type GlobalSettings = {
   selectedOutputDeviceId: string;
   enableDirectPpt: boolean;
   enableDirectTabs: boolean;
+  swapPttAndReplyButtons: boolean;
   enableBackgroundAudioRecovery: boolean;
   keepScreenAwake: boolean;
+  showVolumeControls: boolean;
   inputGainByDeviceId: Record<string, number>;
   roomGainById: Record<string, number>;
   directGainByUserId: Record<string, number>;
@@ -138,8 +140,10 @@ export function loadGlobalSettings(): GlobalSettings {
         selectedOutputDeviceId: "",
         enableDirectPpt: false,
         enableDirectTabs: false,
+        swapPttAndReplyButtons: false,
         enableBackgroundAudioRecovery: true,
         keepScreenAwake: false,
+        showVolumeControls: true,
         inputGainByDeviceId: {},
         roomGainById: {},
         directGainByUserId: {},
@@ -163,6 +167,10 @@ export function loadGlobalSettings(): GlobalSettings {
         typeof parsed.enableDirectTabs === "boolean"
           ? parsed.enableDirectTabs
           : false,
+      swapPttAndReplyButtons:
+        typeof parsed.swapPttAndReplyButtons === "boolean"
+          ? parsed.swapPttAndReplyButtons
+          : false,
       enableBackgroundAudioRecovery:
         typeof parsed.enableBackgroundAudioRecovery === "boolean"
           ? parsed.enableBackgroundAudioRecovery
@@ -171,6 +179,10 @@ export function loadGlobalSettings(): GlobalSettings {
         typeof parsed.keepScreenAwake === "boolean"
           ? parsed.keepScreenAwake
           : false,
+      showVolumeControls:
+        typeof parsed.showVolumeControls === "boolean"
+          ? parsed.showVolumeControls
+          : true,
       inputGainByDeviceId: sanitizeGainMap(parsed.inputGainByDeviceId),
       roomGainById: sanitizeGainMap(parsed.roomGainById),
       directGainByUserId: sanitizeGainMap(parsed.directGainByUserId),
@@ -181,8 +193,10 @@ export function loadGlobalSettings(): GlobalSettings {
       selectedOutputDeviceId: "",
       enableDirectPpt: false,
       enableDirectTabs: false,
+      swapPttAndReplyButtons: false,
       enableBackgroundAudioRecovery: true,
       keepScreenAwake: false,
+      showVolumeControls: true,
       inputGainByDeviceId: {},
       roomGainById: {},
       directGainByUserId: {},

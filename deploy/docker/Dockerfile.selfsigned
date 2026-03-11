@@ -8,12 +8,14 @@ RUN npm run build
 FROM golang:1.23-alpine AS go-build
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
+ARG VERSION=dev
+ARG BUILD_TIMESTAMP=unknown
 WORKDIR /src/backend
 COPY backend/go.mod backend/go.sum* ./
 RUN go mod download
 COPY backend/ .
 COPY --from=web-build /src/web/dist ./internal/app/embedded_web
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X github.com/KesherCom/kesher/backend/internal/app.Version=$VERSION -X github.com/KesherCom/kesher/backend/internal/app.BuildTimestamp=$BUILD_TIMESTAMP" -o /out/server ./cmd/server
 
 FROM alpine:3.21
 LABEL org.opencontainers.image.title="kesher"

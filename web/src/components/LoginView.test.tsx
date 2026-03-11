@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -11,6 +12,8 @@ const baseProps = {
     ],
     rooms: [],
     broadcastGroups: [],
+    ackEnabled: true,
+    appVersion: { version: "dev", buildTimestamp: "2026-03-10" },
   },
   username: "",
   roleId: "",
@@ -57,6 +60,31 @@ describe("LoginView", () => {
     expect(onUsernameChange).toHaveBeenCalled();
     expect(onRoleChange).toHaveBeenCalledWith("admin");
     expect(onLogin).toHaveBeenCalledTimes(1);
+  });
+
+  it("strips whitespace from display name while typing", async () => {
+    const user = userEvent.setup();
+    const onUsernameChange = vi.fn();
+
+    function Harness() {
+      const [username, setUsername] = useState("");
+      return (
+        <LoginView
+          {...baseProps}
+          username={username}
+          roleId="op"
+          onUsernameChange={(value) => {
+            onUsernameChange(value);
+            setUsername(value);
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    await user.type(screen.getByLabelText("Display name"), "Tim FOH");
+    expect(onUsernameChange).toHaveBeenLastCalledWith("TimFOH");
   });
 
   it("toggles admin panel and handles admin login action", async () => {

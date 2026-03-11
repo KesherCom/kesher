@@ -2,7 +2,7 @@
 
 On-prem, web-based intercom for church live productions. Built for 30–50 concurrent users on a trusted LAN.
 
-**Features:** WebRTC voice (always-on + push-to-talk), rooms with listen/talk matrix, broadcast groups spanning multiple rooms, direct PTT between users, real-time presence, role-based access, admin CRUD for roles/rooms/broadcasts, SQLite persistence.
+**Features:** WebRTC voice (always-on + push-to-talk), party‑lines with listen/talk matrix, broadcast groups spanning multiple party‑lines, direct PTT between users, real-time presence, role-based access, admin CRUD for roles/party‑lines/broadcasts, SQLite persistence.
 
 ## Quick start
 

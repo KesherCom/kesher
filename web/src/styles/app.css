@@ -199,10 +199,76 @@ button {
   flex-wrap: wrap;
   gap: 0.6rem;
   margin-bottom: 0.75rem;
+  position: relative;
 }
 .chat input {
   flex: 1;
   min-width: 220px;
+}
+
+/* ===== Chat Actions Row (ACK + Send) ===== */
+.chat-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* ===== ACK Button (Compact Icon) ===== */
+.chat-ack-btn {
+  position: relative;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 140ms ease;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.chat-ack-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.chat-ack-btn:focus-visible {
+  outline: 2px solid rgba(245, 158, 11, 0.5);
+  outline-offset: 1px;
+}
+.chat-ack-indicator {
+  display: block;
+  width: 10px;
+  height: 10px;
+  background: #9ca3af;
+  border-radius: 2px;
+  transition: all 140ms ease;
+}
+.chat-ack-btn.active {
+  background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
+  border-color: rgba(251, 191, 36, 0.7);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
+}
+.chat-ack-btn.active:hover {
+  background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
+  border-color: rgba(251, 191, 36, 0.8);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
+}
+.chat-ack-btn.active .chat-ack-indicator {
+  background: #fef3c7;
+  box-shadow: 0 0 4px rgba(251, 191, 36, 0.6);
+}
+.chat-actions button {
+  flex-shrink: 0;
+  width: auto;
+  /* min-width: max-content; */
+  max-width: 4rem;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 .chat-feed {
   border: 1px solid var(--border-light);
@@ -252,12 +318,51 @@ button {
 .chat-feed-meta span {
   margin-right: 0;
 }
-.chat-feed-room {
+.chat-feed-room, .chat-feed-party-line {
   color: var(--text-secondary);
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   padding: 0.05rem 0.42rem;
   line-height: 1.2;
+}
+/* ===== ACK Status Badges ===== */
+.chat-feed-ack-status {
+  border-radius: 12px;
+  padding: 0.15rem 0.6rem;
+  line-height: 1.3;
+  border: 1px solid;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  transition: all 160ms ease;
+}
+.chat-feed-ack-status.pending {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.4);
+  background: linear-gradient(135deg, 
+    rgba(251, 191, 36, 0.12) 0%, 
+    rgba(217, 119, 6, 0.08) 100%);
+  box-shadow: 0 2px 8px rgba(251, 191, 36, 0.1);
+}
+.chat-feed-ack-status.pending::before {
+  content: '⏱';
+  font-size: 0.9em;
+}
+.chat-feed-ack-status.acked {
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.5);
+  background: linear-gradient(135deg, 
+    rgba(16, 185, 129, 0.18) 0%, 
+    rgba(5, 150, 105, 0.12) 100%);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
+}
+.chat-feed-ack-status.acked::before {
+  content: '✓';
+  font-size: 1em;
+  font-weight: 700;
 }
 .chat-feed-list li p {
   margin: 0.16rem 0 0;
@@ -265,8 +370,94 @@ button {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.chat-feed-list li.self strong {
+/* ===== ACK Acknowledge Button ===== */
+.chat-feed-ack-btn {
+  margin-top: 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.35rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  background: linear-gradient(135deg, 
+    rgba(16, 185, 129, 0.15) 0%, 
+    rgba(5, 150, 105, 0.1) 100%);
+  color: #10b981;
+  cursor: pointer;
+  transition: all 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.1);
+  letter-spacing: 0.01em;
+}
+.chat-feed-ack-btn:hover {
+  background: linear-gradient(135deg, 
+    rgba(16, 185, 129, 0.25) 0%, 
+    rgba(5, 150, 105, 0.18) 100%);
+  border-color: rgba(16, 185, 129, 0.6);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+  transform: translateY(-1px);
+}
+.chat-feed-ack-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(16, 185, 129, 0.15);
+}
+.chat-feed-ack-btn:focus {
+  outline: 2px solid rgba(16, 185, 129, 0.4);
+  outline-offset: 2px;
+}
+.chat-feed-list li.chat-feed-direct {
+  border-left: 3px solid #d97706;
+  padding-left: 0.45rem;
+  background: color-mix(in srgb, #d97706 10%, var(--panel));
+  border-radius: 6px;
+}
+.chat-feed-list li.self .chat-feed-sender {
   color: var(--station-call-text);
+}
+.chat-feed-sender {
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.84rem;
+  font-weight: 700;
+  padding: 0;
+}
+.chat-feed-sender:hover {
+  color: var(--accent-primary);
+  text-decoration: underline;
+}
+.chat-feed-source-icon {
+  font-size: 0.75rem;
+  line-height: 1;
+  opacity: 0.72;
+}
+.chat-autocomplete {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 0.2rem);
+  z-index: 20;
+  width: min(460px, 100%);
+  list-style: none;
+  margin: 0;
+  padding: 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
+}
+.chat-autocomplete li {
+  margin: 0;
+  padding: 0;
+}
+.chat-autocomplete button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  border-radius: 8px;
+  padding: 0.42rem 0.5rem;
+}
+.chat-autocomplete button:hover,
+.chat-autocomplete button.active {
+  background: var(--btn-bg-hover);
 }
 .mic-dropdown {
   position: relative;
@@ -1040,7 +1231,7 @@ button {
   padding: 0.9rem;
   background: rgba(16, 26, 36, 0.3);
 }
-.admin-room-picker {
+.admin-room-picker, .admin-party-line-picker {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem 0.75rem;
@@ -1427,11 +1618,26 @@ button.secondary {
   background: var(--surface);
   border: 1px solid var(--border-dim);
 }
+.station-header {
+  position: sticky;
+  top: max(0.75rem, env(safe-area-inset-top, 0px));
+  z-index: 40;
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.15rem;
+  background: linear-gradient(
+    180deg,
+    var(--surface) 0%,
+    rgba(26, 29, 35, 0.96) 85%,
+    rgba(26, 29, 35, 0) 100%
+  );
+}
 .station-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 1.2rem;
+  margin-bottom: 0;
 }
 .station-live {
   display: inline-flex;
@@ -1972,12 +2178,24 @@ button.secondary {
   border-color: var(--input-border-hover);
   background: var(--station-broadcast-active-hover-bg);
 }
+.station-content-grid {
+  display: grid;
+  gap: 1rem;
+  align-items: start;
+}
+.station-primary-column,
+.station-secondary-column {
+  min-width: 0;
+}
+.station-secondary-column {
+  display: flex;
+}
 .station-controls {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.75rem;
-  margin: 1rem 0;
+  margin: 0;
   padding: 0.6rem 0.85rem;
   border-radius: 14px;
   border: 1px solid var(--border-strong);
@@ -2056,33 +2274,32 @@ button.secondary {
 .station-always-on {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.55rem;
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   padding: 0.45rem 0.7rem 0.45rem 0.55rem;
   background: var(--station-dock-bg);
   box-shadow: none;
+  cursor: pointer;
   transition:
     border-color 140ms ease,
     box-shadow 140ms ease,
     background 140ms ease;
 }
-.station-always-on input {
-  appearance: none;
-  -webkit-appearance: none;
+.station-always-on-indicator {
   width: 1.95rem;
   height: 1.1rem;
-  margin: 0;
   border-radius: 999px;
   border: 1px solid var(--station-direct-reply-active-border);
   background: var(--station-direct-reply-active-bg);
   position: relative;
-  cursor: pointer;
+  flex: 0 0 auto;
   transition:
     background 140ms ease,
     border-color 140ms ease;
 }
-.station-always-on input::after {
+.station-always-on-indicator::after {
   content: "";
   position: absolute;
   left: 2px;
@@ -2096,7 +2313,7 @@ button.secondary {
     transform 140ms ease,
     background 140ms ease;
 }
-.station-always-on span {
+.station-always-on-text {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 700;
@@ -2108,15 +2325,15 @@ button.secondary {
   background: var(--station-broadcast-active-bg-from);
   box-shadow: none;
 }
-.station-always-on.active input {
+.station-always-on.active .station-always-on-indicator {
   background: var(--station-broadcast-active-hover-bg);
   border-color: var(--station-broadcast-active-hover-border);
 }
-.station-always-on.active input::after {
+.station-always-on.active .station-always-on-indicator::after {
   transform: translateX(0.82rem);
   background: var(--station-broadcast-active-badge);
 }
-.station-always-on.active span {
+.station-always-on.active .station-always-on-text {
   color: var(--text-bright-alt2);
 }
 .station-reply {
@@ -2224,10 +2441,26 @@ button.secondary {
   opacity: 0.5;
 }
 .station-utility {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.8rem;
-  margin-bottom: 1rem;
+  display: block;
+  margin-bottom: 0;
+}
+.station-utility-section {
+  width: 100%;
+}
+.station-chat-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.station-chat-panel .chat {
+  flex: 0 0 auto;
+}
+.station-chat-panel .chat-feed {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 .station-modal-backdrop {
   position: fixed;
@@ -2764,24 +2997,13 @@ button.secondary {
   .station-shell {
     display: flex;
     flex-direction: column;
+    padding-bottom: calc(13rem + env(safe-area-inset-bottom, 0px));
   }
-  .station-topbar {
-    order: 1;
-  }
-  .station-controls {
-    order: 2;
-  }
-  .station-talk-section {
-    order: 3;
-  }
-  .station-direct-section {
-    order: 4;
-  }
-  .station-broadcast-section {
-    order: 5;
-  }
-  .station-utility-section {
-    order: 6;
+  .station-header {
+    position: static;
+    margin-bottom: 0;
+    padding-bottom: 0;
+    background: none;
   }
   .station-talk-grid,
   .station-direct-grid {
@@ -2791,26 +3013,75 @@ button.secondary {
     min-height: 46px;
   }
   .station-controls {
+    position: fixed;
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+    z-index: 95;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: stretch;
+    margin: 0;
+    padding: 0.8rem;
+    border-radius: 18px;
+    border: 0;
+    background: rgba(11, 15, 22, 0.94);
+    backdrop-filter: blur(18px);
+    box-shadow: 0 20px 44px rgba(0, 0, 0, 0.38);
+  }
+  .station-controls.station-controls-hidden-mobile {
+    display: none;
   }
   .station-ptt {
     width: 100%;
-  }
-  .station-ptt {
-    flex: 1 1 100%;
+    min-width: 0;
+    height: clamp(140px, 38vw, 220px);
+    min-height: 140px;
+    border-radius: 16px;
   }
   .station-always-on {
-    flex: 0 0 auto;
+    display: none;
   }
   .station-reply {
-    flex: 1 1 220px;
-    min-width: 200px;
+    width: 100%;
+    min-width: 0;
+    height: clamp(140px, 38vw, 220px);
+    min-height: 140px;
+    border-radius: 16px;
+  }
+  .station-controls button {
+    min-width: 0;
+    min-height: 140px;
+  }
+  .station-reply small {
+    text-align: center;
   }
   .station-dock {
     grid-template-columns: 1fr;
   }
   .station-utility {
     grid-template-columns: 1fr;
+  }
+}
+@media (min-width: 1200px) {
+  .station-content-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(400px, 460px);
+  }
+  .station-secondary-column {
+    position: sticky;
+    top: calc(7.5rem + env(safe-area-inset-top, 0px));
+    align-self: start;
+  }
+  .station-utility-section {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    margin-bottom: 0;
+  }
+  .station-chat-panel {
+    height: calc(100vh - 12.25rem - env(safe-area-inset-top, 0px));
+    min-height: 0;
   }
 }
 @media (max-width: 780px) {
@@ -2875,7 +3146,7 @@ button.secondary {
    - --admin-status-online, --admin-status-offline: User status
 
    Station-Specific:
-   - --station-pin-active-bg: Pinned room highlight
+   - --station-pin-active-bg: Pinned party-line highlight
    - --station-call-active-bg: Active call/signal button
    - --station-listen-on-bg: Active listen state
    - --station-card-head-active-bg: Selected station card

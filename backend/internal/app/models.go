@@ -1,5 +1,13 @@
 package app
 
+// NOTE: The term "room" is used throughout the backend for historical reasons
+// (database table names, JSON fields, internal APIs). The user-facing
+// terminology has been updated to "party line"; API consumers within this
+// repo still see "rooms" in JSON payloads for backwards compatibility.
+// New code should use "party line" in comments and documentation when
+// referring to the concept, but avoid renaming JSON tags without a proper
+// migration plan.
+
 import "time"
 
 type Role struct {
@@ -60,12 +68,16 @@ type BootstrapResponse struct {
 	Rooms           []Room           `json:"rooms"`
 	BroadcastGroups []BroadcastGroup `json:"broadcastGroups"`
 	Users           []User           `json:"users"`
+	AckEnabled      bool             `json:"ackEnabled"`
+	AppVersion      VersionInfo      `json:"appVersion"`
 }
 
 type PublicBootstrapResponse struct {
 	Roles           []Role           `json:"roles"`
 	Rooms           []Room           `json:"rooms"`
 	BroadcastGroups []BroadcastGroup `json:"broadcastGroups"`
+	AckEnabled      bool             `json:"ackEnabled"`
+	AppVersion      VersionInfo      `json:"appVersion"`
 }
 
 type LoginRequest struct {
@@ -104,12 +116,39 @@ type PresenceState struct {
 }
 
 type RoutedEvent struct {
-	Scope     string `json:"scope"`
-	TargetID  string `json:"targetId"`
-	Body      string `json:"body"`
-	Signal    string `json:"signal,omitempty"`
-	FromUser  User   `json:"fromUser"`
-	Timestamp int64  `json:"timestamp"`
+	Scope       string `json:"scope"`
+	TargetType  string `json:"targetType,omitempty"`
+	TargetID    string `json:"targetId"`
+	Body        string `json:"body"`
+	Source      string `json:"source,omitempty"`
+	Signal      string `json:"signal,omitempty"`
+	MessageID   string `json:"messageId,omitempty"`
+	AckRequired bool   `json:"ackRequired,omitempty"`
+	Acked       bool   `json:"acked,omitempty"`
+	AckedBy     *User  `json:"ackedBy,omitempty"`
+	AckedAt     int64  `json:"ackedAt,omitempty"`
+	FromUser    User   `json:"fromUser"`
+	Timestamp   int64  `json:"timestamp"`
+}
+
+type ChatAckInbound struct {
+	MessageID    string `json:"messageId"`
+	SenderUserID string `json:"senderUserId"`
+}
+
+type ChatAckUpdate struct {
+	MessageID    string `json:"messageId"`
+	SenderUserID string `json:"senderUserId"`
+	AckedBy      User   `json:"ackedBy"`
+	AckedAt      int64  `json:"ackedAt"`
+}
+
+type RoutingStatusEvent struct {
+	Code       string `json:"code"`
+	TargetType string `json:"targetType,omitempty"`
+	Target     string `json:"target,omitempty"`
+	Message    string `json:"message"`
+	Timestamp  int64  `json:"timestamp"`
 }
 
 type WebRTCOffer struct {
@@ -161,6 +200,24 @@ type TelegramMapping struct {
 	RoomID string `json:"roomId"`
 }
 
+type TelegramAllowlistEntry struct {
+	ID                 string `json:"id"`
+	TelegramUsername   string `json:"telegramUsername"`
+	TelegramNumericID  string `json:"telegramNumericId,omitempty"`
+	KesherUsername     string `json:"kesherUsername"`
+	CreatedAt          int64  `json:"createdAt"`
+	Status             string `json:"status"`
+	IsBound            bool   `json:"isBound"`
+}
+
+type TelegramUserMapping struct {
+	ID             string `json:"id"`
+	TelegramUserID string `json:"telegramUserId"`
+	Username       string `json:"username"`
+	PrivateChatID  string `json:"privateChatId"`
+	CreatedAt      int64  `json:"createdAt"`
+}
+
 type TelegramStatusResponse struct {
 	BotConfigured bool              `json:"botConfigured"`
 	Mode          string            `json:"mode"` // "polling" or "webhook"
@@ -168,8 +225,10 @@ type TelegramStatusResponse struct {
 }
 
 type TelegramUpdate struct {
-	UpdateID int64            `json:"update_id"`
-	Message  *TelegramMessage `json:"message,omitempty"`
+	UpdateID      int64                  `json:"update_id"`
+	Message       *TelegramMessage       `json:"message,omitempty"`
+	CallbackQuery *TelegramCallbackQuery `json:"callback_query,omitempty"`
+	InlineQuery   *TelegramInlineQuery   `json:"inline_query,omitempty"`
 }
 
 type TelegramMessage struct {
@@ -188,4 +247,39 @@ type TelegramUser struct {
 type TelegramChat struct {
 	ID   int64  `json:"id"`
 	Type string `json:"type"`
+}
+
+type TelegramCallbackQuery struct {
+	ID      string           `json:"id"`
+	From    *TelegramUser    `json:"from"`
+	Message *TelegramMessage `json:"message,omitempty"`
+	Data    string           `json:"data"`
+}
+
+type TelegramInlineKeyboardMarkup struct {
+	InlineKeyboard [][]TelegramInlineKeyboardButton `json:"inline_keyboard"`
+}
+
+type TelegramInlineKeyboardButton struct {
+	Text         string `json:"text"`
+	CallbackData string `json:"callback_data"`
+}
+
+type TelegramInlineQuery struct {
+	ID     string        `json:"id"`
+	From   *TelegramUser `json:"from"`
+	Query  string        `json:"query"`
+	Offset string        `json:"offset"`
+}
+
+type TelegramInlineQueryResultArticle struct {
+	Type                string                      `json:"type"`
+	ID                  string                      `json:"id"`
+	Title               string                      `json:"title"`
+	InputMessageContent TelegramInputMessageContent `json:"input_message_content"`
+	Description         string                      `json:"description,omitempty"`
+}
+
+type TelegramInputMessageContent struct {
+	MessageText string `json:"message_text"`
 }

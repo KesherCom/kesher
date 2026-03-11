@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -181,5 +183,81 @@ func TestBulkUpdateRoomPermissionsRejectsUnknownRole(t *testing.T) {
 	err = store.BulkUpdateRoomPermissions(context.Background(), entries)
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestCreateTelegramAllowlistEntryRejectsWhitespaceNames(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	err = store.CreateTelegramAllowlistEntry(ctx, "a1", "tg user", "validuser")
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput for telegram username with whitespace, got %v", err)
+	}
+
+	err = store.CreateTelegramAllowlistEntry(ctx, "a2", "tg_user", "valid user")
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput for kesher username with whitespace, got %v", err)
+	}
+}
+
+func TestNewStoreMigratesLegacyTelegramUserMappingsSchema(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy-telegram.sqlite")
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	if _, err := legacyDB.ExecContext(ctx, `CREATE TABLE telegram_user_mappings (
+		telegram_user_id TEXT NOT NULL UNIQUE,
+		username TEXT NOT NULL,
+		created_at INTEGER NOT NULL
+	)`); err != nil {
+		legacyDB.Close()
+		t.Fatal(err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `INSERT INTO telegram_user_mappings (telegram_user_id, username, created_at) VALUES (?, ?, ?)`,
+		"12345", "alice", int64(1710000000)); err != nil {
+		legacyDB.Close()
+		t.Fatal(err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	mapping, err := store.FindTelegramUserMappingByTelegramID(ctx, "12345")
+	if err != nil {
+		t.Fatalf("expected migrated mapping, got %v", err)
+	}
+	if mapping.ID != "telegram_user_12345" {
+		t.Fatalf("unexpected migrated mapping id: %q", mapping.ID)
+	}
+	if mapping.Username != "alice" {
+		t.Fatalf("unexpected migrated mapping username: %q", mapping.Username)
+	}
+	if mapping.PrivateChatID != "12345" {
+		t.Fatalf("unexpected migrated private chat id: %q", mapping.PrivateChatID)
+	}
+
+	if err := store.CreateTelegramUserMapping(ctx, "telegram_user_67890", "67890", "bob", "1000"); err != nil {
+		t.Fatalf("expected inserts to work after migration, got %v", err)
+	}
+	created, err := store.FindTelegramUserMappingByTelegramID(ctx, "67890")
+	if err != nil {
+		t.Fatalf("expected created mapping after migration, got %v", err)
+	}
+	if created.ID != "telegram_user_67890" {
+		t.Fatalf("unexpected created mapping id: %q", created.ID)
 	}
 }

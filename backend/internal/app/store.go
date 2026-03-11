@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -17,6 +18,10 @@ var (
 	ErrConflict     = errors.New("conflict")
 	ErrNotFound     = errors.New("not found")
 )
+
+func hasWhitespace(value string) bool {
+	return strings.ContainsAny(value, " \t\n\r")
+}
 
 const defaultAdminPIN = "123456"
 
@@ -246,10 +251,10 @@ func toStringSet(values []string) map[string]struct{} {
 	return out
 }
 
-func (s *Store) ensureColumn(ctx context.Context, table, column, columnType string) error {
+func (s *Store) tableHasColumn(ctx context.Context, table, column string) (bool, error) {
 	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, table))
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -260,14 +265,96 @@ func (s *Store) ensureColumn(ctx context.Context, table, column, columnType stri
 		var dflt sql.NullString
 		var pk int
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return err
+			return false, err
 		}
 		if strings.EqualFold(name, column) {
-			return nil
+			return true, nil
 		}
+	}
+	return false, rows.Err()
+}
+
+func (s *Store) ensureColumn(ctx context.Context, table, column, columnType string) error {
+	hasColumn, err := s.tableHasColumn(ctx, table, column)
+	if err != nil {
+		return err
+	}
+	if hasColumn {
+		return nil
 	}
 	_, err = s.db.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, columnType))
 	return err
+}
+
+func (s *Store) ensureTelegramUserMappingsSchema(ctx context.Context) error {
+	hasTelegramUserID, err := s.tableHasColumn(ctx, "telegram_user_mappings", "telegram_user_id")
+	if err != nil {
+		return err
+	}
+	hasUsername, err := s.tableHasColumn(ctx, "telegram_user_mappings", "username")
+	if err != nil {
+		return err
+	}
+	hasID, err := s.tableHasColumn(ctx, "telegram_user_mappings", "id")
+	if err != nil {
+		return err
+	}
+	hasPrivateChatID, err := s.tableHasColumn(ctx, "telegram_user_mappings", "private_chat_id")
+	if err != nil {
+		return err
+	}
+	hasCreatedAt, err := s.tableHasColumn(ctx, "telegram_user_mappings", "created_at")
+	if err != nil {
+		return err
+	}
+	if hasTelegramUserID && hasUsername && hasID && hasPrivateChatID && hasCreatedAt {
+		return nil
+	}
+	if !hasTelegramUserID || !hasUsername {
+		return fmt.Errorf("telegram_user_mappings schema missing required legacy columns")
+	}
+
+	idExpr := `'telegram_user_' || telegram_user_id`
+	if hasID {
+		idExpr = "id"
+	}
+	privateChatIDExpr := "telegram_user_id"
+	if hasPrivateChatID {
+		privateChatIDExpr = "private_chat_id"
+	}
+	createdAtExpr := "CAST(strftime('%s','now') AS INTEGER)"
+	if hasCreatedAt {
+		createdAtExpr = "created_at"
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `CREATE TABLE telegram_user_mappings_new (
+		id TEXT PRIMARY KEY,
+		telegram_user_id TEXT NOT NULL UNIQUE,
+		username TEXT NOT NULL,
+		private_chat_id TEXT NOT NULL,
+		created_at INTEGER NOT NULL
+	)`); err != nil {
+		return err
+	}
+	insertQuery := fmt.Sprintf(`INSERT INTO telegram_user_mappings_new (id, telegram_user_id, username, private_chat_id, created_at)
+		SELECT %s, telegram_user_id, username, %s, %s
+		FROM telegram_user_mappings`, idExpr, privateChatIDExpr, createdAtExpr)
+	if _, err := tx.ExecContext(ctx, insertQuery); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DROP TABLE telegram_user_mappings`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE telegram_user_mappings_new RENAME TO telegram_user_mappings`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) validateRoleDefaults(ctx context.Context, defaultRoomID, defaultVoiceMode string) error {
@@ -306,6 +393,11 @@ func NewStore(dbPath string) (*Store, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
+	}
+	if dbPath == ":memory:" || strings.Contains(dbPath, "mode=memory") {
+		// Keep one connection for in-memory SQLite so schema/data remain visible.
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(1)
 	}
 	s := &Store{db: db}
 	s.resetPolicyCaches()
@@ -388,6 +480,35 @@ func (s *Store) migrate(ctx context.Context) error {
 		chat_id TEXT NOT NULL UNIQUE,
 		label TEXT NOT NULL,
 		room_id TEXT NOT NULL
+	)`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS telegram_user_mappings (
+		id TEXT PRIMARY KEY,
+		telegram_user_id TEXT NOT NULL UNIQUE,
+		username TEXT NOT NULL,
+		private_chat_id TEXT NOT NULL,
+		created_at INTEGER NOT NULL
+	)`); err != nil {
+		return err
+	}
+	if err := s.ensureTelegramUserMappingsSchema(ctx); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS telegram_user_room_subscriptions (
+		telegram_user_id TEXT NOT NULL,
+		room_id TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		PRIMARY KEY (telegram_user_id, room_id)
+	)`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS telegram_allowlist (
+		id TEXT PRIMARY KEY,
+		telegram_username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+		telegram_numeric_id TEXT UNIQUE,
+		kesher_username TEXT NOT NULL,
+		created_at INTEGER NOT NULL
 	)`); err != nil {
 		return err
 	}
@@ -501,6 +622,11 @@ func (s *Store) RoleExists(ctx context.Context, roleID string) (bool, error) {
 }
 
 func (s *Store) UpsertUser(ctx context.Context, username, roleID string) (User, error) {
+	username = strings.TrimSpace(username)
+	roleID = strings.TrimSpace(roleID)
+	if username == "" || roleID == "" || hasWhitespace(username) {
+		return User{}, ErrInvalidInput
+	}
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO users (id, username, role_id) VALUES (lower(hex(randomblob(16))), ?, ?)
 	ON CONFLICT(username) DO UPDATE SET role_id = excluded.role_id`, username, roleID); err != nil {
 		return User{}, err
@@ -511,6 +637,12 @@ func (s *Store) UpsertUser(ctx context.Context, username, roleID string) (User, 
 func (s *Store) FindUserByUsername(ctx context.Context, username string) (User, error) {
 	var u User
 	err := s.db.QueryRowContext(ctx, `SELECT id, username, role_id FROM users WHERE username = ?`, username).Scan(&u.ID, &u.Username, &u.RoleID)
+	return u, err
+}
+
+func (s *Store) FindUserByID(ctx context.Context, id string) (User, error) {
+	var u User
+	err := s.db.QueryRowContext(ctx, `SELECT id, username, role_id FROM users WHERE id = ?`, id).Scan(&u.ID, &u.Username, &u.RoleID)
 	return u, err
 }
 
@@ -1378,19 +1510,260 @@ func (s *Store) FindTelegramMappingByChatID(ctx context.Context, chatID string) 
 	return m, err
 }
 
-func (s *Store) FindTelegramMappingsByRoomID(ctx context.Context, roomID string) ([]TelegramMapping, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, chat_id, label, room_id FROM telegram_mappings WHERE room_id = ?`, roomID)
+// Telegram user mapping operations (linking Telegram users to Kesher identities)
+
+func (s *Store) CreateTelegramUserMapping(ctx context.Context, id, telegramUserID, username, privateChatID string) error {
+	telegramUserID = strings.TrimSpace(telegramUserID)
+	username = strings.TrimSpace(username)
+	privateChatID = strings.TrimSpace(privateChatID)
+	if telegramUserID == "" || username == "" || privateChatID == "" {
+		return ErrInvalidInput
+	}
+	createdAt := time.Now().Unix()
+	_, err := s.db.ExecContext(ctx, `INSERT INTO telegram_user_mappings (id, telegram_user_id, username, private_chat_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+		id, telegramUserID, username, privateChatID, createdAt)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return ErrConflict
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Store) FindTelegramUserMappingByTelegramID(ctx context.Context, telegramUserID string) (TelegramUserMapping, error) {
+	var m TelegramUserMapping
+	err := s.db.QueryRowContext(ctx, `SELECT id, telegram_user_id, username, private_chat_id, created_at FROM telegram_user_mappings WHERE telegram_user_id = ?`, telegramUserID).
+		Scan(&m.ID, &m.TelegramUserID, &m.Username, &m.PrivateChatID, &m.CreatedAt)
+	return m, err
+}
+
+func (s *Store) FindTelegramUserMappingByUsername(ctx context.Context, username string) (TelegramUserMapping, error) {
+	username = strings.TrimSpace(username)
+	var m TelegramUserMapping
+	err := s.db.QueryRowContext(ctx, `SELECT id, telegram_user_id, username, private_chat_id, created_at FROM telegram_user_mappings WHERE username = ? COLLATE NOCASE`, username).
+		Scan(&m.ID, &m.TelegramUserID, &m.Username, &m.PrivateChatID, &m.CreatedAt)
+	return m, err
+}
+
+func (s *Store) UpdateTelegramUserMapping(ctx context.Context, id, username string) error {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return ErrInvalidInput
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE telegram_user_mappings SET username = ? WHERE id = ?`, username, id)
+	if err != nil {
+		return err
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// GetTelegramUserRoomSubscriptions returns all room IDs that a telegram user is subscribed to.
+func (s *Store) GetTelegramUserRoomSubscriptions(ctx context.Context, telegramUserID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT room_id FROM telegram_user_room_subscriptions WHERE telegram_user_id = ?`, telegramUserID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var mappings []TelegramMapping
+	var roomIDs []string
 	for rows.Next() {
-		var m TelegramMapping
-		if err := rows.Scan(&m.ID, &m.ChatID, &m.Label, &m.RoomID); err != nil {
+		var roomID string
+		if err := rows.Scan(&roomID); err != nil {
 			return nil, err
 		}
-		mappings = append(mappings, m)
+		roomIDs = append(roomIDs, roomID)
 	}
-	return mappings, nil
+	return roomIDs, nil
+}
+
+// IsTelegramUserSubscribedToRoom checks if a telegram user is subscribed to a specific room.
+func (s *Store) IsTelegramUserSubscribedToRoom(ctx context.Context, telegramUserID, roomID string) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM telegram_user_room_subscriptions WHERE telegram_user_id = ? AND room_id = ?`, telegramUserID, roomID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// ToggleTelegramUserRoomSubscription toggles the subscription status (subscribe if not subscribed, unsubscribe if subscribed).
+// Returns the new subscription status (true if subscribed, false if unsubscribed).
+func (s *Store) ToggleTelegramUserRoomSubscription(ctx context.Context, telegramUserID, roomID string) (bool, error) {
+	isSubscribed, err := s.IsTelegramUserSubscribedToRoom(ctx, telegramUserID, roomID)
+	if err != nil {
+		return false, err
+	}
+
+	if isSubscribed {
+		// Unsubscribe
+		_, err := s.db.ExecContext(ctx, `DELETE FROM telegram_user_room_subscriptions WHERE telegram_user_id = ? AND room_id = ?`, telegramUserID, roomID)
+		if err != nil {
+			return false, err
+		}
+		return false, nil
+	} else {
+		// Subscribe
+		_, err := s.db.ExecContext(ctx, `INSERT INTO telegram_user_room_subscriptions (telegram_user_id, room_id, created_at) VALUES (?, ?, ?)`, telegramUserID, roomID, time.Now().Unix())
+		if err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+}
+
+// GetSubscribedTelegramUsersForRoom returns all telegram user IDs subscribed to a specific room.
+func (s *Store) GetSubscribedTelegramUsersForRoom(ctx context.Context, roomID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT telegram_user_id FROM telegram_user_room_subscriptions WHERE room_id = ?`, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var telegramUserIDs []string
+	for rows.Next() {
+		var telegramUserID string
+		if err := rows.Scan(&telegramUserID); err != nil {
+			return nil, err
+		}
+		telegramUserIDs = append(telegramUserIDs, telegramUserID)
+	}
+	return telegramUserIDs, nil
+}
+
+// CreateTelegramAllowlistEntry adds a new Telegram user to the allowlist. The telegramNumericID is initially empty and will be bound on first login (TOFU).
+func (s *Store) CreateTelegramAllowlistEntry(ctx context.Context, id, telegramUsername, kesherUsername string) error {
+	telegramUsername = strings.TrimSpace(telegramUsername)
+	kesherUsername = strings.TrimSpace(kesherUsername)
+	if id == "" || telegramUsername == "" || kesherUsername == "" || hasWhitespace(telegramUsername) || hasWhitespace(kesherUsername) {
+		return ErrInvalidInput
+	}
+	// Remove @ prefix if present
+	telegramUsername = strings.TrimPrefix(telegramUsername, "@")
+	createdAt := time.Now().Unix()
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO telegram_allowlist (id, telegram_username, kesher_username, created_at) VALUES (?, ?, ?, ?)`,
+		id, telegramUsername, kesherUsername, createdAt)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return ErrConflict
+		}
+		return err
+	}
+	return nil
+}
+
+// ListTelegramAllowlistEntries returns all allowlist entries with computed status.
+func (s *Store) ListTelegramAllowlistEntries(ctx context.Context) ([]TelegramAllowlistEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, telegram_username, telegram_numeric_id, kesher_username, created_at FROM telegram_allowlist ORDER BY telegram_username`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var entries []TelegramAllowlistEntry
+	for rows.Next() {
+		var entry TelegramAllowlistEntry
+		var numericID sql.NullString
+		if err := rows.Scan(&entry.ID, &entry.TelegramUsername, &numericID, &entry.KesherUsername, &entry.CreatedAt); err != nil {
+			return nil, err
+		}
+		if numericID.Valid {
+			entry.TelegramNumericID = numericID.String
+			entry.Status = "Active (Bound)"
+			entry.IsBound = true
+		} else {
+			entry.Status = "Pending"
+			entry.IsBound = false
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
+}
+
+// FindTelegramAllowlistEntryByUsername finds an allowlist entry by Telegram username (case-insensitive).
+func (s *Store) FindTelegramAllowlistEntryByUsername(ctx context.Context, telegramUsername string) (TelegramAllowlistEntry, error) {
+	telegramUsername = strings.TrimSpace(telegramUsername)
+	telegramUsername = strings.TrimPrefix(telegramUsername, "@")
+	var entry TelegramAllowlistEntry
+	var numericID sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, telegram_username, telegram_numeric_id, kesher_username, created_at FROM telegram_allowlist WHERE LOWER(telegram_username) = LOWER(?)`,
+		telegramUsername).Scan(&entry.ID, &entry.TelegramUsername, &numericID, &entry.KesherUsername, &entry.CreatedAt)
+	if err != nil {
+		return TelegramAllowlistEntry{}, err
+	}
+	if numericID.Valid {
+		entry.TelegramNumericID = numericID.String
+		entry.Status = "Active (Bound)"
+		entry.IsBound = true
+	} else {
+		entry.Status = "Pending"
+		entry.IsBound = false
+	}
+	return entry, nil
+}
+
+// FindTelegramAllowlistEntryByNumericID finds an allowlist entry by numeric Telegram ID.
+func (s *Store) FindTelegramAllowlistEntryByNumericID(ctx context.Context, numericID string) (TelegramAllowlistEntry, error) {
+	var entry TelegramAllowlistEntry
+	var numID sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, telegram_username, telegram_numeric_id, kesher_username, created_at FROM telegram_allowlist WHERE telegram_numeric_id = ?`,
+		numericID).Scan(&entry.ID, &entry.TelegramUsername, &numID, &entry.KesherUsername, &entry.CreatedAt)
+	if err != nil {
+		return TelegramAllowlistEntry{}, err
+	}
+	if numID.Valid {
+		entry.TelegramNumericID = numID.String
+		entry.Status = "Active (Bound)"
+		entry.IsBound = true
+	} else {
+		entry.Status = "Pending"
+		entry.IsBound = false
+	}
+	return entry, nil
+}
+
+// BindTelegramAllowlistEntryNumericID binds the telegram_numeric_id for a user (TOFU - Trust On First Use).
+func (s *Store) BindTelegramAllowlistEntryNumericID(ctx context.Context, telegramUsername, numericID string) error {
+	telegramUsername = strings.TrimSpace(telegramUsername)
+	telegramUsername = strings.TrimPrefix(telegramUsername, "@")
+	if numericID == "" {
+		return ErrInvalidInput
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE telegram_allowlist SET telegram_numeric_id = ? WHERE LOWER(telegram_username) = LOWER(?) AND telegram_numeric_id IS NULL`,
+		numericID, telegramUsername)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return ErrConflict
+		}
+		return err
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteTelegramAllowlistEntry removes a user from the allowlist.
+func (s *Store) DeleteTelegramAllowlistEntry(ctx context.Context, id string) error {
+	if strings.TrimSpace(id) == "" {
+		return ErrInvalidInput
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM telegram_allowlist WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

@@ -127,7 +127,10 @@ sync-embedded-web: build-web
 
 build-backend: sync-embedded-web
 	@mkdir -p backend/bin
-	@cd backend && go build -o ./bin/server ./cmd/server
+	@cd backend && \
+		VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo "dev") && \
+		BUILD_TIMESTAMP=$$(date -u +'%Y-%m-%dT%H:%M:%SZ') && \
+		go build -ldflags="-X github.com/KesherCom/kesher/backend/internal/app.Version=$$VERSION -X github.com/KesherCom/kesher/backend/internal/app.BuildTimestamp=$$BUILD_TIMESTAMP" -o ./bin/server ./cmd/server
 build: build-backend
 
 test:

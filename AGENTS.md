@@ -68,9 +68,9 @@ Desktop proxy is maintained in a separate repository:
 ## Backend architecture (`backend/internal/app`)
 
 - `server.go`: composition root for runtime behavior (HTTP routes, REST handlers, `/ws`, `/api/companion/*`, auth middleware, CORS, static SPA serving, optional HTTPS, production HTTP→HTTPS redirect).
-- `hub.go`: in-memory real-time state keyed by session token; presence fanout; routing for `direct` / `room` / `broadcast` events; active room + listen/talk matrices; signal/reply metadata for companion workflows.
+- `hub.go`: in-memory real-time state keyed by session token; presence fanout; routing for `direct` / `room` / `broadcast` events; active party‑line + listen/talk matrices; signal/reply metadata for companion workflows.
 - `media.go`: Pion WebRTC SFU logic. Maintains peer connections, receives remote audio tracks, forwards RTP to selected listeners, handles offer/answer + ICE, and recomputes routing when room matrix / direct PTT / broadcast PTT changes.
-- `store.go`: SQLite schema migration + seed + CRUD. Role/room/broadcast policy data is persisted and consulted by both event routing and media routing paths.
+- `store.go`: SQLite schema migration + seed + CRUD. Role/party-line/broadcast policy data is persisted and consulted by both event routing and media routing paths.
 - `auth.go`: in-memory session manager (UUID bearer tokens, TTL from config).
 - `config.go`: environment-driven config (TLS file mode and CertMagic DNS-01 mode, production listener split, session and CORS settings).
 - `models.go`: shared API, WS, and domain types.
@@ -80,7 +80,7 @@ Desktop proxy is maintained in a separate repository:
 Important coupling to understand before changing routing logic:
 
 - `Hub` and `MediaManager` are intentionally linked (`hub.SetMediaManager(media)`), and `MediaManager` reads hub client state while holding internal locks for routing decisions.
-- Authorization for room/broadcast access is enforced in both event handling (`server.go` + `hub.go`) and media forwarding (`media.go`), so behavior changes usually require updates in both places.
+- Authorization for party-line/broadcast access is enforced in both event handling (`server.go` + `hub.go`) and media forwarding (`media.go`), so behavior changes usually require updates in both places.
 - Store sentinel errors (`ErrInvalidInput`, `ErrConflict`, `ErrNotFound`) are mapped centrally in `writeStoreErr`.
 - Current caveat: `requireAdmin` in `server.go` currently returns `true`, so admin endpoints are effectively not role-gated.
 
@@ -102,10 +102,10 @@ Desktop proxy implementation lives in the standalone repo:
 1. Login via `POST /api/login`.
 2. Open WebSocket `/ws?token=<token>`.
 3. Server creates/ensures a WebRTC peer and sends offers.
-4. Client sends room matrix + voice state events over WS.
+4. Client sends party-line matrix + voice state events over WS.
 5. Hub routes control events (chat/signal/voice), MediaManager routes audio by:
    - direct target (if active),
-   - else active broadcast group rooms (if active),
+   - else active broadcast group party‑lines (if active),
    - else talk-room → listen-room overlap.
 6. Presence updates are broadcast after state changes.
 

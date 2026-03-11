@@ -40,16 +40,16 @@ flowchart LR
     API["HTTP handlers\n/api/login, /api/bootstrap,\n/admin, /api/public-bootstrap"]
     WSG["WS gateway\nhandleWS()"]
     SESS["SessionManager\n(token -> user/role)"]
-    HUB["Hub\npresence + routed events\n(room/direct/broadcast)"]
+    HUB["Hub\npresence + routed events\n(party-line/direct/broadcast)"]
     MEDIA["MediaManager\nWebRTC peer map + RTP forwarding"]
-    DECIDE{"Audio route priority\nfor each source:\n1) direct target active?\n2) broadcast rooms active?\n3) talk->listen overlap"}
+    DECIDE{"Audio route priority\nfor each source:\n1) direct target active?\n2) broadcast party-lines active?\n3) talk->listen overlap"}
     TELE["TelegramBot\npolling/webhook + chat bridge"]
   end
 
   %% ===============================
   %% Persistence and external systems
   %% ===============================
-  DB[("SQLite Store\nroles / rooms / groups /\nusers / mappings / policy cache")]
+  DB[("SQLite Store\nroles / party-lines / groups /\nusers / mappings / policy cache")]
   TG["Telegram API / chats"]
 
   subgraph COMP["Bitfocus Companion path"]
@@ -85,7 +85,7 @@ flowchart LR
   AUDIO --> OUT
 
   %% Control/event fanout
-  FE -->|"chat/signal/voice_state,\nset_room_matrix"| LWS
+  FE -->|"chat/signal/voice_state,\nset_party_line_matrix"| LWS
   LWS --> WSG
   WSG -->|"authorize by role + scope"| HUB
   HUB -->|"presence + chat + signal + voice_state"| WSG
@@ -115,7 +115,7 @@ flowchart LR
   CWS --> MOD
 
   %% Telegram bridge path
-  HUB -->|"chat hook (room chat)"| TELE
+  HUB -->|"chat hook (party-line chat)"| TELE
   TELE -->|"sendMessage"| TG
   TG -->|"incoming message\n(polling/webhook)"| TELE
   TELE -->|"SendChatToRoom"| HUB
@@ -136,7 +136,7 @@ sequenceDiagram
 
   HW->>FE: Mic input + PTT/chat/signal interactions
   FE->>WS: POST /api/login, GET /api/bootstrap
-  WS->>DB: Validate role, upsert user, load roles/rooms/groups/users
+  WS->>DB: Validate role, upsert user, load roles/party-lines/groups/users
   DB-->>WS: Bootstrap data + session token context
   FE->>WS: Open /ws?token=...
   WS->>MM: EnsurePeer(token,user)
@@ -145,8 +145,8 @@ sequenceDiagram
   MM-->>WS: webrtc_offer (+ ice candidates)
   WS-->>FE: WS webrtc_offer / webrtc_ice_candidate
   FE->>WS: webrtc_answer / webrtc_ice_candidate
-  FE->>WS: set_room_matrix + initial voice_state
-  WS->>DB: Policy checks (room sender/receiver, groups, forced-listen)
+  FE->>WS: set_party_line_matrix + initial voice_state
+  WS->>DB: Policy checks (party-line sender/receiver, groups, forced-listen)
   WS->>HUB: Update presence + route control events
   HUB-->>PEER: presence/chat/signal/voice_state fanout
   FE->>WS: voice_state (ptt_start/stop or always_on)
@@ -168,10 +168,10 @@ sequenceDiagram
   participant FE as Target browser session
 
   MOD->>API: GET /api/companion/discovery?username=...
-  API-->>MOD: Allowed rooms/users/broadcast groups for role
+  API-->>MOD: Allowed party-lines/users/broadcast groups for role
   MOD->>API: WS /api/companion/ws?username=...
   API-->>MOD: companion_state (bound, presence, reply target, signal state)
-  MOD->>API: command payload (set_voice_mode / ptt / signal / room matrix)
+  MOD->>API: command payload (set_voice_mode / ptt / signal / party-line matrix)
   API->>HUB: Resolve latest token for username + SendToToken(companion_command)
   HUB-->>FE: companion_command via operator WS
   FE-->>API: command effect reflected via normal WS events/presence
@@ -190,12 +190,12 @@ sequenceDiagram
   participant FE as Browser clients
 
   TG->>BOT: Incoming message (polling getUpdates or webhook)
-  BOT->>DB: Resolve chatId -> mapped room
-  DB-->>BOT: Room mapping
-  BOT->>HUB: SendChatToRoom(mapped room)
+  BOT->>DB: Resolve chatId -> mapped party-line
+  DB-->>BOT: Party-line mapping
+  BOT->>HUB: SendChatToRoom(mapped party-line)
   HUB-->>FE: chat routed to listeners
-  FE->>HUB: room chat event from operator
+  FE->>HUB: party-line chat event from operator
   HUB->>BOT: chat hook callback
-  BOT->>DB: Find room -> telegram mappings
+  BOT->>DB: Find party-line -> telegram mappings
   BOT->>TG: sendMessage to mapped chats
 ```

@@ -22,6 +22,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type AckSettings struct {
+	Enabled bool `json:"enabled"`
+}
+
 type Server struct {
 	cfg         Config
 	logger      *slog.Logger
@@ -34,6 +38,9 @@ type Server struct {
 	httpSrv     *http.Server
 	redirectSrv *http.Server
 	upgrader    websocket.Upgrader
+	ackMu       sync.RWMutex
+	ackEnabled  bool
+	ackSet      bool
 }
 
 type tlsProvider interface {
@@ -364,11 +371,13 @@ func NewServer(cfg Config) (*Server, error) {
 		}
 	}
 	s := &Server{
-		cfg:      cfg,
-		logger:   logger,
-		store:    store,
-		sessions: NewSessionManager(cfg.SessionTTL),
-		hub:      NewHub(store, logger),
+		cfg:        cfg,
+		logger:     logger,
+		store:      store,
+		sessions:   NewSessionManager(cfg.SessionTTL),
+		hub:        NewHub(store, logger),
+		ackEnabled: true,
+		ackSet:     true,
 		upgrader: websocket.Upgrader{
 			CheckOrigin:      func(r *http.Request) bool { return true },
 			HandshakeTimeout: 10 * time.Second,
@@ -397,15 +406,22 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/roles/", s.withAuth(s.handleAdminRoleByID))
 	mux.HandleFunc("/api/admin/rooms", s.withAuth(s.handleAdminRooms))
 	mux.HandleFunc("/api/admin/rooms/", s.withAuth(s.handleAdminRoomByID))
+	// backwards-compatible aliases using new terminology
+	mux.HandleFunc("/api/admin/party-lines", s.withAuth(s.handleAdminRooms))
+	mux.HandleFunc("/api/admin/party-lines/", s.withAuth(s.handleAdminRoomByID))
 	mux.HandleFunc("/api/admin/broadcast-groups", s.withAuth(s.handleAdminBroadcastGroups))
 	mux.HandleFunc("/api/admin/broadcast-groups/", s.withAuth(s.handleAdminBroadcastGroupByID))
 	mux.HandleFunc("/api/admin/pin", s.withAuth(s.handleAdminPin))
+	mux.HandleFunc("/api/admin/chat-history/clear", s.withAuth(s.handleAdminClearChatHistory))
+	mux.HandleFunc("/api/admin/ack-settings", s.withAuth(s.handleAdminAckSettings))
 	mux.HandleFunc("/api/admin/routing-matrix", s.withAuth(s.handleAdminRoutingMatrix))
 	mux.HandleFunc("/api/companion/discovery", s.handleCompanionDiscovery)
 	mux.HandleFunc("/api/companion/ws", s.handleCompanionWS)
 	mux.HandleFunc("/api/telegram/webhook", s.handleTelegramWebhook)
 	mux.HandleFunc("/api/admin/telegram", s.withAuth(s.handleAdminTelegram))
 	mux.HandleFunc("/api/admin/telegram/", s.withAuth(s.handleAdminTelegramByID))
+	mux.HandleFunc("/api/admin/telegram-users", s.withAuth(s.handleAdminTelegramUsers))
+	mux.HandleFunc("/api/admin/telegram-users/", s.withAuth(s.handleAdminTelegramUserByID))
 	mux.HandleFunc("/api/realtime-stats", s.withAuth(s.handleRealtimeStats))
 	mux.HandleFunc("/ws", s.handleWS)
 	if cfg.StaticDir != "" || embeddedStaticAvailable() {
@@ -560,6 +576,8 @@ func (s *Server) handlePublicBootstrap(w http.ResponseWriter, r *http.Request) {
 		Roles:           roles,
 		Rooms:           rooms,
 		BroadcastGroups: groups,
+		AckEnabled:      s.isAckEnabled(),
+		AppVersion:      GetVersionInfo(),
 	})
 }
 
@@ -578,6 +596,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "username and roleId required", http.StatusBadRequest)
 		return
 	}
+	if strings.ContainsAny(req.Username, " \t\n\r") {
+		http.Error(w, "username must not contain whitespace", http.StatusBadRequest)
+		return
+	}
 	ok, err := s.store.RoleExists(r.Context(), req.RoleID)
 	if err != nil {
 		s.internalErr(w, err)
@@ -589,6 +611,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := s.store.UpsertUser(r.Context(), req.Username, req.RoleID)
 	if err != nil {
+		if errors.Is(err, ErrInvalidInput) {
+			http.Error(w, "username must not contain whitespace", http.StatusBadRequest)
+			return
+		}
 		s.internalErr(w, err)
 		return
 	}
@@ -644,6 +670,8 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request, session
 		Rooms:           rooms,
 		BroadcastGroups: groups,
 		Users:           users,
+		AckEnabled:      s.isAckEnabled(),
+		AppVersion:      GetVersionInfo(),
 	})
 }
 
@@ -922,6 +950,81 @@ func (s *Server) handleAdminPin(w http.ResponseWriter, r *http.Request, session 
 	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+func (s *Server) handleAdminClearChatHistory(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.hub != nil {
+		s.hub.ClearChatHistory()
+		s.hub.BroadcastChatHistoryCleared()
+	}
+	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleAdminAckSettings(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		s.writeJSON(w, http.StatusOK, AckSettings{Enabled: s.isAckEnabled()})
+	case http.MethodPut:
+		var req AckSettings
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		s.setAckEnabled(req.Enabled)
+		if s.hub != nil {
+			roles, err := s.store.ListRoles(r.Context())
+			if err != nil {
+				http.Error(w, "failed to fetch roles", http.StatusInternalServerError)
+				return
+			}
+			rooms, err := s.store.ListRooms(r.Context())
+			if err != nil {
+				http.Error(w, "failed to fetch rooms", http.StatusInternalServerError)
+				return
+			}
+			groups, err := s.store.ListBroadcastGroups(r.Context())
+			if err != nil {
+				http.Error(w, "failed to fetch broadcast groups", http.StatusInternalServerError)
+				return
+			}
+			s.hub.BroadcastConfigUpdate(PublicBootstrapResponse{
+				Roles:           roles,
+				Rooms:           rooms,
+				BroadcastGroups: groups,
+				AckEnabled:      s.isAckEnabled(),
+				AppVersion:      GetVersionInfo(),
+			})
+		}
+		s.writeJSON(w, http.StatusOK, AckSettings{Enabled: s.isAckEnabled()})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) isAckEnabled() bool {
+	s.ackMu.RLock()
+	defer s.ackMu.RUnlock()
+	if !s.ackSet {
+		return true
+	}
+	return s.ackEnabled
+}
+
+func (s *Server) setAckEnabled(enabled bool) {
+	s.ackMu.Lock()
+	s.ackEnabled = enabled
+	s.ackSet = true
+	s.ackMu.Unlock()
+}
+
 func (s *Server) handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 	if s.telegram == nil {
 		http.Error(w, "telegram bot not configured", http.StatusServiceUnavailable)
@@ -934,6 +1037,11 @@ type upsertTelegramMappingRequest struct {
 	ChatID string `json:"chatId"`
 	Label  string `json:"label"`
 	RoomID string `json:"roomId"`
+}
+
+type createTelegramAllowlistRequest struct {
+	TelegramUsername string `json:"telegramUsername"`
+	KesherUsername   string `json:"kesherUsername"`
 }
 
 func (s *Server) handleAdminTelegram(w http.ResponseWriter, r *http.Request, session Session) {
@@ -1017,6 +1125,89 @@ func (s *Server) handleAdminTelegramByID(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+func (s *Server) handleAdminTelegramUsers(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		entries, err := s.store.ListTelegramAllowlistEntries(r.Context())
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		if entries == nil {
+			entries = []TelegramAllowlistEntry{}
+		}
+		s.writeJSON(w, http.StatusOK, entries)
+	case http.MethodPost:
+		var req createTelegramAllowlistRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+
+		// Get all available roles to pick a default one
+		roles, err := s.store.ListRoles(r.Context())
+		if err != nil || len(roles) == 0 {
+			s.internalErr(w, fmt.Errorf("no roles available for new user"))
+			return
+		}
+
+		// Use the first available role (usually "producer" or similar)
+		defaultRoleID := roles[0].ID
+
+		// Automatically create or upsert the Kesher user with the default role
+		_, err = s.store.UpsertUser(r.Context(), req.KesherUsername, defaultRoleID)
+		if err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, fmt.Errorf("failed to create kesher user: %w", err))
+			return
+		}
+
+		// Create the allowlist entry
+		id := newID()
+		if err := s.store.CreateTelegramAllowlistEntry(r.Context(), id, req.TelegramUsername, req.KesherUsername); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleAdminTelegramUserByID(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/admin/telegram-users/")
+	if id == "" || strings.Contains(id, "/") {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.store.DeleteTelegramAllowlistEntry(r.Context(), id); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		// If there's an active Telegram session for this user, disconnect it
+		// (Implementation note: telegram.go will enforce this on next message)
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 func (s *Server) handleAdminRoutingMatrix(w http.ResponseWriter, r *http.Request, session Session) {
 	if !s.requireAdmin(w, r, session) {
 		return
@@ -1044,6 +1235,8 @@ func (s *Server) handleAdminRoutingMatrix(w http.ResponseWriter, r *http.Request
 						Roles:           roles,
 						Rooms:           rooms,
 						BroadcastGroups: groups,
+						AckEnabled:      s.isAckEnabled(),
+						AppVersion:      GetVersionInfo(),
 					})
 				}
 			}
@@ -1168,6 +1361,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		sendPriority:    make(chan WSOutbound, 128),
 	}
 	s.hub.Add(c)
+	s.hub.SendChatHistorySnapshot(session.Token)
 	if err := s.media.EnsurePeer(session.Token, user); err != nil {
 		s.logger.Error("failed to initialize media peer", "error", err)
 	}
@@ -1234,15 +1428,28 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			raw, _ := json.Marshal(in.Data)
 			var e RoomMatrixEvent
 			_ = json.Unmarshal(raw, &e)
+			prevListen := s.hub.ListenRoomsForToken(session.Token)
 			allowedListen := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, e.ListenRoomIDs, false)
 			allowedListen = s.mergeForcedListenRooms(r.Context(), session.RoleID, allowedListen)
 			allowedTalk := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, e.TalkRoomIDs, true)
 			s.hub.SetRoomMatrix(session.Token, allowedListen, allowedTalk)
+			newlyListened := addedRooms(prevListen, allowedListen)
+			if len(newlyListened) > 0 {
+				s.hub.SendRoomChatHistory(session.Token, newlyListened)
+			}
 			if mediaReady {
 				s.media.SyncRouting()
 			}
 		case "chat":
 			s.routeInbound(r.Context(), session, in, "chat")
+		case "chat_ack":
+			if !s.isAckEnabled() {
+				continue
+			}
+			raw, _ := json.Marshal(in.Data)
+			var e ChatAckInbound
+			_ = json.Unmarshal(raw, &e)
+			s.hub.RouteChatAck(session.Token, e)
 		case "signal":
 			s.routeInbound(r.Context(), session, in, "signal")
 		case "voice_state":
@@ -1303,13 +1510,207 @@ func (s *Server) routeInbound(ctx context.Context, sender Session, in WSInbound,
 	if err := json.Unmarshal(raw, &e); err != nil {
 		return
 	}
+	if outType == "chat" {
+		resolved, status, ok := s.resolveChatRouting(ctx, sender, e)
+		if !ok {
+			if status != nil {
+				s.sendRoutingStatus(sender.Token, *status)
+			}
+			return
+		}
+		e = resolved
+		if strings.TrimSpace(e.MessageID) == "" {
+			e.MessageID = newID()
+		}
+		if !s.isAckEnabled() {
+			e.AckRequired = false
+		}
+	}
 	if e.Scope == "" || e.TargetID == "" {
 		return
+	}
+	if e.Source == "" {
+		e.Source = "web"
 	}
 	if !s.isInboundAllowed(ctx, sender, e) {
 		return
 	}
 	s.hub.RouteEvent(sender.Token, outType, e)
+}
+
+func (s *Server) resolveChatRouting(ctx context.Context, sender Session, e RoutedEvent) (RoutedEvent, *RoutingStatusEvent, bool) {
+	body := strings.TrimSpace(e.Body)
+	if body == "" {
+		return RoutedEvent{}, nil, false
+	}
+
+	prefix, targetLabel, messageBody, hasPrefix := parseChatPrefix(body)
+	if !hasPrefix {
+		talkRoomID, ok := s.hub.ActiveTalkRoomForToken(sender.Token)
+		if !ok {
+			return RoutedEvent{}, &RoutingStatusEvent{
+				Code:       "unzustellbar",
+				TargetType: "room",
+				Message:    "Unzustellbar: Keine aktive Talk-Partyline.",
+			}, false
+		}
+		e.Scope = "room"
+		e.TargetType = "room"
+		e.TargetID = talkRoomID
+		e.Body = body
+		return e, nil, true
+	}
+
+	if messageBody == "" {
+		return RoutedEvent{}, nil, false
+	}
+
+	switch prefix {
+	case '#':
+		roomID, ok := s.resolveRoomTargetID(ctx, targetLabel)
+		if !ok {
+			return RoutedEvent{}, &RoutingStatusEvent{
+				Code:       "unzustellbar",
+				TargetType: "room",
+				Target:     targetLabel,
+				Message:    "Unzustellbar: Partyline nicht gefunden.",
+			}, false
+		}
+		e.Scope = "room"
+		e.TargetType = "room"
+		e.TargetID = roomID
+		e.Body = messageBody
+		return e, nil, true
+	case '@':
+		if activeUser, ok := s.hub.ActiveUserByUsername(targetLabel); ok {
+			if activeUser.ID == sender.UserID {
+				return RoutedEvent{}, &RoutingStatusEvent{
+					Code:       "unzustellbar",
+					TargetType: "user",
+					Target:     targetLabel,
+					Message:    "Unzustellbar: Du kannst dir selbst keine Nachricht schicken.",
+				}, false
+			}
+			e.Scope = "direct"
+			e.TargetType = "user"
+			e.TargetID = activeUser.ID
+			e.Body = messageBody
+			return e, nil, true
+		}
+		if persistedUser, err := s.store.FindUserByUsername(ctx, targetLabel); err == nil {
+			if persistedUser.ID == sender.UserID {
+				return RoutedEvent{}, &RoutingStatusEvent{
+					Code:       "unzustellbar",
+					TargetType: "user",
+					Target:     targetLabel,
+					Message:    "Unzustellbar: Du kannst dir selbst keine Nachricht schicken.",
+				}, false
+			}
+			e.Scope = "direct"
+			e.TargetType = "user"
+			e.TargetID = persistedUser.ID
+			e.Body = messageBody
+			return e, nil, true
+		}
+		roleID, ok := s.resolveRoleTargetID(ctx, targetLabel)
+		if !ok {
+			return RoutedEvent{}, &RoutingStatusEvent{
+				Code:       "unzustellbar",
+				TargetType: "user",
+				Target:     targetLabel,
+				Message:    "Unzustellbar: Benutzer oder Rolle nicht gefunden.",
+			}, false
+		}
+		if !s.hub.HasActiveSessionsForRole(roleID) {
+			return RoutedEvent{}, &RoutingStatusEvent{
+				Code:       "unzustellbar",
+				TargetType: "role",
+				Target:     targetLabel,
+				Message:    "Unzustellbar: Keine aktiven Nutzer fuer diese Rolle.",
+			}, false
+		}
+		e.Scope = "direct"
+		e.TargetType = "role"
+		e.TargetID = roleID
+		e.Body = messageBody
+		return e, nil, true
+	default:
+		return RoutedEvent{}, nil, false
+	}
+}
+
+func parseChatPrefix(body string) (rune, string, string, bool) {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return 0, "", "", false
+	}
+	if !strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "@") {
+		return 0, "", "", false
+	}
+	parts := strings.Fields(trimmed)
+	if len(parts) == 0 {
+		return 0, "", "", false
+	}
+	prefixToken := parts[0]
+	prefix := rune(prefixToken[0])
+	target := strings.TrimSpace(prefixToken[1:])
+	message := strings.TrimSpace(strings.TrimPrefix(trimmed, prefixToken))
+	if target == "" {
+		return 0, "", "", false
+	}
+	return prefix, target, message, true
+}
+
+func addedRooms(previous []string, next []string) []string {
+	prevSet := make(map[string]struct{}, len(previous))
+	for _, roomID := range previous {
+		if roomID == "" {
+			continue
+		}
+		prevSet[roomID] = struct{}{}
+	}
+	added := make([]string, 0, len(next))
+	for _, roomID := range next {
+		if roomID == "" {
+			continue
+		}
+		if _, exists := prevSet[roomID]; exists {
+			continue
+		}
+		added = append(added, roomID)
+	}
+	return added
+}
+
+func (s *Server) resolveRoomTargetID(ctx context.Context, target string) (string, bool) {
+	rooms, err := s.store.ListRooms(ctx)
+	if err != nil {
+		return "", false
+	}
+	for _, room := range rooms {
+		if strings.EqualFold(room.ID, target) || strings.EqualFold(room.Name, target) {
+			return room.ID, true
+		}
+	}
+	return "", false
+}
+
+func (s *Server) resolveRoleTargetID(ctx context.Context, target string) (string, bool) {
+	roles, err := s.store.ListRoles(ctx)
+	if err != nil {
+		return "", false
+	}
+	for _, role := range roles {
+		if strings.EqualFold(role.ID, target) || strings.EqualFold(role.Name, target) {
+			return role.ID, true
+		}
+	}
+	return "", false
+}
+
+func (s *Server) sendRoutingStatus(token string, status RoutingStatusEvent) {
+	status.Timestamp = time.Now().UnixMilli()
+	s.hub.SendToToken(token, WSOutbound{Type: "status", Data: status})
 }
 
 func (s *Server) isInboundAllowed(ctx context.Context, sender Session, e RoutedEvent) bool {

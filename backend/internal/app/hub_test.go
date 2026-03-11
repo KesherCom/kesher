@@ -18,6 +18,31 @@ func drain(ch chan WSOutbound) {
 	}
 }
 
+func TestHubSetVoiceStatePreservesAlwaysOnAcrossTransientPTT(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	c := &client{session: Session{Token: "a"}, user: User{ID: "u1", Username: "a", RoleID: "audio"}, send: make(chan WSOutbound, 4)}
+	hub.Add(c)
+
+	hub.SetVoiceState("a", "always_on")
+	hub.SetVoiceState("a", "ptt_start")
+	presence, ok := hub.PresenceForUsername("a")
+	if !ok || presence.VoiceMode != "always_on" || !presence.MicEnabled {
+		t.Fatalf("unexpected always_on ptt_start presence: %+v", presence)
+	}
+
+	hub.SetVoiceState("a", "ptt_stop")
+	presence, ok = hub.PresenceForUsername("a")
+	if !ok || presence.VoiceMode != "always_on" || !presence.MicEnabled {
+		t.Fatalf("unexpected always_on ptt_stop presence: %+v", presence)
+	}
+}
+
 func TestHubRoomRoutingRespectsReceiverRoleRestrictions(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
@@ -279,7 +304,190 @@ func TestHubSetVoiceStateTransitions(t *testing.T) {
 	}
 	hub.SetVoiceState("a", "ptt_stop")
 	presence, ok = hub.PresenceForUsername("a")
+	if !ok || presence.VoiceMode != "always_on" || !presence.MicEnabled {
+		t.Fatalf("unexpected always_on ptt_stop presence: %+v", presence)
+	}
+	hub.SetVoiceState("a", "always_off")
+	presence, ok = hub.PresenceForUsername("a")
 	if !ok || presence.VoiceMode != "ptt" || presence.MicEnabled {
-		t.Fatalf("unexpected ptt_stop presence: %+v", presence)
+		t.Fatalf("unexpected always_off presence: %+v", presence)
+	}
+}
+
+func TestHubChatHistorySnapshotIncludesRoomAndDirect(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	sender := &client{
+		session:     Session{Token: "sender", RoleID: "audio"},
+		user:        User{ID: "u1", Username: "sender", RoleID: "audio"},
+		send:        make(chan WSOutbound, 16),
+		listenRooms: toRoomSet([]string{"foh"}),
+	}
+	hub.Add(sender)
+	drain(sender.send)
+
+	hub.RouteEvent("sender", "chat", RoutedEvent{Scope: "room", TargetID: "foh", Body: "room hello"})
+	time.Sleep(2 * time.Millisecond)
+	hub.RouteEvent("sender", "chat", RoutedEvent{Scope: "direct", TargetType: "user", TargetID: "u2", Body: "direct hello"})
+
+	receiver := &client{
+		session:     Session{Token: "receiver", RoleID: "video"},
+		user:        User{ID: "u2", Username: "receiver", RoleID: "video"},
+		send:        make(chan WSOutbound, 16),
+		listenRooms: toRoomSet([]string{"foh"}),
+	}
+	hub.Add(receiver)
+	drain(receiver.send)
+
+	count := hub.SendChatHistorySnapshot("receiver")
+	if count != 2 {
+		t.Fatalf("expected 2 chat history events, got %d", count)
+	}
+
+	var first, second RoutedEvent
+	select {
+	case msg := <-receiver.send:
+		first = msg.Data.(RoutedEvent)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for first chat history event")
+	}
+	select {
+	case msg := <-receiver.send:
+		second = msg.Data.(RoutedEvent)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for second chat history event")
+	}
+	if first.Body != "room hello" {
+		t.Fatalf("expected first history message to be room message, got %q", first.Body)
+	}
+	if second.Body != "direct hello" {
+		t.Fatalf("expected second history message to be direct message, got %q", second.Body)
+	}
+}
+
+func TestHubClearChatHistoryRemovesBufferedMessages(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	hub.chatHistory.AppendForRoom("foh", RoutedEvent{Scope: "room", TargetID: "foh", Body: "hello", Timestamp: 1})
+
+	hub.ClearChatHistory()
+	remaining := hub.chatHistory.HistoryForRooms([]string{"foh"})
+	if len(remaining) != 0 {
+		t.Fatalf("expected cleared history, got %d entries", len(remaining))
+	}
+}
+
+func TestHubBroadcastChatHistoryCleared(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	receiver := &client{session: Session{Token: "receiver"}, user: User{ID: "u2", Username: "receiver", RoleID: "video"}, send: make(chan WSOutbound, 4)}
+	hub.Add(receiver)
+	drain(receiver.send)
+
+	hub.BroadcastChatHistoryCleared()
+
+	select {
+	case msg := <-receiver.send:
+		if msg.Type != "chat_history_cleared" {
+			t.Fatalf("expected chat_history_cleared message, got %s", msg.Type)
+		}
+	default:
+		t.Fatal("expected chat_history_cleared message to be delivered")
+	}
+}
+
+func TestHubRouteChatAckRoutesToOriginalSender(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	sender := &client{session: Session{Token: "sender-token"}, user: User{ID: "u1", Username: "sender", RoleID: "audio"}, send: make(chan WSOutbound, 4)}
+	acker := &client{session: Session{Token: "acker-token"}, user: User{ID: "u2", Username: "acker", RoleID: "video"}, send: make(chan WSOutbound, 4)}
+	hub.Add(sender)
+	hub.Add(acker)
+	drain(sender.send)
+	drain(acker.send)
+
+	hub.RouteChatAck("acker-token", ChatAckInbound{MessageID: "m-123", SenderUserID: "u1"})
+
+	select {
+	case msg := <-sender.send:
+		if msg.Type != "chat_ack" {
+			t.Fatalf("expected chat_ack event, got %s", msg.Type)
+		}
+		update, ok := msg.Data.(ChatAckUpdate)
+		if !ok {
+			t.Fatalf("expected ChatAckUpdate payload, got %T", msg.Data)
+		}
+		if update.MessageID != "m-123" || update.SenderUserID != "u1" || update.AckedBy.ID != "u2" {
+			t.Fatalf("unexpected chat ack payload: %+v", update)
+		}
+	default:
+		t.Fatal("expected chat ack update for original sender")
+	}
+	select {
+	case <-acker.send:
+		t.Fatal("did not expect acker to receive chat ack update")
+	default:
+	}
+}
+
+func TestHubSendChatToUserDoesNotPanicWithoutSenderClient(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+
+	receiver := &client{session: Session{Token: "receiver-token"}, user: User{ID: "u2", Username: "receiver", RoleID: "video"}, send: make(chan WSOutbound, 4)}
+	hub.Add(receiver)
+	drain(receiver.send)
+
+	e := RoutedEvent{
+		Scope:      "direct",
+		TargetType: "user",
+		TargetID:   "u2",
+		Body:       "hello from telegram",
+		Source:     "telegram",
+		FromUser:   User{ID: "u1", Username: "sender", RoleID: "audio"},
+	}
+
+	hub.SendChatToUser("u2", e)
+
+	select {
+	case msg := <-receiver.send:
+		if msg.Type != "chat" {
+			t.Fatalf("expected chat message, got %s", msg.Type)
+		}
+		routed, ok := msg.Data.(RoutedEvent)
+		if !ok {
+			t.Fatalf("expected RoutedEvent payload, got %T", msg.Data)
+		}
+		if routed.Body != "hello from telegram" {
+			t.Fatalf("unexpected routed body: %q", routed.Body)
+		}
+	default:
+		t.Fatal("expected message to be delivered to target user")
 	}
 }

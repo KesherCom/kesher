@@ -374,6 +374,8 @@ export function App() {
       roles: data.roles,
       rooms: data.rooms,
       broadcastGroups: data.broadcastGroups,
+      ackEnabled: data.ackEnabled,
+      appVersion: data.appVersion,
     });
     session.applyBootstrapData(data, false);
   }
@@ -506,12 +508,43 @@ export function App() {
   }
 
   // ── Operator view ──
+  const activeUsersForChat = Array.from(
+    new Map(
+      [
+        ...appData.users
+          .filter((u) => u.id !== appData.self.id)
+          .map((u) => ({
+            userId: u.id,
+            username: u.username,
+            roleId: u.roleId,
+            roleName: roleNameById.get(u.roleId) || u.roleId,
+            isWebOnline: false,
+          })),
+        ...session.presence
+          .filter((p) => p.userId !== appData.self.id)
+          .map((p) => ({
+            userId: p.userId,
+            username: p.username,
+            roleId: p.roleId,
+            roleName: roleNameById.get(p.roleId) || p.roleId,
+            isWebOnline: true,
+          })),
+      ].map((u) => [u.username.toLowerCase(), u]),
+    ).values(),
+  ).sort((a, b) => a.username.localeCompare(b.username));
+
   const chatAndSignalBlock = (
     <ChatSignalPanel
       message={session.message}
       onMessageChange={session.setMessage}
       onSendChat={session.sendChat}
+      onAcknowledge={session.acknowledgeChatMessage}
+      showAckOption={appData.ackEnabled}
       chatMessages={session.chatMessages}
+      listenRoomIds={session.listenRoomIds}
+      rooms={appData.rooms.map((room) => ({ id: room.id, name: room.name }))}
+      roles={appData.roles.map((role) => ({ id: role.id, name: role.name }))}
+      activeUsers={activeUsersForChat}
     />
   );
   const realtimeDebugBlock = <RealtimeEventsPanel events={session.events} />;
@@ -576,7 +609,7 @@ export function App() {
   );
   const simplePttTargetLabel =
     appData.rooms.find((room) => room.id === simpleVoiceTargetId)?.name ||
-    "No room selected";
+    "No party line selected";
 
   const attentionFlashOverlay = session.incomingAttention ? (
     <div
@@ -678,12 +711,16 @@ export function App() {
         }}
         enableDirectTabs={settings.enableDirectTabs}
         onEnableDirectTabsChange={settings.setEnableDirectTabs}
+        swapPttAndReplyButtons={settings.swapPttAndReplyButtons}
+        onSwapPttAndReplyButtonsChange={settings.setSwapPttAndReplyButtons}
         enableBackgroundAudioRecovery={settings.enableBackgroundAudioRecovery}
         onEnableBackgroundAudioRecoveryChange={
           settings.setEnableBackgroundAudioRecovery
         }
         keepScreenAwake={settings.keepScreenAwake}
         onKeepScreenAwakeChange={settings.setKeepScreenAwake}
+        showVolumeControls={settings.showVolumeControls}
+        onShowVolumeControlsChange={settings.setShowVolumeControls}
         mediaSessionSupported={session.mediaSessionSupported}
         wakeLockSupported={session.wakeLockSupported}
         wakeLockActive={session.wakeLockActive}

@@ -33,6 +33,8 @@ const appData: Bootstrap = {
     },
   ],
   broadcastGroups: [],
+  ackEnabled: true,
+  appVersion: { version: "dev", buildTimestamp: "2026-03-10" },
 };
 
 describe("AdminRoutingMatrixCard", () => {
@@ -49,6 +51,8 @@ describe("AdminRoutingMatrixCard", () => {
 
     // Initially expanded
     expect(screen.getByRole("grid")).toBeVisible();
+    // header corner should mention party line instead of room
+    expect(screen.getByText("Role ╲ Party Line")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Hide" }));
     expect(screen.queryByRole("grid")).not.toBeInTheDocument();
   });

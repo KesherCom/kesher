@@ -148,9 +148,9 @@ export function AdminRolesCard({
                   <select
                     value={roleCreateDefaultRoomId}
                     onChange={(e) => setRoleCreateDefaultRoomId(e.target.value)}
-                    aria-label="Default room"
+                    aria-label="Default party line"
                   >
-                    <option value="">Default room…</option>
+                    <option value="">Default party line…</option>
                     {appData.rooms.map((room) => (
                       <option key={`role-room-${room.id}`} value={room.id}>
                         {room.name}
@@ -220,9 +220,9 @@ export function AdminRolesCard({
                   <select
                     value={roleEditDefaultRoomId}
                     onChange={(e) => setRoleEditDefaultRoomId(e.target.value)}
-                    aria-label="Default room"
+                    aria-label="Default party line"
                   >
-                    <option value="">Default room…</option>
+                    <option value="">Default party line…</option>
                     {appData.rooms.map((room) => (
                       <option key={`role-edit-room-${room.id}`} value={room.id}>
                         {room.name}

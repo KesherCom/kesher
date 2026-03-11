@@ -5,6 +5,16 @@ export type Role = {
   defaultVoiceMode?: "always_on" | "ptt";
   defaultSimpleView?: boolean;
 };
+
+export type VersionInfo = {
+  version: string;
+  buildTimestamp: string;
+};
+
+// NOTE: this type is still called Room for backwards compatibility with
+// the server API JSON, but user-facing UI now refers to these entities as
+// "party lines". When communicating with new code or documentation, prefer
+// the term party line instead of room.
 export type Room = {
   id: string;
   name: string;
@@ -34,6 +44,8 @@ export type PublicBootstrap = {
   roles: Role[];
   rooms: Room[];
   broadcastGroups: BroadcastGroup[];
+  ackEnabled: boolean;
+  appVersion: VersionInfo;
 };
 
 export type Bootstrap = PublicBootstrap & {
@@ -53,6 +65,17 @@ export type TelegramStatus = {
   mode: "polling" | "webhook" | "";
   mappings: TelegramMapping[];
 };
+
+export type TelegramAllowlistEntry = {
+  id: string;
+  telegramUsername: string;
+  telegramNumericId?: string;
+  kesherUsername: string;
+  createdAt: number;
+  status: string;
+  isBound: boolean;
+};
+
 export type HubRealtimeStats = {
   connectedClients: number;
   normalQueueDepthTotal: number;
@@ -100,9 +123,23 @@ export type StatusResponse = {
 
 export type RoutedEvent = {
   scope: "direct" | "room" | "broadcast";
+  targetType?: "room" | "user" | "role";
   targetId: string;
   body: string;
+  source?: string;
   signal?: string;
+  messageId?: string;
+  ackRequired?: boolean;
+  acked?: boolean;
+  ackedBy?: User;
+  ackedAt?: number;
   fromUser: User;
   timestamp: number;
+};
+
+export type ChatAckUpdate = {
+  messageId: string;
+  senderUserId: string;
+  ackedBy: User;
+  ackedAt: number;
 };

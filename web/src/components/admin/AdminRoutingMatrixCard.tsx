@@ -176,14 +176,13 @@ export function AdminRoutingMatrixCard({
           <p className="routing-matrix-hint">
             Click <strong>T</strong>&thinsp;(Talk), <strong>L</strong>
             &thinsp;(Listen), or <strong>F</strong>&thinsp;(Forced listen) to
-            toggle permissions for each role/room combination.
+            toggle permissions for each role/party‑line combination.
           </p>
 
-          <div className="routing-matrix-wrapper">
             <table className="routing-matrix" role="grid">
               <thead>
                 <tr>
-                  <th className="routing-matrix-corner">Role ╲ Room</th>
+                  <th className="routing-matrix-corner">Role ╲ Party Line</th>
                   {appData.rooms.map((room) => (
                     <th key={room.id} className="routing-matrix-col-header">
                       {room.name}
@@ -247,7 +246,6 @@ export function AdminRoutingMatrixCard({
                 ))}
               </tbody>
             </table>
-          </div>
 
           <div className="routing-matrix-legend">
             <span className="routing-matrix-legend-item">

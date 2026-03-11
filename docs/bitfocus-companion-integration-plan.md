@@ -47,8 +47,8 @@ The following are already in place and are not part of this remaining plan:
 
 ### 5) Add missing feedback capabilities
 
-- Add feedback for “active room equals X”.
-- Add feedback for “target PTT active” (room/direct/broadcast target).
+- Add feedback for “active party‑line equals X”.
+- Add feedback for “target PTT active” (party‑line/direct/broadcast target).
 - Touchpoints: `KesherCom/companion-module-kesher/src/feedbacks.ts`.
 
 ### 6) Expose reconnect/backoff tuning in module config

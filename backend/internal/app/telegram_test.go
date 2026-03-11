@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -320,5 +321,203 @@ func TestTelegramStatusIncludesMode(t *testing.T) {
 	}
 	if status.Mode != "polling" {
 		t.Fatalf("expected mode=polling, got %s", status.Mode)
+	}
+}
+
+func TestInlineTargetsForUsersAndRoles_FilteredByAllowlist(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	bot := NewTelegramBot("fake-token", "", "polling", store, hub, logger)
+
+	ctx := context.Background()
+
+	// Two active Kesher clients are connected.
+	hub.Add(&client{
+		session: Session{Token: "tok-alice", UserID: "u-alice", Username: "alice", RoleID: "audio"},
+		user:    User{ID: "u-alice", Username: "alice", RoleID: "audio"},
+	})
+	hub.Add(&client{
+		session: Session{Token: "tok-bob", UserID: "u-bob", Username: "bob", RoleID: "audio"},
+		user:    User{ID: "u-bob", Username: "bob", RoleID: "audio"},
+	})
+
+	// Only alice is allowlisted for Telegram usage.
+	if err := store.CreateTelegramAllowlistEntry(ctx, "allow-1", "tg_alice", "alice"); err != nil {
+		t.Fatalf("failed to create allowlist entry: %v", err)
+	}
+
+	targets := bot.inlineTargetsForUsersAndRoles(ctx, "")
+	if len(targets) == 0 {
+		t.Fatal("expected at least one inline target")
+	}
+
+	for _, target := range targets {
+		if target.Kind == "user" && target.ID == "u-bob" {
+			t.Fatalf("unexpected non-allowlisted user in inline targets: %+v", target)
+		}
+	}
+
+	var hasAlice bool
+	for _, target := range targets {
+		if target.Kind == "user" && target.ID == "u-alice" {
+			hasAlice = true
+			break
+		}
+	}
+	if !hasAlice {
+		t.Fatal("expected allowlisted user alice in inline targets")
+	}
+}
+
+func TestInlineTargetsForUsersAndRoles_IncludeAllowlistedOfflineUsers(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	bot := NewTelegramBot("fake-token", "", "polling", store, hub, logger)
+
+	ctx := context.Background()
+
+	if _, err := store.UpsertUser(ctx, "offline-allowed", "audio"); err != nil {
+		t.Fatalf("failed to persist offline user: %v", err)
+	}
+	if _, err := store.UpsertUser(ctx, "offline-blocked", "video"); err != nil {
+		t.Fatalf("failed to persist blocked user: %v", err)
+	}
+	if err := store.CreateTelegramAllowlistEntry(ctx, "allow-offline", "tg_offline", "offline-allowed"); err != nil {
+		t.Fatalf("failed to create allowlist entry: %v", err)
+	}
+
+	targets := bot.inlineTargetsForUsersAndRoles(ctx, "")
+	if len(targets) == 0 {
+		t.Fatal("expected inline targets for allowlisted offline user")
+	}
+
+	var hasOfflineAllowed bool
+	for _, target := range targets {
+		if target.Kind == "user" && strings.Contains(target.Title, "offline-allowed") {
+			hasOfflineAllowed = true
+		}
+		if target.Kind == "user" && strings.Contains(target.Title, "offline-blocked") {
+			t.Fatalf("unexpected non-allowlisted offline user in inline targets: %+v", target)
+		}
+	}
+	if !hasOfflineAllowed {
+		t.Fatal("expected allowlisted offline user in inline targets")
+	}
+}
+
+func TestInlineTargetsForUsersAndRoles_ExcludeCurrentUser(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	bot := NewTelegramBot("fake-token", "", "polling", store, hub, logger)
+
+	ctx := context.Background()
+	if _, err := store.UpsertUser(ctx, "alice", "audio"); err != nil {
+		t.Fatalf("failed to persist alice: %v", err)
+	}
+	if _, err := store.UpsertUser(ctx, "bob", "video"); err != nil {
+		t.Fatalf("failed to persist bob: %v", err)
+	}
+	if err := store.CreateTelegramAllowlistEntry(ctx, "allow-alice", "tg_alice", "alice"); err != nil {
+		t.Fatalf("failed to create alice allowlist entry: %v", err)
+	}
+	if err := store.CreateTelegramAllowlistEntry(ctx, "allow-bob", "tg_bob", "bob"); err != nil {
+		t.Fatalf("failed to create bob allowlist entry: %v", err)
+	}
+
+	targets := bot.inlineTargetsForUsersAndRoles(ctx, "alice")
+	for _, target := range targets {
+		if target.Kind == "user" && strings.Contains(strings.ToLower(target.Title), "alice") {
+			t.Fatalf("unexpected current user in inline targets: %+v", target)
+		}
+	}
+
+	var hasBob bool
+	for _, target := range targets {
+		if target.Kind == "user" && strings.Contains(strings.ToLower(target.Title), "bob") {
+			hasBob = true
+			break
+		}
+	}
+	if !hasBob {
+		t.Fatal("expected other allowlisted user in inline targets")
+	}
+}
+
+func TestInlineTargetsForUsersAndRoles_ExcludeCurrentUserButKeepRoleTargets(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	bot := NewTelegramBot("fake-token", "", "polling", store, hub, logger)
+
+	ctx := context.Background()
+	if _, err := store.UpsertUser(ctx, "alice", "audio"); err != nil {
+		t.Fatalf("failed to persist alice: %v", err)
+	}
+	if err := store.CreateTelegramAllowlistEntry(ctx, "allow-alice", "tg_alice", "alice"); err != nil {
+		t.Fatalf("failed to create alice allowlist entry: %v", err)
+	}
+
+	targets := bot.inlineTargetsForUsersAndRoles(ctx, "alice")
+	if len(targets) == 0 {
+		t.Fatal("expected role targets even when current user is excluded")
+	}
+
+	for _, target := range targets {
+		if target.Kind == "user" && strings.Contains(strings.ToLower(target.Title), "alice") {
+			t.Fatalf("unexpected current user in inline targets: %+v", target)
+		}
+	}
+
+	var hasAudioRole bool
+	for _, target := range targets {
+		if target.Kind == "role" && strings.Contains(strings.ToLower(target.Title), "audio") {
+			hasAudioRole = true
+			break
+		}
+	}
+	if !hasAudioRole {
+		t.Fatal("expected own role to remain available as target")
+	}
+}
+
+func TestFuzzyMatchInlineTargetsPrefersExactUserBeforeRole(t *testing.T) {
+	targets := []inlineTarget{
+		{Kind: "role", ID: "audio", Title: "Role: Audio", SearchValue: "Audio Sarah"},
+		{Kind: "user", ID: "u-sarah", Title: "Sarah [Audio]", SearchValue: "Sarah Audio"},
+		{Kind: "user", ID: "u-sara", Title: "Sara [Video]", SearchValue: "Sara Video"},
+	}
+
+	matches := fuzzyMatchInlineTargets("Sarah", targets)
+	if len(matches) < 2 {
+		t.Fatalf("expected at least two matches, got %d", len(matches))
+	}
+	if matches[0].Kind != "user" || matches[0].ID != "u-sarah" {
+		t.Fatalf("expected exact user match first, got %+v", matches[0])
+	}
+	if matches[1].Kind != "role" || matches[1].ID != "audio" {
+		t.Fatalf("expected related role after exact user match, got %+v", matches[1])
 	}
 }

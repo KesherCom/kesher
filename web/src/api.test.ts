@@ -95,7 +95,7 @@ describe("api helpers", () => {
           rooms: [
             {
               id: "r1",
-              name: "Room 1",
+              name: "Party Line 1",
               senderRoleIds: null,
               receiverRoleIds: null,
             },

@@ -3,6 +3,7 @@ import type {
   PublicBootstrap,
   RealtimeStatsResponse,
   StatusResponse,
+  TelegramAllowlistEntry,
   TelegramStatus,
   User,
 } from "./types";
@@ -48,6 +49,12 @@ export function normalizePublicBootstrap(data: unknown): PublicBootstrap {
         allowedRoleIds: toStringArray(entry.allowedRoleIds),
       };
     }),
+    ackEnabled:
+      typeof raw.ackEnabled === "boolean" ? raw.ackEnabled : true,
+    appVersion: {
+      version: typeof (raw.appVersion as any)?.version === "string" ? (raw.appVersion as any).version : "unknown",
+      buildTimestamp: typeof (raw.appVersion as any)?.buildTimestamp === "string" ? (raw.appVersion as any).buildTimestamp : "unknown",
+    },
   };
 }
 
@@ -248,6 +255,13 @@ export async function deleteRoom(
   );
 }
 
+// new terminology aliases (party-line) kept for compatibility with UI docs
+// and future external integrations. These simply call the existing room
+// helpers so that the underlying API paths remain unchanged.
+export const createPartyLine = createRoom;
+export const updatePartyLine = updateRoom;
+export const deletePartyLine = deleteRoom;
+
 export async function createBroadcastGroup(
   token: string,
   adminPin: string,
@@ -345,6 +359,47 @@ export async function deleteTelegramMapping(
   );
 }
 
+export async function getTelegramAllowlist(
+  token: string,
+  adminPin: string,
+): Promise<TelegramAllowlistEntry[]> {
+  const res = await fetch("/api/admin/telegram-users", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+    },
+  });
+  if (!res.ok) throw new Error("failed to load telegram allowlist");
+  return res.json() as Promise<TelegramAllowlistEntry[]>;
+}
+
+export async function createTelegramAllowlistEntry(
+  token: string,
+  adminPin: string,
+  payload: { telegramUsername: string; kesherUsername: string },
+): Promise<void> {
+  await apiMutation(
+    "/api/admin/telegram-users",
+    token,
+    "POST",
+    adminPin,
+    payload,
+  );
+}
+
+export async function deleteTelegramAllowlistEntry(
+  token: string,
+  adminPin: string,
+  id: string,
+): Promise<void> {
+  await apiMutation(
+    `/api/admin/telegram-users/${encodeURIComponent(id)}`,
+    token,
+    "DELETE",
+    adminPin,
+  );
+}
+
 export async function updateAdminPin(
   token: string,
   currentAdminPin: string,
@@ -374,4 +429,36 @@ export async function updateRoutingMatrix(
     adminPin,
     entries,
   );
+}
+
+export async function clearChatHistory(
+  token: string,
+  adminPin: string,
+): Promise<void> {
+  await apiMutation(
+    "/api/admin/chat-history/clear",
+    token,
+    "POST",
+    adminPin,
+  );
+}
+
+export async function updateAckSettings(
+  token: string,
+  adminPin: string,
+  enabled: boolean,
+): Promise<{ enabled: boolean }> {
+  const res = await fetch("/api/admin/ack-settings", {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  return res.json() as Promise<{ enabled: boolean }>;
 }

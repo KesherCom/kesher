@@ -3,6 +3,7 @@ import { bootstrap, normalizePublicBootstrap } from "../api";
 import {
   matrixAnchorRoomId,
   mergeForcedListenRooms,
+  resolveChatTargetRoomId,
   roleAllowed,
   toggleRoomSelectionState,
 } from "../lib/intercom";
@@ -16,6 +17,7 @@ import {
 } from "../app/utils";
 import type {
   Bootstrap,
+  ChatAckUpdate,
   Presence,
   PublicBootstrap,
   RoutedEvent,
@@ -48,6 +50,8 @@ type NavigatorWithAudioSession = Navigator & {
 type WsMessage =
   | { type: "presence"; data: Presence[] }
   | { type: "chat"; data: RoutedEvent }
+  | { type: "chat_ack"; data: ChatAckUpdate }
+  | { type: "chat_history_cleared"; data: { timestamp?: number } }
   | { type: "signal"; data: RoutedEvent }
   | { type: "voice_state"; data: RoutedEvent }
   | {
@@ -206,10 +210,20 @@ export type UseIntercomSessionResult = {
   presence: Presence[];
   chatMessages: Array<{
     from: string;
+    fromUserId: string;
     body: string;
     at: string;
     room: string;
     self: boolean;
+    scope: "direct" | "room" | "broadcast";
+    targetId: string;
+    targetType?: "room" | "user" | "role";
+    messageId?: string;
+    ackRequired?: boolean;
+    acked?: boolean;
+    ackedBy?: string;
+    ackedAt?: string;
+    source?: string;
   }>;
   events: Array<{ label: string; at: string }>;
   rtpStats: { inKbps: number; outKbps: number };
@@ -252,7 +266,8 @@ export type UseIntercomSessionResult = {
     targetId: string,
     signal: string,
   ) => void;
-  sendChat: () => void;
+  sendChat: (ackRequired?: boolean) => void;
+  acknowledgeChatMessage: (messageId: string, senderUserId: string) => void;
   handleChannelPttStart: (channelId: string) => void;
   handleChannelPttStop: (channelId: string) => void;
   toggleListenRoom: (roomId: string) => void;
@@ -301,10 +316,20 @@ export function useIntercomSession({
   const [chatMessages, setChatMessages] = useState<
     Array<{
       from: string;
+      fromUserId: string;
       body: string;
       at: string;
       room: string;
       self: boolean;
+      scope: "direct" | "room" | "broadcast";
+      targetId: string;
+      targetType?: "room" | "user" | "role";
+      messageId?: string;
+      ackRequired?: boolean;
+      acked?: boolean;
+      ackedBy?: string;
+      ackedAt?: string;
+      source?: string;
     }>
   >([]);
   const [events, setEvents] = useState<Array<{ label: string; at: string }>>(
@@ -379,6 +404,7 @@ export function useIntercomSession({
   const appDataRef = useRef(appData);
   const listenRoomIdsRef = useRef<string[]>(initialListenRoomIds);
   const talkRoomIdsRef = useRef<string[]>(initialTalkRoomIds);
+  const seenChatKeysRef = useRef<Set<string>>(new Set());
 
   // Sync refs
   useEffect(() => {
@@ -609,7 +635,7 @@ export function useIntercomSession({
         targetID,
         label,
       });
-    } else if (body === "ptt_stop") {
+    } else if (body === "ptt_stop" || body === "always_off") {
       activeVoiceRoutesRef.current.delete(routeKey);
     }
     refreshActiveVoiceChannelState();
@@ -837,6 +863,8 @@ export function useIntercomSession({
       for (const track of stream.getAudioTracks()) {
         if (state === "always_on" || state === "ptt_start") {
           track.enabled = true;
+        } else if (state === "always_off") {
+          track.enabled = false;
         } else if (state === "ptt_stop") {
           track.enabled = voiceModeRef.current === "always_on";
         }
@@ -881,23 +909,27 @@ export function useIntercomSession({
 
   // ── Voice mode actions ──
   function setAlwaysOn(enabled: boolean) {
-    if (enableDirectPpt) {
+    if (enabled && enableDirectPpt) {
       if (voiceModeRef.current !== "ptt") {
         setVoiceMode("ptt");
         voiceModeRef.current = "ptt";
       }
       if (pttPressed) setPttPressed(false);
-      sendVoiceState("ptt_stop");
+      sendVoiceState("always_off");
       return;
     }
     if (enabled) {
       setVoiceMode("always_on");
       voiceModeRef.current = "always_on";
+      setPttPressed(false);
+      setPttPressedChannelId(null);
       sendVoiceState("always_on");
     } else {
       setVoiceMode("ptt");
       voiceModeRef.current = "ptt";
-      sendVoiceState("ptt_stop");
+      setPttPressed(false);
+      setPttPressedChannelId(null);
+      sendVoiceState("always_off");
     }
   }
 
@@ -970,16 +1002,21 @@ export function useIntercomSession({
   // ── Chat ──
   const chatScope: "direct" | "room" | "broadcast" = "room";
 
-  function sendChat() {
+  function sendChat(ackRequired = false) {
     if (
       !wsRef.current ||
       wsRef.current.readyState !== WebSocket.OPEN ||
       !message.trim()
     )
       return;
-    const resolvedTargetId = matrixAnchorRoomId(
+    const resolvedTargetId = resolveChatTargetRoomId(
       listenRoomIdsRef.current,
       talkRoomIdsRef.current,
+      appDataRef.current?.rooms || [],
+      appDataRef.current?.roles.find(
+        (role) => role.id === appDataRef.current?.self.roleId,
+      ),
+      appDataRef.current?.self.roleId || "",
     );
     if (!resolvedTargetId) return;
     wsRef.current.send(
@@ -989,10 +1026,41 @@ export function useIntercomSession({
           scope: chatScope,
           targetId: resolvedTargetId,
           body: message.trim(),
+          ackRequired: ackRequired && (appDataRef.current?.ackEnabled ?? true),
         },
       }),
     );
     setMessage("");
+  }
+
+  function acknowledgeChatMessage(messageId: string, senderUserId: string) {
+    if (
+      !wsRef.current ||
+      wsRef.current.readyState !== WebSocket.OPEN ||
+      !messageId ||
+      !senderUserId
+    ) {
+      return;
+    }
+    wsRef.current.send(
+      JSON.stringify({
+        type: "chat_ack",
+        data: { messageId, senderUserId },
+      }),
+    );
+    setChatMessages((old) =>
+      old.map((entry) => {
+        if (entry.messageId !== messageId) {
+          return entry;
+        }
+        return {
+          ...entry,
+          acked: true,
+          ackedBy: appDataRef.current?.self.username || entry.ackedBy,
+          ackedAt: new Date().toLocaleTimeString(),
+        };
+      }),
+    );
   }
 
   // ── Bootstrap data application ──
@@ -1081,6 +1149,7 @@ export function useIntercomSession({
     setConnectionState("offline");
     setPresence([]);
     setChatMessages([]);
+    seenChatKeysRef.current.clear();
     setEvents([]);
     setPttPressed(false);
     setBroadcastPttPressed(null);
@@ -1274,6 +1343,7 @@ export function useIntercomSession({
               roles: updated.roles,
               rooms: updated.rooms,
               broadcastGroups: updated.broadcastGroups,
+              ackEnabled: updated.ackEnabled,
             };
           });
           onUpdatePublicData(updated);
@@ -1283,14 +1353,20 @@ export function useIntercomSession({
               const room = updated.rooms.find((r) => r.id === id);
               return !!room && roleAllowed(room.receiverRoleIds, selfRoleId);
             });
-            return mergeForcedListenRooms(filtered, updated.rooms, selfRoleId);
+            const next = mergeForcedListenRooms(
+              filtered,
+              updated.rooms,
+              selfRoleId,
+            );
+            return sameStringArray(prev, next) ? prev : next;
           });
-          setTalkRoomIds((prev) =>
-            prev.filter((id) => {
+          setTalkRoomIds((prev) => {
+            const next = prev.filter((id) => {
               const room = updated.rooms.find((r) => r.id === id);
               return !!room && roleAllowed(room.senderRoleIds, selfRoleId);
-            }),
-          );
+            });
+            return sameStringArray(prev, next) ? prev : next;
+          });
           return;
         }
         if (msg.type === "companion_command") {
@@ -1468,28 +1544,102 @@ export function useIntercomSession({
         if (msg.type === "chat") {
           const chatBody = (msg.data.body || "").toString().trim();
           if (chatBody) {
+            const chatScope = msg.data.scope;
+            const chatTargetId = msg.data.targetId;
             const roomLabel =
-              msg.data.scope === "room"
-                ? ad?.rooms.find((room) => room.id === msg.data.targetId)
-                    ?.name || msg.data.targetId
-                : msg.data.scope === "broadcast"
+              chatScope === "room"
+                ? ad?.rooms.find((room) => room.id === chatTargetId)?.name ||
+                  chatTargetId
+                : chatScope === "broadcast"
                   ? ad?.broadcastGroups.find(
-                      (group) => group.id === msg.data.targetId,
-                    )?.name || msg.data.targetId
+                      (group) => group.id === chatTargetId,
+                    )?.name || chatTargetId
                   : "Direct";
-            setChatMessages((old) =>
-              [
-                {
-                  from: msg.data.fromUser.username,
-                  body: chatBody,
-                  at: new Date(msg.data.timestamp).toLocaleTimeString(),
-                  room: roomLabel,
-                  self: msg.data.fromUser.id === ad?.self.id,
-                },
-                ...old,
-              ].slice(0, 120),
-            );
+            setChatMessages((old) => {
+              const nextEntry = {
+                from: msg.data.fromUser.username,
+                fromUserId: msg.data.fromUser.id,
+                body: chatBody,
+                at: new Date(msg.data.timestamp).toLocaleTimeString(),
+                room: roomLabel,
+                self: msg.data.fromUser.id === ad?.self.id,
+                scope: chatScope,
+                targetId: chatTargetId,
+                targetType: msg.data.targetType,
+                messageId: msg.data.messageId,
+                ackRequired: !!msg.data.ackRequired,
+                acked: !!msg.data.acked,
+                ackedBy: msg.data.ackedBy?.username,
+                ackedAt: msg.data.ackedAt
+                  ? new Date(msg.data.ackedAt).toLocaleTimeString()
+                  : undefined,
+                source: msg.data.source,
+              };
+              const stableKey = nextEntry.messageId
+                ? `id:${nextEntry.messageId}`
+                : [
+                    "fallback",
+                    nextEntry.at,
+                    nextEntry.fromUserId,
+                    nextEntry.scope,
+                    nextEntry.targetId,
+                    nextEntry.body,
+                  ].join("|");
+              if (seenChatKeysRef.current.has(stableKey)) {
+                return old;
+              }
+              const nextIdentity = [
+                nextEntry.at,
+                nextEntry.fromUserId,
+                nextEntry.scope,
+                nextEntry.targetId,
+                nextEntry.body,
+              ].join("|");
+              const alreadyPresent = old.some((entry) => {
+                if (nextEntry.messageId && entry.messageId) {
+                  return entry.messageId === nextEntry.messageId;
+                }
+                const entryIdentity = [
+                  entry.at,
+                  entry.fromUserId,
+                  entry.scope,
+                  entry.targetId,
+                  entry.body,
+                ].join("|");
+                return entryIdentity === nextIdentity;
+              });
+              if (alreadyPresent) {
+                seenChatKeysRef.current.add(stableKey);
+                return old;
+              }
+              seenChatKeysRef.current.add(stableKey);
+              return [nextEntry, ...old].slice(0, 120);
+            });
           }
+        }
+        if (msg.type === "chat_ack") {
+          setChatMessages((old) =>
+            old.map((entry) => {
+              if (entry.messageId !== msg.data.messageId) {
+                return entry;
+              }
+              return {
+                ...entry,
+                acked: true,
+                ackedBy: msg.data.ackedBy.username,
+                ackedAt: new Date(msg.data.ackedAt).toLocaleTimeString(),
+              };
+            }),
+          );
+          return;
+        }
+        if (msg.type === "chat_history_cleared") {
+          setChatMessages([]);
+          seenChatKeysRef.current.clear();
+          if (showDebug) {
+            pushDebugEvent("system · chat history cleared");
+          }
+          return;
         }
         const body = (msg.data.signal || msg.data.body || "").toString();
         if (showDebug) {
@@ -1703,14 +1853,8 @@ export function useIntercomSession({
       setVoiceMode(nextVoiceMode);
       voiceModeRef.current = nextVoiceMode;
     }
-    if (nextVoiceMode === "always_on") {
+    if (nextVoiceMode !== "always_on" && !selfPresence.micEnabled) {
       setPttPressed(false);
-      setdirectPttPressedUserId(null);
-      setBroadcastPttPressed(null);
-      return;
-    }
-    setPttPressed(selfPresence.micEnabled);
-    if (!selfPresence.micEnabled) {
       setdirectPttPressedUserId(null);
       setBroadcastPttPressed(null);
     }
@@ -1776,6 +1920,7 @@ export function useIntercomSession({
     handleEnableDirectPptChange,
     sendScopedSignal,
     sendChat,
+    acknowledgeChatMessage,
     handleChannelPttStart,
     handleChannelPttStop,
     toggleListenRoom,
