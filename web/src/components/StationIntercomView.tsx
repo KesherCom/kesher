@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Bootstrap, BroadcastGroup, Presence } from "../types";
 import type { KeyboardShortcutSettings } from "../app/settings";
+import { createHoldButtonProps } from "../lib/holdButton";
 import { sortDirectUsersByRoleAndUsername } from "../lib/users";
 import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
 
@@ -350,14 +351,28 @@ export function StationIntercomView({
     (pttPressed || voiceMode === "always_on") &&
     !directPttPressedUserId &&
     !broadcastPttPressed;
+  const mainPttButtonProps = createHoldButtonProps<HTMLButtonElement>({
+    onStart: startPtt,
+    onStop: stopPtt,
+  });
+  const replyButtonProps = createHoldButtonProps<HTMLButtonElement>({
+    disabled: !replyTargetUserId,
+    onStart: () => {
+      if (replyTargetUserId) {
+        startDirectPtt(replyTargetUserId);
+      }
+    },
+    onStop: () => {
+      if (replyTargetUserId) {
+        stopDirectPtt(replyTargetUserId);
+      }
+    },
+  });
   const mainPttButton = (
     <button
       key="ptt"
-      className={`station-ptt ${pttPressed ? "active" : ""}`}
-      onPointerDown={startPtt}
-      onPointerUp={stopPtt}
-      onPointerLeave={stopPtt}
-      onPointerCancel={stopPtt}
+      className={`station-ptt hold-button ${pttPressed ? "active" : ""}`}
+      {...mainPttButtonProps}
     >
       Hold to talk
     </button>
@@ -365,24 +380,13 @@ export function StationIntercomView({
   const replyButton = (
     <button
       key="reply"
-      className={`station-reply ${replyTargetUserId ? "" : "disabled"} ${
+      className={`station-reply hold-button ${replyTargetUserId ? "" : "disabled"} ${
         replyTargetUserId && directPttPressedUserId === replyTargetUserId
           ? "active"
           : ""
       }`}
       disabled={!replyTargetUserId}
-      onPointerDown={() =>
-        replyTargetUserId ? startDirectPtt(replyTargetUserId) : undefined
-      }
-      onPointerUp={() =>
-        replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined
-      }
-      onPointerLeave={() =>
-        replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined
-      }
-      onPointerCancel={() =>
-        replyTargetUserId ? stopDirectPtt(replyTargetUserId) : undefined
-      }
+      {...replyButtonProps}
     >
       Reply to caller
       <small>
@@ -491,8 +495,30 @@ export function StationIntercomView({
                     onChannelPptStop(room.id);
                   }
                 };
+                const talkButtonHoldProps =
+                  canTalk && enableDirectPpt
+                    ? createHoldButtonProps<HTMLButtonElement>({
+                        onStart: handleTalkPointerDown,
+                        onStop: handleTalkPointerUp,
+                      })
+                    : {};
 
                 const listenerCount = roomListenerCounts[room.id] ?? 0;
+                const talkButtonClassName = `station-card-head ${
+                  enableDirectPpt ? "hold-button " : ""
+                }${
+                  enableDirectPpt
+                    ? isPttPressed && canTalk
+                      ? "ppt-active"
+                      : ""
+                    : ""
+                } ${canTalk ? "" : "disabled"}${
+                  !enableDirectPpt && talking && canTalk ? " talk-armed" : ""
+                }${
+                  !enableDirectPpt && talking && canTalk && isSendingOnTalkRooms
+                    ? " talk-live"
+                    : ""
+                }`;
 
                 return (
                   <article
@@ -526,33 +552,8 @@ export function StationIntercomView({
                       ★
                     </button>
                     <button
-                      className={`station-card-head ${
-                        enableDirectPpt
-                          ? isPttPressed && canTalk
-                            ? "ppt-active"
-                            : ""
-                          : ""
-                      } ${canTalk ? "" : "disabled"}${!enableDirectPpt && talking && canTalk ? " talk-armed" : ""}${!enableDirectPpt && talking && canTalk && isSendingOnTalkRooms ? " talk-live" : ""}`}
-                      onPointerDown={
-                        canTalk && enableDirectPpt
-                          ? handleTalkPointerDown
-                          : undefined
-                      }
-                      onPointerUp={
-                        canTalk && enableDirectPpt
-                          ? handleTalkPointerUp
-                          : undefined
-                      }
-                      onPointerLeave={
-                        canTalk && enableDirectPpt && isPttPressed
-                          ? handleTalkPointerUp
-                          : undefined
-                      }
-                      onPointerCancel={
-                        canTalk && enableDirectPpt && isPttPressed
-                          ? handleTalkPointerUp
-                          : undefined
-                      }
+                      className={talkButtonClassName}
+                      {...talkButtonHoldProps}
                       onClick={
                         !enableDirectPpt && canTalk
                           ? () => toggleTalkRoom(room.id)
@@ -685,11 +686,11 @@ export function StationIntercomView({
                           ★
                         </button>
                         <button
-                          className={`station-card-head direct-ptt ${directPttPressedUserId === p.userId ? "active" : ""}`}
-                          onPointerDown={() => startDirectPtt(p.userId)}
-                          onPointerUp={() => stopDirectPtt(p.userId)}
-                          onPointerLeave={() => stopDirectPtt(p.userId)}
-                          onPointerCancel={() => stopDirectPtt(p.userId)}
+                          className={`station-card-head direct-ptt hold-button ${directPttPressedUserId === p.userId ? "active" : ""}`}
+                          {...createHoldButtonProps<HTMLButtonElement>({
+                            onStart: () => startDirectPtt(p.userId),
+                            onStop: () => stopDirectPtt(p.userId),
+                          })}
                         >
                           {isReceivingDirect(p.userId) ? (
                             <span className="station-receiving-badge">🔊</span>
@@ -780,11 +781,11 @@ export function StationIntercomView({
                       ★
                     </button>
                     <button
-                      className={`station-card-head direct-ptt ${directPttPressedUserId === p.userId ? "active" : ""}`}
-                      onPointerDown={() => startDirectPtt(p.userId)}
-                      onPointerUp={() => stopDirectPtt(p.userId)}
-                      onPointerLeave={() => stopDirectPtt(p.userId)}
-                      onPointerCancel={() => stopDirectPtt(p.userId)}
+                      className={`station-card-head direct-ptt hold-button ${directPttPressedUserId === p.userId ? "active" : ""}`}
+                      {...createHoldButtonProps<HTMLButtonElement>({
+                        onStart: () => startDirectPtt(p.userId),
+                        onStop: () => stopDirectPtt(p.userId),
+                      })}
                     >
                       {isReceivingDirect(p.userId) ? (
                         <span className="station-receiving-badge">🔊</span>
@@ -857,21 +858,22 @@ export function StationIntercomView({
                   return (
                     <button
                       key={group.id}
-                      className={`station-broadcast-button ${broadcastPttPressed === group.id ? "active" : ""} ${
+                      className={`station-broadcast-button hold-button ${broadcastPttPressed === group.id ? "active" : ""} ${
                         canSend ? "" : "disabled"
                       }`}
-                      onPointerDown={() =>
-                        canSend ? startBroadcastPtt(group.id) : undefined
-                      }
-                      onPointerUp={() =>
-                        canSend ? stopBroadcastPtt(group.id) : undefined
-                      }
-                      onPointerLeave={() =>
-                        canSend ? stopBroadcastPtt(group.id) : undefined
-                      }
-                      onPointerCancel={() =>
-                        canSend ? stopBroadcastPtt(group.id) : undefined
-                      }
+                      {...createHoldButtonProps<HTMLButtonElement>({
+                        disabled: !canSend,
+                        onStart: () => {
+                          if (canSend) {
+                            startBroadcastPtt(group.id);
+                          }
+                        },
+                        onStop: () => {
+                          if (canSend) {
+                            stopBroadcastPtt(group.id);
+                          }
+                        },
+                      })}
                       disabled={!canSend}
                       title={
                         canSend

@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { StationIntercomView } from "./StationIntercomView";
@@ -220,5 +220,56 @@ describe("StationIntercomView", () => {
     expect(secondaryColumn).not.toBeNull();
     expect(secondaryColumn).toHaveTextContent("Chat");
     expect(secondaryColumn).toHaveTextContent("Chat content");
+  });
+
+  it("keeps hold-to-talk active when the pointer moves away before release", () => {
+    const startPtt = vi.fn();
+    const stopPtt = vi.fn();
+
+    render(
+      <StationIntercomView
+        {...baseProps}
+        startPtt={startPtt}
+        stopPtt={stopPtt}
+      />,
+    );
+
+    const holdButton = screen.getByRole("button", { name: "Hold to talk" });
+    let capturedPointerId: number | null = null;
+
+    Object.defineProperties(holdButton, {
+      setPointerCapture: {
+        configurable: true,
+        value: (pointerId: number) => {
+          capturedPointerId = pointerId;
+        },
+      },
+      hasPointerCapture: {
+        configurable: true,
+        value: (pointerId: number) => capturedPointerId === pointerId,
+      },
+      releasePointerCapture: {
+        configurable: true,
+        value: (pointerId: number) => {
+          if (capturedPointerId === pointerId) {
+            capturedPointerId = null;
+          }
+        },
+      },
+    });
+
+    fireEvent.pointerDown(holdButton, {
+      button: 0,
+      pointerId: 12,
+      pointerType: "touch",
+    });
+    fireEvent.pointerLeave(holdButton, { pointerId: 12, pointerType: "touch" });
+
+    expect(startPtt).toHaveBeenCalledTimes(1);
+    expect(stopPtt).not.toHaveBeenCalled();
+
+    fireEvent.pointerUp(holdButton, { pointerId: 12, pointerType: "touch" });
+
+    expect(stopPtt).toHaveBeenCalledTimes(1);
   });
 });
