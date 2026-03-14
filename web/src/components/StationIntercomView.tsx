@@ -225,7 +225,7 @@ export function StationIntercomView({
   const [isOutputMenuOpen, setIsOutputMenuOpen] = useState(false);
   const micMenuRef = useRef<HTMLDivElement>(null);
   const outputMenuRef = useRef<HTMLDivElement>(null);
-  const [isAudioOpen, setIsAudioOpen] = useState(true);
+  const [isAudioOpen, setIsAudioOpen] = useState(false);
   const [activeDirectTab, setActiveDirectTab] = useState<string>("all");
 
   // Close dropdowns when clicking outside
@@ -545,8 +545,8 @@ export function StationIntercomView({
                       }}
                       title={
                         pinnedRoomIds.includes(room.id)
-                          ? "Unpin channel"
-                          : "Pin channel"
+                          ? "Remove channel from favorites"
+                          : "Add channel to favorites"
                       }
                     >
                       ★
@@ -679,8 +679,8 @@ export function StationIntercomView({
                           }}
                           title={
                             pinnedUserIds.includes(p.userId)
-                              ? "Unpin user"
-                              : "Pin user"
+                              ? "Remove user from favorites"
+                              : "Add user to favorites"
                           }
                         >
                           ★
@@ -753,7 +753,7 @@ export function StationIntercomView({
             ) : directOnlineTargets.length === 0 ? (
               <p className="station-empty">
                 {showPinnedOnly
-                  ? "No pinned users online."
+                  ? "No favorite users online."
                   : "No other users online."}
               </p>
             ) : (
@@ -774,8 +774,8 @@ export function StationIntercomView({
                       }}
                       title={
                         pinnedUserIds.includes(p.userId)
-                          ? "Unpin user"
-                          : "Pin user"
+                          ? "Remove user from favorites"
+                          : "Add user to favorites"
                       }
                     >
                       ★
@@ -926,85 +926,101 @@ export function StationIntercomView({
               </button>
             </div>
             <div className="station-modal-body">
-              <label className="station-setting">
-                <input
-                  type="checkbox"
-                  checked={showPinnedOnly}
-                  onChange={(e) => onShowPinnedOnlyChange(e.target.checked)}
-                />
-                <span>Show only pinned</span>
-              </label>
-              <label className="station-setting">
-                <input
-                  type="checkbox"
-                  checked={enableDirectPpt}
-                  onChange={(e) => onEnableDirectPptChange(e.target.checked)}
-                />
-                <span>Direct PTT Mode (press channel to talk)</span>
-              </label>
-              <label className="station-setting">
-                <input
-                  type="checkbox"
-                  checked={enableDirectTabs}
-                  onChange={(e) => onEnableDirectTabsChange(e.target.checked)}
-                />
-                <span>Show direct communication as tabs</span>
-              </label>
-              <label className="station-setting">
-                <input
-                  type="checkbox"
-                  checked={swapPttAndReplyButtons}
-                  onChange={(e) =>
-                    onSwapPttAndReplyButtonsChange(e.target.checked)
-                  }
-                />
-                <span>Swap PTT and reply buttons</span>
-              </label>
-              <label className="station-setting">
-                <input
-                  type="checkbox"
-                  checked={enableBackgroundAudioRecovery}
-                  onChange={(e) =>
-                    onEnableBackgroundAudioRecoveryChange(e.target.checked)
-                  }
-                />
-                <span>Background audio assist</span>
-              </label>
-              <label className="station-setting">
-                <input
-                  type="checkbox"
-                  checked={keepScreenAwake}
-                  disabled={!wakeLockSupported}
-                  onChange={(e) => onKeepScreenAwakeChange(e.target.checked)}
-                />
-                <span>Keep device awake while connected</span>
-              </label>
-              <label className="station-setting">
-                <input
-                  type="checkbox"
-                  checked={showVolumeControls}
-                  onChange={(e) => onShowVolumeControlsChange(e.target.checked)}
-                />
-                <span>Show volume controls</span>
-              </label>
-              <div style={{ display: "grid", gap: "0.35rem" }}>
-                <small>
-                  Media controls:{" "}
-                  {mediaSessionSupported ? "supported" : "not supported"} · Wake
-                  lock:{" "}
-                  {wakeLockSupported
-                    ? wakeLockActive
-                      ? "active"
-                      : "available"
-                    : "not supported"}{" "}
-                  · Install mode:{" "}
-                  {isStandaloneDisplayMode ? "installed app" : "browser tab"}
+              <section className="station-settings-section">
+                <h4 className="station-settings-section-title">Layout</h4>
+                <div className="station-settings-grid">
+                  <label className="station-setting">
+                    <input
+                      type="checkbox"
+                      checked={showPinnedOnly}
+                      onChange={(e) => onShowPinnedOnlyChange(e.target.checked)}
+                    />
+                    <span>Show only favorites</span>
+                  </label>
+                  <label className="station-setting">
+                    <input
+                      type="checkbox"
+                      checked={enableDirectTabs}
+                      onChange={(e) =>
+                        onEnableDirectTabsChange(e.target.checked)
+                      }
+                    />
+                    <span>Show direct communication as tabs</span>
+                  </label>
+                  <label className="station-setting">
+                    <input
+                      type="checkbox"
+                      checked={showVolumeControls}
+                      onChange={(e) =>
+                        onShowVolumeControlsChange(e.target.checked)
+                      }
+                    />
+                    <span>Show volume controls</span>
+                  </label>
+                </div>
+              </section>
+
+              <section className="station-settings-section">
+                <h4 className="station-settings-section-title">Interaction</h4>
+                <div className="station-settings-grid">
+                  <label className="station-setting">
+                    <input
+                      type="checkbox"
+                      checked={enableDirectPpt}
+                      onChange={(e) =>
+                        onEnableDirectPptChange(e.target.checked)
+                      }
+                    />
+                    <span>Direct PTT Mode (press channel to talk)</span>
+                  </label>
+                  <label className="station-setting">
+                    <input
+                      type="checkbox"
+                      checked={swapPttAndReplyButtons}
+                      onChange={(e) =>
+                        onSwapPttAndReplyButtonsChange(e.target.checked)
+                      }
+                    />
+                    <span>Swap PTT and reply buttons</span>
+                  </label>
+                </div>
+              </section>
+
+              <section className="station-settings-section">
+                <h4 className="station-settings-section-title">System</h4>
+                <div className="station-settings-grid">
+                  <label className="station-setting">
+                    <input
+                      type="checkbox"
+                      checked={enableBackgroundAudioRecovery}
+                      onChange={(e) =>
+                        onEnableBackgroundAudioRecoveryChange(e.target.checked)
+                      }
+                    />
+                    <span>Background audio assist</span>
+                  </label>
+                  <label className="station-setting">
+                    <input
+                      type="checkbox"
+                      checked={keepScreenAwake}
+                      disabled={!wakeLockSupported}
+                      onChange={(e) => onKeepScreenAwakeChange(e.target.checked)}
+                    />
+                    <span>Keep device awake while connected</span>
+                  </label>
+                </div>
+              </section>
+
+              <section className="station-settings-section station-settings-status">
+                <small className="station-settings-meta">
+                  Media controls: {mediaSessionSupported ? "supported" : "not supported"} · Wake
+                  lock: {wakeLockSupported ? (wakeLockActive ? "active" : "available") : "not supported"} · Install mode: {isStandaloneDisplayMode ? "installed app" : "browser tab"}
                 </small>
-                <small>
+                <small className="station-settings-meta">
                   For best mobile reliability, keep background audio assist
                   enabled and install the app to your home screen.
                 </small>
-              </div>
+              </section>
 
               <KeyboardShortcutsSettings
                 shortcuts={keyboardShortcuts}
@@ -1177,11 +1193,13 @@ export function StationIntercomView({
                 </div>
               </div>
 
-              <div style={{ display: "grid", gap: "0.5rem", marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid var(--border-color, #ddd)" }}>
-                <small style={{ fontWeight: "500", display: "block" }}>App Version</small>
+              <section className="station-settings-section station-settings-version">
+                <h4 className="station-settings-section-title">App Version</h4>
                 <small>{appData.appVersion.version}</small>
-                <small style={{ opacity: 0.7, fontSize: "0.85em" }}>Built: {appData.appVersion.buildTimestamp}</small>
-              </div>
+                <small className="station-settings-build">
+                  Built: {appData.appVersion.buildTimestamp}
+                </small>
+              </section>
 
               <p className="station-modal-hint">
                 Preferences apply only to you on this device.

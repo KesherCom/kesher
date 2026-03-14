@@ -61,7 +61,7 @@ export function AdminRoutingMatrixCard({
   appData,
   refreshBootstrapData,
 }: AdminRoutingMatrixCardProps) {
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(false);
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminError, setAdminError] = useState("");
 
