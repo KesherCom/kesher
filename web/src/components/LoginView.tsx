@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { PublicBootstrap } from "../types";
+import type { LoginConflict, PublicBootstrap } from "../types";
 
 type LoginViewProps = {
   publicData: PublicBootstrap;
@@ -8,10 +8,14 @@ type LoginViewProps = {
   onUsernameChange: (value: string) => void;
   onRoleChange: (roleId: string) => void;
   onLogin: () => void;
+  loginError?: string;
   adminPin: string;
   onAdminPinChange: (value: string) => void;
   onAdminLogin: () => void;
   adminError?: string;
+  takeoverConflict: LoginConflict | null;
+  onConfirmTakeover: () => void;
+  onCancelTakeover: () => void;
 };
 
 export function LoginView({
@@ -21,10 +25,14 @@ export function LoginView({
   onUsernameChange,
   onRoleChange,
   onLogin,
+  loginError,
   adminPin,
   onAdminPinChange,
   onAdminLogin,
   adminError,
+  takeoverConflict,
+  onConfirmTakeover,
+  onCancelTakeover,
 }: LoginViewProps) {
   const stripWhitespace = (value: string) => value.replace(/\s+/g, "");
   const [showAdmin, setShowAdmin] = useState(false);
@@ -65,6 +73,31 @@ export function LoginView({
           >
             Join Intercom
           </button>
+          {loginError ? <p className="login-error">{loginError}</p> : null}
+          {takeoverConflict ? (
+            <div className="login-admin-card" role="alert">
+              <div className="login-admin-head">
+                <h3>Role currently in use</h3>
+              </div>
+              <p className="login-admin-note">
+                {takeoverConflict.conflictRoleName || takeoverConflict.conflictRoleId}
+                {" "}
+                is currently active
+                {takeoverConflict.conflictUsername
+                  ? ` by ${takeoverConflict.conflictUsername}`
+                  : ""}
+                . Confirm takeover to replace the existing session.
+              </p>
+              <div className="login-admin-actions">
+                <button className="primary" onClick={onConfirmTakeover}>
+                  Confirm takeover
+                </button>
+                <button className="secondary" onClick={onCancelTakeover}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div>

@@ -17,6 +17,7 @@ type client struct {
 	session         Session
 	user            User
 	connectedAt     time.Time
+	closeNow        func() error
 	lastDirectFrom  string
 	lastDirectName  string
 	signalFrom      string
@@ -633,21 +634,70 @@ func (h *Hub) SetVoiceState(token, state string) {
 }
 
 func (h *Hub) Remove(token string) {
+	h.removeToken(token, "")
+}
+
+func (h *Hub) RemoveWithReason(token string, reason string) {
+	h.removeToken(token, reason)
+}
+
+func (h *Hub) removeToken(token string, reason string) {
+	var c *client
 	h.mu.Lock()
-	if c, ok := h.clients[token]; ok {
+	c, ok := h.clients[token]
+	if ok {
+		if reason != "" {
+			h.enqueueOutbound(c, WSOutbound{Type: "session_revoked", Data: SessionRevokedEvent{Reason: reason, Timestamp: time.Now().UnixMilli()}})
+		}
+		delete(h.clients, token)
 		if c.send != nil {
 			close(c.send)
 		}
 		if c.sendPriority != nil && c.sendPriority != c.send {
 			close(c.sendPriority)
 		}
-		delete(h.clients, token)
 	}
 	h.mu.Unlock()
+	if !ok {
+		return
+	}
+	if c.closeNow != nil {
+		_ = c.closeNow()
+	}
 	if h.media != nil {
 		h.media.RemovePeer(token)
 	}
 	h.broadcastPresence()
+}
+
+func (h *Hub) LatestRoleSession(roleID string) (Session, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var selected *client
+	for _, c := range h.clients {
+		if c.session.RoleID != roleID {
+			continue
+		}
+		if selected == nil || c.connectedAt.After(selected.connectedAt) {
+			selected = c
+		}
+	}
+	if selected == nil {
+		return Session{}, false
+	}
+	return selected.session, true
+}
+
+func (h *Hub) TokensForRole(roleID string) []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	tokens := make([]string, 0)
+	for token, c := range h.clients {
+		if c.session.RoleID == roleID {
+			tokens = append(tokens, token)
+		}
+	}
+	return tokens
 }
 
 func (h *Hub) SetRoomMatrix(token string, listenRooms []string, talkRooms []string) {

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  adminLogin,
   bootstrap,
   getPublicBootstrap,
   getStatus,
   login,
+  loginTakeover,
   logout,
   updateAdminPin,
 } from "./api";
@@ -24,7 +26,7 @@ import {
 } from "./app/useKeyboardShortcuts";
 import { roleAllowed, matrixAnchorRoomId } from "./lib/intercom";
 import { sortDirectUsersByRoleAndUsername } from "./lib/users";
-import type { Bootstrap, PublicBootstrap } from "./types";
+import type { Bootstrap, LoginConflict, PublicBootstrap } from "./types";
 import { useSettings } from "./hooks/useSettings";
 import { useAudioDevices } from "./hooks/useAudioDevices";
 import { useIntercomSession } from "./hooks/useIntercomSession";
@@ -59,11 +61,22 @@ export function App() {
   );
   const [adminPinInput, setAdminPinInput] = useState("");
   const [adminLoginError, setAdminLoginError] = useState("");
+  const [operatorLoginError, setOperatorLoginError] = useState("");
   const [adminOverrideActive, setAdminOverrideActive] = useState(false);
   const [pathname, setPathname] = useState(() => window.location.pathname);
   const [roomListenerCounts, setRoomListenerCounts] = useState<
     Record<string, number>
   >({});
+  const [pendingTakeover, setPendingTakeover] = useState<
+    | {
+        username: string;
+        roleId: string;
+        conflict: LoginConflict;
+        targetAuthMode: "operator" | "admin";
+        adminOverrideActive: boolean;
+      }
+    | null
+  >(null);
 
   // ── UI state ──
   const [isUserSettingsOpen, setIsUserSettingsOpen] = useState(false);
@@ -129,6 +142,12 @@ export function App() {
     onUpdateAppData: setAppData,
     onUpdatePublicData: setPublicData,
     onRefreshAudioDevices: audioDevices.refreshAudioDevices,
+    onSessionRevoked: () => {
+      sessionStorage.removeItem(tokenStorageKey);
+      localStorage.removeItem(tokenStorageKey);
+      setToken(null);
+      setAppData(null);
+    },
   });
 
   // ── Computed values ──
@@ -181,7 +200,9 @@ export function App() {
     bootstrap(token)
       .then((data) => {
         setAppData(data);
-        settings.setRoleID(data.self.roleId);
+        if (authMode === "operator") {
+          settings.setRoleID(data.self.roleId);
+        }
         session.applyBootstrapData(data, true);
       })
       .catch(() => {
@@ -304,7 +325,11 @@ export function App() {
   }, [authMode, pathname, token]);
 
   // ── Login / logout ──
-  async function doLogin(overrideUsername?: string, overrideRoleId?: string) {
+  async function doLogin(
+    overrideUsername?: string,
+    overrideRoleId?: string,
+    targetAuthMode: "operator" | "admin" = "operator",
+  ): Promise<boolean> {
     const useUsername =
       typeof overrideUsername === "string"
         ? overrideUsername
@@ -312,17 +337,43 @@ export function App() {
     const useRoleId =
       typeof overrideRoleId === "string" ? overrideRoleId : settings.roleId;
     const res = await login(useUsername, useRoleId);
+    if ("requiresTakeover" in res) {
+      const conflictLabel = res.conflictRoleName || res.conflictRoleId;
+      const conflictUser = res.conflictUsername
+        ? ` Bereits aktiv: ${res.conflictUsername}.`
+        : "";
+      const conflictMessage = `Die Rolle ${conflictLabel} ist bereits angemeldet.${conflictUser}`;
+      if (targetAuthMode === "admin") {
+        setAdminLoginError(conflictMessage);
+      } else {
+        setOperatorLoginError(conflictMessage);
+      }
+      setPendingTakeover({
+        username: useUsername,
+        roleId: useRoleId,
+        conflict: res,
+        targetAuthMode,
+        adminOverrideActive: targetAuthMode === "admin",
+      });
+      return false;
+    }
+    setOperatorLoginError("");
+    setAdminLoginError("");
+    setPendingTakeover(null);
     sessionStorage.setItem(tokenStorageKey, res.token);
     setToken(res.token);
+    return true;
   }
 
   async function handleOperatorLogin() {
     setAuthMode("operator");
     setAdminLoginError("");
+    setOperatorLoginError("");
+    setPendingTakeover(null);
     try {
-      await doLogin();
+      await doLogin(undefined, undefined, "operator");
     } catch (error) {
-      setAdminLoginError(
+      setOperatorLoginError(
         error instanceof Error ? error.message : "Login failed.",
       );
     }
@@ -334,14 +385,13 @@ export function App() {
       return;
     }
     setAdminLoginError("");
-    const nextRoleId = settings.roleId || publicData?.roles?.[0]?.id || "";
-    if (!nextRoleId) {
-      setAdminLoginError("No role available for admin login.");
-      return;
-    }
     setAuthMode("admin");
     try {
-      await doLogin("admin", nextRoleId);
+      const res = await adminLogin(adminPinInput.trim());
+      setPendingTakeover(null);
+      setOperatorLoginError("");
+      sessionStorage.setItem(tokenStorageKey, res.token);
+      setToken(res.token);
       setAdminOverrideActive(true);
     } catch (error) {
       setAuthMode("operator");
@@ -360,16 +410,45 @@ export function App() {
     setAuthMode("operator");
     setAdminPinInput("");
     setAdminLoginError("");
+    setOperatorLoginError("");
     setAdminOverrideActive(false);
+    setPendingTakeover(null);
     setToken(null);
     setAppData(null);
+  }
+
+  async function handleConfirmTakeover() {
+    if (!pendingTakeover) return;
+    setAdminLoginError("");
+    setOperatorLoginError("");
+    try {
+      const res = await loginTakeover(
+        pendingTakeover.username,
+        pendingTakeover.roleId,
+      );
+      setPendingTakeover(null);
+      setAuthMode(pendingTakeover.targetAuthMode);
+      setAdminOverrideActive(pendingTakeover.adminOverrideActive);
+      sessionStorage.setItem(tokenStorageKey, res.token);
+      setToken(res.token);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Takeover failed.";
+      if (pendingTakeover.targetAuthMode === "admin") {
+        setAdminLoginError(message);
+      } else {
+        setOperatorLoginError(message);
+      }
+    }
   }
 
   async function refreshBootstrapData() {
     if (!token) return;
     const data = await bootstrap(token);
     setAppData(data);
-    settings.setRoleID(data.self.roleId);
+    if (authMode === "operator") {
+      settings.setRoleID(data.self.roleId);
+    }
     setPublicData({
       roles: data.roles,
       rooms: data.rooms,
@@ -473,7 +552,16 @@ export function App() {
         adminPin={adminPinInput}
         onAdminPinChange={setAdminPinInput}
         onAdminLogin={() => void handleAdminLogin()}
+        loginError={operatorLoginError}
         adminError={adminLoginError}
+        takeoverConflict={pendingTakeover?.conflict ?? null}
+        onConfirmTakeover={() => void handleConfirmTakeover()}
+        onCancelTakeover={() => {
+          setPendingTakeover(null);
+          setOperatorLoginError("");
+          setAdminLoginError("");
+          setAdminOverrideActive(false);
+        }}
       />
     );
   }

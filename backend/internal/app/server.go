@@ -31,6 +31,7 @@ type Server struct {
 	logger      *slog.Logger
 	store       *Store
 	sessions    *SessionManager
+	sessionMu   sync.Mutex
 	hub         *Hub
 	media       *MediaManager
 	telegram    *TelegramBot
@@ -399,6 +400,8 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/healthz", s.handleHealth)
 	mux.HandleFunc("/api/public-bootstrap", s.handlePublicBootstrap)
 	mux.HandleFunc("/api/login", s.handleLogin)
+	mux.HandleFunc("/api/admin/login", s.handleAdminLogin)
+	mux.HandleFunc("/api/login/takeover", s.handleLoginTakeover)
 	mux.HandleFunc("/api/logout", s.withAuth(s.handleLogout))
 	mux.HandleFunc("/api/bootstrap", s.withAuth(s.handleBootstrap))
 	mux.HandleFunc("/api/status", s.withAuth(s.handleStatus))
@@ -592,7 +595,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Username = strings.TrimSpace(req.Username)
-	if req.Username == "" || req.RoleID == "" {
+	if !isValidLoginRequest(req.Username, req.RoleID) {
 		http.Error(w, "username and roleId required", http.StatusBadRequest)
 		return
 	}
@@ -609,6 +612,17 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid role", http.StatusBadRequest)
 		return
 	}
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	if existing, conflict := s.sessions.LatestForRole(req.RoleID); conflict {
+		s.writeJSON(w, http.StatusConflict, LoginConflictResponse{
+			RequiresTakeover: true,
+			ConflictRoleID:   req.RoleID,
+			ConflictRoleName: s.roleNameByID(r.Context(), req.RoleID),
+			ConflictUsername: existing.Username,
+		})
+		return
+	}
 	user, err := s.store.UpsertUser(r.Context(), req.Username, req.RoleID)
 	if err != nil {
 		if errors.Is(err, ErrInvalidInput) {
@@ -620,6 +634,87 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	session := s.sessions.Create(user)
 	s.writeJSON(w, http.StatusOK, LoginResponse{Token: session.Token, User: user})
+}
+
+func (s *Server) handleLoginTakeover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req LoginTakeoverRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	req.Username = strings.TrimSpace(req.Username)
+	if !isValidLoginRequest(req.Username, req.RoleID) {
+		http.Error(w, "username and roleId required", http.StatusBadRequest)
+		return
+	}
+	if strings.ContainsAny(req.Username, " \t\n\r") {
+		http.Error(w, "username must not contain whitespace", http.StatusBadRequest)
+		return
+	}
+	ok, err := s.store.RoleExists(r.Context(), req.RoleID)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	if !ok {
+		http.Error(w, "invalid role", http.StatusBadRequest)
+		return
+	}
+
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+
+	revokedSessions := s.sessions.DeleteByRole(req.RoleID)
+	revokedTokens := make(map[string]struct{}, len(revokedSessions))
+	for _, revoked := range revokedSessions {
+		revokedTokens[revoked.Token] = struct{}{}
+	}
+	for _, token := range s.hub.TokensForRole(req.RoleID) {
+		if _, ok := revokedTokens[token]; !ok {
+			s.sessions.Delete(token)
+		}
+		s.hub.RemoveWithReason(token, "takeover")
+	}
+
+	user, err := s.store.UpsertUser(r.Context(), req.Username, req.RoleID)
+	if err != nil {
+		if errors.Is(err, ErrInvalidInput) {
+			http.Error(w, "username must not contain whitespace", http.StatusBadRequest)
+			return
+		}
+		s.internalErr(w, err)
+		return
+	}
+	session := s.sessions.Create(user)
+	s.writeJSON(w, http.StatusOK, LoginResponse{Token: session.Token, User: user})
+}
+
+func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req AdminLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	configuredPIN, err := s.store.GetAdminPIN(r.Context())
+	if err != nil || strings.TrimSpace(configuredPIN) == "" {
+		http.Error(w, "admin pin unavailable", http.StatusForbidden)
+		return
+	}
+	presentedPIN := strings.TrimSpace(req.PIN)
+	if subtle.ConstantTimeCompare([]byte(presentedPIN), []byte(configuredPIN)) != 1 {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	session := s.sessions.Create(User{Username: "admin"})
+	s.writeJSON(w, http.StatusOK, LoginResponse{Token: session.Token, User: User{Username: "admin"}})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request, session Session) {
@@ -698,6 +793,23 @@ func filterBroadcastGroupsForRole(roleID string, groups []BroadcastGroup) []Broa
 		}
 	}
 	return filtered
+}
+
+func isValidLoginRequest(username, roleID string) bool {
+	return strings.TrimSpace(username) != "" && strings.TrimSpace(roleID) != ""
+}
+
+func (s *Server) roleNameByID(ctx context.Context, roleID string) string {
+	roles, err := s.store.ListRoles(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, role := range roles {
+		if role.ID == roleID {
+			return role.Name
+		}
+	}
+	return ""
 }
 
 type upsertRoleRequest struct {
@@ -1352,6 +1464,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	c := &client{
 		session:         session,
 		user:            user,
+		closeNow:        conn.Close,
 		listenRooms:     toRoomSet(listenRooms),
 		talkRooms:       toRoomSet(talkRooms),
 		voiceMode:       initialVoiceMode,
@@ -1759,7 +1872,6 @@ func (s *Server) staticHandler() http.Handler {
 			return
 		}
 		http.ServeFile(w, r, s.cfg.StaticDir+"/index.html")
-		return
 	})
 }
 

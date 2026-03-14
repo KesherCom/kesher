@@ -1,5 +1,7 @@
 import type {
   Bootstrap,
+  LoginConflict,
+  LoginSuccess,
   PublicBootstrap,
   RealtimeStatsResponse,
   StatusResponse,
@@ -94,14 +96,40 @@ export async function getPublicBootstrap(): Promise<PublicBootstrap> {
 export async function login(
   username: string,
   roleId: string,
-): Promise<{ token: string; user: User }> {
+): Promise<LoginSuccess | LoginConflict> {
   const res = await fetch("/api/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, roleId }),
   });
+  if (res.status === 409) {
+    return (await res.json()) as LoginConflict;
+  }
   if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return (await res.json()) as LoginSuccess;
+}
+
+export async function loginTakeover(
+  username: string,
+  roleId: string,
+): Promise<LoginSuccess> {
+  const res = await fetch("/api/login/takeover", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, roleId }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as LoginSuccess;
+}
+
+export async function adminLogin(pin: string): Promise<LoginSuccess> {
+  const res = await fetch("/api/admin/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pin }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as LoginSuccess;
 }
 
 export async function bootstrap(token: string): Promise<Bootstrap> {

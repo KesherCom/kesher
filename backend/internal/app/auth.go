@@ -54,3 +54,47 @@ func (m *SessionManager) Delete(token string) {
 	defer m.mu.Unlock()
 	delete(m.sessions, token)
 }
+
+func (m *SessionManager) LatestForRole(roleID string) (Session, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	var selected Session
+	var found bool
+	for token, session := range m.sessions {
+		if now.After(session.ExpiresAt) {
+			delete(m.sessions, token)
+			continue
+		}
+		if session.RoleID != roleID {
+			continue
+		}
+		if !found || session.ExpiresAt.After(selected.ExpiresAt) {
+			selected = session
+			found = true
+		}
+	}
+	if !found {
+		return Session{}, false
+	}
+	return selected, true
+}
+
+func (m *SessionManager) DeleteByRole(roleID string) []Session {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	deleted := make([]Session, 0)
+	for token, session := range m.sessions {
+		if now.After(session.ExpiresAt) {
+			delete(m.sessions, token)
+			continue
+		}
+		if session.RoleID != roleID {
+			continue
+		}
+		deleted = append(deleted, session)
+		delete(m.sessions, token)
+	}
+	return deleted
+}

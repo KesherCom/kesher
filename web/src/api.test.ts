@@ -2,10 +2,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import {
+  adminLogin,
   bootstrap,
   createRole,
   getPublicBootstrap,
   login,
+  loginTakeover,
   logout,
 } from "./api";
 
@@ -25,6 +27,23 @@ const server = setupServer(
     return HttpResponse.json({
       token: "token-123",
       user: { id: "u1", username: body.username, roleId: body.roleId },
+    });
+  }),
+  http.post("http://localhost/api/login/takeover", async ({ request }) => {
+    const body = (await request.json()) as { username: string; roleId: string };
+    return HttpResponse.json({
+      token: "token-takeover",
+      user: { id: "u1", username: body.username, roleId: body.roleId },
+    });
+  }),
+  http.post("http://localhost/api/admin/login", async ({ request }) => {
+    const body = (await request.json()) as { pin: string };
+    if (!body.pin) {
+      return new HttpResponse("forbidden", { status: 403 });
+    }
+    return HttpResponse.json({
+      token: "admin-token",
+      user: { id: "", username: "admin", roleId: "" },
     });
   }),
   http.get("http://localhost/api/bootstrap", ({ request }) => {
@@ -69,8 +88,22 @@ describe("api helpers", () => {
 
   it("logs in and returns token + user", async () => {
     const result = await login("Tim", "op");
+    if ("requiresTakeover" in result) {
+      throw new Error("expected successful login payload");
+    }
     expect(result.token).toBe("token-123");
     expect(result.user.username).toBe("Tim");
+  });
+
+  it("executes takeover login", async () => {
+    const result = await loginTakeover("Tim", "op");
+    expect(result.token).toBe("token-takeover");
+  });
+
+  it("executes admin login without role", async () => {
+    const result = await adminLogin("123456");
+    expect(result.token).toBe("admin-token");
+    expect(result.user.roleId).toBe("");
   });
 
   it("loads authenticated bootstrap", async () => {

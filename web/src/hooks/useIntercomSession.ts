@@ -21,6 +21,7 @@ import type {
   Presence,
   PublicBootstrap,
   RoutedEvent,
+  SessionRevokedEvent,
 } from "../types";
 import { useLocalMic } from "./useLocalMic";
 import { useRemoteAudio } from "./useRemoteAudio";
@@ -72,6 +73,7 @@ type WsMessage =
       type: "webrtc_ice_candidate";
       data: { candidate: string; sdpMid?: string; sdpMLineIndex?: number };
     }
+  | { type: "session_revoked"; data: SessionRevokedEvent }
   | { type: "config_updated"; data: unknown };
 const opusMaxBitrateBps = 24000;
 const opusSpeechFmtpParams = [
@@ -203,6 +205,7 @@ export type UseIntercomSessionOptions = {
     React.SetStateAction<PublicBootstrap | null>
   >;
   onRefreshAudioDevices: () => Promise<void>;
+  onSessionRevoked: () => void;
 };
 
 export type UseIntercomSessionResult = {
@@ -305,6 +308,7 @@ export function useIntercomSession({
   onUpdateAppData,
   onUpdatePublicData,
   onRefreshAudioDevices,
+  onSessionRevoked,
 }: UseIntercomSessionOptions): UseIntercomSessionResult {
   // ── State ──
   const [connectionState, setConnectionState] = useState<
@@ -1369,6 +1373,16 @@ export function useIntercomSession({
           });
           return;
         }
+        if (msg.type === "session_revoked") {
+          shouldReconnectRef.current = false;
+          setConnectionState("offline");
+          pushDebugEvent(
+            `system · session revoked · reason:${msg.data.reason || "unknown"}`,
+          );
+          onSessionRevoked();
+          ws.close(4001, "session revoked");
+          return;
+        }
         if (msg.type === "companion_command") {
           if (msg.data.command === "set_voice_mode" && msg.data.mode) {
             setAlwaysOn(msg.data.mode === "always_on");
@@ -1659,6 +1673,10 @@ export function useIntercomSession({
         clearRoomSwitchTimer();
         cleanupRealtimeResources();
         if (!shouldReconnectRef.current || cancelled) {
+          setConnectionState("offline");
+          return;
+        }
+        if (event.code === 4001) {
           setConnectionState("offline");
           return;
         }

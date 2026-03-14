@@ -244,6 +244,92 @@ func TestServerHandleLoginSuccess(t *testing.T) {
 	}
 }
 
+func TestServerHandleLoginConflictReturnsTakeoverHint(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute), hub: NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))}
+	_ = s.sessions.Create(User{ID: "u-existing", Username: "alice", RoleID: "audio"})
+
+	body := bytes.NewBufferString("{\"username\":\"tim\",\"roleId\":\"audio\"}")
+	req := httptest.NewRequest(http.MethodPost, "/api/login", body)
+	rec := httptest.NewRecorder()
+	s.handleLogin(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", rec.Code)
+	}
+	var resp LoginConflictResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode conflict response: %v", err)
+	}
+	if !resp.RequiresTakeover || resp.ConflictRoleID != "audio" || resp.ConflictUsername != "alice" {
+		t.Fatalf("unexpected conflict response: %+v", resp)
+	}
+}
+
+func TestServerHandleLoginTakeoverReplacesExistingRoleSession(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute), hub: NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))}
+	existing := s.sessions.Create(User{ID: "u-existing", Username: "alice", RoleID: "audio"})
+
+	body := bytes.NewBufferString("{\"username\":\"tim\",\"roleId\":\"audio\"}")
+	req := httptest.NewRequest(http.MethodPost, "/api/login/takeover", body)
+	rec := httptest.NewRecorder()
+	s.handleLoginTakeover(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if _, ok := s.sessions.Get(existing.Token); ok {
+		t.Fatal("expected old role session to be removed by takeover")
+	}
+	var resp LoginResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode takeover response: %v", err)
+	}
+	if resp.Token == "" || resp.User.Username != "tim" || resp.User.RoleID != "audio" {
+		t.Fatalf("unexpected takeover response: %+v", resp)
+	}
+}
+
+func TestServerHandleAdminLoginCreatesRoleFreeSession(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute)}
+	body := bytes.NewBufferString("{\"pin\":\"123456\"}")
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/login", body)
+	rec := httptest.NewRecorder()
+	s.handleAdminLogin(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp LoginResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode admin login response: %v", err)
+	}
+	if resp.Token == "" || resp.User.Username != "admin" || resp.User.RoleID != "" {
+		t.Fatalf("unexpected admin login response: %+v", resp)
+	}
+	stored, ok := s.sessions.Get(resp.Token)
+	if !ok {
+		t.Fatal("expected admin session to exist")
+	}
+	if stored.RoleID != "" {
+		t.Fatalf("expected admin session role to be empty, got %q", stored.RoleID)
+	}
+	if _, conflict := s.sessions.LatestForRole("audio"); conflict {
+		t.Fatal("admin session must not create role conflict")
+	}
+}
+
 func TestServerHandleLoginRejectsWhitespaceInUsername(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {

@@ -286,6 +286,39 @@ func TestHubSignalStateForUsernameExpires(t *testing.T) {
 	}
 }
 
+func TestHubRemoveWithReasonSendsRevocation(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	c := &client{
+		session: Session{Token: "token-a", RoleID: "audio"},
+		user:    User{ID: "u1", Username: "tim", RoleID: "audio"},
+		send:    make(chan WSOutbound, 4),
+	}
+	hub.Add(c)
+	drain(c.send)
+
+	hub.RemoveWithReason("token-a", "takeover")
+
+	msg, ok := <-c.send
+	if !ok {
+		t.Fatal("expected buffered revocation message before channel closes")
+	}
+	if msg.Type != "session_revoked" {
+		t.Fatalf("expected session_revoked message, got %s", msg.Type)
+	}
+	if msg.Data.(SessionRevokedEvent).Reason != "takeover" {
+		t.Fatalf("unexpected revoke reason: %+v", msg.Data)
+	}
+	if _, stillPresent := hub.PresenceForUsername("tim"); stillPresent {
+		t.Fatal("expected client to be removed from hub")
+	}
+}
+
 func TestHubSetVoiceStateTransitions(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {

@@ -90,6 +90,22 @@ type LoginResponse struct {
 	User  User   `json:"user"`
 }
 
+type LoginConflictResponse struct {
+	RequiresTakeover bool   `json:"requiresTakeover"`
+	ConflictRoleID   string `json:"conflictRoleId"`
+	ConflictRoleName string `json:"conflictRoleName,omitempty"`
+	ConflictUsername string `json:"conflictUsername,omitempty"`
+}
+
+type LoginTakeoverRequest struct {
+	Username string `json:"username"`
+	RoleID   string `json:"roleId"`
+}
+
+type AdminLoginRequest struct {
+	PIN string `json:"pin"`
+}
+
 type WSInbound struct {
 	Type string `json:"type"`
 	Data any    `json:"data"`
@@ -98,6 +114,11 @@ type WSInbound struct {
 type WSOutbound struct {
 	Type string `json:"type"`
 	Data any    `json:"data"`
+}
+
+type SessionRevokedEvent struct {
+	Reason    string `json:"reason"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 type RoomMatrixEvent struct {
@@ -201,13 +222,13 @@ type TelegramMapping struct {
 }
 
 type TelegramAllowlistEntry struct {
-	ID                 string `json:"id"`
-	TelegramUsername   string `json:"telegramUsername"`
-	TelegramNumericID  string `json:"telegramNumericId,omitempty"`
-	KesherUsername     string `json:"kesherUsername"`
-	CreatedAt          int64  `json:"createdAt"`
-	Status             string `json:"status"`
-	IsBound            bool   `json:"isBound"`
+	ID                string `json:"id"`
+	TelegramUsername  string `json:"telegramUsername"`
+	TelegramNumericID string `json:"telegramNumericId,omitempty"`
+	KesherUsername    string `json:"kesherUsername"`
+	CreatedAt         int64  `json:"createdAt"`
+	Status            string `json:"status"`
+	IsBound           bool   `json:"isBound"`
 }
 
 type TelegramUserMapping struct {

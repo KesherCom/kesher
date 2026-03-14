@@ -29,6 +29,17 @@ export type BroadcastGroup = {
   allowedRoleIds: string[];
 };
 export type User = { id: string; username: string; roleId: string };
+export type LoginSuccess = { token: string; user: User };
+export type LoginConflict = {
+  requiresTakeover: true;
+  conflictRoleId: string;
+  conflictRoleName?: string;
+  conflictUsername?: string;
+};
+export type SessionRevokedEvent = {
+  reason: string;
+  timestamp: number;
+};
 export type Presence = {
   userId: string;
   username: string;
