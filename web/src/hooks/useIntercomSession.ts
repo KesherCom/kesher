@@ -138,6 +138,18 @@ function tuneOpusSdpForSpeech(sdp: string): string {
   return lines.join("\r\n");
 }
 
+function isMobileClient(): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return false;
+  }
+  const ua = navigator.userAgent || "";
+  const isMobileUserAgent = /Android|iPhone|iPad|iPod|Mobi/i.test(ua);
+  const isCoarsePointer =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(pointer: coarse)").matches;
+  return isMobileUserAgent || isCoarsePointer;
+}
+
 async function applyOutgoingAudioSenderBitrate(pc: RTCPeerConnection) {
   const audioSender = pc
     .getSenders()
@@ -310,6 +322,11 @@ export function useIntercomSession({
   onRefreshAudioDevices,
   onSessionRevoked,
 }: UseIntercomSessionOptions): UseIntercomSessionResult {
+  const forcePttOnMobile = isMobileClient();
+  const resolveVoiceModeForClient = (
+    mode: "always_on" | "ptt",
+  ): "always_on" | "ptt" => (forcePttOnMobile ? "ptt" : mode);
+
   // ── State ──
   const [connectionState, setConnectionState] = useState<
     "connecting" | "connected" | "reconnecting" | "offline"
@@ -346,7 +363,7 @@ export function useIntercomSession({
   } | null>(null);
   const [attentionFlashKey, setAttentionFlashKey] = useState(0);
   const [voiceMode, setVoiceMode] = useState<"always_on" | "ptt">(
-    initialVoiceMode,
+    resolveVoiceModeForClient(initialVoiceMode),
   );
   const [pttPressed, setPttPressed] = useState(false);
   const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(
@@ -402,7 +419,9 @@ export function useIntercomSession({
   const observedVoiceSendersRef = useRef<Set<string>>(new Set());
   const incomingAttentionTimeoutRef = useRef<number | null>(null);
   const roomSwitchTimerRef = useRef<number | null>(null);
-  const voiceModeRef = useRef<"always_on" | "ptt">(initialVoiceMode);
+  const voiceModeRef = useRef<"always_on" | "ptt">(
+    resolveVoiceModeForClient(initialVoiceMode),
+  );
   const prevChannelRef = useRef<string>("");
   const pendingInitialRoomRestoreRef = useRef(hadStoredSessionSettings);
   const appDataRef = useRef(appData);
@@ -913,6 +932,16 @@ export function useIntercomSession({
 
   // ── Voice mode actions ──
   function setAlwaysOn(enabled: boolean) {
+    if (forcePttOnMobile) {
+      if (voiceModeRef.current !== "ptt") {
+        setVoiceMode("ptt");
+        voiceModeRef.current = "ptt";
+      }
+      setPttPressed(false);
+      setPttPressedChannelId(null);
+      sendVoiceState("always_off");
+      return;
+    }
     if (enabled && enableDirectPpt) {
       if (voiceModeRef.current !== "ptt") {
         setVoiceMode("ptt");
@@ -1074,7 +1103,9 @@ export function useIntercomSession({
         (role) => role.id === data.self.roleId,
       );
       if (roleDefaults?.defaultVoiceMode) {
-        const nextMode = roleDefaults.defaultVoiceMode as "always_on" | "ptt";
+        const nextMode = resolveVoiceModeForClient(
+          roleDefaults.defaultVoiceMode as "always_on" | "ptt",
+        );
         setVoiceMode(nextMode);
         voiceModeRef.current = nextMode;
       }
@@ -1140,7 +1171,7 @@ export function useIntercomSession({
         }
       }
     },
-    [hadStoredSessionSettings],
+    [hadStoredSessionSettings, forcePttOnMobile],
   );
 
   // ── Admin mode: reset operator state ──
@@ -1866,7 +1897,9 @@ export function useIntercomSession({
         : selfPresence.talkRooms,
     );
     const nextVoiceMode =
-      selfPresence.voiceMode === "always_on" ? "always_on" : "ptt";
+      resolveVoiceModeForClient(
+        selfPresence.voiceMode === "always_on" ? "always_on" : "ptt",
+      );
     if (nextVoiceMode !== voiceModeRef.current) {
       setVoiceMode(nextVoiceMode);
       voiceModeRef.current = nextVoiceMode;
