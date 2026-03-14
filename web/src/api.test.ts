@@ -5,7 +5,9 @@ import {
   adminLogin,
   bootstrap,
   createRole,
+  exportConfiguration,
   getPublicBootstrap,
+  importConfiguration,
   login,
   loginTakeover,
   logout,
@@ -72,6 +74,50 @@ const server = setupServer(
     if (!body.id || !body.name)
       return new HttpResponse("invalid", { status: 400 });
     return new HttpResponse(null, { status: 204 });
+  }),
+  http.get("http://localhost/api/admin/configuration-export", () => {
+    return HttpResponse.json({
+      meta: {
+        format: "kesher-showfile",
+        schemaVersion: 1,
+        exportedAt: "2026-03-14T12:00:00Z",
+        sourceVersion: { version: "test", buildTimestamp: "2026-03-14T12:00:00Z" },
+        sections: [
+          "roles",
+          "users",
+          "rooms",
+          "broadcastGroups",
+          "telegramAllowlist",
+          "ackSettings",
+        ],
+      },
+      roles: [{ id: "op", name: "Operator" }],
+      users: [{ username: "tim", roleId: "op" }],
+      rooms: [],
+      broadcastGroups: [],
+      telegramAllowlist: [
+        {
+          id: "allow-1",
+          telegramUsername: "tim_telegram",
+          telegramNumericId: "",
+          kesherUsername: "tim",
+          createdAt: 0,
+          status: "Pending",
+          isBound: false,
+        },
+      ],
+      ackSettings: { enabled: true },
+    });
+  }),
+  http.post("http://localhost/api/admin/configuration-import", async ({ request }) => {
+    const body = (await request.json()) as {
+      document?: { meta?: { format?: string } };
+      sections?: string[];
+    };
+    if (!body.document?.meta?.format || !body.sections?.length) {
+      return new HttpResponse("invalid", { status: 400 });
+    }
+    return HttpResponse.json({ importedSections: body.sections });
   }),
 );
 
@@ -172,5 +218,49 @@ describe("api helpers", () => {
     await expect(
       createRole("token-123", "1234", { id: "op", name: "Operator" }),
     ).rejects.toThrow("role exists");
+  });
+
+  it("loads configuration export documents", async () => {
+    const document = await exportConfiguration("token-123", "123456");
+    expect(document.meta.format).toBe("kesher-showfile");
+    expect(document.users[0]?.username).toBe("tim");
+    expect(document.telegramAllowlist[0]?.telegramUsername).toBe(
+      "tim_telegram",
+    );
+    expect(document.ackSettings?.enabled).toBe(true);
+  });
+
+  it("posts configuration imports with selected sections", async () => {
+    const response = await importConfiguration(
+      "token-123",
+      "123456",
+      {
+        meta: {
+          format: "kesher-showfile",
+          schemaVersion: 1,
+          exportedAt: "2026-03-14T12:00:00Z",
+          sourceVersion: {
+            version: "test",
+            buildTimestamp: "2026-03-14T12:00:00Z",
+          },
+          sections: [
+            "roles",
+            "users",
+            "rooms",
+            "broadcastGroups",
+            "telegramAllowlist",
+            "ackSettings",
+          ],
+        },
+        roles: [],
+        users: [],
+        rooms: [],
+        broadcastGroups: [],
+        telegramAllowlist: [],
+        ackSettings: { enabled: true },
+      },
+      ["roles", "rooms"],
+    );
+    expect(response.importedSections).toEqual(["roles", "rooms"]);
   });
 });

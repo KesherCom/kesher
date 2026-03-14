@@ -417,6 +417,8 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/pin", s.withAuth(s.handleAdminPin))
 	mux.HandleFunc("/api/admin/chat-history/clear", s.withAuth(s.handleAdminClearChatHistory))
 	mux.HandleFunc("/api/admin/ack-settings", s.withAuth(s.handleAdminAckSettings))
+	mux.HandleFunc("/api/admin/configuration-export", s.withAuth(s.handleAdminConfigurationExport))
+	mux.HandleFunc("/api/admin/configuration-import", s.withAuth(s.handleAdminConfigurationImport))
 	mux.HandleFunc("/api/admin/routing-matrix", s.withAuth(s.handleAdminRoutingMatrix))
 	mux.HandleFunc("/api/companion/discovery", s.handleCompanionDiscovery)
 	mux.HandleFunc("/api/companion/ws", s.handleCompanionWS)
@@ -1119,6 +1121,60 @@ func (s *Server) handleAdminAckSettings(w http.ResponseWriter, r *http.Request, 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) handleAdminConfigurationExport(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	doc, err := s.exportConfigurationDocument(r.Context())
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", "attachment; filename=kesher-showfile.json")
+	s.writeJSON(w, http.StatusOK, doc)
+}
+
+func (s *Server) handleAdminConfigurationImport(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req ConfigurationImportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	state, sections, revokedUsernames, err := s.importConfigurationDocument(r.Context(), req)
+	if err != nil {
+		s.logger.Warn("configuration import rejected",
+			"admin", session.Username,
+			"requestedSections", req.Sections,
+			"documentSections", req.Document.Meta.Sections,
+			"error", err.Error(),
+		)
+		if errors.Is(err, ErrInvalidInput) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if s.writeStoreErr(w, err) {
+			return
+		}
+		http.Error(w, "invalid input", http.StatusBadRequest)
+		return
+	}
+	s.revokeSessionsForUsernames(revokedUsernames)
+	s.broadcastImportedConfiguration(state)
+	s.writeJSON(w, http.StatusOK, ConfigurationImportResponse{ImportedSections: sections})
 }
 
 func (s *Server) isAckEnabled() bool {

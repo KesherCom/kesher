@@ -98,3 +98,22 @@ func (m *SessionManager) DeleteByRole(roleID string) []Session {
 	}
 	return deleted
 }
+
+func (m *SessionManager) DeleteByUsername(username string) []Session {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	deleted := make([]Session, 0)
+	for token, session := range m.sessions {
+		if now.After(session.ExpiresAt) {
+			delete(m.sessions, token)
+			continue
+		}
+		if session.Username != username {
+			continue
+		}
+		deleted = append(deleted, session)
+		delete(m.sessions, token)
+	}
+	return deleted
+}

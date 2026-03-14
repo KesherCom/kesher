@@ -29,6 +29,41 @@ export type BroadcastGroup = {
   allowedRoleIds: string[];
 };
 export type User = { id: string; username: string; roleId: string };
+export type ConfigurationSection =
+  | "roles"
+  | "users"
+  | "rooms"
+  | "broadcastGroups"
+  | "telegramAllowlist"
+  | "ackSettings";
+
+export type ConfigurationMetadata = {
+  format: string;
+  schemaVersion: number;
+  exportedAt: string;
+  sourceVersion: VersionInfo;
+  sections: ConfigurationSection[];
+};
+
+export type ConfigurationUserAssignment = {
+  username: string;
+  roleId: string;
+};
+
+export type ConfigurationDocument = {
+  meta: ConfigurationMetadata;
+  roles: Role[];
+  users: ConfigurationUserAssignment[];
+  rooms: Room[];
+  broadcastGroups: BroadcastGroup[];
+  telegramAllowlist: TelegramAllowlistEntry[];
+  ackSettings: { enabled: boolean } | null;
+};
+
+export type ConfigurationImportResponse = {
+  importedSections: ConfigurationSection[];
+};
+
 export type LoginSuccess = { token: string; user: User };
 export type LoginConflict = {
   requiresTakeover: true;

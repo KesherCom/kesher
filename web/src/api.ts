@@ -1,5 +1,8 @@
 import type {
   Bootstrap,
+  ConfigurationDocument,
+  ConfigurationImportResponse,
+  ConfigurationSection,
   LoginConflict,
   LoginSuccess,
   PublicBootstrap,
@@ -83,6 +86,70 @@ function normalizeBootstrap(data: unknown): Bootstrap {
         roleId: typeof entry.roleId === "string" ? entry.roleId : "",
       };
     }) as User[],
+  };
+}
+
+function normalizeConfigurationDocument(data: unknown): ConfigurationDocument {
+  const raw = (data ?? {}) as Record<string, unknown>;
+  const normalizedPublic = normalizePublicBootstrap(raw);
+  const users = Array.isArray(raw.users) ? raw.users : [];
+  const telegramAllowlist = Array.isArray(raw.telegramAllowlist)
+    ? raw.telegramAllowlist
+    : [];
+  const meta = (raw.meta ?? {}) as Record<string, unknown>;
+  const ackSettings = (raw.ackSettings ?? null) as Record<string, unknown> | null;
+
+  return {
+    meta: {
+      format: typeof meta.format === "string" ? meta.format : "",
+      schemaVersion:
+        typeof meta.schemaVersion === "number" ? meta.schemaVersion : 0,
+      exportedAt: typeof meta.exportedAt === "string" ? meta.exportedAt : "",
+      sourceVersion: {
+        version:
+          typeof (meta.sourceVersion as any)?.version === "string"
+            ? (meta.sourceVersion as any).version
+            : "unknown",
+        buildTimestamp:
+          typeof (meta.sourceVersion as any)?.buildTimestamp === "string"
+            ? (meta.sourceVersion as any).buildTimestamp
+            : "unknown",
+      },
+      sections: toStringArray(meta.sections) as ConfigurationSection[],
+    },
+    roles: normalizedPublic.roles,
+    users: users.map((user) => {
+      const entry = user as Record<string, unknown>;
+      return {
+        username: typeof entry.username === "string" ? entry.username : "",
+        roleId: typeof entry.roleId === "string" ? entry.roleId : "",
+      };
+    }),
+    rooms: normalizedPublic.rooms,
+    broadcastGroups: normalizedPublic.broadcastGroups,
+    telegramAllowlist: telegramAllowlist.map((allowlistEntry) => {
+      const entry = allowlistEntry as Record<string, unknown>;
+      return {
+        id: typeof entry.id === "string" ? entry.id : "",
+        telegramUsername:
+          typeof entry.telegramUsername === "string"
+            ? entry.telegramUsername
+            : "",
+        telegramNumericId:
+          typeof entry.telegramNumericId === "string"
+            ? entry.telegramNumericId
+            : "",
+        kesherUsername:
+          typeof entry.kesherUsername === "string" ? entry.kesherUsername : "",
+        createdAt: typeof entry.createdAt === "number" ? entry.createdAt : 0,
+        status: typeof entry.status === "string" ? entry.status : "",
+        isBound: typeof entry.isBound === "boolean" ? entry.isBound : false,
+      };
+    }),
+    ackSettings:
+      ackSettings && typeof ackSettings.enabled === "boolean"
+        ? { enabled: ackSettings.enabled }
+        : null,
   };
 }
 
@@ -335,6 +402,40 @@ export async function deleteBroadcastGroup(
     "DELETE",
     adminPin,
   );
+}
+
+export async function exportConfiguration(
+  token: string,
+  adminPin: string,
+): Promise<ConfigurationDocument> {
+  const res = await fetch("/api/admin/configuration-export", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+    },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const raw = (await res.json()) as unknown;
+  return normalizeConfigurationDocument(raw);
+}
+
+export async function importConfiguration(
+  token: string,
+  adminPin: string,
+  document: ConfigurationDocument,
+  sections: ConfigurationSection[],
+): Promise<ConfigurationImportResponse> {
+  const res = await fetch("/api/admin/configuration-import", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ document, sections }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ConfigurationImportResponse>;
 }
 
 export async function getTelegramStatus(
