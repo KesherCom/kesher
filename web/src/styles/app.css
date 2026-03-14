@@ -1384,6 +1384,9 @@ button.secondary {
   display: grid;
   place-items: center;
   position: relative;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 .simple-controls {
   width: min(480px, 100%);
@@ -1620,6 +1623,16 @@ button.secondary {
   min-height: 100vh;
   background: var(--surface);
   border: 1px solid var(--border-dim);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.station-shell .station-chat-panel,
+.station-shell .station-chat-panel * {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 .station-header {
   position: sticky;
