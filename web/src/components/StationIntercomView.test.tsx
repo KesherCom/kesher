@@ -111,6 +111,11 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
   onStreamDeckSettingsChange: vi.fn(),
   onSaveStreamDeckSettings: vi.fn(),
   onResetStreamDeckSettings: vi.fn(),
+  streamDeckWebHidSupported: true,
+  streamDeckWebHidActive: false,
+  streamDeckWebHidBusy: false,
+  onConnectStreamDeckWebHid: vi.fn(),
+  onDisconnectStreamDeckWebHid: vi.fn(),
   streamDeckBridgeConnected: false,
   streamDeckBridgeLastEvent: "",
 };

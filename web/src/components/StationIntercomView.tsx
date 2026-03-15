@@ -150,6 +150,11 @@ type StationIntercomViewProps = {
   onStreamDeckSettingsChange: (next: StreamDeckSettings) => void;
   onSaveStreamDeckSettings: () => void;
   onResetStreamDeckSettings: () => void;
+  streamDeckWebHidSupported: boolean;
+  streamDeckWebHidActive: boolean;
+  streamDeckWebHidBusy: boolean;
+  onConnectStreamDeckWebHid: () => void;
+  onDisconnectStreamDeckWebHid: () => void;
   streamDeckBridgeConnected: boolean;
   streamDeckBridgeLastEvent: string;
 };
@@ -240,6 +245,11 @@ export function StationIntercomView({
   onStreamDeckSettingsChange,
   onSaveStreamDeckSettings,
   onResetStreamDeckSettings,
+  streamDeckWebHidSupported,
+  streamDeckWebHidActive,
+  streamDeckWebHidBusy,
+  onConnectStreamDeckWebHid,
+  onDisconnectStreamDeckWebHid,
   streamDeckBridgeConnected,
   streamDeckBridgeLastEvent,
 }: StationIntercomViewProps) {
@@ -1236,6 +1246,22 @@ export function StationIntercomView({
                           <button
                             type="button"
                             className="shortcut-btn"
+                            onClick={
+                              streamDeckWebHidActive
+                                ? onDisconnectStreamDeckWebHid
+                                : onConnectStreamDeckWebHid
+                            }
+                            disabled={streamDeckWebHidBusy || !streamDeckWebHidSupported}
+                          >
+                            {streamDeckWebHidBusy
+                              ? "Working..."
+                              : streamDeckWebHidActive
+                                ? "Disconnect device"
+                                : "Connect device"}
+                          </button>
+                          <button
+                            type="button"
+                            className="shortcut-btn"
                             onClick={onSaveStreamDeckSettings}
                             disabled={streamDeckBusy || !streamDeckSettings}
                           >
@@ -1255,7 +1281,15 @@ export function StationIntercomView({
                       <small className="streamdeck-error">{streamDeckError}</small>
                     ) : null}
                     <small className="station-settings-meta">
-                      Bridge: {streamDeckBridgeConnected ? "connected" : "waiting"}
+                      WebHID: {
+                        streamDeckWebHidSupported
+                          ? streamDeckWebHidActive
+                            ? "connected"
+                            : "ready"
+                          : "not supported"
+                      }
+                      {" · "}
+                      Input: {streamDeckBridgeConnected ? "connected" : "waiting"}
                       {streamDeckBridgeLastEvent
                         ? ` · Last event: ${streamDeckBridgeLastEvent}`
                         : ""}
@@ -1263,7 +1297,11 @@ export function StationIntercomView({
                     {showDebug ? (
                       <small className="station-settings-meta">
                         Debug: use window.__kesherStreamDeckDev.buttonTap(0, 0)
-                        or buttonDown/buttonUp in browser console.
+                        or buttonDown/buttonUp in browser console. Use
+                        window.__kesherStreamDeckDev.listHidDevices() to show
+                        granted HID devices or
+                        window.__kesherStreamDeckDev.requestAndListHidDevices()
+                        to re-open the device picker.
                       </small>
                     ) : null}
                     {!streamDeckSettings ? (

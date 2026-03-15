@@ -34,6 +34,18 @@ import {
   resolveStreamDeckButtonAction,
   streamDeckButtonEventName,
 } from "./lib/streamDeckBridge";
+import {
+  decodeStreamDeckButtonStates,
+  diffStreamDeckButtonStates,
+  getNavigatorHid,
+  getStreamDeckByteOffset,
+  isStreamDeckDevice,
+  type HidConnectionEventLike,
+  type HidDeviceLike,
+  type HidInputReportEventLike,
+  isWebHidSupported,
+  streamDeckVendorFilters,
+} from "./lib/streamDeckWebHid";
 import { createStreamDeckDevTools } from "./lib/streamDeckDevTools";
 import { sortDirectUsersByRoleAndUsername } from "./lib/users";
 import type {
@@ -117,6 +129,9 @@ export function App() {
   const [streamDeckError, setStreamDeckError] = useState("");
   const [streamDeckConnected, setStreamDeckConnected] = useState(false);
   const [streamDeckLastEvent, setStreamDeckLastEvent] = useState("");
+  const [streamDeckWebHidSupported] = useState(() => isWebHidSupported());
+  const [streamDeckWebHidActive, setStreamDeckWebHidActive] = useState(false);
+  const [streamDeckWebHidBusy, setStreamDeckWebHidBusy] = useState(false);
   const isUserSettingsOpenRef = useRef(isUserSettingsOpen);
   useEffect(() => {
     isUserSettingsOpenRef.current = isUserSettingsOpen;
@@ -226,9 +241,155 @@ export function App() {
 
   const streamDeckSettingsRef = useRef<StreamDeckSettings | null>(null);
   const streamDeckPressedRoleTargetsRef = useRef<Map<string, string>>(new Map());
+  const streamDeckHidSessionRef = useRef<{
+    device: HidDeviceLike;
+    onInputReport: (event: HidInputReportEventLike) => void;
+    onDisconnect: (event: HidConnectionEventLike) => void;
+  } | null>(null);
   useEffect(() => {
     streamDeckSettingsRef.current = streamDeckSettings;
   }, [streamDeckSettings]);
+
+  const emitStreamDeckBridgeEvent = useCallback((payload: unknown) => {
+    window.dispatchEvent(
+      new CustomEvent(streamDeckButtonEventName, { detail: payload }),
+    );
+  }, []);
+
+  const disconnectStreamDeckWebHid = useCallback(
+    async (options?: { announce?: boolean }) => {
+      const session = streamDeckHidSessionRef.current;
+      if (!session) return;
+      const announce = options?.announce ?? true;
+      streamDeckHidSessionRef.current = null;
+      const hid = getNavigatorHid();
+
+      try {
+        hid?.removeEventListener("disconnect", session.onDisconnect as EventListener);
+      } catch {
+        // Ignore navigator API errors while disconnecting.
+      }
+      try {
+        session.device.removeEventListener(
+          "inputreport",
+          session.onInputReport as EventListener,
+        );
+      } catch {
+        // Ignore listener cleanup errors.
+      }
+      try {
+        if (session.device.opened) {
+          await session.device.close();
+        }
+      } catch {
+        // Ignore close errors, state is already reset.
+      }
+
+      setStreamDeckWebHidActive(false);
+      if (announce) {
+        emitStreamDeckBridgeEvent({
+          source: "kesher-streamdeck",
+          type: "connection",
+          status: "disconnected",
+          message: "WebHID disconnected",
+        });
+      }
+    },
+    [emitStreamDeckBridgeEvent],
+  );
+
+  const connectStreamDeckWebHid = useCallback(async () => {
+    if (!streamDeckWebHidSupported) {
+      setStreamDeckError("WebHID is not available in this browser.");
+      return;
+    }
+    setStreamDeckWebHidBusy(true);
+    setStreamDeckError("");
+    try {
+      const hid = getNavigatorHid();
+      if (!hid) {
+        setStreamDeckError("WebHID is not available in this browser.");
+        return;
+      }
+      await disconnectStreamDeckWebHid({ announce: false });
+      const grantedDevices = (await hid.getDevices()).filter(isStreamDeckDevice);
+      const devices =
+        grantedDevices.length > 0
+          ? grantedDevices
+          : await hid.requestDevice({
+              filters: streamDeckVendorFilters,
+            });
+      const device = devices.find(isStreamDeckDevice) ?? devices[0];
+      if (!device) {
+        setStreamDeckError(
+          "No Stream Deck device was selected. Close Elgato Stream Deck or other apps that may be holding the device, then try again.",
+        );
+        return;
+      }
+
+      await device.open();
+
+      const settings = streamDeckSettingsRef.current;
+      const buttonCount =
+        (settings?.gridColumns ?? 5) *
+        (settings?.gridRows ?? 3);
+      const byteOffset = getStreamDeckByteOffset(device.productName ?? "");
+      let previousStates = Array.from({ length: buttonCount }, () => false);
+
+      const onInputReport = (event: HidInputReportEventLike) => {
+        const nextStates = decodeStreamDeckButtonStates(event.data, buttonCount, byteOffset);
+        const changes = diffStreamDeckButtonStates(previousStates, nextStates);
+        previousStates = nextStates;
+        for (const change of changes) {
+          emitStreamDeckBridgeEvent({
+            source: "kesher-streamdeck",
+            type: "button",
+            buttonIndex: change.buttonIndex,
+            state: change.state,
+          });
+        }
+      };
+
+      const onDisconnect = (event: HidConnectionEventLike) => {
+        if (event.device !== device) return;
+        streamDeckHidSessionRef.current = null;
+        setStreamDeckWebHidActive(false);
+        emitStreamDeckBridgeEvent({
+          source: "kesher-streamdeck",
+          type: "connection",
+          status: "disconnected",
+          message: "WebHID device unplugged",
+        });
+      };
+
+      device.addEventListener("inputreport", onInputReport as EventListener);
+      hid.addEventListener("disconnect", onDisconnect as EventListener);
+      streamDeckHidSessionRef.current = { device, onInputReport, onDisconnect };
+
+      setStreamDeckWebHidActive(true);
+      emitStreamDeckBridgeEvent({
+        source: "kesher-streamdeck",
+        type: "connection",
+        status: "connected",
+        message: `WebHID connected: ${device.productName || "Stream Deck"}`,
+      });
+    } catch (error) {
+      setStreamDeckError(
+        error instanceof Error
+          ? error.message
+          : "Failed to connect to Stream Deck via WebHID.",
+      );
+      setStreamDeckWebHidActive(false);
+    } finally {
+      setStreamDeckWebHidBusy(false);
+    }
+  }, [disconnectStreamDeckWebHid, emitStreamDeckBridgeEvent, streamDeckWebHidSupported]);
+
+  useEffect(() => {
+    return () => {
+      void disconnectStreamDeckWebHid({ announce: false });
+    };
+  }, [disconnectStreamDeckWebHid]);
 
   // ── Initial load: public bootstrap ──
   useEffect(() => {
@@ -602,7 +763,9 @@ export function App() {
 
   useEffect(() => {
     if (!token || authMode !== "operator") {
+      void disconnectStreamDeckWebHid({ announce: false });
       setStreamDeckConnected(false);
+      setStreamDeckWebHidActive(false);
       setStreamDeckLastEvent("");
       return;
     }
@@ -631,12 +794,13 @@ export function App() {
         effectivePage,
         payload.buttonIndex,
       );
-      if (!action) return;
 
       setStreamDeckConnected(true);
       setStreamDeckLastEvent(
         `P${effectivePage + 1}/B${payload.buttonIndex + 1} ${payload.state}`,
       );
+
+      if (!action) return;
 
       if (action.type === "none") return;
       if (action.type === "mute_toggle") {
@@ -745,7 +909,7 @@ export function App() {
         onBridgeButtonEvent,
       );
     };
-  }, [appData, authMode, session, settings, token]);
+  }, [appData, authMode, disconnectStreamDeckWebHid, session, settings, token]);
 
   useEffect(() => {
     if (!showDebug) {
@@ -1127,6 +1291,13 @@ export function App() {
         onStreamDeckSettingsChange={handleStreamDeckSettingsChange}
         onSaveStreamDeckSettings={() => void handleSaveStreamDeckSettings()}
         onResetStreamDeckSettings={() => void handleResetStreamDeckSettings()}
+        streamDeckWebHidSupported={streamDeckWebHidSupported}
+        streamDeckWebHidActive={streamDeckWebHidActive}
+        streamDeckWebHidBusy={streamDeckWebHidBusy}
+        onConnectStreamDeckWebHid={() => void connectStreamDeckWebHid()}
+        onDisconnectStreamDeckWebHid={() =>
+          void disconnectStreamDeckWebHid({ announce: true })
+        }
         streamDeckBridgeConnected={streamDeckConnected}
         streamDeckBridgeLastEvent={streamDeckLastEvent}
       />
