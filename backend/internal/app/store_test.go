@@ -261,3 +261,64 @@ func TestNewStoreMigratesLegacyTelegramUserMappingsSchema(t *testing.T) {
 		t.Fatalf("unexpected created mapping id: %q", created.ID)
 	}
 }
+
+func TestUserStreamDeckSettingsRoundTrip(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	user, err := store.UpsertUser(ctx, "deckuser", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Label = "Reply"
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeReplyToCaller}
+
+	stored, err := store.UpsertUserStreamDeckSettings(ctx, user.ID, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Pages[0].Buttons[0].Action == nil || stored.Pages[0].Buttons[0].Action.Type != StreamDeckActionTypeReplyToCaller {
+		t.Fatalf("unexpected stored action: %+v", stored.Pages[0].Buttons[0].Action)
+	}
+
+	loaded, err := store.GetUserStreamDeckSettings(ctx, user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Pages[0].Buttons[0].Label != "Reply" {
+		t.Fatalf("expected label Reply, got %q", loaded.Pages[0].Buttons[0].Label)
+	}
+	if loaded.Pages[0].Buttons[0].Action == nil || loaded.Pages[0].Buttons[0].Action.Type != StreamDeckActionTypeReplyToCaller {
+		t.Fatalf("unexpected loaded action: %+v", loaded.Pages[0].Buttons[0].Action)
+	}
+}
+
+func TestDeleteUserStreamDeckSettings(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	user, err := store.UpsertUser(ctx, "deckdelete", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertUserStreamDeckSettings(ctx, user.ID, DefaultStreamDeckSettings()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.DeleteUserStreamDeckSettings(ctx, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetUserStreamDeckSettings(ctx, user.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after delete, got %v", err)
+	}
+}

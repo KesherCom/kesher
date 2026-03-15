@@ -167,6 +167,43 @@ export type StatusResponse = {
   timestampUnixMs: number;
 };
 
+export type StreamDeckActionType =
+  | "none"
+  | "ptt_room"
+  | "direct_user"
+  | "reply_to_caller"
+  | "broadcast_ptt"
+  | "mute_toggle"
+  | "volume_delta";
+
+export type StreamDeckButtonAction = {
+  type: StreamDeckActionType;
+  roomId?: string;
+  userId?: string;
+  broadcastGroupId?: string;
+  volumeDelta?: number;
+};
+
+export type StreamDeckButtonConfig = {
+  index: number;
+  label?: string;
+  color?: string;
+  action?: StreamDeckButtonAction;
+};
+
+export type StreamDeckPageConfig = {
+  page: number;
+  buttons: StreamDeckButtonConfig[];
+};
+
+export type StreamDeckSettings = {
+  version: number;
+  gridColumns: number;
+  gridRows: number;
+  selectedPage: number;
+  pages: StreamDeckPageConfig[];
+};
+
 export type RoutedEvent = {
   scope: "direct" | "room" | "broadcast";
   targetType?: "room" | "user" | "role";

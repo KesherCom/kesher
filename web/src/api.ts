@@ -8,6 +8,8 @@ import type {
   PublicBootstrap,
   RealtimeStatsResponse,
   StatusResponse,
+  StreamDeckActionType,
+  StreamDeckSettings,
   TelegramAllowlistEntry,
   TelegramStatus,
   User,
@@ -150,6 +152,116 @@ function normalizeConfigurationDocument(data: unknown): ConfigurationDocument {
       ackSettings && typeof ackSettings.enabled === "boolean"
         ? { enabled: ackSettings.enabled }
         : null,
+  };
+}
+
+function defaultStreamDeckSettings(): StreamDeckSettings {
+  const buttons = Array.from({ length: 15 }, (_, index) => ({ index }));
+  return {
+    version: 1,
+    gridColumns: 5,
+    gridRows: 3,
+    selectedPage: 0,
+    pages: [{ page: 0, buttons }],
+  };
+}
+
+function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
+  const allowedActionTypes: StreamDeckActionType[] = [
+    "none",
+    "ptt_room",
+    "direct_user",
+    "reply_to_caller",
+    "broadcast_ptt",
+    "mute_toggle",
+    "volume_delta",
+  ];
+  const raw = (data ?? {}) as Record<string, unknown>;
+  const version =
+    typeof raw.version === "number" && Number.isFinite(raw.version)
+      ? raw.version
+      : 1;
+  const gridColumns =
+    typeof raw.gridColumns === "number" && Number.isFinite(raw.gridColumns)
+      ? raw.gridColumns
+      : 5;
+  const gridRows =
+    typeof raw.gridRows === "number" && Number.isFinite(raw.gridRows)
+      ? raw.gridRows
+      : 3;
+  const selectedPage =
+    typeof raw.selectedPage === "number" && Number.isFinite(raw.selectedPage)
+      ? raw.selectedPage
+      : 0;
+  const pagesRaw = Array.isArray(raw.pages) ? raw.pages : [];
+  const pages = pagesRaw
+    .map((page) => {
+      const pageEntry = page as Record<string, unknown>;
+      const pageNo =
+        typeof pageEntry.page === "number" && Number.isFinite(pageEntry.page)
+          ? pageEntry.page
+          : -1;
+      const buttonsRaw = Array.isArray(pageEntry.buttons)
+        ? pageEntry.buttons
+        : [];
+      const buttons = buttonsRaw
+        .map((button) => {
+          const buttonEntry = button as Record<string, unknown>;
+          const index =
+            typeof buttonEntry.index === "number" &&
+            Number.isFinite(buttonEntry.index)
+              ? buttonEntry.index
+              : -1;
+          const actionRaw = (buttonEntry.action ?? null) as
+            | Record<string, unknown>
+            | null;
+          const typeCandidate =
+            typeof actionRaw?.type === "string" ? actionRaw.type : "none";
+          const type: StreamDeckActionType = allowedActionTypes.includes(
+            typeCandidate as StreamDeckActionType,
+          )
+            ? (typeCandidate as StreamDeckActionType)
+            : "none";
+          const action = actionRaw
+            ? {
+                type,
+                roomId:
+                  typeof actionRaw.roomId === "string" ? actionRaw.roomId : undefined,
+                userId:
+                  typeof actionRaw.userId === "string" ? actionRaw.userId : undefined,
+                broadcastGroupId:
+                  typeof actionRaw.broadcastGroupId === "string"
+                    ? actionRaw.broadcastGroupId
+                    : undefined,
+                volumeDelta:
+                  typeof actionRaw.volumeDelta === "number"
+                    ? actionRaw.volumeDelta
+                    : undefined,
+              }
+            : undefined;
+          return {
+            index,
+            label:
+              typeof buttonEntry.label === "string" ? buttonEntry.label : undefined,
+            color:
+              typeof buttonEntry.color === "string" ? buttonEntry.color : undefined,
+            action,
+          };
+        })
+        .filter((button) => button.index >= 0);
+      return { page: pageNo, buttons };
+    })
+    .filter((page) => page.page >= 0);
+
+  if (gridColumns !== 5 || gridRows !== 3 || pages.length === 0) {
+    return defaultStreamDeckSettings();
+  }
+  return {
+    version,
+    gridColumns,
+    gridRows,
+    selectedPage,
+    pages,
   };
 }
 
@@ -590,4 +702,44 @@ export async function updateAckSettings(
     throw new Error(await res.text());
   }
   return res.json() as Promise<{ enabled: boolean }>;
+}
+
+export async function getStreamDeckSettings(
+  token: string,
+): Promise<StreamDeckSettings> {
+  const res = await fetch("/api/user/stream-deck/settings", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const raw = (await res.json()) as unknown;
+  return normalizeStreamDeckSettings(raw);
+}
+
+export async function updateStreamDeckSettings(
+  token: string,
+  settings: StreamDeckSettings,
+): Promise<StreamDeckSettings> {
+  const res = await fetch("/api/user/stream-deck/settings", {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const raw = (await res.json()) as unknown;
+  return normalizeStreamDeckSettings(raw);
+}
+
+export async function resetStreamDeckSettings(
+  token: string,
+): Promise<StreamDeckSettings> {
+  const res = await fetch("/api/user/stream-deck/settings", {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const raw = (await res.json()) as unknown;
+  return normalizeStreamDeckSettings(raw);
 }

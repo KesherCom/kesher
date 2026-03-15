@@ -99,6 +99,20 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
   selectedOutputLabel: "Default output",
   outputSelectionSupported: false,
   setSelectedOutputDeviceId: vi.fn(),
+  streamDeckSettings: {
+    version: 1,
+    gridColumns: 5,
+    gridRows: 3,
+    selectedPage: 0,
+    pages: [{ page: 0, buttons: Array.from({ length: 15 }, (_, i) => ({ index: i })) }],
+  },
+  streamDeckBusy: false,
+  streamDeckError: "",
+  onStreamDeckSettingsChange: vi.fn(),
+  onSaveStreamDeckSettings: vi.fn(),
+  onResetStreamDeckSettings: vi.fn(),
+  streamDeckBridgeConnected: false,
+  streamDeckBridgeLastEvent: "",
 };
 
 describe("StationIntercomView", () => {
@@ -271,5 +285,45 @@ describe("StationIntercomView", () => {
     fireEvent.pointerUp(holdButton, { pointerId: 12, pointerType: "touch" });
 
     expect(stopPtt).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows assigning reply-to-caller in stream deck settings", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.selectOptions(
+      screen.getByLabelText("Stream Deck function"),
+      "reply_to_caller",
+    );
+
+    expect(onStreamDeckSettingsChange).toHaveBeenCalled();
+    const calls = onStreamDeckSettingsChange.mock.calls;
+    const lastCallArg = calls[calls.length - 1]?.[0];
+    expect(lastCallArg?.pages?.[0]?.buttons?.[0]?.action?.type).toBe(
+      "reply_to_caller",
+    );
+  });
+
+  it("triggers save from stream deck settings header", async () => {
+    const user = userEvent.setup();
+    const onSaveStreamDeckSettings = vi.fn();
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onSaveStreamDeckSettings={onSaveStreamDeckSettings}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSaveStreamDeckSettings).toHaveBeenCalledTimes(1);
   });
 });

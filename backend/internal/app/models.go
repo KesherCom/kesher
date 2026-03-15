@@ -62,6 +62,68 @@ type Session struct {
 	ExpiresAt time.Time
 }
 
+type StreamDeckActionType string
+
+const (
+	StreamDeckActionTypeNone          StreamDeckActionType = "none"
+	StreamDeckActionTypePTTRoom       StreamDeckActionType = "ptt_room"
+	StreamDeckActionTypeDirectUser    StreamDeckActionType = "direct_user"
+	StreamDeckActionTypeReplyToCaller StreamDeckActionType = "reply_to_caller"
+	StreamDeckActionTypeBroadcastPTT  StreamDeckActionType = "broadcast_ptt"
+	StreamDeckActionTypeMuteToggle    StreamDeckActionType = "mute_toggle"
+	StreamDeckActionTypeVolumeDelta   StreamDeckActionType = "volume_delta"
+)
+
+const (
+	StreamDeckGridColumns = 5
+	StreamDeckGridRows    = 3
+	StreamDeckButtonCount = StreamDeckGridColumns * StreamDeckGridRows
+)
+
+type StreamDeckButtonAction struct {
+	Type             StreamDeckActionType `json:"type"`
+	RoomID           string               `json:"roomId,omitempty"`
+	UserID           string               `json:"userId,omitempty"`
+	BroadcastGroupID string               `json:"broadcastGroupId,omitempty"`
+	VolumeDelta      int                  `json:"volumeDelta,omitempty"`
+}
+
+type StreamDeckButtonConfig struct {
+	Index  int                     `json:"index"`
+	Label  string                  `json:"label,omitempty"`
+	Color  string                  `json:"color,omitempty"`
+	Action *StreamDeckButtonAction `json:"action,omitempty"`
+}
+
+type StreamDeckPageConfig struct {
+	Page    int                      `json:"page"`
+	Buttons []StreamDeckButtonConfig `json:"buttons"`
+}
+
+type StreamDeckSettings struct {
+	Version      int                    `json:"version"`
+	GridColumns  int                    `json:"gridColumns"`
+	GridRows     int                    `json:"gridRows"`
+	SelectedPage int                    `json:"selectedPage"`
+	Pages        []StreamDeckPageConfig `json:"pages"`
+}
+
+func DefaultStreamDeckSettings() StreamDeckSettings {
+	buttons := make([]StreamDeckButtonConfig, 0, StreamDeckButtonCount)
+	for i := 0; i < StreamDeckButtonCount; i++ {
+		buttons = append(buttons, StreamDeckButtonConfig{Index: i})
+	}
+	return StreamDeckSettings{
+		Version:      1,
+		GridColumns:  StreamDeckGridColumns,
+		GridRows:     StreamDeckGridRows,
+		SelectedPage: 0,
+		Pages: []StreamDeckPageConfig{
+			{Page: 0, Buttons: buttons},
+		},
+	}
+}
+
 type BootstrapResponse struct {
 	Self            User             `json:"self"`
 	Roles           []Role           `json:"roles"`

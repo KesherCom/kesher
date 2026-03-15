@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   adminLogin,
   bootstrap,
+  getStreamDeckSettings,
   getPublicBootstrap,
   getStatus,
   login,
   loginTakeover,
+  resetStreamDeckSettings,
   logout,
+  updateStreamDeckSettings,
   updateAdminPin,
 } from "./api";
 import { LoginView } from "./components/LoginView";
@@ -25,8 +28,20 @@ import {
   type ShortcutCallbacks,
 } from "./app/useKeyboardShortcuts";
 import { roleAllowed, matrixAnchorRoomId } from "./lib/intercom";
+import {
+  gainWithDbDelta,
+  parseStreamDeckBridgeEvent,
+  resolveStreamDeckButtonAction,
+  streamDeckButtonEventName,
+} from "./lib/streamDeckBridge";
+import { createStreamDeckDevTools } from "./lib/streamDeckDevTools";
 import { sortDirectUsersByRoleAndUsername } from "./lib/users";
-import type { Bootstrap, LoginConflict, PublicBootstrap } from "./types";
+import type {
+  Bootstrap,
+  LoginConflict,
+  PublicBootstrap,
+  StreamDeckSettings,
+} from "./types";
 import { useSettings } from "./hooks/useSettings";
 import { useAudioDevices } from "./hooks/useAudioDevices";
 import { useIntercomSession } from "./hooks/useIntercomSession";
@@ -47,6 +62,21 @@ function syncPathname(pathname: string, replace = false) {
     "",
     `${pathname}${window.location.search}${window.location.hash}`,
   );
+}
+
+function localDefaultStreamDeckSettings(): StreamDeckSettings {
+  return {
+    version: 1,
+    gridColumns: 5,
+    gridRows: 3,
+    selectedPage: 0,
+    pages: [
+      {
+        page: 0,
+        buttons: Array.from({ length: 15 }, (_, index) => ({ index })),
+      },
+    ],
+  };
 }
 
 export function App() {
@@ -81,6 +111,12 @@ export function App() {
   // ── UI state ──
   const [isUserSettingsOpen, setIsUserSettingsOpen] = useState(false);
   const [isRecordingShortcut, setIsRecordingShortcut] = useState(false);
+  const [streamDeckSettings, setStreamDeckSettings] =
+    useState<StreamDeckSettings | null>(null);
+  const [streamDeckBusy, setStreamDeckBusy] = useState(false);
+  const [streamDeckError, setStreamDeckError] = useState("");
+  const [streamDeckConnected, setStreamDeckConnected] = useState(false);
+  const [streamDeckLastEvent, setStreamDeckLastEvent] = useState("");
   const isUserSettingsOpenRef = useRef(isUserSettingsOpen);
   useEffect(() => {
     isUserSettingsOpenRef.current = isUserSettingsOpen;
@@ -188,6 +224,11 @@ export function App() {
     return map;
   }, [appData]);
 
+  const streamDeckSettingsRef = useRef<StreamDeckSettings | null>(null);
+  useEffect(() => {
+    streamDeckSettingsRef.current = streamDeckSettings;
+  }, [streamDeckSettings]);
+
   // ── Initial load: public bootstrap ──
   useEffect(() => {
     localStorage.removeItem(tokenStorageKey);
@@ -211,6 +252,43 @@ export function App() {
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  // ── Stream Deck settings load ──
+  useEffect(() => {
+    if (!token || authMode !== "operator") {
+      setStreamDeckSettings(null);
+      setStreamDeckError("");
+      setStreamDeckBusy(false);
+      return;
+    }
+    let cancelled = false;
+    setStreamDeckBusy(true);
+    setStreamDeckError("");
+    getStreamDeckSettings(token)
+      .then((next) => {
+        if (!cancelled) {
+          setStreamDeckSettings(next);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setStreamDeckSettings(localDefaultStreamDeckSettings());
+          setStreamDeckError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load Stream Deck settings.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setStreamDeckBusy(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authMode, token]);
 
   // ── Status polling ──
   useEffect(() => {
@@ -520,6 +598,174 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+
+  useEffect(() => {
+    if (!token || authMode !== "operator") {
+      setStreamDeckConnected(false);
+      setStreamDeckLastEvent("");
+      return;
+    }
+
+    const handleBridgeAction = (
+      payload: ReturnType<typeof parseStreamDeckBridgeEvent>,
+    ) => {
+      if (!payload) return;
+      if (payload.kind === "connection") {
+        setStreamDeckConnected(payload.connected);
+        if (payload.message) {
+          setStreamDeckLastEvent(payload.message);
+        }
+        return;
+      }
+
+      const streamDeckCfg = streamDeckSettingsRef.current;
+      const currentAppData = appData;
+      if (!streamDeckCfg || !currentAppData) return;
+      const effectivePage =
+        typeof payload.page === "number"
+          ? payload.page
+          : streamDeckCfg.selectedPage;
+      const action = resolveStreamDeckButtonAction(
+        streamDeckCfg,
+        effectivePage,
+        payload.buttonIndex,
+      );
+      if (!action) return;
+
+      setStreamDeckConnected(true);
+      setStreamDeckLastEvent(
+        `P${effectivePage + 1}/B${payload.buttonIndex + 1} ${payload.state}`,
+      );
+
+      if (action.type === "none") return;
+      if (action.type === "mute_toggle") {
+        if (payload.state === "down") {
+          session.setAlwaysOn(session.voiceModeRef.current !== "always_on");
+        }
+        return;
+      }
+      if (action.type === "volume_delta") {
+        if (payload.state === "down") {
+          const delta = action.volumeDelta || 0;
+          if (delta !== 0) {
+            const currentGain = settings.selectedInputGainFor(
+              settings.selectedInputDeviceId,
+            );
+            settings.onInputGainChange(
+              settings.selectedInputDeviceId,
+              gainWithDbDelta(currentGain, delta),
+            );
+          }
+        }
+        return;
+      }
+      if (action.type === "ptt_room" && action.roomId) {
+        if (payload.state === "down") {
+          session.handleChannelPttStart(action.roomId);
+        } else {
+          session.handleChannelPttStop(action.roomId);
+        }
+        return;
+      }
+      if (action.type === "direct_user" && action.userId) {
+        if (payload.state === "down") {
+          session.startDirectPtt(action.userId);
+        } else {
+          session.stopDirectPtt(action.userId);
+        }
+        return;
+      }
+      if (action.type === "reply_to_caller") {
+        const callerId = session.lastDirectCallerUserId;
+        if (!callerId) return;
+        if (payload.state === "down") {
+          session.startDirectPtt(callerId);
+        } else {
+          session.stopDirectPtt(callerId);
+        }
+        return;
+      }
+      if (action.type === "broadcast_ptt" && action.broadcastGroupId) {
+        if (payload.state === "down") {
+          session.startBroadcastPtt(action.broadcastGroupId);
+        } else {
+          session.stopBroadcastPtt(action.broadcastGroupId);
+        }
+      }
+    };
+
+    const onMessage = (event: MessageEvent) => {
+      const parsed = parseStreamDeckBridgeEvent(event.data);
+      handleBridgeAction(parsed);
+    };
+    const onBridgeButtonEvent = (event: Event) => {
+      const custom = event as CustomEvent<unknown>;
+      const parsed = parseStreamDeckBridgeEvent(custom.detail);
+      handleBridgeAction(parsed);
+    };
+
+    window.addEventListener("message", onMessage);
+    window.addEventListener(streamDeckButtonEventName, onBridgeButtonEvent);
+
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.removeEventListener(
+        streamDeckButtonEventName,
+        onBridgeButtonEvent,
+      );
+    };
+  }, [appData, authMode, session, settings, token]);
+
+  useEffect(() => {
+    if (!showDebug) {
+      delete window.__kesherStreamDeckDev;
+      return;
+    }
+    window.__kesherStreamDeckDev = createStreamDeckDevTools(window);
+    return () => {
+      delete window.__kesherStreamDeckDev;
+    };
+  }, [showDebug]);
+
+  const handleStreamDeckSettingsChange = useCallback(
+    (next: StreamDeckSettings) => {
+      setStreamDeckSettings(next);
+      setStreamDeckError("");
+    },
+    [],
+  );
+
+  const handleSaveStreamDeckSettings = useCallback(async () => {
+    if (!token || !streamDeckSettings) return;
+    setStreamDeckBusy(true);
+    setStreamDeckError("");
+    try {
+      const saved = await updateStreamDeckSettings(token, streamDeckSettings);
+      setStreamDeckSettings(saved);
+    } catch (err) {
+      setStreamDeckError(
+        err instanceof Error ? err.message : "Failed to save Stream Deck settings.",
+      );
+    } finally {
+      setStreamDeckBusy(false);
+    }
+  }, [streamDeckSettings, token]);
+
+  const handleResetStreamDeckSettings = useCallback(async () => {
+    if (!token) return;
+    setStreamDeckBusy(true);
+    setStreamDeckError("");
+    try {
+      const reset = await resetStreamDeckSettings(token);
+      setStreamDeckSettings(reset);
+    } catch (err) {
+      setStreamDeckError(
+        err instanceof Error ? err.message : "Failed to reset Stream Deck settings.",
+      );
+    } finally {
+      setStreamDeckBusy(false);
+    }
+  }, [token]);
 
   // ── Early returns ──
   if (!publicData) return <div className="root">Loading configuration...</div>;
@@ -844,6 +1090,14 @@ export function App() {
         selectedOutputLabel={selectedOutputLabel}
         outputSelectionSupported={outputSelectionSupported}
         setSelectedOutputDeviceId={(id) => void changeOutputDevice(id)}
+        streamDeckSettings={streamDeckSettings}
+        streamDeckBusy={streamDeckBusy}
+        streamDeckError={streamDeckError}
+        onStreamDeckSettingsChange={handleStreamDeckSettingsChange}
+        onSaveStreamDeckSettings={() => void handleSaveStreamDeckSettings()}
+        onResetStreamDeckSettings={() => void handleResetStreamDeckSettings()}
+        streamDeckBridgeConnected={streamDeckConnected}
+        streamDeckBridgeLastEvent={streamDeckLastEvent}
       />
       {attentionFlashOverlay}
     </>

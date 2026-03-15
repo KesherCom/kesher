@@ -1173,3 +1173,102 @@ func TestServerWriteStoreErrMappings(t *testing.T) {
 		})
 	}
 }
+
+func TestServerHandleUserStreamDeckSettingsGetReturnsDefaultWhenMissing(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute)}
+	user, err := store.UpsertUser(context.Background(), "deck-default", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := s.sessions.Create(user)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/stream-deck/settings", nil)
+	rec := httptest.NewRecorder()
+	s.handleUserStreamDeckSettings(rec, req, session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var got StreamDeckSettings
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if got.GridColumns != StreamDeckGridColumns || got.GridRows != StreamDeckGridRows {
+		t.Fatalf("unexpected default grid: %+v", got)
+	}
+}
+
+func TestServerHandleUserStreamDeckSettingsPutAndDelete(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute)}
+	user, err := store.UpsertUser(context.Background(), "deck-put", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := s.sessions.Create(user)
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeReplyToCaller}
+	body, _ := json.Marshal(settings)
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/user/stream-deck/settings", bytes.NewBuffer(body))
+	putRec := httptest.NewRecorder()
+	s.handleUserStreamDeckSettings(putRec, putReq, session)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for PUT, got %d", putRec.Code)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/user/stream-deck/settings", nil)
+	getRec := httptest.NewRecorder()
+	s.handleUserStreamDeckSettings(getRec, getReq, session)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for GET, got %d", getRec.Code)
+	}
+	var got StreamDeckSettings
+	if err := json.Unmarshal(getRec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("failed to decode GET response: %v", err)
+	}
+	if got.Pages[0].Buttons[0].Action == nil || got.Pages[0].Buttons[0].Action.Type != StreamDeckActionTypeReplyToCaller {
+		t.Fatalf("expected reply-to-caller action, got %+v", got.Pages[0].Buttons[0].Action)
+	}
+
+	delReq := httptest.NewRequest(http.MethodDelete, "/api/user/stream-deck/settings", nil)
+	delRec := httptest.NewRecorder()
+	s.handleUserStreamDeckSettings(delRec, delReq, session)
+	if delRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for DELETE, got %d", delRec.Code)
+	}
+}
+
+func TestServerHandleUserStreamDeckSettingsRejectsInvalidPayload(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute)}
+	user, err := store.UpsertUser(context.Background(), "deck-invalid", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := s.sessions.Create(user)
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeVolumeDelta, VolumeDelta: 0}
+	body, _ := json.Marshal(settings)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/user/stream-deck/settings", bytes.NewBuffer(body))
+	rec := httptest.NewRecorder()
+	s.handleUserStreamDeckSettings(rec, req, session)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}

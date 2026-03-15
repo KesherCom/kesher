@@ -405,6 +405,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/logout", s.withAuth(s.handleLogout))
 	mux.HandleFunc("/api/bootstrap", s.withAuth(s.handleBootstrap))
 	mux.HandleFunc("/api/status", s.withAuth(s.handleStatus))
+	mux.HandleFunc("/api/user/stream-deck/settings", s.withAuth(s.handleUserStreamDeckSettings))
 	mux.HandleFunc("/api/admin/roles", s.withAuth(s.handleAdminRoles))
 	mux.HandleFunc("/api/admin/roles/", s.withAuth(s.handleAdminRoleByID))
 	mux.HandleFunc("/api/admin/rooms", s.withAuth(s.handleAdminRooms))
@@ -785,6 +786,52 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, _ Session)
 		RoomListenerCounts: roomListenerCounts,
 		TimestampUnixMs:    time.Now().UnixMilli(),
 	})
+}
+
+func (s *Server) handleUserStreamDeckSettings(w http.ResponseWriter, r *http.Request, session Session) {
+	switch r.Method {
+	case http.MethodGet:
+		settings, err := s.store.GetUserStreamDeckSettings(r.Context(), session.UserID)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				s.writeJSON(w, http.StatusOK, DefaultStreamDeckSettings())
+				return
+			}
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, settings)
+	case http.MethodPut:
+		var req StreamDeckSettings
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		settings, err := s.store.UpsertUserStreamDeckSettings(r.Context(), session.UserID, req)
+		if err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, settings)
+	case http.MethodDelete:
+		err := s.store.DeleteUserStreamDeckSettings(r.Context(), session.UserID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, DefaultStreamDeckSettings())
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func filterBroadcastGroupsForRole(roleID string, groups []BroadcastGroup) []BroadcastGroup {

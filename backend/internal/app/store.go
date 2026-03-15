@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -512,6 +513,14 @@ func (s *Store) migrate(ctx context.Context) error {
 	)`); err != nil {
 		return err
 	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS user_stream_deck_settings (
+		user_id TEXT PRIMARY KEY,
+		settings_json TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -661,6 +670,154 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 		users = append(users, u)
 	}
 	return users, nil
+}
+
+func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, error) {
+	if in.Version <= 0 {
+		in.Version = 1
+	}
+	if in.GridColumns != StreamDeckGridColumns || in.GridRows != StreamDeckGridRows {
+		return StreamDeckSettings{}, ErrInvalidInput
+	}
+	if len(in.Pages) == 0 {
+		return StreamDeckSettings{}, ErrInvalidInput
+	}
+	selectedPageValid := false
+	normalizedPages := make([]StreamDeckPageConfig, 0, len(in.Pages))
+	seenPages := make(map[int]struct{}, len(in.Pages))
+	for _, page := range in.Pages {
+		if page.Page < 0 {
+			return StreamDeckSettings{}, ErrInvalidInput
+		}
+		if _, exists := seenPages[page.Page]; exists {
+			return StreamDeckSettings{}, ErrInvalidInput
+		}
+		seenPages[page.Page] = struct{}{}
+		if page.Page == in.SelectedPage {
+			selectedPageValid = true
+		}
+		if len(page.Buttons) != StreamDeckButtonCount {
+			return StreamDeckSettings{}, ErrInvalidInput
+		}
+		seenButtonIdx := make(map[int]struct{}, len(page.Buttons))
+		normalizedButtons := make([]StreamDeckButtonConfig, 0, len(page.Buttons))
+		for _, button := range page.Buttons {
+			if button.Index < 0 || button.Index >= StreamDeckButtonCount {
+				return StreamDeckSettings{}, ErrInvalidInput
+			}
+			if _, exists := seenButtonIdx[button.Index]; exists {
+				return StreamDeckSettings{}, ErrInvalidInput
+			}
+			seenButtonIdx[button.Index] = struct{}{}
+			button.Label = strings.TrimSpace(button.Label)
+			button.Color = strings.TrimSpace(button.Color)
+			if button.Action != nil {
+				action := *button.Action
+				action.RoomID = strings.TrimSpace(action.RoomID)
+				action.UserID = strings.TrimSpace(action.UserID)
+				action.BroadcastGroupID = strings.TrimSpace(action.BroadcastGroupID)
+				switch action.Type {
+				case StreamDeckActionTypeNone, StreamDeckActionTypeMuteToggle, StreamDeckActionTypeReplyToCaller:
+				case StreamDeckActionTypePTTRoom:
+					if action.RoomID == "" {
+						return StreamDeckSettings{}, ErrInvalidInput
+					}
+				case StreamDeckActionTypeDirectUser:
+					if action.UserID == "" {
+						return StreamDeckSettings{}, ErrInvalidInput
+					}
+				case StreamDeckActionTypeBroadcastPTT:
+					if action.BroadcastGroupID == "" {
+						return StreamDeckSettings{}, ErrInvalidInput
+					}
+				case StreamDeckActionTypeVolumeDelta:
+					if action.VolumeDelta == 0 {
+						return StreamDeckSettings{}, ErrInvalidInput
+					}
+				default:
+					return StreamDeckSettings{}, ErrInvalidInput
+				}
+				button.Action = &action
+			}
+			normalizedButtons = append(normalizedButtons, button)
+		}
+		normalizedPages = append(normalizedPages, StreamDeckPageConfig{Page: page.Page, Buttons: normalizedButtons})
+	}
+	if !selectedPageValid {
+		return StreamDeckSettings{}, ErrInvalidInput
+	}
+	in.Pages = normalizedPages
+	return in, nil
+}
+
+func (s *Store) GetUserStreamDeckSettings(ctx context.Context, userID string) (StreamDeckSettings, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return StreamDeckSettings{}, ErrInvalidInput
+	}
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT settings_json FROM user_stream_deck_settings WHERE user_id = ?`, userID).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return StreamDeckSettings{}, ErrNotFound
+		}
+		return StreamDeckSettings{}, err
+	}
+	var settings StreamDeckSettings
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		return StreamDeckSettings{}, ErrInvalidInput
+	}
+	return validateStreamDeckSettings(settings)
+}
+
+func (s *Store) UpsertUserStreamDeckSettings(ctx context.Context, userID string, settings StreamDeckSettings) (StreamDeckSettings, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return StreamDeckSettings{}, ErrInvalidInput
+	}
+	normalized, err := validateStreamDeckSettings(settings)
+	if err != nil {
+		return StreamDeckSettings{}, err
+	}
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM users WHERE id = ?`, userID).Scan(&count); err != nil {
+		return StreamDeckSettings{}, err
+	}
+	if count == 0 {
+		return StreamDeckSettings{}, ErrNotFound
+	}
+	body, err := json.Marshal(normalized)
+	if err != nil {
+		return StreamDeckSettings{}, err
+	}
+	now := time.Now().Unix()
+	_, err = s.db.ExecContext(ctx, `INSERT INTO user_stream_deck_settings (user_id, settings_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at`,
+		userID, string(body), now, now)
+	if err != nil {
+		return StreamDeckSettings{}, err
+	}
+	return normalized, nil
+}
+
+func (s *Store) DeleteUserStreamDeckSettings(ctx context.Context, userID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return ErrInvalidInput
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM user_stream_deck_settings WHERE user_id = ?`, userID)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {

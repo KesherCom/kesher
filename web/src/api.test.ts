@@ -7,10 +7,13 @@ import {
   createRole,
   exportConfiguration,
   getPublicBootstrap,
+  getStreamDeckSettings,
   importConfiguration,
   login,
   loginTakeover,
   logout,
+  resetStreamDeckSettings,
+  updateStreamDeckSettings,
 } from "./api";
 
 const server = setupServer(
@@ -118,6 +121,39 @@ const server = setupServer(
       return new HttpResponse("invalid", { status: 400 });
     }
     return HttpResponse.json({ importedSections: body.sections });
+  }),
+  http.get("http://localhost/api/user/stream-deck/settings", () => {
+    return HttpResponse.json({
+      version: 1,
+      gridColumns: 5,
+      gridRows: 3,
+      selectedPage: 0,
+      pages: [
+        {
+          page: 0,
+          buttons: [{ index: 0, action: { type: "reply_to_caller" } }],
+        },
+      ],
+    });
+  }),
+  http.put("http://localhost/api/user/stream-deck/settings", async ({ request }) => {
+    const body = (await request.json()) as {
+      gridColumns?: number;
+      gridRows?: number;
+    };
+    if (body.gridColumns !== 5 || body.gridRows !== 3) {
+      return new HttpResponse("invalid", { status: 400 });
+    }
+    return HttpResponse.json(body);
+  }),
+  http.delete("http://localhost/api/user/stream-deck/settings", () => {
+    return HttpResponse.json({
+      version: 1,
+      gridColumns: 5,
+      gridRows: 3,
+      selectedPage: 0,
+      pages: [{ page: 0, buttons: [{ index: 0 }] }],
+    });
   }),
 );
 
@@ -262,5 +298,30 @@ describe("api helpers", () => {
       ["roles", "rooms"],
     );
     expect(response.importedSections).toEqual(["roles", "rooms"]);
+  });
+
+  it("loads stream deck settings", async () => {
+    const settings = await getStreamDeckSettings("token-123");
+    expect(settings.gridColumns).toBe(5);
+    expect(settings.pages[0]?.buttons[0]?.action?.type).toBe("reply_to_caller");
+  });
+
+  it("updates stream deck settings", async () => {
+    const settings = {
+      version: 1,
+      gridColumns: 5,
+      gridRows: 3,
+      selectedPage: 0,
+      pages: [{ page: 0, buttons: [{ index: 0, action: { type: "reply_to_caller" as const } }] }],
+    };
+    const updated = await updateStreamDeckSettings("token-123", settings);
+    expect(updated.gridRows).toBe(3);
+    expect(updated.pages[0]?.buttons[0]?.action?.type).toBe("reply_to_caller");
+  });
+
+  it("resets stream deck settings", async () => {
+    const reset = await resetStreamDeckSettings("token-123");
+    expect(reset.gridColumns).toBe(5);
+    expect(reset.pages[0]?.page).toBe(0);
   });
 });
