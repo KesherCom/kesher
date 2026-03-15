@@ -225,6 +225,7 @@ export function App() {
   }, [appData]);
 
   const streamDeckSettingsRef = useRef<StreamDeckSettings | null>(null);
+  const streamDeckPressedRoleTargetsRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
     streamDeckSettingsRef.current = streamDeckSettings;
   }, [streamDeckSettings]);
@@ -667,6 +668,35 @@ export function App() {
         }
         return;
       }
+      if (action.type === "direct_role" && action.roleId) {
+        const buttonKey = `${effectivePage}:${payload.buttonIndex}`;
+        if (payload.state === "down") {
+          const candidates = session.presence
+            .filter(
+              (entry) =>
+                entry.userId !== currentAppData.self.id &&
+                entry.roleId === action.roleId,
+            )
+            .sort((a, b) => a.username.localeCompare(b.username));
+          const chosen = candidates[0];
+          if (!chosen) {
+            setStreamDeckLastEvent(
+              `P${effectivePage + 1}/B${payload.buttonIndex + 1} no active user in role`,
+            );
+            return;
+          }
+          streamDeckPressedRoleTargetsRef.current.set(buttonKey, chosen.userId);
+          session.startDirectPtt(chosen.userId);
+        } else {
+          const targetUserId =
+            streamDeckPressedRoleTargetsRef.current.get(buttonKey);
+          if (targetUserId) {
+            session.stopDirectPtt(targetUserId);
+            streamDeckPressedRoleTargetsRef.current.delete(buttonKey);
+          }
+        }
+        return;
+      }
       if (action.type === "direct_user" && action.userId) {
         if (payload.state === "down") {
           session.startDirectPtt(action.userId);
@@ -708,6 +738,7 @@ export function App() {
     window.addEventListener(streamDeckButtonEventName, onBridgeButtonEvent);
 
     return () => {
+      streamDeckPressedRoleTargetsRef.current.clear();
       window.removeEventListener("message", onMessage);
       window.removeEventListener(
         streamDeckButtonEventName,

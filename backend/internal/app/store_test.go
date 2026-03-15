@@ -322,3 +322,37 @@ func TestDeleteUserStreamDeckSettings(t *testing.T) {
 		t.Fatalf("expected ErrNotFound after delete, got %v", err)
 	}
 }
+
+func TestUserStreamDeckSettingsAcceptsDirectRoleAction(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	user, err := store.UpsertUser(ctx, "deckrole", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[1].Action = &StreamDeckButtonAction{
+		Type:   StreamDeckActionTypeDirectRole,
+		RoleID: "video",
+	}
+
+	stored, err := store.UpsertUserStreamDeckSettings(ctx, user.ID, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Pages[0].Buttons[1].Action == nil {
+		t.Fatal("expected action to be stored")
+	}
+	if stored.Pages[0].Buttons[1].Action.Type != StreamDeckActionTypeDirectRole {
+		t.Fatalf("unexpected action type: %s", stored.Pages[0].Buttons[1].Action.Type)
+	}
+	if stored.Pages[0].Buttons[1].Action.RoleID != "video" {
+		t.Fatalf("unexpected role id: %q", stored.Pages[0].Buttons[1].Action.RoleID)
+	}
+}

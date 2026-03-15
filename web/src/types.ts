@@ -171,6 +171,7 @@ export type StreamDeckActionType =
   | "none"
   | "ptt_room"
   | "direct_user"
+  | "direct_role"
   | "reply_to_caller"
   | "broadcast_ptt"
   | "mute_toggle"
@@ -180,6 +181,7 @@ export type StreamDeckButtonAction = {
   type: StreamDeckActionType;
   roomId?: string;
   userId?: string;
+  roleId?: string;
   broadcastGroupId?: string;
   volumeDelta?: number;
 };

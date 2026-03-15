@@ -68,6 +68,7 @@ const (
 	StreamDeckActionTypeNone          StreamDeckActionType = "none"
 	StreamDeckActionTypePTTRoom       StreamDeckActionType = "ptt_room"
 	StreamDeckActionTypeDirectUser    StreamDeckActionType = "direct_user"
+	StreamDeckActionTypeDirectRole    StreamDeckActionType = "direct_role"
 	StreamDeckActionTypeReplyToCaller StreamDeckActionType = "reply_to_caller"
 	StreamDeckActionTypeBroadcastPTT  StreamDeckActionType = "broadcast_ptt"
 	StreamDeckActionTypeMuteToggle    StreamDeckActionType = "mute_toggle"
@@ -84,6 +85,7 @@ type StreamDeckButtonAction struct {
 	Type             StreamDeckActionType `json:"type"`
 	RoomID           string               `json:"roomId,omitempty"`
 	UserID           string               `json:"userId,omitempty"`
+	RoleID           string               `json:"roleId,omitempty"`
 	BroadcastGroupID string               `json:"broadcastGroupId,omitempty"`
 	VolumeDelta      int                  `json:"volumeDelta,omitempty"`
 }

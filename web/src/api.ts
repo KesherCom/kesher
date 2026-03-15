@@ -171,6 +171,7 @@ function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
     "none",
     "ptt_room",
     "direct_user",
+    "direct_role",
     "reply_to_caller",
     "broadcast_ptt",
     "mute_toggle",
@@ -229,6 +230,8 @@ function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
                   typeof actionRaw.roomId === "string" ? actionRaw.roomId : undefined,
                 userId:
                   typeof actionRaw.userId === "string" ? actionRaw.userId : undefined,
+                roleId:
+                  typeof actionRaw.roleId === "string" ? actionRaw.roleId : undefined,
                 broadcastGroupId:
                   typeof actionRaw.broadcastGroupId === "string"
                     ? actionRaw.broadcastGroupId

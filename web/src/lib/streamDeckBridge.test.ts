@@ -58,6 +58,30 @@ describe("streamDeckBridge", () => {
     expect(action?.type).toBe("reply_to_caller");
   });
 
+  it("resolves direct-role action from settings", () => {
+    const action = resolveStreamDeckButtonAction(
+      {
+        version: 1,
+        gridColumns: 5,
+        gridRows: 3,
+        selectedPage: 0,
+        pages: [
+          {
+            page: 0,
+            buttons: [
+              { index: 0 },
+              { index: 1, action: { type: "direct_role", roleId: "audio" } },
+              ...Array.from({ length: 13 }, (_, idx) => ({ index: idx + 2 })),
+            ],
+          },
+        ],
+      },
+      0,
+      1,
+    );
+    expect(action).toEqual({ type: "direct_role", roleId: "audio" });
+  });
+
   it("applies db deltas with clamp", () => {
     const boosted = gainWithDbDelta(1, 6);
     expect(boosted).toBeGreaterThan(1);

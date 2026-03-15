@@ -248,6 +248,7 @@ export function StationIntercomView({
   const micMenuRef = useRef<HTMLDivElement>(null);
   const outputMenuRef = useRef<HTMLDivElement>(null);
   const [isAudioOpen, setIsAudioOpen] = useState(false);
+  const [isStreamDeckOpen, setIsStreamDeckOpen] = useState(false);
   const [activeDirectTab, setActiveDirectTab] = useState<string>("all");
   const [streamDeckSelectedButtonIndex, setStreamDeckSelectedButtonIndex] =
     useState(0);
@@ -418,6 +419,7 @@ export function StationIntercomView({
         type: StreamDeckActionType;
         roomId?: string;
         userId?: string;
+        roleId?: string;
         broadcastGroupId?: string;
         volumeDelta?: number;
       };
@@ -461,15 +463,15 @@ export function StationIntercomView({
           },
         };
       }
-      if (type === "direct_user") {
+      if (type === "direct_role") {
         return {
           ...button,
           action: {
             type,
-            userId:
-              button.action?.type === "direct_user"
-                ? button.action.userId
-                : appData.users.find((user) => user.id !== appData.self.id)?.id,
+            roleId:
+              button.action?.type === "direct_role"
+                ? button.action.roleId
+                : appData.roles[0]?.id,
           },
         };
       }
@@ -1210,125 +1212,141 @@ export function StationIntercomView({
               />
 
               <section className="station-settings-section streamdeck-settings-section">
-                <div className="streamdeck-settings-header">
-                  <h4 className="station-settings-section-title">
-                    Stream Deck
-                  </h4>
-                  <div className="streamdeck-settings-actions">
+                <div className={`audio-box ${isStreamDeckOpen ? "" : "collapsed"}`}>
+                  <div className="audio-box-header">
                     <button
                       type="button"
-                      className="shortcut-btn"
-                      onClick={onSaveStreamDeckSettings}
-                      disabled={streamDeckBusy || !streamDeckSettings}
+                      className="audio-box-toggle"
+                      onClick={() => setIsStreamDeckOpen((value) => !value)}
+                      aria-expanded={isStreamDeckOpen}
                     >
-                      {streamDeckBusy ? "Saving..." : "Save"}
-                    </button>
-                    <button
-                      type="button"
-                      className="shortcut-btn shortcut-btn-clear"
-                      onClick={onResetStreamDeckSettings}
-                      disabled={streamDeckBusy}
-                    >
-                      Reset
+                      Stream Deck
+                      <span className={`chev ${isStreamDeckOpen ? "open" : ""}`}>
+                        ▾
+                      </span>
                     </button>
                   </div>
-                </div>
-                {streamDeckError ? (
-                  <small className="streamdeck-error">{streamDeckError}</small>
-                ) : null}
-                <small className="station-settings-meta">
-                  Bridge: {streamDeckBridgeConnected ? "connected" : "waiting"}
-                  {streamDeckBridgeLastEvent
-                    ? ` · Last event: ${streamDeckBridgeLastEvent}`
-                    : ""}
-                </small>
-                {showDebug ? (
-                  <small className="station-settings-meta">
-                    Debug: use window.__kesherStreamDeckDev.buttonTap(0, 0)
-                    or buttonDown/buttonUp in browser console.
-                  </small>
-                ) : null}
-                {!streamDeckSettings ? (
-                  <small className="station-settings-meta">
-                    Loading Stream Deck settings...
-                  </small>
-                ) : (
-                  <>
-                    <div className="streamdeck-toolbar">
-                      <label className="streamdeck-control">
-                        <span>Profile</span>
-                        <select value="default" disabled>
-                          <option value="default">Default</option>
-                        </select>
-                      </label>
-                      <div className="streamdeck-page-nav" aria-label="Page selector">
-                        <button
-                          type="button"
-                          className="shortcut-btn"
-                          onClick={() => goToStreamDeckPage(-1)}
-                          disabled={
-                            streamDeckBusy ||
-                            streamDeckPageOrder[0] ===
-                              streamDeckSettings.selectedPage
-                          }
-                        >
-                          ◀
-                        </button>
-                        <span>
-                          Page {streamDeckSettings.selectedPage + 1}
-                        </span>
-                        <button
-                          type="button"
-                          className="shortcut-btn"
-                          onClick={() => goToStreamDeckPage(1)}
-                          disabled={
-                            streamDeckBusy ||
-                            streamDeckPageOrder[streamDeckPageOrder.length - 1] ===
-                              streamDeckSettings.selectedPage
-                          }
-                        >
-                          ▶
-                        </button>
+                  {isStreamDeckOpen ? (
+                    <div className="audio-box-body">
+                      <div className="streamdeck-settings-header">
+                        <h4 className="station-settings-section-title">
+                          Configuration
+                        </h4>
+                        <div className="streamdeck-settings-actions">
+                          <button
+                            type="button"
+                            className="shortcut-btn"
+                            onClick={onSaveStreamDeckSettings}
+                            disabled={streamDeckBusy || !streamDeckSettings}
+                          >
+                            {streamDeckBusy ? "Saving..." : "Save"}
+                          </button>
+                          <button
+                            type="button"
+                            className="shortcut-btn shortcut-btn-clear"
+                            onClick={onResetStreamDeckSettings}
+                            disabled={streamDeckBusy}
+                          >
+                            Reset
+                          </button>
+                        </div>
                       </div>
-                    </div>
-
-                    <div className="streamdeck-layout">
-                      <div className="streamdeck-grid" role="grid" aria-label="Stream Deck 5x3 grid">
-                        {streamDeckCurrentButtons.map((button) => {
-                          const actionType = button.action?.type || "none";
-                          const displayLabel =
-                            button.label ||
-                            (actionType === "reply_to_caller"
-                              ? "Reply"
-                              : actionType.replace(/_/g, " "));
-                          return (
+                    {streamDeckError ? (
+                      <small className="streamdeck-error">{streamDeckError}</small>
+                    ) : null}
+                    <small className="station-settings-meta">
+                      Bridge: {streamDeckBridgeConnected ? "connected" : "waiting"}
+                      {streamDeckBridgeLastEvent
+                        ? ` · Last event: ${streamDeckBridgeLastEvent}`
+                        : ""}
+                    </small>
+                    {showDebug ? (
+                      <small className="station-settings-meta">
+                        Debug: use window.__kesherStreamDeckDev.buttonTap(0, 0)
+                        or buttonDown/buttonUp in browser console.
+                      </small>
+                    ) : null}
+                    {!streamDeckSettings ? (
+                      <small className="station-settings-meta">
+                        Loading Stream Deck settings...
+                      </small>
+                    ) : (
+                      <>
+                        <div className="streamdeck-toolbar">
+                          <label className="streamdeck-control">
+                            <span>Profile</span>
+                            <select value="default" disabled>
+                              <option value="default">Default</option>
+                            </select>
+                          </label>
+                          <div className="streamdeck-page-nav" aria-label="Page selector">
                             <button
                               type="button"
-                              key={`streamdeck-button-${button.index}`}
-                              className={`streamdeck-button ${
-                                streamDeckSelectedButton?.index === button.index
-                                  ? "active"
-                                  : ""
-                              }`}
-                              onClick={() =>
-                                setStreamDeckSelectedButtonIndex(button.index)
-                              }
-                              style={
-                                button.color
-                                  ? ({
-                                      "--streamdeck-button-color": button.color,
-                                    } as React.CSSProperties)
-                                  : undefined
+                              className="shortcut-btn"
+                              onClick={() => goToStreamDeckPage(-1)}
+                              disabled={
+                                streamDeckBusy ||
+                                streamDeckPageOrder[0] ===
+                                  streamDeckSettings.selectedPage
                               }
                             >
-                              <strong>{displayLabel || `Button ${button.index + 1}`}</strong>
-                              <small>{actionType === "none" ? "unassigned" : actionType}</small>
+                              ◀
                             </button>
-                          );
-                        })}
-                      </div>
+                            <span>
+                              Page {streamDeckSettings.selectedPage + 1}
+                            </span>
+                            <button
+                              type="button"
+                              className="shortcut-btn"
+                              onClick={() => goToStreamDeckPage(1)}
+                              disabled={
+                                streamDeckBusy ||
+                                streamDeckPageOrder[streamDeckPageOrder.length - 1] ===
+                                  streamDeckSettings.selectedPage
+                              }
+                            >
+                              ▶
+                            </button>
+                          </div>
+                        </div>
 
-                      <div className="streamdeck-editor panel">
+                        <div className="streamdeck-layout">
+                          <div className="streamdeck-grid" role="grid" aria-label="Stream Deck 5x3 grid">
+                            {streamDeckCurrentButtons.map((button) => {
+                              const actionType = button.action?.type || "none";
+                              const displayLabel =
+                                button.label ||
+                                (actionType === "reply_to_caller"
+                                  ? "Reply"
+                                  : actionType.replace(/_/g, " "));
+                              return (
+                                <button
+                                  type="button"
+                                  key={`streamdeck-button-${button.index}`}
+                                  className={`streamdeck-button ${
+                                    streamDeckSelectedButton?.index === button.index
+                                      ? "active"
+                                      : ""
+                                  }`}
+                                  onClick={() =>
+                                    setStreamDeckSelectedButtonIndex(button.index)
+                                  }
+                                  style={
+                                    button.color
+                                      ? ({
+                                          "--streamdeck-button-color": button.color,
+                                        } as React.CSSProperties)
+                                      : undefined
+                                  }
+                                >
+                                  <strong>{displayLabel || `Button ${button.index + 1}`}</strong>
+                                  <small>{actionType === "none" ? "unassigned" : actionType}</small>
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          <div className="streamdeck-editor panel">
                         <h5>
                           Button {(streamDeckSelectedButton?.index || 0) + 1}
                         </h5>
@@ -1373,7 +1391,7 @@ export function StationIntercomView({
                           >
                             <option value="none">None</option>
                             <option value="ptt_room">PTT channel</option>
-                            <option value="direct_user">Direct talk</option>
+                            <option value="direct_role">Direct role</option>
                             <option value="reply_to_caller">Reply to caller</option>
                             <option value="broadcast_ptt">Broadcast PTT</option>
                             <option value="mute_toggle">Mute / unmute mic</option>
@@ -1406,29 +1424,36 @@ export function StationIntercomView({
                           </label>
                         ) : null}
 
-                        {streamDeckSelectedButton?.action?.type === "direct_user" ? (
+                        {streamDeckSelectedButton?.action?.type === "direct_role" ? (
                           <label className="streamdeck-control">
-                            <span>Direct user</span>
+                            <span>Direct role</span>
                             <select
-                              aria-label="Stream Deck direct target"
-                              value={streamDeckSelectedButton.action.userId || ""}
+                              aria-label="Stream Deck direct role target"
+                              value={streamDeckSelectedButton.action.roleId || ""}
                               onChange={(event) =>
                                 updateStreamDeckSelectedButton((button) => ({
                                   ...button,
                                   action: {
-                                    type: "direct_user",
-                                    userId: event.target.value,
+                                    type: "direct_role",
+                                    roleId: event.target.value,
                                   },
                                 }))
                               }
                             >
-                              {appData.users
-                                .filter((user) => user.id !== appData.self.id)
-                                .map((user) => (
-                                  <option key={`streamdeck-user-${user.id}`} value={user.id}>
-                                    {user.username}
+                              {appData.roles.map((role) => {
+                                const onlineRoleUsers = allDirectOnlineTargets
+                                  .filter((entry) => entry.roleId === role.id)
+                                  .map((entry) => entry.username);
+                                const onlineHint =
+                                  onlineRoleUsers.length > 0
+                                    ? ` (${onlineRoleUsers.join(", ")})`
+                                    : "";
+                                return (
+                                  <option key={`streamdeck-role-${role.id}`} value={role.id}>
+                                    {role.name}{onlineHint}
                                   </option>
-                                ))}
+                                );
+                              })}
                             </select>
                           </label>
                         ) : null}
@@ -1483,10 +1508,13 @@ export function StationIntercomView({
                             </select>
                           </label>
                         ) : null}
-                      </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
                     </div>
-                  </>
-                )}
+                  ) : null}
+                </div>
               </section>
 
               <div className="audio-section">

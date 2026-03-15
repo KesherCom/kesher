@@ -715,6 +715,7 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 				action := *button.Action
 				action.RoomID = strings.TrimSpace(action.RoomID)
 				action.UserID = strings.TrimSpace(action.UserID)
+				action.RoleID = strings.TrimSpace(action.RoleID)
 				action.BroadcastGroupID = strings.TrimSpace(action.BroadcastGroupID)
 				switch action.Type {
 				case StreamDeckActionTypeNone, StreamDeckActionTypeMuteToggle, StreamDeckActionTypeReplyToCaller:
@@ -724,6 +725,10 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 					}
 				case StreamDeckActionTypeDirectUser:
 					if action.UserID == "" {
+						return StreamDeckSettings{}, ErrInvalidInput
+					}
+				case StreamDeckActionTypeDirectRole:
+					if action.RoleID == "" {
 						return StreamDeckSettings{}, ErrInvalidInput
 					}
 				case StreamDeckActionTypeBroadcastPTT:

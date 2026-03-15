@@ -298,6 +298,8 @@ describe("StationIntercomView", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
     await user.selectOptions(
       screen.getByLabelText("Stream Deck function"),
       "reply_to_caller",
@@ -322,8 +324,32 @@ describe("StationIntercomView", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(onSaveStreamDeckSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("collapses and expands stream deck settings", async () => {
+    const user = userEvent.setup();
+
+    render(<StationIntercomView {...baseProps} isUserSettingsOpen />);
+
+    expect(
+      screen.queryByRole("grid", { name: "Stream Deck 5x3 grid" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    expect(
+      screen.getByRole("grid", { name: "Stream Deck 5x3 grid" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    expect(
+      screen.queryByRole("grid", { name: "Stream Deck 5x3 grid" }),
+    ).not.toBeInTheDocument();
   });
 });
