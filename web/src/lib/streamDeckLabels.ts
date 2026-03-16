@@ -7,6 +7,7 @@ type StreamDeckLabelLookup = {
   rooms: Array<{ id: string; name: string }>;
   roles: Array<{ id: string; name: string }>;
   users: Array<{ id: string; username: string; roleId?: string }>;
+  activeUsers?: Array<{ id: string; username: string; roleId?: string }>;
   broadcastGroups: Array<{ id: string; name: string }>;
 };
 
@@ -40,10 +41,18 @@ function resolveActionLabel(
         action.roomId
       );
     case "direct_role":
-      return (
-        lookup.roles.find((role) => role.id === action.roleId)?.name ||
-        action.roleId
-      );
+      {
+        const roleName =
+          lookup.roles.find((role) => role.id === action.roleId)?.name ||
+          action.roleId;
+        const roleUsers = (lookup.activeUsers ?? lookup.users).filter(
+          (u) => u.roleId === action.roleId,
+        );
+        if (roleUsers.length > 0) {
+          return `${roleUsers[0].username}\n${roleName}`;
+        }
+        return roleName;
+      }
     case "direct_user":
       {
         const user = lookup.users.find((entry) => entry.id === action.userId);

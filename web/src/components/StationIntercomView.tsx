@@ -632,9 +632,14 @@ export function StationIntercomView({
       rooms: appData.rooms,
       roles: appData.roles,
       users: appData.users,
+      activeUsers: presence.map((entry) => ({
+        id: entry.userId,
+        username: entry.username,
+        roleId: entry.roleId,
+      })),
       broadcastGroups,
     }),
-    [appData.rooms, appData.roles, appData.users, broadcastGroups],
+    [appData.rooms, appData.roles, appData.users, broadcastGroups, presence],
   );
 
   const streamDeckPreviewPressedSet = useMemo(
@@ -929,6 +934,18 @@ export function StationIntercomView({
               button.action?.type === "call_room"
                 ? button.action.roomId
                 : appData.rooms[0]?.id,
+          },
+        };
+      }
+      if (type === "direct_user") {
+        return {
+          ...button,
+          action: {
+            type,
+            userId:
+              button.action?.type === "direct_user"
+                ? button.action.userId
+                : appData.users[0]?.id,
           },
         };
       }
@@ -2140,6 +2157,7 @@ export function StationIntercomView({
                               <option value="call_room">Call channel</option>
                             </optgroup>
                             <optgroup label="Direct communication">
+                              <option value="direct_user">Direct user</option>
                               <option value="direct_role">Direct role</option>
                               <option value="reply_to_caller">Reply to caller</option>
                             </optgroup>
@@ -2176,6 +2194,31 @@ export function StationIntercomView({
                               {appData.rooms.map((room) => (
                                 <option key={`streamdeck-room-${room.id}`} value={room.id}>
                                   {room.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : null}
+
+                        {streamDeckSelectedButton?.action?.type === "direct_user" ? (
+                          <label className="streamdeck-control">
+                            <span>User</span>
+                            <select
+                              aria-label="Stream Deck direct user target"
+                              value={streamDeckSelectedButton.action.userId || ""}
+                              onChange={(event) =>
+                                updateStreamDeckSelectedButton((button) => ({
+                                  ...button,
+                                  action: {
+                                    type: "direct_user",
+                                    userId: event.target.value,
+                                  },
+                                }))
+                              }
+                            >
+                              {sortDirectUsersByRoleAndUsername(appData.users, roleNameById).map((user) => (
+                                <option key={`streamdeck-user-${user.id}`} value={user.id}>
+                                  {user.username} ({roleNameById.get(user.roleId) ?? user.roleId})
                                 </option>
                               ))}
                             </select>

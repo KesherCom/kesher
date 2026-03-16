@@ -53,6 +53,7 @@ import { sortDirectUsersByRoleAndUsername } from "./lib/users";
 import type {
   Bootstrap,
   LoginConflict,
+  Presence,
   PublicBootstrap,
   StreamDeckButtonConfig,
   StreamDeckSettings,
@@ -290,6 +291,7 @@ export function App() {
   const streamDeckSettingsRef = useRef<StreamDeckSettings | null>(null);
   const appDataRef = useRef<Bootstrap | null>(null);
   const listenRoomIdsRef = useRef<string[]>([]);
+  const presenceRef = useRef<Presence[]>([]);
   const streamDeckPressedRoleTargetsRef = useRef<Map<string, string>>(new Map());
   const streamDeckHidSessionRef = useRef<{
     deck: StreamDeckWeb;
@@ -325,6 +327,10 @@ export function App() {
     listenRoomIdsRef.current = session.listenRoomIds;
   }, [session.listenRoomIds]);
 
+  useEffect(() => {
+    presenceRef.current = session.presence;
+  }, [session.presence]);
+
   const renderConnectedStreamDeck = useCallback(
     async (options?: StreamDeckRenderRequest) => {
       const request = options || {};
@@ -346,6 +352,7 @@ export function App() {
           const settings = streamDeckSettingsRef.current;
           const currentAppData = appDataRef.current;
           const listenRoomIds = listenRoomIdsRef.current;
+          const activePresence = presenceRef.current;
           if (!session || !settings || !currentAppData) {
             break;
           }
@@ -359,6 +366,11 @@ export function App() {
                   rooms: currentAppData.rooms,
                   roles: currentAppData.roles,
                   users: currentAppData.users,
+                  activeUsers: activePresence.map((entry) => ({
+                    id: entry.userId,
+                    username: entry.username,
+                    roleId: entry.roleId,
+                  })),
                   broadcastGroups: currentAppData.broadcastGroups,
                 }),
                 isListening:

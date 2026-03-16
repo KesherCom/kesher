@@ -602,28 +602,36 @@ function createButtonCanvasFromSize(
         ctx,
         primary,
         canvas.width - 24,
-        Math.max(18, Math.round(canvas.width * 0.16)),
+        Math.max(20, Math.round(canvas.width * 0.2)),
         800,
       );
       ctx.fillStyle = textColor;
       ctx.font = `800 ${primaryFont}px sans-serif`;
-      const primaryLines = wrapLines(ctx, primary, canvas.width - 24, 1);
-      ctx.fillText(primaryLines[0] || primary, canvas.width / 2, Math.round(canvas.height * 0.5));
+      const primaryLines = wrapLines(ctx, primary, canvas.width - 24, 2);
+      const primaryLineHeight = Math.round(primaryFont * 1.1);
+      const primaryBlockHeight = primaryLines.length * primaryLineHeight;
+      const primaryStartY =
+        Math.round(canvas.height * 0.38) -
+        primaryBlockHeight / 2 +
+        primaryLineHeight / 2;
+      primaryLines.forEach((line, index) => {
+        ctx.fillText(line, canvas.width / 2, primaryStartY + index * primaryLineHeight);
+      });
 
       const secondaryFont = fitText(
         ctx,
         secondary,
         canvas.width - 26,
-        Math.max(10, Math.round(canvas.width * 0.085)),
-        700,
+        Math.max(11, Math.round(canvas.width * 0.1)),
+        600,
       );
       ctx.fillStyle = mixColors(textColor, "#aeb6c0", 0.45);
-      ctx.font = `700 ${secondaryFont}px sans-serif`;
+      ctx.font = `600 ${secondaryFont}px sans-serif`;
       const secondaryLines = wrapLines(ctx, secondary, canvas.width - 26, 1);
       ctx.fillText(
         secondaryLines[0] || secondary,
         canvas.width / 2,
-        Math.round(canvas.height * 0.7),
+        Math.round(canvas.height * 0.68),
       );
     } else {
       const labelFont = fitText(
