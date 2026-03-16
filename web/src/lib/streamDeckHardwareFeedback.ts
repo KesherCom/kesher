@@ -4,10 +4,13 @@ import type {
 } from "@elgato-stream-deck/webhid";
 import type { StreamDeckButtonConfig, StreamDeckSettings } from "../types";
 
+export type StreamDeckRenderableButton = StreamDeckButtonConfig & {
+  isListening?: boolean;
+};
+
 const defaultBackground = "#182028";
 const defaultForeground = "#eef4ff";
-const defaultMuted = "rgba(238, 244, 255, 0.7)";
-const streamDeckCanvasBackground = "#0b1016";
+const streamDeckCanvasBackground = "#000000";
 
 type KeyPalette = {
   background: string;
@@ -96,74 +99,79 @@ function getDisplayLabel(button: StreamDeckButtonConfig): string {
   const actionType = button.action?.type ?? "none";
   if (button.label?.trim()) return button.label.trim();
   if (actionType === "reply_to_caller") return "Reply";
-  if (actionType === "none") return "";
-  return actionType.replace(/_/g, " ");
-}
-
-function getSubtitle(button: StreamDeckButtonConfig): string {
-  const actionType = button.action?.type ?? "none";
-  return actionType === "none" ? "unassigned" : actionType;
+  if (actionType === "ptt_room") return "Partyline";
+  if (actionType === "direct_role" || actionType === "direct_user") {
+    return "Direct";
+  }
+  if (actionType === "broadcast_ptt") return "Broadcast";
+  if (actionType === "mute_toggle") return "Mute";
+  if (actionType === "volume_delta") return "Volume";
+  return "";
 }
 
 function getDisplayTitle(button: StreamDeckButtonConfig): string {
-  const label = getDisplayLabel(button) || `Button ${button.index + 1}`;
-  return label.trim().toUpperCase();
+  return getDisplayLabel(button);
 }
 
 function getButtonPalette(button: StreamDeckButtonConfig, pressed: boolean): KeyPalette {
   const actionType = button.action?.type ?? "none";
+  if (pressed && actionType !== "none") {
+    return {
+      background: "#ef1212",
+      border: "#ff2d26",
+      label: "#f7f7f7",
+    };
+  }
   if (button.color?.trim()) {
     const custom = normalizeHexColor(button.color);
     return {
-      background: pressed ? mixColors(custom, "#ffffff", 0.08) : custom,
+      background: "#000000",
       border: pressed ? mixColors(custom, "#ffffff", 0.42) : mixColors(custom, "#ffffff", 0.22),
-      label: getReadableTextColor(custom),
-      stripe: mixColors(custom, "#ffffff", 0.32),
+      label: "#f2f5f8",
     };
   }
 
   switch (actionType) {
     case "broadcast_ptt":
       return {
-        background: pressed ? "#ff1c1c" : "#ef1212",
+        background: "#000000",
         border: "#ff2d26",
         label: "#f7f7f7",
       };
     case "direct_role":
     case "direct_user":
       return {
-        background: pressed ? "#3b3e44" : "#2f3238",
+        background: "#000000",
         border: "#ff2d26",
         label: "#f3f5f7",
       };
     case "ptt_room":
       return {
-        background: pressed ? "#3d424a" : "#31363e",
+        background: "#000000",
         border: "#1b2026",
         label: "#f1f4f8",
-        stripe: "#15c84b",
       };
     case "reply_to_caller":
       return {
-        background: pressed ? "#4a4032" : "#3a3228",
+        background: "#000000",
         border: "#ffc067",
         label: "#f6f0e8",
       };
     case "mute_toggle":
       return {
-        background: pressed ? "#4f2323" : "#3f1b1b",
+        background: "#000000",
         border: "#f84e4e",
         label: "#fff1f1",
       };
     case "volume_delta":
       return {
-        background: pressed ? "#36324e" : "#2b2840",
+        background: "#000000",
         border: "#9d8cff",
         label: "#f2f0ff",
       };
     default:
       return {
-        background: pressed ? "#2f3640" : "#242a31",
+        background: "#000000",
         border: "#1a1f26",
         label: "#edf2f8",
       };
@@ -433,14 +441,12 @@ function drawActionIcon(
 ) {
   switch (actionType) {
     case "ptt_room":
+    case "direct_role":
+    case "direct_user":
       drawIconHeadset(ctx, centerX, centerY, size, color);
       return;
     case "broadcast_ptt":
       drawIconMegaphone(ctx, centerX, centerY, size, color);
-      return;
-    case "direct_role":
-    case "direct_user":
-      drawIconCamera(ctx, centerX, centerY, size, color);
       return;
     case "reply_to_caller":
       drawIconReply(ctx, centerX, centerY, size, color);
@@ -459,7 +465,7 @@ function drawActionIcon(
 function createButtonCanvasFromSize(
   width: number,
   height: number,
-  button: StreamDeckButtonConfig,
+  button: StreamDeckRenderableButton,
   pressed: boolean,
 ): HTMLCanvasElement | null {
   const canvas = document.createElement("canvas");
@@ -475,7 +481,6 @@ function createButtonCanvasFromSize(
   const stroke = pressed ? mixColors(palette.border, "#ffffff", 0.2) : palette.border;
   const radius = Math.max(10, Math.round(canvas.width * 0.12));
   const textColor = palette.label;
-  const subTextColor = defaultMuted;
   const cardX = 7;
   const cardY = 7;
   const cardWidth = canvas.width - 14;
@@ -493,13 +498,6 @@ function createButtonCanvasFromSize(
   ctx.fill();
   ctx.restore();
 
-  const innerTopGradient = ctx.createLinearGradient(0, cardY, 0, cardY + cardHeight * 0.75);
-  innerTopGradient.addColorStop(0, "rgba(255,255,255,0.08)");
-  innerTopGradient.addColorStop(1, "rgba(255,255,255,0)");
-  roundedRect(ctx, cardX, cardY, cardWidth, cardHeight, radius);
-  ctx.fillStyle = innerTopGradient;
-  ctx.fill();
-
   roundedRect(ctx, cardX, cardY, cardWidth, cardHeight, radius);
   ctx.lineWidth = pressed ? 4 : 3;
   ctx.strokeStyle = stroke;
@@ -512,65 +510,88 @@ function createButtonCanvasFromSize(
     ctx.stroke();
   }
 
-  if (palette.stripe) {
+  if (button.action?.type === "ptt_room" && button.isListening) {
+    const stripeHeight = Math.max(6, Math.round(canvas.height * 0.075));
     roundedRect(
       ctx,
-      cardX + 2,
-      cardY + cardHeight - Math.round(canvas.height * 0.1),
-      cardWidth - 4,
-      Math.round(canvas.height * 0.08),
-      Math.max(4, Math.round(canvas.width * 0.03)),
+      cardX + 3,
+      cardY + cardHeight - stripeHeight - 2,
+      cardWidth - 6,
+      stripeHeight,
+      Math.max(3, Math.round(stripeHeight / 2)),
     );
-    ctx.fillStyle = palette.stripe;
+    ctx.fillStyle = "#14c64b";
     ctx.fill();
   }
 
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
-  const iconColor = mixColors(textColor, "#ffffff", 0.08);
-  drawActionIcon(
-    ctx,
-    actionType,
-    canvas.width / 2,
-    canvas.height * 0.39,
-    canvas.width * 0.64,
-    iconColor,
-  );
-
   const title = getDisplayTitle(button);
   if (title) {
-    const labelFont = fitText(
-      ctx,
-      title,
-      canvas.width - 24,
-      Math.max(18, Math.round(canvas.width * 0.15)),
-      800,
-    );
-    ctx.fillStyle = textColor;
-    ctx.font = `800 ${labelFont}px sans-serif`;
-    const labelLines = wrapLines(ctx, title, canvas.width - 24, 2);
+    const split = title
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const primary = split[0] || "";
+    const secondary = split[1] || "";
 
-    const labelLineHeight = Math.round(labelFont * 1.03);
-    const labelStartY =
-      Math.round(canvas.height * 0.77) -
-      ((labelLines.length - 1) * labelLineHeight) / 2;
-    labelLines.forEach((line, index) => {
-      ctx.fillText(line, canvas.width / 2, labelStartY + index * labelLineHeight);
-    });
+    if (secondary) {
+      const primaryFont = fitText(
+        ctx,
+        primary,
+        canvas.width - 24,
+        Math.max(18, Math.round(canvas.width * 0.16)),
+        800,
+      );
+      ctx.fillStyle = textColor;
+      ctx.font = `800 ${primaryFont}px sans-serif`;
+      const primaryLines = wrapLines(ctx, primary, canvas.width - 24, 1);
+      ctx.fillText(primaryLines[0] || primary, canvas.width / 2, Math.round(canvas.height * 0.5));
 
-    const footer = getSubtitle(button).toUpperCase();
-    ctx.font = `700 ${Math.max(8, Math.round(canvas.width * 0.052))}px sans-serif`;
-    ctx.fillStyle = subTextColor;
-    ctx.textBaseline = "alphabetic";
-    ctx.fillText(footer, canvas.width / 2, canvas.height - 6);
+      const secondaryFont = fitText(
+        ctx,
+        secondary,
+        canvas.width - 26,
+        Math.max(10, Math.round(canvas.width * 0.085)),
+        700,
+      );
+      ctx.fillStyle = mixColors(textColor, "#aeb6c0", 0.45);
+      ctx.font = `700 ${secondaryFont}px sans-serif`;
+      const secondaryLines = wrapLines(ctx, secondary, canvas.width - 26, 1);
+      ctx.fillText(
+        secondaryLines[0] || secondary,
+        canvas.width / 2,
+        Math.round(canvas.height * 0.7),
+      );
+    } else {
+      const labelFont = fitText(
+        ctx,
+        title,
+        canvas.width - 24,
+        Math.max(18, Math.round(canvas.width * 0.15)),
+        800,
+      );
+      ctx.fillStyle = textColor;
+      ctx.font = `800 ${labelFont}px sans-serif`;
+      const labelLines = wrapLines(ctx, title, canvas.width - 24, 2);
+
+      const labelLineHeight = Math.round(labelFont * 1.03);
+      const labelStartY =
+        Math.round(canvas.height * 0.56) -
+        ((labelLines.length - 1) * labelLineHeight) / 2;
+      labelLines.forEach((line, index) => {
+        ctx.fillText(line, canvas.width / 2, labelStartY + index * labelLineHeight);
+      });
+    }
+
   }
 
   return canvas;
 }
 
 export function createStreamDeckButtonPreviewDataUrl(
-  button: StreamDeckButtonConfig,
+  button: StreamDeckRenderableButton,
   options?: { pressed?: boolean; width?: number; height?: number },
 ): string {
   const canvas = createButtonCanvasFromSize(
@@ -584,7 +605,7 @@ export function createStreamDeckButtonPreviewDataUrl(
 
 function createButtonCanvas(
   control: StreamDeckButtonControlDefinition,
-  button: StreamDeckButtonConfig,
+  button: StreamDeckRenderableButton,
   pressed: boolean,
 ): HTMLCanvasElement | null {
   if (control.feedbackType !== "lcd") {
@@ -601,7 +622,7 @@ function createButtonCanvas(
 export async function renderStreamDeckButton(
   deck: StreamDeckWeb,
   control: StreamDeckButtonControlDefinition,
-  button: StreamDeckButtonConfig,
+  button: StreamDeckRenderableButton,
   pressed: boolean,
 ): Promise<void> {
   if (control.feedbackType === "none") {

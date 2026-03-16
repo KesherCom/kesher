@@ -9,6 +9,7 @@ import type {
 import type { KeyboardShortcutSettings } from "../app/settings";
 import { createHoldButtonProps } from "../lib/holdButton";
 import { createStreamDeckButtonPreviewDataUrl } from "../lib/streamDeckHardwareFeedback";
+import { withResolvedStreamDeckButtonLabel } from "../lib/streamDeckLabels";
 import { sortDirectUsersByRoleAndUsername } from "../lib/users";
 import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
 
@@ -422,16 +423,39 @@ export function StationIntercomView({
 
   const streamDeckPreviewImageByIndex = useMemo(() => {
     return new Map(
-      streamDeckCurrentButtons.map((button) => [
-        button.index,
+      streamDeckCurrentButtons.map((rawButton) => {
+        const resolvedButton = withResolvedStreamDeckButtonLabel(rawButton, {
+          rooms: appData.rooms,
+          roles: appData.roles,
+          users: appData.users,
+          broadcastGroups,
+        });
+        const button = {
+          ...resolvedButton,
+          isListening:
+            rawButton.action?.type === "ptt_room" &&
+            !!rawButton.action.roomId &&
+            listenRoomIds.includes(rawButton.action.roomId),
+        };
+        return [
+          rawButton.index,
         createStreamDeckButtonPreviewDataUrl(button, {
-          pressed: streamDeckPreviewPressedIndexes.includes(button.index),
+          pressed: streamDeckPreviewPressedIndexes.includes(rawButton.index),
           width: 112,
           height: 112,
         }),
-      ]),
+        ] as const;
+      }),
     );
-  }, [streamDeckCurrentButtons, streamDeckPreviewPressedIndexes]);
+  }, [
+    appData.rooms,
+    appData.roles,
+    appData.users,
+    broadcastGroups,
+    listenRoomIds,
+    streamDeckCurrentButtons,
+    streamDeckPreviewPressedIndexes,
+  ]);
 
   const startStreamDeckPreviewPress = (buttonIndex: number) => {
     if (!streamDeckSettings || !streamDeckTestMode) return;
@@ -1508,7 +1532,6 @@ export function StationIntercomView({
                             <option value="direct_role">Direct role</option>
                             <option value="reply_to_caller">Reply to caller</option>
                             <option value="broadcast_ptt">Broadcast PTT</option>
-                            <option value="mute_toggle">Mute / unmute mic</option>
                             <option value="volume_delta">Volume +/-</option>
                           </select>
                         </label>

@@ -47,6 +47,7 @@ import {
   getStreamDeckPageButtons,
   renderStreamDeckButton,
 } from "./lib/streamDeckHardwareFeedback";
+import { withResolvedStreamDeckButtonLabel } from "./lib/streamDeckLabels";
 import { sortDirectUsersByRoleAndUsername } from "./lib/users";
 import type {
   Bootstrap,
@@ -241,6 +242,8 @@ export function App() {
   }, [appData]);
 
   const streamDeckSettingsRef = useRef<StreamDeckSettings | null>(null);
+  const appDataRef = useRef<Bootstrap | null>(null);
+  const listenRoomIdsRef = useRef<string[]>([]);
   const streamDeckPressedRoleTargetsRef = useRef<Map<string, string>>(new Map());
   const streamDeckHidSessionRef = useRef<{
     deck: StreamDeckWeb;
@@ -261,14 +264,38 @@ export function App() {
     streamDeckSettingsRef.current = streamDeckSettings;
   }, [streamDeckSettings]);
 
+  useEffect(() => {
+    appDataRef.current = appData;
+  }, [appData]);
+
+  useEffect(() => {
+    listenRoomIdsRef.current = session.listenRoomIds;
+  }, [session.listenRoomIds]);
+
   const renderConnectedStreamDeck = useCallback(
     async (options?: { buttonIndex?: number }) => {
       const session = streamDeckHidSessionRef.current;
       const settings = streamDeckSettingsRef.current;
-      if (!session || !settings) return;
+      const currentAppData = appDataRef.current;
+      const listenRoomIds = listenRoomIdsRef.current;
+      if (!session || !settings || !currentAppData) return;
 
       const buttonMap = new Map<number, StreamDeckButtonConfig>(
-        getStreamDeckPageButtons(settings).map((button) => [button.index, button]),
+        getStreamDeckPageButtons(settings).map((rawButton) => [
+          rawButton.index,
+          {
+            ...withResolvedStreamDeckButtonLabel(rawButton, {
+              rooms: currentAppData.rooms,
+              roles: currentAppData.roles,
+              users: currentAppData.users,
+              broadcastGroups: currentAppData.broadcastGroups,
+            }),
+            isListening:
+              rawButton.action?.type === "ptt_room" &&
+              !!rawButton.action.roomId &&
+              listenRoomIds.includes(rawButton.action.roomId),
+          },
+        ]),
       );
       const controls = session.deck.CONTROLS.filter(
         (control): control is StreamDeckButtonControlDefinition =>
@@ -460,7 +487,13 @@ export function App() {
   useEffect(() => {
     if (!streamDeckWebHidActive) return;
     void renderConnectedStreamDeck();
-  }, [renderConnectedStreamDeck, session.voiceMode, streamDeckSettings, streamDeckWebHidActive]);
+  }, [
+    renderConnectedStreamDeck,
+    session.voiceMode,
+    session.listenRoomIds,
+    streamDeckSettings,
+    streamDeckWebHidActive,
+  ]);
 
   useEffect(() => {
     return () => {
