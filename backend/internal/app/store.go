@@ -526,13 +526,13 @@ func (s *Store) migrate(ctx context.Context) error {
 
 func (s *Store) seed(ctx context.Context) error {
 	roles := []Role{
-		{ID: "audio", Name: "Audio", DefaultRoomID: "foh", DefaultVoiceMode: "always_on"},
+		{ID: "audio", Name: "Audio", DefaultRoomID: "foh", DefaultVoiceMode: "ptt"},
 		{ID: "video", Name: "Video", DefaultRoomID: "video-control", DefaultVoiceMode: "ptt"},
 		{ID: "lighting", Name: "Lighting", DefaultRoomID: "lighting-booth", DefaultVoiceMode: "ptt"},
-		{ID: "broadcast", Name: "Broadcast", DefaultRoomID: "livestream", DefaultVoiceMode: "always_on"},
+		{ID: "broadcast", Name: "Broadcast", DefaultRoomID: "livestream", DefaultVoiceMode: "ptt"},
 		{ID: "camera", Name: "Camera", DefaultRoomID: "stage", DefaultVoiceMode: "ptt", DefaultSimpleView: true},
 		{ID: "pastor", Name: "Pastor", DefaultRoomID: "stage", DefaultVoiceMode: "ptt"},
-		{ID: "producer", Name: "Producer", DefaultRoomID: "foh", DefaultVoiceMode: "always_on"},
+		{ID: "producer", Name: "Producer", DefaultRoomID: "foh", DefaultVoiceMode: "ptt"},
 	}
 	for _, role := range roles {
 		defaultSimpleView := 0

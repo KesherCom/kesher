@@ -54,6 +54,27 @@ func TestCreateRoleRejectsInvalidDefaultVoiceMode(t *testing.T) {
 	}
 }
 
+func TestSeedRolesDefaultVoiceModeIsPTT(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	roles, err := store.ListRoles(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roles) == 0 {
+		t.Fatal("expected seeded roles")
+	}
+	for _, role := range roles {
+		if role.DefaultVoiceMode != "ptt" {
+			t.Fatalf("expected role %q default voice mode to be ptt, got %q", role.ID, role.DefaultVoiceMode)
+		}
+	}
+}
+
 func TestDeleteRoleConflictsWhenRoleAssignedToUser(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
