@@ -6,11 +6,15 @@ import type { StreamDeckButtonConfig, StreamDeckSettings } from "../types";
 
 export type StreamDeckRenderableButton = StreamDeckButtonConfig & {
   isListening?: boolean;
+  attentionActive?: boolean;
+  attentionPulseOn?: boolean;
 };
 
 const defaultBackground = "#182028";
 const defaultForeground = "#eef4ff";
 const streamDeckCanvasBackground = "#000000";
+const attentionNeonPrimary = "#ffe600";
+const attentionNeonSecondary = "#ffaa00";
 
 type KeyPalette = {
   background: string;
@@ -530,12 +534,17 @@ function createButtonCanvasFromSize(
 
   const actionType = button.action?.type ?? "none";
   const useEmergencyPressedColor = pressed && actionType !== "listen_room";
+  const useAttentionPulse =
+    !pressed && !!button.attentionActive && !!button.attentionPulseOn;
+  const attentionActive = !pressed && !!button.attentionActive;
   const accent = getActionAccent(actionType);
   const palette = getButtonPalette(button, pressed);
   const fill = palette.background;
   const stroke = pressed ? mixColors(palette.border, "#ffffff", 0.2) : palette.border;
   const radius = Math.max(10, Math.round(canvas.width * 0.12));
-  const textColor = palette.label;
+  const textColor = attentionActive
+    ? mixColors(palette.label, "#ffffff", useAttentionPulse ? 0.24 : 0.14)
+    : palette.label;
   const cardInset = 2;
   const cardX = cardInset;
   const cardY = cardInset;
@@ -560,6 +569,37 @@ function createButtonCanvasFromSize(
   ctx.lineWidth = useEmergencyPressedColor ? 4 : 3;
   ctx.strokeStyle = stroke;
   ctx.stroke();
+
+  if (attentionActive) {
+    const overlayOpacity = useAttentionPulse ? 0.72 : 0.44;
+    const centerGlow = ctx.createRadialGradient(
+      cardX + cardWidth * 0.5,
+      cardY + cardHeight * 0.5,
+      cardWidth * 0.1,
+      cardX + cardWidth * 0.5,
+      cardY + cardHeight * 0.5,
+      cardWidth * 0.82,
+    );
+    centerGlow.addColorStop(0, `${attentionNeonPrimary}ff`);
+    centerGlow.addColorStop(0.45, `${attentionNeonSecondary}cc`);
+    centerGlow.addColorStop(1, `${attentionNeonPrimary}33`);
+
+    ctx.save();
+    roundedRect(ctx, cardX, cardY, cardWidth, cardHeight, radius);
+    ctx.clip();
+    ctx.globalAlpha = overlayOpacity;
+    ctx.globalCompositeOperation = "screen";
+    ctx.fillStyle = centerGlow;
+    ctx.fillRect(cardX, cardY, cardWidth, cardHeight);
+    ctx.restore();
+  }
+
+  if (useAttentionPulse) {
+    roundedRect(ctx, cardX - 1, cardY - 1, cardWidth + 2, cardHeight + 2, radius + 1);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = attentionNeonPrimary;
+    ctx.stroke();
+  }
 
   if (useEmergencyPressedColor) {
     roundedRect(ctx, cardX - 1, cardY - 1, cardWidth + 2, cardHeight + 2, radius + 1);
@@ -700,9 +740,15 @@ export async function renderStreamDeckButton(
   }
 
   if (control.feedbackType === "rgb") {
-    const color = pressed
-      ? mixColors(button.color ?? defaultBackground, "#ffffff", 0.2)
-      : normalizeHexColor(button.color || defaultBackground);
+    const color = (() => {
+      if (pressed) {
+        return mixColors(button.color ?? defaultBackground, "#ffffff", 0.2);
+      }
+      if (button.attentionActive) {
+        return button.attentionPulseOn ? attentionNeonPrimary : attentionNeonSecondary;
+      }
+      return normalizeHexColor(button.color || defaultBackground);
+    })();
     const { r, g, b } = hexToRgb(color);
     await deck.fillKeyColor(control.index, r, g, b);
     return;

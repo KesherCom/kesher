@@ -136,6 +136,8 @@ function streamDeckButtonRenderSignature(
     action?.broadcastGroupId || "",
     action?.volumeDelta ?? "",
     button.isListening ? "1" : "0",
+    button.attentionActive ? "1" : "0",
+    button.attentionPulseOn ? "1" : "0",
     pressed ? "1" : "0",
   ].join("|");
 }
@@ -293,6 +295,8 @@ export function App() {
   const listenRoomIdsRef = useRef<string[]>([]);
   const presenceRef = useRef<Presence[]>([]);
   const lastDirectCallerUserIdRef = useRef<string | null>(null);
+  const incomingAttentionRef = useRef(false);
+  const streamDeckAttentionPulseOnRef = useRef(false);
   const streamDeckPressedRoleTargetsRef = useRef<Map<string, string>>(new Map());
   const streamDeckHidSessionRef = useRef<{
     deck: StreamDeckWeb;
@@ -359,6 +363,8 @@ export function App() {
           const currentAppData = appDataRef.current;
           const listenRoomIds = listenRoomIdsRef.current;
           const activePresence = presenceRef.current;
+          const attentionActive = incomingAttentionRef.current;
+          const attentionPulseOn = streamDeckAttentionPulseOnRef.current;
           if (!session || !settings || !currentAppData) {
             break;
           }
@@ -385,6 +391,8 @@ export function App() {
                     rawButton.action?.type === "listen_room") &&
                   !!rawButton.action.roomId &&
                   listeningRoomIds.has(rawButton.action.roomId),
+                attentionActive,
+                attentionPulseOn,
               },
             ]),
           );
@@ -604,6 +612,40 @@ export function App() {
     session.lastDirectCallerUserId,
     session.listenRoomIds,
     streamDeckSettings,
+    streamDeckWebHidActive,
+  ]);
+
+  useEffect(() => {
+    const hasIncomingAttention = !!session.incomingAttention;
+    incomingAttentionRef.current = hasIncomingAttention;
+
+    if (!hasIncomingAttention) {
+      streamDeckAttentionPulseOnRef.current = false;
+      if (streamDeckWebHidActive) {
+        void renderConnectedStreamDeck({ force: true });
+      }
+      return;
+    }
+
+    streamDeckAttentionPulseOnRef.current = true;
+    if (streamDeckWebHidActive) {
+      void renderConnectedStreamDeck({ force: true });
+    }
+
+    const pulseInterval = window.setInterval(() => {
+      streamDeckAttentionPulseOnRef.current =
+        !streamDeckAttentionPulseOnRef.current;
+      if (streamDeckWebHidActive) {
+        void renderConnectedStreamDeck({ force: true });
+      }
+    }, 260);
+
+    return () => {
+      window.clearInterval(pulseInterval);
+    };
+  }, [
+    renderConnectedStreamDeck,
+    session.incomingAttention,
     streamDeckWebHidActive,
   ]);
 
