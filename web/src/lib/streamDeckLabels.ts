@@ -9,7 +9,30 @@ type StreamDeckLabelLookup = {
   users: Array<{ id: string; username: string; roleId?: string }>;
   activeUsers?: Array<{ id: string; username: string; roleId?: string }>;
   broadcastGroups: Array<{ id: string; name: string }>;
+  lastDirectCallerUserId?: string | null;
 };
+
+function resolveReplyTargetLabel(lookup: StreamDeckLabelLookup): string {
+  if (!lookup.lastDirectCallerUserId) {
+    return "No active caller";
+  }
+
+  const activeUser = lookup.activeUsers?.find(
+    (entry) => entry.id === lookup.lastDirectCallerUserId,
+  );
+  if (activeUser?.username) {
+    return activeUser.username;
+  }
+
+  const knownUser = lookup.users.find(
+    (entry) => entry.id === lookup.lastDirectCallerUserId,
+  );
+  if (knownUser?.username) {
+    return knownUser.username;
+  }
+
+  return "Unknown caller";
+}
 
 function resolveActionLabel(
   action: StreamDeckButtonAction | undefined,
@@ -71,7 +94,7 @@ function resolveActionLabel(
           ?.name || action.broadcastGroupId
       );
     case "reply_to_caller":
-      return "Reply";
+      return `Reply\n${resolveReplyTargetLabel(lookup)}`;
     case "mute_toggle":
       return "Mute";
     case "volume_delta":
@@ -90,6 +113,17 @@ export function withResolvedStreamDeckButtonLabel(
   button: StreamDeckButtonConfig,
   lookup: StreamDeckLabelLookup,
 ): StreamDeckButtonConfig {
+  if (button.action?.type === "reply_to_caller") {
+    const existingLabel = button.label?.trim() ?? "";
+    const primaryLabel =
+      existingLabel.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ||
+      "Reply";
+    return {
+      ...button,
+      label: `${primaryLabel}\n${resolveReplyTargetLabel(lookup)}`,
+    };
+  }
+
   if (button.label?.trim()) {
     return button;
   }

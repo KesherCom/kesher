@@ -292,6 +292,7 @@ export function App() {
   const appDataRef = useRef<Bootstrap | null>(null);
   const listenRoomIdsRef = useRef<string[]>([]);
   const presenceRef = useRef<Presence[]>([]);
+  const lastDirectCallerUserIdRef = useRef<string | null>(null);
   const streamDeckPressedRoleTargetsRef = useRef<Map<string, string>>(new Map());
   const streamDeckHidSessionRef = useRef<{
     deck: StreamDeckWeb;
@@ -331,6 +332,10 @@ export function App() {
     presenceRef.current = session.presence;
   }, [session.presence]);
 
+  useEffect(() => {
+    lastDirectCallerUserIdRef.current = session.lastDirectCallerUserId;
+  }, [session.lastDirectCallerUserId]);
+
   const renderConnectedStreamDeck = useCallback(
     async (options?: StreamDeckRenderRequest) => {
       const request = options || {};
@@ -349,6 +354,7 @@ export function App() {
           streamDeckPendingRenderRef.current = null;
 
           const session = streamDeckHidSessionRef.current;
+          const lastDirectCallerUserId = lastDirectCallerUserIdRef.current;
           const settings = streamDeckSettingsRef.current;
           const currentAppData = appDataRef.current;
           const listenRoomIds = listenRoomIdsRef.current;
@@ -371,6 +377,7 @@ export function App() {
                     username: entry.username,
                     roleId: entry.roleId,
                   })),
+                  lastDirectCallerUserId,
                   broadcastGroups: currentAppData.broadcastGroups,
                 }),
                 isListening:
@@ -594,6 +601,7 @@ export function App() {
     void renderConnectedStreamDeck({ force: true });
   }, [
     renderConnectedStreamDeck,
+    session.lastDirectCallerUserId,
     session.listenRoomIds,
     streamDeckSettings,
     streamDeckWebHidActive,
