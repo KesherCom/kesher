@@ -46,6 +46,7 @@ import { createStreamDeckDevTools } from "./lib/streamDeckDevTools";
 import {
   getStreamDeckPageButtons,
   renderStreamDeckButton,
+  type StreamDeckRenderableButton,
 } from "./lib/streamDeckHardwareFeedback";
 import { withResolvedStreamDeckButtonLabel } from "./lib/streamDeckLabels";
 import { sortDirectUsersByRoleAndUsername } from "./lib/users";
@@ -91,6 +92,51 @@ function localDefaultStreamDeckSettings(): StreamDeckSettings {
       },
     ],
   };
+}
+
+type StreamDeckRenderRequest = {
+  buttonIndex?: number;
+  force?: boolean;
+};
+
+function mergeStreamDeckRenderRequests(
+  current: StreamDeckRenderRequest | null,
+  next: StreamDeckRenderRequest,
+): StreamDeckRenderRequest {
+  if (!current) return next;
+  if (current.force || next.force) {
+    return { force: true };
+  }
+  if (
+    typeof current.buttonIndex === "number" &&
+    typeof next.buttonIndex === "number" &&
+    current.buttonIndex === next.buttonIndex
+  ) {
+    return { buttonIndex: current.buttonIndex };
+  }
+  return {};
+}
+
+function streamDeckButtonRenderSignature(
+  page: number,
+  button: StreamDeckRenderableButton,
+  pressed: boolean,
+): string {
+  const action = button.action;
+  return [
+    page,
+    button.index,
+    button.label || "",
+    button.color || "",
+    action?.type || "none",
+    action?.roomId || "",
+    action?.userId || "",
+    action?.roleId || "",
+    action?.broadcastGroupId || "",
+    action?.volumeDelta ?? "",
+    button.isListening ? "1" : "0",
+    pressed ? "1" : "0",
+  ].join("|");
 }
 
 export function App() {
@@ -260,6 +306,13 @@ export function App() {
     ) => void;
     onError: (error: unknown) => void;
   } | null>(null);
+  const streamDeckRenderInFlightRef = useRef(false);
+  const streamDeckPendingRenderRef = useRef<StreamDeckRenderRequest | null>(
+    null,
+  );
+  const streamDeckRenderedSignatureByIndexRef = useRef<Map<number, string>>(
+    new Map(),
+  );
   useEffect(() => {
     streamDeckSettingsRef.current = streamDeckSettings;
   }, [streamDeckSettings]);
@@ -273,49 +326,84 @@ export function App() {
   }, [session.listenRoomIds]);
 
   const renderConnectedStreamDeck = useCallback(
-    async (options?: { buttonIndex?: number }) => {
-      const session = streamDeckHidSessionRef.current;
-      const settings = streamDeckSettingsRef.current;
-      const currentAppData = appDataRef.current;
-      const listenRoomIds = listenRoomIdsRef.current;
-      if (!session || !settings || !currentAppData) return;
-
-      const buttonMap = new Map<number, StreamDeckButtonConfig>(
-        getStreamDeckPageButtons(settings).map((rawButton) => [
-          rawButton.index,
-          {
-            ...withResolvedStreamDeckButtonLabel(rawButton, {
-              rooms: currentAppData.rooms,
-              roles: currentAppData.roles,
-              users: currentAppData.users,
-              broadcastGroups: currentAppData.broadcastGroups,
-            }),
-            isListening:
-              (rawButton.action?.type === "ptt_room" ||
-                rawButton.action?.type === "listen_room") &&
-              !!rawButton.action.roomId &&
-              listenRoomIds.includes(rawButton.action.roomId),
-          },
-        ]),
+    async (options?: StreamDeckRenderRequest) => {
+      const request = options || {};
+      streamDeckPendingRenderRef.current = mergeStreamDeckRenderRequests(
+        streamDeckPendingRenderRef.current,
+        request,
       );
-      const controls = session.deck.CONTROLS.filter(
-        (control): control is StreamDeckButtonControlDefinition =>
-          control.type === "button",
-      );
-      const targetControls =
-        typeof options?.buttonIndex === "number"
-          ? controls.filter((control) => control.index === options.buttonIndex)
-          : controls;
+      if (streamDeckRenderInFlightRef.current) {
+        return;
+      }
 
+      streamDeckRenderInFlightRef.current = true;
       try {
-        for (const control of targetControls) {
-          const button = buttonMap.get(control.index) ?? { index: control.index };
-          await renderStreamDeckButton(
-            session.deck,
-            control,
-            button,
-            session.pressedButtons.has(control.index),
+        while (streamDeckPendingRenderRef.current) {
+          const nextRequest = streamDeckPendingRenderRef.current;
+          streamDeckPendingRenderRef.current = null;
+
+          const session = streamDeckHidSessionRef.current;
+          const settings = streamDeckSettingsRef.current;
+          const currentAppData = appDataRef.current;
+          const listenRoomIds = listenRoomIdsRef.current;
+          if (!session || !settings || !currentAppData) {
+            break;
+          }
+
+          const listeningRoomIds = new Set(listenRoomIds);
+          const buttonMap = new Map<number, StreamDeckRenderableButton>(
+            getStreamDeckPageButtons(settings).map((rawButton) => [
+              rawButton.index,
+              {
+                ...withResolvedStreamDeckButtonLabel(rawButton, {
+                  rooms: currentAppData.rooms,
+                  roles: currentAppData.roles,
+                  users: currentAppData.users,
+                  broadcastGroups: currentAppData.broadcastGroups,
+                }),
+                isListening:
+                  (rawButton.action?.type === "ptt_room" ||
+                    rawButton.action?.type === "listen_room") &&
+                  !!rawButton.action.roomId &&
+                  listeningRoomIds.has(rawButton.action.roomId),
+              },
+            ]),
           );
+          const controls = session.deck.CONTROLS.filter(
+            (control): control is StreamDeckButtonControlDefinition =>
+              control.type === "button",
+          );
+          const targetControls =
+            typeof nextRequest.buttonIndex === "number"
+              ? controls.filter(
+                  (control) => control.index === nextRequest.buttonIndex,
+                )
+              : controls;
+
+          for (const control of targetControls) {
+            const button =
+              buttonMap.get(control.index) ?? ({ index: control.index } as StreamDeckRenderableButton);
+            const pressed = session.pressedButtons.has(control.index);
+            const signature = streamDeckButtonRenderSignature(
+              settings.selectedPage,
+              button,
+              pressed,
+            );
+
+            if (!nextRequest.force) {
+              const previous =
+                streamDeckRenderedSignatureByIndexRef.current.get(control.index);
+              if (previous === signature) {
+                continue;
+              }
+            }
+
+            await renderStreamDeckButton(session.deck, control, button, pressed);
+            streamDeckRenderedSignatureByIndexRef.current.set(
+              control.index,
+              signature,
+            );
+          }
         }
       } catch (error) {
         setStreamDeckError(
@@ -323,6 +411,8 @@ export function App() {
             ? error.message
             : "Failed to update Stream Deck display.",
         );
+      } finally {
+        streamDeckRenderInFlightRef.current = false;
       }
     },
     [],
@@ -353,6 +443,8 @@ export function App() {
       if (!session) return;
       const announce = options?.announce ?? true;
       streamDeckHidSessionRef.current = null;
+      streamDeckPendingRenderRef.current = null;
+      streamDeckRenderedSignatureByIndexRef.current.clear();
 
       try {
         session.deck.off("down", session.onDown);
@@ -461,7 +553,7 @@ export function App() {
       await deck.setBrightness(70);
 
       setStreamDeckWebHidActive(true);
-      await renderConnectedStreamDeck();
+      await renderConnectedStreamDeck({ force: true });
       emitStreamDeckBridgeEvent({
         source: "kesher-streamdeck",
         type: "connection",
@@ -487,10 +579,9 @@ export function App() {
 
   useEffect(() => {
     if (!streamDeckWebHidActive) return;
-    void renderConnectedStreamDeck();
+    void renderConnectedStreamDeck({ force: true });
   }, [
     renderConnectedStreamDeck,
-    session.voiceMode,
     session.listenRoomIds,
     streamDeckSettings,
     streamDeckWebHidActive,
@@ -1169,6 +1260,12 @@ export function App() {
     };
 
     const onMessage = (event: MessageEvent) => {
+      const payload = event.data as Record<string, unknown> | null;
+      if (!payload || typeof payload !== "object") return;
+      const type = typeof payload.type === "string" ? payload.type : "";
+      if (type !== "button" && type !== "key" && type !== "connection") {
+        return;
+      }
       const parsed = parseStreamDeckBridgeEvent(event.data);
       handleBridgeAction(parsed);
     };

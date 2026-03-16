@@ -217,6 +217,26 @@ function cloneStreamDeckSettings(settings: StreamDeckSettings): StreamDeckSettin
   };
 }
 
+function streamDeckPreviewSignature(
+  button: StreamDeckButtonConfig & { isListening?: boolean },
+  pressed: boolean,
+): string {
+  const action = button.action;
+  return [
+    button.index,
+    button.label || "",
+    button.color || "",
+    action?.type || "none",
+    action?.roomId || "",
+    action?.userId || "",
+    action?.roleId || "",
+    action?.broadcastGroupId || "",
+    action?.volumeDelta ?? "",
+    button.isListening ? "1" : "0",
+    pressed ? "1" : "0",
+  ].join("|");
+}
+
 function meterDbFsToPercent(dbFs: number): number {
   const clamped = Math.max(METER_DBFS_MIN, Math.min(0, dbFs));
   return ((clamped - METER_DBFS_MIN) / (0 - METER_DBFS_MIN)) * 100;
@@ -456,6 +476,9 @@ export function StationIntercomView({
   const [streamDeckUndoStack, setStreamDeckUndoStack] = useState<
     StreamDeckSettings[]
   >([]);
+  const streamDeckPreviewCacheRef = useRef<
+    Map<number, { signature: string; dataUrl: string }>
+  >(new Map());
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -604,41 +627,70 @@ export function StationIntercomView({
     [streamDeckCurrentButtons, streamDeckSelectedButtonIndex],
   );
 
+  const streamDeckLabelLookup = useMemo(
+    () => ({
+      rooms: appData.rooms,
+      roles: appData.roles,
+      users: appData.users,
+      broadcastGroups,
+    }),
+    [appData.rooms, appData.roles, appData.users, broadcastGroups],
+  );
+
+  const streamDeckPreviewPressedSet = useMemo(
+    () => new Set(streamDeckPreviewPressedIndexes),
+    [streamDeckPreviewPressedIndexes],
+  );
+
   const streamDeckPreviewImageByIndex = useMemo(() => {
+    const cache = streamDeckPreviewCacheRef.current;
+    const listeningRoomIds = new Set(listenRoomIds);
+    const visibleButtonIndices = new Set(
+      streamDeckCurrentButtons.map((button) => button.index),
+    );
+
+    for (const cachedIndex of Array.from(cache.keys())) {
+      if (!visibleButtonIndices.has(cachedIndex)) {
+        cache.delete(cachedIndex);
+      }
+    }
+
     return new Map(
       streamDeckCurrentButtons.map((rawButton) => {
-        const resolvedButton = withResolvedStreamDeckButtonLabel(rawButton, {
-          rooms: appData.rooms,
-          roles: appData.roles,
-          users: appData.users,
-          broadcastGroups,
-        });
+        const resolvedButton = withResolvedStreamDeckButtonLabel(
+          rawButton,
+          streamDeckLabelLookup,
+        );
         const button = {
           ...resolvedButton,
           isListening:
             (rawButton.action?.type === "ptt_room" ||
               rawButton.action?.type === "listen_room") &&
             !!rawButton.action.roomId &&
-            listenRoomIds.includes(rawButton.action.roomId),
+            listeningRoomIds.has(rawButton.action.roomId),
         };
-        return [
-          rawButton.index,
-        createStreamDeckButtonPreviewDataUrl(button, {
-          pressed: streamDeckPreviewPressedIndexes.includes(rawButton.index),
+        const pressed = streamDeckPreviewPressedSet.has(rawButton.index);
+        const signature = streamDeckPreviewSignature(button, pressed);
+        const cached = cache.get(rawButton.index);
+
+        if (cached && cached.signature === signature) {
+          return [rawButton.index, cached.dataUrl] as const;
+        }
+
+        const dataUrl = createStreamDeckButtonPreviewDataUrl(button, {
+          pressed,
           width: 112,
           height: 112,
-        }),
-        ] as const;
+        });
+        cache.set(rawButton.index, { signature, dataUrl });
+        return [rawButton.index, dataUrl] as const;
       }),
     );
   }, [
-    appData.rooms,
-    appData.roles,
-    appData.users,
-    broadcastGroups,
     listenRoomIds,
+    streamDeckLabelLookup,
     streamDeckCurrentButtons,
-    streamDeckPreviewPressedIndexes,
+    streamDeckPreviewPressedSet,
   ]);
 
   const startStreamDeckPreviewPress = (buttonIndex: number) => {
