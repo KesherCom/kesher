@@ -35,7 +35,8 @@ export type ConfigurationSection =
   | "rooms"
   | "broadcastGroups"
   | "telegramAllowlist"
-  | "ackSettings";
+  | "ackSettings"
+  | "streamDeckSettings";
 
 export type ConfigurationMetadata = {
   format: string;
@@ -50,6 +51,11 @@ export type ConfigurationUserAssignment = {
   roleId: string;
 };
 
+export type ConfigurationUserStreamDeckSettings = {
+  username: string;
+  settings: StreamDeckSettings;
+};
+
 export type ConfigurationDocument = {
   meta: ConfigurationMetadata;
   roles: Role[];
@@ -58,6 +64,7 @@ export type ConfigurationDocument = {
   broadcastGroups: BroadcastGroup[];
   telegramAllowlist: TelegramAllowlistEntry[];
   ackSettings: { enabled: boolean } | null;
+  streamDeckSettings: ConfigurationUserStreamDeckSettings[];
 };
 
 export type ConfigurationImportResponse = {

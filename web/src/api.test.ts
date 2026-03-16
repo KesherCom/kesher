@@ -92,6 +92,7 @@ const server = setupServer(
           "broadcastGroups",
           "telegramAllowlist",
           "ackSettings",
+          "streamDeckSettings",
         ],
       },
       roles: [{ id: "op", name: "Operator" }],
@@ -110,6 +111,7 @@ const server = setupServer(
         },
       ],
       ackSettings: { enabled: true },
+      streamDeckSettings: [],
     });
   }),
   http.post("http://localhost/api/admin/configuration-import", async ({ request }) => {
@@ -286,6 +288,7 @@ describe("api helpers", () => {
             "broadcastGroups",
             "telegramAllowlist",
             "ackSettings",
+            "streamDeckSettings",
           ],
         },
         roles: [],
@@ -294,6 +297,7 @@ describe("api helpers", () => {
         broadcastGroups: [],
         telegramAllowlist: [],
         ackSettings: { enabled: true },
+        streamDeckSettings: [],
       },
       ["roles", "rooms"],
     );

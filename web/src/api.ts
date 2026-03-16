@@ -98,6 +98,9 @@ function normalizeConfigurationDocument(data: unknown): ConfigurationDocument {
   const telegramAllowlist = Array.isArray(raw.telegramAllowlist)
     ? raw.telegramAllowlist
     : [];
+  const streamDeckSettings = Array.isArray(raw.streamDeckSettings)
+    ? raw.streamDeckSettings
+    : [];
   const meta = (raw.meta ?? {}) as Record<string, unknown>;
   const ackSettings = (raw.ackSettings ?? null) as Record<string, unknown> | null;
 
@@ -152,6 +155,13 @@ function normalizeConfigurationDocument(data: unknown): ConfigurationDocument {
       ackSettings && typeof ackSettings.enabled === "boolean"
         ? { enabled: ackSettings.enabled }
         : null,
+    streamDeckSettings: streamDeckSettings.map((assignment) => {
+      const entry = assignment as Record<string, unknown>;
+      return {
+        username: typeof entry.username === "string" ? entry.username : "",
+        settings: normalizeStreamDeckSettings(entry.settings),
+      };
+    }),
   };
 }
 

@@ -38,6 +38,39 @@ func TestExportConfigurationDocumentIncludesMetadataHeader(t *testing.T) {
 	}
 }
 
+func TestExportConfigurationDocumentIncludesStreamDeckSettings(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	user, err := store.UpsertUser(context.Background(), "alice", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeReplyToCaller}
+	if _, err := store.UpsertUserStreamDeckSettings(context.Background(), user.ID, settings); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{store: store}
+	doc, err := s.exportConfigurationDocument(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.StreamDeck) != 1 {
+		t.Fatalf("expected 1 stream deck assignment, got %d", len(doc.StreamDeck))
+	}
+	if doc.StreamDeck[0].Username != "alice" {
+		t.Fatalf("unexpected stream deck username: %q", doc.StreamDeck[0].Username)
+	}
+	if doc.StreamDeck[0].Settings.Pages[0].Buttons[0].Action == nil || doc.StreamDeck[0].Settings.Pages[0].Buttons[0].Action.Type != StreamDeckActionTypeReplyToCaller {
+		t.Fatalf("unexpected stream deck action: %+v", doc.StreamDeck[0].Settings.Pages[0].Buttons[0].Action)
+	}
+}
+
 func TestImportConfigurationReplacesSelectedSectionsAndPreservesOthers(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
@@ -283,6 +316,55 @@ func TestImportConfigurationAcceptsOmittedEmptyTelegramAllowlistField(t *testing
 	}
 	if !slicesEqual(sections, []string{configurationSectionTelegramAllowlist}) {
 		t.Fatalf("unexpected imported sections: %v", sections)
+	}
+}
+
+func TestImportConfigurationReplacesStreamDeckSettings(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	user, err := store.UpsertUser(context.Background(), "alice", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := DefaultStreamDeckSettings()
+	initial.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeReplyToCaller}
+	if _, err := store.UpsertUserStreamDeckSettings(context.Background(), user.ID, initial); err != nil {
+		t.Fatal(err)
+	}
+
+	updated := DefaultStreamDeckSettings()
+	updated.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp}
+
+	s := &Server{store: store, ackEnabled: true, ackSet: true}
+	_, sections, _, err := s.importConfigurationDocument(context.Background(), ConfigurationImportRequest{
+		Document: ConfigurationDocument{
+			Meta: ConfigurationMetadata{
+				Format:        configurationDocumentFormat,
+				SchemaVersion: configurationDocumentSchemaVersion,
+				ExportedAt:    time.Now().UTC().Format(time.RFC3339),
+				Sections:      []string{configurationSectionStreamDeck},
+			},
+			StreamDeck: []ConfigurationUserStreamDeckSettings{
+				{Username: "alice", Settings: updated},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slicesEqual(sections, []string{configurationSectionStreamDeck}) {
+		t.Fatalf("unexpected imported sections: %v", sections)
+	}
+	loaded, err := store.GetUserStreamDeckSettings(context.Background(), user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Pages[0].Buttons[0].Action == nil || loaded.Pages[0].Buttons[0].Action.Type != StreamDeckActionTypePageUp {
+		t.Fatalf("expected imported stream deck action, got %+v", loaded.Pages[0].Buttons[0].Action)
 	}
 }
 

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -20,6 +21,7 @@ const (
 	configurationSectionBroadcastGroups   = "broadcastGroups"
 	configurationSectionTelegramAllowlist = "telegramAllowlist"
 	configurationSectionAckSettings       = "ackSettings"
+	configurationSectionStreamDeck        = "streamDeckSettings"
 )
 
 var allConfigurationSections = []string{
@@ -29,6 +31,7 @@ var allConfigurationSections = []string{
 	configurationSectionBroadcastGroups,
 	configurationSectionTelegramAllowlist,
 	configurationSectionAckSettings,
+	configurationSectionStreamDeck,
 }
 
 type ConfigurationMetadata struct {
@@ -44,14 +47,20 @@ type ConfigurationUserAssignment struct {
 	RoleID   string `json:"roleId"`
 }
 
+type ConfigurationUserStreamDeckSettings struct {
+	Username string             `json:"username"`
+	Settings StreamDeckSettings `json:"settings"`
+}
+
 type ConfigurationDocument struct {
-	Meta              ConfigurationMetadata         `json:"meta"`
-	Roles             []Role                        `json:"roles,omitempty"`
-	Users             []ConfigurationUserAssignment `json:"users,omitempty"`
-	Rooms             []Room                        `json:"rooms,omitempty"`
-	BroadcastGroups   []BroadcastGroup              `json:"broadcastGroups,omitempty"`
-	TelegramAllowlist []TelegramAllowlistEntry      `json:"telegramAllowlist,omitempty"`
-	AckSettings       *AckSettings                  `json:"ackSettings,omitempty"`
+	Meta              ConfigurationMetadata                 `json:"meta"`
+	Roles             []Role                                `json:"roles,omitempty"`
+	Users             []ConfigurationUserAssignment         `json:"users,omitempty"`
+	Rooms             []Room                                `json:"rooms,omitempty"`
+	BroadcastGroups   []BroadcastGroup                      `json:"broadcastGroups,omitempty"`
+	TelegramAllowlist []TelegramAllowlistEntry              `json:"telegramAllowlist,omitempty"`
+	AckSettings       *AckSettings                          `json:"ackSettings,omitempty"`
+	StreamDeck        []ConfigurationUserStreamDeckSettings `json:"streamDeckSettings,omitempty"`
 }
 
 type ConfigurationImportRequest struct {
@@ -70,6 +79,7 @@ type configurationState struct {
 	BroadcastGroups   []BroadcastGroup
 	TelegramAllowlist []TelegramAllowlistEntry
 	AckEnabled        bool
+	StreamDeck        []ConfigurationUserStreamDeckSettings
 }
 
 func invalidInputf(format string, args ...any) error {
@@ -106,6 +116,7 @@ func (s *Server) exportConfigurationDocument(ctx context.Context) (Configuration
 		BroadcastGroups:   append([]BroadcastGroup{}, state.BroadcastGroups...),
 		TelegramAllowlist: append([]TelegramAllowlistEntry{}, state.TelegramAllowlist...),
 		AckSettings:       &AckSettings{Enabled: s.isAckEnabled()},
+		StreamDeck:        append([]ConfigurationUserStreamDeckSettings{}, state.StreamDeck...),
 	}, nil
 }
 
@@ -130,13 +141,53 @@ func (s *Store) currentConfigurationState(ctx context.Context) (configurationSta
 	if err != nil {
 		return configurationState{}, err
 	}
+	streamDeck, err := s.ListUserStreamDeckSettingsByUsername(ctx)
+	if err != nil {
+		return configurationState{}, err
+	}
 	return configurationState{
 		Roles:             roles,
 		Users:             users,
 		Rooms:             rooms,
 		BroadcastGroups:   groups,
 		TelegramAllowlist: allowlist,
+		StreamDeck:        streamDeck,
 	}, nil
+}
+
+func (s *Store) ListUserStreamDeckSettingsByUsername(ctx context.Context) ([]ConfigurationUserStreamDeckSettings, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT users.username, user_stream_deck_settings.settings_json
+		FROM user_stream_deck_settings
+		JOIN users ON users.id = user_stream_deck_settings.user_id
+		ORDER BY users.username`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]ConfigurationUserStreamDeckSettings, 0)
+	for rows.Next() {
+		var username string
+		var raw string
+		if err := rows.Scan(&username, &raw); err != nil {
+			return nil, err
+		}
+		var settings StreamDeckSettings
+		if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+			return nil, ErrInvalidInput
+		}
+		normalized, err := validateStreamDeckSettings(settings)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, ConfigurationUserStreamDeckSettings{
+			Username: username,
+			Settings: normalized,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func mergeConfigurationImport(current configurationState, doc ConfigurationDocument, requestedSections []string) (configurationState, []string, error) {
@@ -151,6 +202,7 @@ func mergeConfigurationImport(current configurationState, doc ConfigurationDocum
 		BroadcastGroups:   append([]BroadcastGroup(nil), current.BroadcastGroups...),
 		TelegramAllowlist: append([]TelegramAllowlistEntry(nil), current.TelegramAllowlist...),
 		AckEnabled:        current.AckEnabled,
+		StreamDeck:        append([]ConfigurationUserStreamDeckSettings(nil), current.StreamDeck...),
 	}
 	for _, section := range sections {
 		switch section {
@@ -166,6 +218,12 @@ func mergeConfigurationImport(current configurationState, doc ConfigurationDocum
 			merged.TelegramAllowlist = append([]TelegramAllowlistEntry(nil), doc.TelegramAllowlist...)
 		case configurationSectionAckSettings:
 			merged.AckEnabled = doc.AckSettings.Enabled
+		case configurationSectionStreamDeck:
+			normalizedStreamDeck, err := normalizeImportedStreamDeckAssignments(doc.StreamDeck)
+			if err != nil {
+				return configurationState{}, nil, err
+			}
+			merged.StreamDeck = normalizedStreamDeck
 		}
 	}
 	if err := validateConfigurationState(merged); err != nil {
@@ -251,9 +309,38 @@ func configurationDocumentHasSection(doc ConfigurationDocument, section string) 
 		return true
 	case configurationSectionAckSettings:
 		return doc.AckSettings != nil
+	case configurationSectionStreamDeck:
+		return true
 	default:
 		return false
 	}
+}
+
+func normalizeImportedStreamDeckAssignments(imported []ConfigurationUserStreamDeckSettings) ([]ConfigurationUserStreamDeckSettings, error) {
+	normalized := make([]ConfigurationUserStreamDeckSettings, 0, len(imported))
+	seenUsernames := make(map[string]struct{}, len(imported))
+	for _, assignment := range imported {
+		username := strings.TrimSpace(assignment.Username)
+		if username == "" {
+			return nil, invalidInputf("streamDeckSettings username is required")
+		}
+		if _, ok := seenUsernames[username]; ok {
+			return nil, conflictf("duplicate streamDeckSettings username %q", username)
+		}
+		settings, err := validateStreamDeckSettings(assignment.Settings)
+		if err != nil {
+			if errors.Is(err, ErrInvalidInput) {
+				return nil, invalidInputf("streamDeckSettings for %q is invalid", username)
+			}
+			return nil, err
+		}
+		seenUsernames[username] = struct{}{}
+		normalized = append(normalized, ConfigurationUserStreamDeckSettings{
+			Username: username,
+			Settings: settings,
+		})
+	}
+	return normalized, nil
 }
 
 func importedAssignmentsToUsers(imported []ConfigurationUserAssignment) []User {
@@ -381,6 +468,24 @@ func validateConfigurationState(state configurationState) error {
 		userByUsername[strings.ToLower(username)] = struct{}{}
 	}
 
+	streamDeckByUsername := make(map[string]struct{}, len(state.StreamDeck))
+	for _, assignment := range state.StreamDeck {
+		username := strings.TrimSpace(assignment.Username)
+		if username == "" {
+			return invalidInputf("streamDeckSettings username is required")
+		}
+		if _, exists := streamDeckByUsername[username]; exists {
+			return conflictf("duplicate streamDeckSettings username %q", username)
+		}
+		if _, ok := usernames[username]; !ok {
+			return invalidInputf("streamDeckSettings references unknown username %q", username)
+		}
+		if _, err := validateStreamDeckSettings(assignment.Settings); err != nil {
+			return invalidInputf("streamDeckSettings for %q is invalid", username)
+		}
+		streamDeckByUsername[username] = struct{}{}
+	}
+
 	allowlistUsernames := make(map[string]struct{}, len(state.TelegramAllowlist))
 	allowlistNumericIDs := make(map[string]struct{}, len(state.TelegramAllowlist))
 	for _, entry := range state.TelegramAllowlist {
@@ -407,7 +512,7 @@ func validateConfigurationState(state configurationState) error {
 	return nil
 }
 
-func (s *Store) ReplaceConfiguration(ctx context.Context, state configurationState, updateUsers bool) error {
+func (s *Store) ReplaceConfiguration(ctx context.Context, state configurationState, updateUsers bool, rewriteStreamDeck bool) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -518,6 +623,36 @@ func (s *Store) ReplaceConfiguration(ctx context.Context, state configurationSta
 		}
 	}
 
+	if rewriteStreamDeck {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM user_stream_deck_settings`); err != nil {
+			return err
+		}
+		now := time.Now().Unix()
+		for _, assignment := range state.StreamDeck {
+			settingsJSON, err := json.Marshal(assignment.Settings)
+			if err != nil {
+				return err
+			}
+			result, err := tx.ExecContext(ctx, `INSERT INTO user_stream_deck_settings (user_id, settings_json, created_at, updated_at)
+				SELECT users.id, ?, ?, ? FROM users WHERE users.username = ?`,
+				string(settingsJSON),
+				now,
+				now,
+				assignment.Username,
+			)
+			if err != nil {
+				return err
+			}
+			affected, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if affected == 0 {
+				return invalidInputf("streamDeckSettings references unknown username %q", assignment.Username)
+			}
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -573,7 +708,8 @@ func (s *Server) importConfigurationDocument(ctx context.Context, req Configurat
 		return configurationState{}, nil, nil, err
 	}
 	updateUsers := slices.Contains(sections, configurationSectionUsers)
-	if err := s.store.ReplaceConfiguration(ctx, mergedState, updateUsers); err != nil {
+	rewriteStreamDeck := updateUsers || slices.Contains(sections, configurationSectionStreamDeck)
+	if err := s.store.ReplaceConfiguration(ctx, mergedState, updateUsers, rewriteStreamDeck); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return configurationState{}, nil, nil, ErrNotFound
 		}

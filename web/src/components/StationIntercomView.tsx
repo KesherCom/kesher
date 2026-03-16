@@ -48,6 +48,146 @@ function sliderFillPercent(gain: number): number {
 }
 
 const METER_DBFS_MIN = -60;
+const STREAM_DECK_IMPORT_FORMAT = "kesher-user-streamdeck";
+const STREAM_DECK_IMPORT_SCHEMA_VERSION = 1;
+
+type StreamDeckImportDocument = {
+  meta?: {
+    format?: string;
+    schemaVersion?: number;
+    exportedAt?: string;
+    username?: string;
+  };
+  settings?: unknown;
+};
+
+function normalizeImportedStreamDeckSettings(input: unknown): StreamDeckSettings {
+  const raw = (input ?? {}) as Record<string, unknown>;
+  const pagesRaw = Array.isArray(raw.pages) ? raw.pages : null;
+  if (!pagesRaw || pagesRaw.length === 0) {
+    throw new Error("Import failed: settings.pages must be a non-empty array.");
+  }
+  const gridColumns = Number(raw.gridColumns);
+  const gridRows = Number(raw.gridRows);
+  if (gridColumns !== 5 || gridRows !== 3) {
+    throw new Error("Import failed: only 5x3 Stream Deck layouts are supported.");
+  }
+
+  const selectedPage = Number(raw.selectedPage);
+  if (!Number.isInteger(selectedPage) || selectedPage < 0) {
+    throw new Error("Import failed: selectedPage must be a non-negative integer.");
+  }
+
+  const actionTypes = new Set<StreamDeckActionType>([
+    "none",
+    "ptt_room",
+    "direct_user",
+    "direct_role",
+    "reply_to_caller",
+    "broadcast_ptt",
+    "mute_toggle",
+    "volume_delta",
+    "page_up",
+    "page_down",
+  ]);
+
+  const normalizedPages = pagesRaw.map((pageEntry) => {
+    const pageRaw = (pageEntry ?? {}) as Record<string, unknown>;
+    const page = Number(pageRaw.page);
+    const buttonsRaw = Array.isArray(pageRaw.buttons) ? pageRaw.buttons : null;
+    if (!Number.isInteger(page) || page < 0 || !buttonsRaw || buttonsRaw.length !== 15) {
+      throw new Error("Import failed: each page must have a valid page id and exactly 15 buttons.");
+    }
+    const seenIndices = new Set<number>();
+    const buttons = buttonsRaw.map((buttonEntry) => {
+      const buttonRaw = (buttonEntry ?? {}) as Record<string, unknown>;
+      const index = Number(buttonRaw.index);
+      if (!Number.isInteger(index) || index < 0 || index >= 15 || seenIndices.has(index)) {
+        throw new Error("Import failed: button indices must be unique integers from 0 to 14.");
+      }
+      seenIndices.add(index);
+
+      const actionRaw = buttonRaw.action as Record<string, unknown> | undefined;
+      if (!actionRaw) {
+        return {
+          index,
+          label: typeof buttonRaw.label === "string" ? buttonRaw.label : "",
+          color: typeof buttonRaw.color === "string" ? buttonRaw.color : "",
+        };
+      }
+
+      const type = actionRaw.type;
+      if (typeof type !== "string" || !actionTypes.has(type as StreamDeckActionType)) {
+        throw new Error("Import failed: unsupported button action type.");
+      }
+
+      return {
+        index,
+        label: typeof buttonRaw.label === "string" ? buttonRaw.label : "",
+        color: typeof buttonRaw.color === "string" ? buttonRaw.color : "",
+        action: {
+          type: type as StreamDeckActionType,
+          roomId: typeof actionRaw.roomId === "string" ? actionRaw.roomId : undefined,
+          userId: typeof actionRaw.userId === "string" ? actionRaw.userId : undefined,
+          roleId: typeof actionRaw.roleId === "string" ? actionRaw.roleId : undefined,
+          broadcastGroupId:
+            typeof actionRaw.broadcastGroupId === "string"
+              ? actionRaw.broadcastGroupId
+              : undefined,
+          volumeDelta:
+            typeof actionRaw.volumeDelta === "number" && Number.isFinite(actionRaw.volumeDelta)
+              ? actionRaw.volumeDelta
+              : undefined,
+        },
+      };
+    });
+
+    return { page, buttons };
+  });
+
+  if (!normalizedPages.some((entry) => entry.page === selectedPage)) {
+    throw new Error("Import failed: selectedPage does not exist in pages.");
+  }
+
+  return {
+    version:
+      typeof raw.version === "number" && Number.isFinite(raw.version) && raw.version > 0
+        ? raw.version
+        : 1,
+    gridColumns,
+    gridRows,
+    selectedPage,
+    pages: normalizedPages,
+  };
+}
+
+function parseStreamDeckImportDocument(text: string): StreamDeckSettings {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("Import failed: invalid JSON.");
+  }
+
+  const doc = (parsed ?? {}) as StreamDeckImportDocument;
+  if (doc && typeof doc === "object" && doc.settings !== undefined) {
+    const format = doc.meta?.format;
+    const schemaVersion = doc.meta?.schemaVersion;
+    if (format && format !== STREAM_DECK_IMPORT_FORMAT) {
+      throw new Error(`Import failed: expected format ${STREAM_DECK_IMPORT_FORMAT}.`);
+    }
+    if (
+      typeof schemaVersion === "number" &&
+      schemaVersion !== STREAM_DECK_IMPORT_SCHEMA_VERSION
+    ) {
+      throw new Error("Import failed: unsupported schemaVersion.");
+    }
+    return normalizeImportedStreamDeckSettings(doc.settings);
+  }
+
+  // Backward-compatible fallback: allow raw StreamDeckSettings JSON.
+  return normalizeImportedStreamDeckSettings(parsed);
+}
 
 function createEmptyStreamDeckButtons(count: number) {
   return Array.from({ length: count }, (_, index) => ({ index }));
@@ -272,6 +412,9 @@ export function StationIntercomView({
   const [isAudioOpen, setIsAudioOpen] = useState(false);
   const [isStreamDeckOpen, setIsStreamDeckOpen] = useState(false);
   const [streamDeckTestMode, setStreamDeckTestMode] = useState(false);
+  const streamDeckImportInputRef = useRef<HTMLInputElement>(null);
+  const [streamDeckTransferMessage, setStreamDeckTransferMessage] = useState("");
+  const [streamDeckTransferError, setStreamDeckTransferError] = useState("");
   const [streamDeckPreviewPressedIndexes, setStreamDeckPreviewPressedIndexes] =
     useState<number[]>([]);
   const [activeDirectTab, setActiveDirectTab] = useState<string>("all");
@@ -654,6 +797,63 @@ export function StationIntercomView({
       selectedPage: fallbackPage,
       pages: nextPages,
     });
+  };
+
+  const exportStreamDeckSettings = () => {
+    if (!streamDeckSettings) {
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const payload = {
+      meta: {
+        format: STREAM_DECK_IMPORT_FORMAT,
+        schemaVersion: STREAM_DECK_IMPORT_SCHEMA_VERSION,
+        exportedAt: nowIso,
+        username: appData.self.username,
+      },
+      settings: streamDeckSettings,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = window.URL.createObjectURL(blob);
+    const anchor = window.document.createElement("a");
+    const username = appData.self.username.replace(/[^a-zA-Z0-9_-]/g, "_");
+    anchor.href = url;
+    anchor.download = `kesher-streamdeck-${username}-${nowIso.replace(/[:]/g, "-")}.json`;
+    window.document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.URL.revokeObjectURL(url);
+    setStreamDeckTransferError("");
+    setStreamDeckTransferMessage("Stream Deck profile exported.");
+  };
+
+  const openStreamDeckImportPicker = () => {
+    streamDeckImportInputRef.current?.click();
+  };
+
+  const importStreamDeckSettingsFromFile = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const nextSettings = parseStreamDeckImportDocument(text);
+      onStreamDeckSettingsChange(nextSettings);
+      setStreamDeckTransferError("");
+      setStreamDeckTransferMessage(
+        `${file.name} loaded. Click Save to persist it to your account.`,
+      );
+    } catch (error) {
+      setStreamDeckTransferMessage("");
+      setStreamDeckTransferError(
+        error instanceof Error ? error.message : "Import failed.",
+      );
+    } finally {
+      event.target.value = "";
+    }
   };
 
   const replyTarget =
@@ -1366,6 +1566,17 @@ export function StationIntercomView({
                           Configuration
                         </h4>
                         <div className="streamdeck-settings-actions">
+                          <input
+                            ref={streamDeckImportInputRef}
+                            type="file"
+                            accept="application/json,.json"
+                            data-testid="streamdeck-import-input"
+                            className="streamdeck-import-input"
+                            onChange={(event) => {
+                              void importStreamDeckSettingsFromFile(event);
+                            }}
+                            disabled={streamDeckBusy}
+                          />
                           <button
                             type="button"
                             className="shortcut-btn"
@@ -1381,6 +1592,22 @@ export function StationIntercomView({
                               : streamDeckWebHidActive
                                 ? "Disconnect device"
                                 : "Connect device"}
+                          </button>
+                          <button
+                            type="button"
+                            className="shortcut-btn"
+                            onClick={exportStreamDeckSettings}
+                            disabled={streamDeckBusy || !streamDeckSettings}
+                          >
+                            Export
+                          </button>
+                          <button
+                            type="button"
+                            className="shortcut-btn"
+                            onClick={openStreamDeckImportPicker}
+                            disabled={streamDeckBusy}
+                          >
+                            Import
                           </button>
                           <button
                             type="button"
@@ -1402,6 +1629,12 @@ export function StationIntercomView({
                       </div>
                     {streamDeckError ? (
                       <small className="streamdeck-error">{streamDeckError}</small>
+                    ) : null}
+                    {streamDeckTransferError ? (
+                      <small className="streamdeck-error">{streamDeckTransferError}</small>
+                    ) : null}
+                    {streamDeckTransferMessage ? (
+                      <small className="station-settings-meta">{streamDeckTransferMessage}</small>
                     ) : null}
                     <small className="station-settings-meta">
                       WebHID: {

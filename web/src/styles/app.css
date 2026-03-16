@@ -3069,6 +3069,10 @@ button.secondary {
   gap: 0.35rem;
 }
 
+.streamdeck-import-input {
+  display: none;
+}
+
 .streamdeck-error {
   color: #ffbdbd;
   display: block;

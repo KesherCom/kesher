@@ -395,6 +395,84 @@ describe("StationIntercomView", () => {
     expect(onSaveStreamDeckSettings).toHaveBeenCalledTimes(1);
   });
 
+  it("exports stream deck settings as a JSON file", async () => {
+    const user = userEvent.setup();
+    const createObjectURLSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:streamdeck-export");
+    const revokeObjectURLSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+
+    render(<StationIntercomView {...baseProps} isUserSettingsOpen />);
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+    await user.click(screen.getByRole("button", { name: "Export" }));
+
+    expect(createObjectURLSpy).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURLSpy).toHaveBeenCalledWith("blob:streamdeck-export");
+
+    createObjectURLSpy.mockRestore();
+    revokeObjectURLSpy.mockRestore();
+  });
+
+  it("imports stream deck settings from JSON and applies them", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    const { container } = render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    const input = container.querySelector(
+      '[data-testid="streamdeck-import-input"]',
+    ) as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+
+    const importedSettings = {
+      meta: {
+        format: "kesher-user-streamdeck",
+        schemaVersion: 1,
+        exportedAt: "2026-03-16T10:00:00Z",
+        username: "tim",
+      },
+      settings: {
+        version: 1,
+        gridColumns: 5,
+        gridRows: 3,
+        selectedPage: 0,
+        pages: [
+          {
+            page: 0,
+            buttons: Array.from({ length: 15 }, (_, i) =>
+              i === 0
+                ? { index: 0, action: { type: "reply_to_caller" } }
+                : { index: i },
+            ),
+          },
+        ],
+      },
+    };
+
+    const file = new File([JSON.stringify(importedSettings)], "streamdeck.json", {
+      type: "application/json",
+    });
+
+    await user.upload(input!, file);
+
+    expect(onStreamDeckSettingsChange).toHaveBeenCalled();
+    const streamDeckCalls = onStreamDeckSettingsChange.mock.calls;
+    const lastCallArg = streamDeckCalls[streamDeckCalls.length - 1]?.[0];
+    expect(lastCallArg?.pages?.[0]?.buttons?.[0]?.action?.type).toBe(
+      "reply_to_caller",
+    );
+  });
+
   it("collapses and expands stream deck settings", async () => {
     const user = userEvent.setup();
 

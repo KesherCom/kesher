@@ -49,6 +49,11 @@ const availableSections: Array<{
 		label: "ACK Settings",
 		description: "Global ACK cue toggle.",
 	},
+	{
+		key: "streamDeckSettings",
+		label: "StreamDeck Profiles",
+		description: "Per-user StreamDeck button and page mappings.",
+	},
 ];
 
 function createSectionSelection(): Record<ConfigurationSection, boolean> {
@@ -59,6 +64,7 @@ function createSectionSelection(): Record<ConfigurationSection, boolean> {
 		broadcastGroups: true,
 		telegramAllowlist: true,
 		ackSettings: true,
+		streamDeckSettings: true,
 	};
 }
 
