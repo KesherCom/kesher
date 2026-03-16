@@ -536,10 +536,11 @@ function createButtonCanvasFromSize(
   const stroke = pressed ? mixColors(palette.border, "#ffffff", 0.2) : palette.border;
   const radius = Math.max(10, Math.round(canvas.width * 0.12));
   const textColor = palette.label;
-  const cardX = 7;
-  const cardY = 7;
-  const cardWidth = canvas.width - 14;
-  const cardHeight = canvas.height - 14;
+  const cardInset = 2;
+  const cardX = cardInset;
+  const cardY = cardInset;
+  const cardWidth = canvas.width - cardInset * 2;
+  const cardHeight = canvas.height - cardInset * 2;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = streamDeckCanvasBackground;
