@@ -8,6 +8,7 @@ import type {
 } from "../types";
 import type { KeyboardShortcutSettings } from "../app/settings";
 import { createHoldButtonProps } from "../lib/holdButton";
+import { createStreamDeckButtonPreviewDataUrl } from "../lib/streamDeckHardwareFeedback";
 import { sortDirectUsersByRoleAndUsername } from "../lib/users";
 import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
 
@@ -157,6 +158,11 @@ type StationIntercomViewProps = {
   onDisconnectStreamDeckWebHid: () => void;
   streamDeckBridgeConnected: boolean;
   streamDeckBridgeLastEvent: string;
+  onStreamDeckTestButtonEvent: (event: {
+    page: number;
+    buttonIndex: number;
+    state: "down" | "up";
+  }) => void;
 };
 
 export function StationIntercomView({
@@ -252,6 +258,7 @@ export function StationIntercomView({
   onDisconnectStreamDeckWebHid,
   streamDeckBridgeConnected,
   streamDeckBridgeLastEvent,
+  onStreamDeckTestButtonEvent,
 }: StationIntercomViewProps) {
   const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
   const [isOutputMenuOpen, setIsOutputMenuOpen] = useState(false);
@@ -259,6 +266,9 @@ export function StationIntercomView({
   const outputMenuRef = useRef<HTMLDivElement>(null);
   const [isAudioOpen, setIsAudioOpen] = useState(false);
   const [isStreamDeckOpen, setIsStreamDeckOpen] = useState(false);
+  const [streamDeckTestMode, setStreamDeckTestMode] = useState(false);
+  const [streamDeckPreviewPressedIndexes, setStreamDeckPreviewPressedIndexes] =
+    useState<number[]>([]);
   const [activeDirectTab, setActiveDirectTab] = useState<string>("all");
   const [streamDeckSelectedButtonIndex, setStreamDeckSelectedButtonIndex] =
     useState(0);
@@ -409,6 +419,49 @@ export function StationIntercomView({
       ) || streamDeckCurrentButtons[0] || null,
     [streamDeckCurrentButtons, streamDeckSelectedButtonIndex],
   );
+
+  const streamDeckPreviewImageByIndex = useMemo(() => {
+    return new Map(
+      streamDeckCurrentButtons.map((button) => [
+        button.index,
+        createStreamDeckButtonPreviewDataUrl(button, {
+          pressed: streamDeckPreviewPressedIndexes.includes(button.index),
+          width: 112,
+          height: 112,
+        }),
+      ]),
+    );
+  }, [streamDeckCurrentButtons, streamDeckPreviewPressedIndexes]);
+
+  const startStreamDeckPreviewPress = (buttonIndex: number) => {
+    if (!streamDeckSettings || !streamDeckTestMode) return;
+    setStreamDeckPreviewPressedIndexes((prev) =>
+      prev.includes(buttonIndex) ? prev : [...prev, buttonIndex],
+    );
+    onStreamDeckTestButtonEvent({
+      page: streamDeckSettings.selectedPage,
+      buttonIndex,
+      state: "down",
+    });
+  };
+
+  const stopStreamDeckPreviewPress = (buttonIndex: number) => {
+    if (!streamDeckSettings || !streamDeckTestMode) return;
+    setStreamDeckPreviewPressedIndexes((prev) => {
+      if (!prev.includes(buttonIndex)) return prev;
+      return prev.filter((index) => index !== buttonIndex);
+    });
+    onStreamDeckTestButtonEvent({
+      page: streamDeckSettings.selectedPage,
+      buttonIndex,
+      state: "up",
+    });
+  };
+
+  useEffect(() => {
+    if (streamDeckTestMode) return;
+    setStreamDeckPreviewPressedIndexes([]);
+  }, [streamDeckTestMode]);
 
   useEffect(() => {
     if (!streamDeckCurrentButtons.length) return;
@@ -1346,39 +1399,62 @@ export function StationIntercomView({
                               ▶
                             </button>
                           </div>
+                          <button
+                            type="button"
+                            className={`shortcut-btn ${streamDeckTestMode ? "active" : ""}`}
+                            onClick={() => setStreamDeckTestMode((value) => !value)}
+                            disabled={streamDeckBusy}
+                            aria-pressed={streamDeckTestMode}
+                            title="Test Stream Deck actions directly in the browser"
+                          >
+                            {streamDeckTestMode ? "Test mode on" : "Test mode off"}
+                          </button>
                         </div>
+                        {streamDeckTestMode ? (
+                          <small className="station-settings-meta">
+                            Test mode active: press and hold any key in the grid to trigger down/up events without a physical Stream Deck.
+                          </small>
+                        ) : null}
 
                         <div className="streamdeck-layout">
                           <div className="streamdeck-grid" role="grid" aria-label="Stream Deck 5x3 grid">
                             {streamDeckCurrentButtons.map((button) => {
-                              const actionType = button.action?.type || "none";
-                              const displayLabel =
-                                button.label ||
-                                (actionType === "reply_to_caller"
-                                  ? "Reply"
-                                  : actionType.replace(/_/g, " "));
+                              const previewImage =
+                                streamDeckPreviewImageByIndex.get(button.index) || "";
+                              const isPressedInPreview =
+                                streamDeckPreviewPressedIndexes.includes(button.index);
                               return (
                                 <button
                                   type="button"
                                   key={`streamdeck-button-${button.index}`}
+                                  aria-label={`Deck key ${button.index + 1}`}
                                   className={`streamdeck-button ${
                                     streamDeckSelectedButton?.index === button.index
                                       ? "active"
                                       : ""
-                                  }`}
-                                  onClick={() =>
-                                    setStreamDeckSelectedButtonIndex(button.index)
+                                  } ${isPressedInPreview ? "test-pressed" : ""}`}
+                                  onClick={() => setStreamDeckSelectedButtonIndex(button.index)}
+                                  onPointerDown={() =>
+                                    startStreamDeckPreviewPress(button.index)
                                   }
-                                  style={
-                                    button.color
-                                      ? ({
-                                          "--streamdeck-button-color": button.color,
-                                        } as React.CSSProperties)
-                                      : undefined
+                                  onPointerUp={() =>
+                                    stopStreamDeckPreviewPress(button.index)
+                                  }
+                                  onPointerCancel={() =>
+                                    stopStreamDeckPreviewPress(button.index)
+                                  }
+                                  onPointerLeave={() =>
+                                    stopStreamDeckPreviewPress(button.index)
                                   }
                                 >
-                                  <strong>{displayLabel || `Button ${button.index + 1}`}</strong>
-                                  <small>{actionType === "none" ? "unassigned" : actionType}</small>
+                                  {previewImage ? (
+                                    <img
+                                      src={previewImage}
+                                      alt={`Preview of Stream Deck button ${button.index + 1}`}
+                                      className="streamdeck-button-preview"
+                                      draggable={false}
+                                    />
+                                  ) : null}
                                 </button>
                               );
                             })}

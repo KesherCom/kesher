@@ -306,6 +306,19 @@ export function App() {
     );
   }, []);
 
+  const handleStreamDeckTestButtonEvent = useCallback(
+    (event: { page: number; buttonIndex: number; state: "down" | "up" }) => {
+      emitStreamDeckBridgeEvent({
+        source: "kesher-streamdeck",
+        type: "button",
+        page: event.page,
+        buttonIndex: event.buttonIndex,
+        state: event.state,
+      });
+    },
+    [emitStreamDeckBridgeEvent],
+  );
+
   const disconnectStreamDeckWebHid = useCallback(
     async (options?: { announce?: boolean }) => {
       const session = streamDeckHidSessionRef.current;
@@ -1364,6 +1377,7 @@ export function App() {
         }
         streamDeckBridgeConnected={streamDeckConnected}
         streamDeckBridgeLastEvent={streamDeckLastEvent}
+        onStreamDeckTestButtonEvent={handleStreamDeckTestButtonEvent}
       />
       {attentionFlashOverlay}
     </>

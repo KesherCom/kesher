@@ -3104,13 +3104,10 @@ button.secondary {
 .streamdeck-button {
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: var(--streamdeck-button-color, rgba(255, 255, 255, 0.04));
-  color: #fff;
-  min-height: 68px;
-  display: grid;
-  gap: 0.2rem;
-  align-content: center;
-  justify-items: center;
+  background: #0b1016;
+  min-height: 84px;
+  padding: 0;
+  overflow: hidden;
   cursor: pointer;
   transition:
     border-color 140ms ease,
@@ -3128,14 +3125,16 @@ button.secondary {
   box-shadow: 0 0 0 2px rgba(100, 166, 255, 0.25);
 }
 
-.streamdeck-button strong {
-  font-size: 0.8rem;
-  text-align: center;
+.streamdeck-button.test-pressed {
+  transform: translateY(0);
+  box-shadow: 0 0 0 2px rgba(255, 115, 115, 0.28);
 }
 
-.streamdeck-button small {
-  font-size: 0.68rem;
-  opacity: 0.85;
+.streamdeck-button-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .streamdeck-editor.panel {

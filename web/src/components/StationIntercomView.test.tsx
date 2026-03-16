@@ -118,6 +118,7 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
   onDisconnectStreamDeckWebHid: vi.fn(),
   streamDeckBridgeConnected: false,
   streamDeckBridgeLastEvent: "",
+  onStreamDeckTestButtonEvent: vi.fn(),
 };
 
 describe("StationIntercomView", () => {
@@ -356,5 +357,39 @@ describe("StationIntercomView", () => {
     expect(
       screen.queryByRole("grid", { name: "Stream Deck 5x3 grid" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("emits down and up events in stream deck browser test mode", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckTestButtonEvent = vi.fn();
+
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onStreamDeckTestButtonEvent={onStreamDeckTestButtonEvent}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+    await user.click(screen.getByRole("button", { name: "Test mode off" }));
+
+    const key = screen.getByRole("button", {
+      name: "Deck key 1",
+    });
+
+    fireEvent.pointerDown(key);
+    fireEvent.pointerUp(key);
+
+    expect(onStreamDeckTestButtonEvent).toHaveBeenNthCalledWith(1, {
+      page: 0,
+      buttonIndex: 0,
+      state: "down",
+    });
+    expect(onStreamDeckTestButtonEvent).toHaveBeenNthCalledWith(2, {
+      page: 0,
+      buttonIndex: 0,
+      state: "up",
+    });
   });
 });
