@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { StationIntercomView } from "./StationIntercomView";
+import type { StreamDeckSettings } from "../types";
 const baseProps: ComponentProps<typeof StationIntercomView> = {
   connectionState: "connected",
   appData: {
@@ -338,6 +339,138 @@ describe("StationIntercomView", () => {
     const calls = onStreamDeckSettingsChange.mock.calls;
     const lastCallArg = calls[calls.length - 1]?.[0];
     expect(lastCallArg?.pages?.[0]?.buttons?.[0]?.action?.type).toBe("page_up");
+  });
+
+  it("copies and pastes a stream deck button configuration", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    const streamDeckSettings: StreamDeckSettings = {
+      version: 1,
+      gridColumns: 5,
+      gridRows: 3,
+      selectedPage: 0,
+      pages: [
+        {
+          page: 0,
+          buttons: Array.from({ length: 15 }, (_, i) =>
+            i === 0
+              ? { index: 0, action: { type: "reply_to_caller" as const } }
+              : { index: i },
+          ),
+        },
+      ],
+    };
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        streamDeckSettings={streamDeckSettings}
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+    await user.click(screen.getByRole("button", { name: "Copy" }));
+    await user.click(screen.getByRole("button", { name: "Deck key 2" }));
+    await user.click(screen.getByRole("button", { name: "Paste" }));
+
+    const calls = onStreamDeckSettingsChange.mock.calls;
+    const lastCallArg = calls[calls.length - 1]?.[0];
+    expect(lastCallArg?.pages?.[0]?.buttons?.[1]?.action?.type).toBe(
+      "reply_to_caller",
+    );
+  });
+
+  it("undoes the last stream deck button change", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    const { rerender } = render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+    await user.selectOptions(
+      screen.getByLabelText("Stream Deck function"),
+      "reply_to_caller",
+    );
+
+    const changedSettings = onStreamDeckSettingsChange.mock.calls[0]?.[0];
+    rerender(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        streamDeckSettings={changedSettings}
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Undo" }));
+
+    const undoCallArg = onStreamDeckSettingsChange.mock.calls[1]?.[0];
+    expect(undoCallArg?.pages?.[0]?.buttons?.[0]?.action).toBeUndefined();
+  });
+
+  it("swaps stream deck buttons via drag and drop", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    const streamDeckSettings: StreamDeckSettings = {
+      version: 1,
+      gridColumns: 5,
+      gridRows: 3,
+      selectedPage: 0,
+      pages: [
+        {
+          page: 0,
+          buttons: Array.from({ length: 15 }, (_, i) => {
+            if (i === 0) {
+              return { index: 0, action: { type: "reply_to_caller" as const } };
+            }
+            if (i === 1) {
+              return { index: 1, action: { type: "page_up" as const } };
+            }
+            return { index: i };
+          }),
+        },
+      ],
+    };
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        streamDeckSettings={streamDeckSettings}
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    const keyOne = screen.getByRole("button", { name: "Deck key 1" });
+    const keyTwo = screen.getByRole("button", { name: "Deck key 2" });
+
+    fireEvent.dragStart(keyOne, {
+      dataTransfer: {
+        effectAllowed: "",
+        setData: vi.fn(),
+        getData: vi.fn(),
+      },
+    });
+    fireEvent.dragOver(keyTwo, {
+      dataTransfer: {
+        dropEffect: "",
+      },
+    });
+    fireEvent.drop(keyTwo);
+
+    const calls = onStreamDeckSettingsChange.mock.calls;
+    const lastCallArg = calls[calls.length - 1]?.[0];
+    expect(lastCallArg?.pages?.[0]?.buttons?.[0]?.action?.type).toBe("page_up");
+    expect(lastCallArg?.pages?.[0]?.buttons?.[1]?.action?.type).toBe(
+      "reply_to_caller",
+    );
   });
 
   it("adds and removes stream deck pages from toolbar buttons", async () => {

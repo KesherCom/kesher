@@ -177,6 +177,10 @@ export type StatusResponse = {
 export type StreamDeckActionType =
   | "none"
   | "ptt_room"
+  | "select_talk_room"
+  | "ptt_selected"
+  | "listen_room"
+  | "call_room"
   | "direct_user"
   | "direct_role"
   | "reply_to_caller"

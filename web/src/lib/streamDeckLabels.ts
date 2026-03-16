@@ -22,6 +22,23 @@ function resolveActionLabel(
         lookup.rooms.find((room) => room.id === action.roomId)?.name ||
         action.roomId
       );
+    case "select_talk_room":
+      return (
+        lookup.rooms.find((room) => room.id === action.roomId)?.name ||
+        action.roomId
+      );
+    case "ptt_selected":
+      return "PTT";
+    case "listen_room":
+      return (
+        lookup.rooms.find((room) => room.id === action.roomId)?.name ||
+        action.roomId
+      );
+    case "call_room":
+      return (
+        lookup.rooms.find((room) => room.id === action.roomId)?.name ||
+        action.roomId
+      );
     case "direct_role":
       return (
         lookup.roles.find((role) => role.id === action.roleId)?.name ||

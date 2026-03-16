@@ -79,6 +79,14 @@ function getActionAccent(actionType?: string): string {
   switch (actionType) {
     case "ptt_room":
       return "#00a8ff";
+    case "select_talk_room":
+      return "#2da8ff";
+    case "ptt_selected":
+      return "#ff4d4d";
+    case "listen_room":
+      return "#26d07c";
+    case "call_room":
+      return "#ffc067";
     case "direct_role":
     case "direct_user":
       return "#1fd18b";
@@ -103,6 +111,10 @@ function getDisplayLabel(button: StreamDeckButtonConfig): string {
   if (button.label?.trim()) return button.label.trim();
   if (actionType === "reply_to_caller") return "Reply";
   if (actionType === "ptt_room") return "Partyline";
+  if (actionType === "select_talk_room") return "Select";
+  if (actionType === "ptt_selected") return "PTT";
+  if (actionType === "listen_room") return "Listen";
+  if (actionType === "call_room") return "Call";
   if (actionType === "direct_role" || actionType === "direct_user") {
     return "Direct";
   }
@@ -120,7 +132,9 @@ function getDisplayTitle(button: StreamDeckButtonConfig): string {
 
 function getButtonPalette(button: StreamDeckButtonConfig, pressed: boolean): KeyPalette {
   const actionType = button.action?.type ?? "none";
-  if (pressed && actionType !== "none") {
+  const useEmergencyPressedColor =
+    pressed && actionType !== "none" && actionType !== "listen_room";
+  if (useEmergencyPressedColor) {
     return {
       background: "#ef1212",
       border: "#ff2d26",
@@ -142,6 +156,30 @@ function getButtonPalette(button: StreamDeckButtonConfig, pressed: boolean): Key
         background: "#000000",
         border: "#ff2d26",
         label: "#f7f7f7",
+      };
+    case "call_room":
+      return {
+        background: "#000000",
+        border: "#ffc067",
+        label: "#f6f0e8",
+      };
+    case "select_talk_room":
+      return {
+        background: "#000000",
+        border: "#2da8ff",
+        label: "#ecf7ff",
+      };
+    case "ptt_selected":
+      return {
+        background: "#000000",
+        border: "#ff4d4d",
+        label: "#fff1f1",
+      };
+    case "listen_room":
+      return {
+        background: "#000000",
+        border: "#26d07c",
+        label: "#ebfff3",
       };
     case "direct_role":
     case "direct_user":
@@ -453,11 +491,15 @@ function drawActionIcon(
 ) {
   switch (actionType) {
     case "ptt_room":
+    case "select_talk_room":
+    case "ptt_selected":
     case "direct_role":
     case "direct_user":
+    case "listen_room":
       drawIconHeadset(ctx, centerX, centerY, size, color);
       return;
     case "broadcast_ptt":
+    case "call_room":
       drawIconMegaphone(ctx, centerX, centerY, size, color);
       return;
     case "reply_to_caller":
@@ -487,6 +529,7 @@ function createButtonCanvasFromSize(
   if (!ctx) return null;
 
   const actionType = button.action?.type ?? "none";
+  const useEmergencyPressedColor = pressed && actionType !== "listen_room";
   const accent = getActionAccent(actionType);
   const palette = getButtonPalette(button, pressed);
   const fill = palette.background;
@@ -503,26 +546,32 @@ function createButtonCanvasFromSize(
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   ctx.save();
-  ctx.shadowColor = pressed ? "rgba(255, 56, 56, 0.35)" : `${accent}28`;
-  ctx.shadowBlur = pressed ? 14 : 6;
+  ctx.shadowColor = useEmergencyPressedColor
+    ? "rgba(255, 56, 56, 0.35)"
+    : `${accent}28`;
+  ctx.shadowBlur = useEmergencyPressedColor ? 14 : 6;
   roundedRect(ctx, cardX, cardY, cardWidth, cardHeight, radius);
   ctx.fillStyle = fill;
   ctx.fill();
   ctx.restore();
 
   roundedRect(ctx, cardX, cardY, cardWidth, cardHeight, radius);
-  ctx.lineWidth = pressed ? 4 : 3;
+  ctx.lineWidth = useEmergencyPressedColor ? 4 : 3;
   ctx.strokeStyle = stroke;
   ctx.stroke();
 
-  if (pressed) {
+  if (useEmergencyPressedColor) {
     roundedRect(ctx, cardX - 1, cardY - 1, cardWidth + 2, cardHeight + 2, radius + 1);
     ctx.lineWidth = 2;
     ctx.strokeStyle = "rgba(255, 115, 115, 0.28)";
     ctx.stroke();
   }
 
-  if (button.action?.type === "ptt_room" && button.isListening) {
+  if (
+    (button.action?.type === "ptt_room" ||
+      button.action?.type === "listen_room") &&
+    button.isListening
+  ) {
     const stripeHeight = Math.max(6, Math.round(canvas.height * 0.075));
     roundedRect(
       ctx,

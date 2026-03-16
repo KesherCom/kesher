@@ -3129,6 +3129,15 @@ button.secondary {
   box-shadow: 0 0 0 2px rgba(100, 166, 255, 0.25);
 }
 
+.streamdeck-button.drag-source {
+  opacity: 0.5;
+}
+
+.streamdeck-button.drag-target {
+  border-color: #f5c36b;
+  box-shadow: 0 0 0 2px rgba(245, 195, 107, 0.26);
+}
+
 .streamdeck-button.test-pressed {
   transform: translateY(0);
   box-shadow: 0 0 0 2px rgba(255, 115, 115, 0.28);
@@ -3154,6 +3163,12 @@ button.secondary {
   margin: 0;
   font-size: 0.95rem;
   color: #fff;
+}
+
+.streamdeck-editor-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 .streamdeck-control {

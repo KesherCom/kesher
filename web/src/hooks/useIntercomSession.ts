@@ -870,6 +870,59 @@ export function useIntercomSession({
   );
 
   // ── Sending helpers ──
+  function canSelfSendToRoom(roomId: string): boolean {
+    const ad = appDataRef.current;
+    if (!ad || !roomId) return false;
+    return canRoleSendToRoom(roomId, ad.self.roleId);
+  }
+
+  function canSelfSendToBroadcastGroup(groupId: string): boolean {
+    const ad = appDataRef.current;
+    if (!ad || !groupId) return false;
+    const group = ad.broadcastGroups.find((entry) => entry.id === groupId);
+    if (!group) return false;
+    const allowedRoleIds = Array.isArray(group.allowedRoleIds)
+      ? group.allowedRoleIds
+      : [];
+    const roleAllowedForGroup =
+      allowedRoleIds.length === 0 || allowedRoleIds.includes(ad.self.roleId);
+    if (!roleAllowedForGroup) return false;
+    return group.roomIds.some((roomId) => canRoleSendToRoom(roomId, ad.self.roleId));
+  }
+
+  function canSelfDirectToRole(targetRoleId: string): boolean {
+    const ad = appDataRef.current;
+    if (!ad || !targetRoleId) return false;
+    return ad.rooms.some(
+      (room) =>
+        roleAllowed(room.senderRoleIds, ad.self.roleId) &&
+        roleAllowed(room.receiverRoleIds, targetRoleId),
+    );
+  }
+
+  function canSelfSendDirectToUser(targetUserId: string): boolean {
+    const ad = appDataRef.current;
+    if (!ad || !targetUserId) return false;
+    if (targetUserId === ad.self.id) return false;
+    const targetUser = ad.users.find((user) => user.id === targetUserId);
+    if (!targetUser) return false;
+    return canSelfDirectToRole(targetUser.roleId);
+  }
+
+  function canSendScopedVoiceState(
+    scopeValue: "direct" | "room" | "broadcast",
+    scopedTargetId: string,
+  ): boolean {
+    if (!scopedTargetId) return false;
+    if (scopeValue === "direct") {
+      return canSelfSendDirectToUser(scopedTargetId);
+    }
+    if (scopeValue === "room") {
+      return canSelfSendToRoom(scopedTargetId);
+    }
+    return canSelfSendToBroadcastGroup(scopedTargetId);
+  }
+
   function sendScopedVoiceState(
     scopeValue: "direct" | "room" | "broadcast",
     scopedTargetId: string,
@@ -881,6 +934,9 @@ export function useIntercomSession({
       !scopedTargetId
     )
       return;
+    if (!canSendScopedVoiceState(scopeValue, scopedTargetId)) {
+      return;
+    }
     const stream = mic.localStreamRef.current;
     if (stream) {
       for (const track of stream.getAudioTracks()) {
@@ -907,7 +963,7 @@ export function useIntercomSession({
       listenRoomIdsRef.current,
       talkRoomIdsRef.current,
     );
-    if (!voiceTargetId) return;
+    if (!voiceTargetId || !canSelfSendToRoom(voiceTargetId)) return;
     sendScopedVoiceState("room", voiceTargetId, state);
   }
 
@@ -922,6 +978,9 @@ export function useIntercomSession({
       !scopedTargetId
     )
       return;
+    if (!canSendScopedVoiceState(scopeValue, scopedTargetId)) {
+      return;
+    }
     wsRef.current.send(
       JSON.stringify({
         type: "signal",
@@ -981,21 +1040,25 @@ export function useIntercomSession({
   }
 
   function startBroadcastPtt(groupId: string) {
+    if (!canSelfSendToBroadcastGroup(groupId)) return;
     setBroadcastPttPressed(groupId);
     sendScopedVoiceState("broadcast", groupId, "ptt_start");
   }
 
   function stopBroadcastPtt(groupId: string) {
+    if (!canSelfSendToBroadcastGroup(groupId)) return;
     setBroadcastPttPressed((current) => (current === groupId ? null : current));
     sendScopedVoiceState("broadcast", groupId, "ptt_stop");
   }
 
   function startDirectPtt(userId: string) {
+    if (!canSendScopedVoiceState("direct", userId)) return;
     setdirectPttPressedUserId(userId);
     sendScopedVoiceState("direct", userId, "ptt_start");
   }
 
   function stopDirectPtt(userId: string) {
+    if (!canSendScopedVoiceState("direct", userId)) return;
     setdirectPttPressedUserId((current) =>
       current === userId ? null : current,
     );
@@ -1005,6 +1068,7 @@ export function useIntercomSession({
   // ── Channel PTT ──
   function handleChannelPttStart(channelId: string) {
     if (!appDataRef.current || !channelId) return;
+    if (!canSelfSendToRoom(channelId)) return;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     setTalkRoomIds([channelId]);
     setPttPressed(true);

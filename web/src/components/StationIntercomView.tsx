@@ -4,6 +4,7 @@ import type {
   BroadcastGroup,
   Presence,
   StreamDeckActionType,
+  StreamDeckButtonConfig,
   StreamDeckSettings,
 } from "../types";
 import type { KeyboardShortcutSettings } from "../app/settings";
@@ -81,6 +82,10 @@ function normalizeImportedStreamDeckSettings(input: unknown): StreamDeckSettings
   const actionTypes = new Set<StreamDeckActionType>([
     "none",
     "ptt_room",
+    "select_talk_room",
+    "ptt_selected",
+    "listen_room",
+    "call_room",
     "direct_user",
     "direct_role",
     "reply_to_caller",
@@ -191,6 +196,25 @@ function parseStreamDeckImportDocument(text: string): StreamDeckSettings {
 
 function createEmptyStreamDeckButtons(count: number) {
   return Array.from({ length: count }, (_, index) => ({ index }));
+}
+
+function cloneStreamDeckButtonConfig(
+  button: StreamDeckButtonConfig,
+): StreamDeckButtonConfig {
+  return {
+    ...button,
+    action: button.action ? { ...button.action } : undefined,
+  };
+}
+
+function cloneStreamDeckSettings(settings: StreamDeckSettings): StreamDeckSettings {
+  return {
+    ...settings,
+    pages: settings.pages.map((page) => ({
+      ...page,
+      buttons: page.buttons.map((button) => cloneStreamDeckButtonConfig(button)),
+    })),
+  };
 }
 
 function meterDbFsToPercent(dbFs: number): number {
@@ -420,6 +444,18 @@ export function StationIntercomView({
   const [activeDirectTab, setActiveDirectTab] = useState<string>("all");
   const [streamDeckSelectedButtonIndex, setStreamDeckSelectedButtonIndex] =
     useState(0);
+  const [streamDeckClipboardButton, setStreamDeckClipboardButton] = useState<
+    StreamDeckButtonConfig | null
+  >(null);
+  const [streamDeckDragSourceIndex, setStreamDeckDragSourceIndex] = useState<
+    number | null
+  >(null);
+  const [streamDeckDropTargetIndex, setStreamDeckDropTargetIndex] = useState<
+    number | null
+  >(null);
+  const [streamDeckUndoStack, setStreamDeckUndoStack] = useState<
+    StreamDeckSettings[]
+  >([]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -580,7 +616,8 @@ export function StationIntercomView({
         const button = {
           ...resolvedButton,
           isListening:
-            rawButton.action?.type === "ptt_room" &&
+            (rawButton.action?.type === "ptt_room" ||
+              rawButton.action?.type === "listen_room") &&
             !!rawButton.action.roomId &&
             listenRoomIds.includes(rawButton.action.roomId),
         };
@@ -634,6 +671,40 @@ export function StationIntercomView({
     setStreamDeckPreviewPressedIndexes([]);
   }, [streamDeckTestMode]);
 
+  const applyStreamDeckSettings = (
+    nextSettings: StreamDeckSettings,
+    options?: {
+      recordUndo?: boolean;
+      message?: string;
+      error?: string;
+    },
+  ) => {
+    if (streamDeckSettings && options?.recordUndo !== false) {
+      setStreamDeckUndoStack((prev) => [
+        ...prev.slice(-24),
+        cloneStreamDeckSettings(streamDeckSettings),
+      ]);
+    }
+    onStreamDeckSettingsChange(nextSettings);
+    if (options?.error !== undefined) {
+      setStreamDeckTransferError(options.error);
+    }
+    if (options?.message !== undefined) {
+      setStreamDeckTransferMessage(options.message);
+    }
+  };
+
+  const undoLastStreamDeckChange = () => {
+    const previousSettings = streamDeckUndoStack[streamDeckUndoStack.length - 1];
+    if (!previousSettings) {
+      return;
+    }
+    setStreamDeckUndoStack((prev) => prev.slice(0, -1));
+    onStreamDeckSettingsChange(cloneStreamDeckSettings(previousSettings));
+    setStreamDeckTransferError("");
+    setStreamDeckTransferMessage("Last Stream Deck change undone.");
+  };
+
   useEffect(() => {
     if (!streamDeckCurrentButtons.length) return;
     const exists = streamDeckCurrentButtons.some(
@@ -663,21 +734,125 @@ export function StationIntercomView({
       return;
     }
     const nextSelected = updater(streamDeckSelectedButton);
-    onStreamDeckSettingsChange({
+    const nextButtons = streamDeckCurrentPage.buttons.map((button) =>
+      button.index === streamDeckSelectedButton.index ? nextSelected : button,
+    );
+    applyStreamDeckSettings({
       ...streamDeckSettings,
       pages: streamDeckSettings.pages.map((page) =>
         page.page !== streamDeckCurrentPage.page
           ? page
           : {
               ...page,
-              buttons: page.buttons.map((button) =>
-                button.index === streamDeckSelectedButton.index
-                  ? nextSelected
-                  : button,
-              ),
+              buttons: nextButtons,
             },
       ),
     });
+  };
+
+  const updateStreamDeckCurrentPageButtons = (
+    updater: (buttons: StreamDeckButtonConfig[]) => StreamDeckButtonConfig[],
+  ) => {
+    if (!streamDeckSettings || !streamDeckCurrentPage) {
+      return;
+    }
+    const nextButtons = updater(streamDeckCurrentPage.buttons);
+    applyStreamDeckSettings({
+      ...streamDeckSettings,
+      pages: streamDeckSettings.pages.map((page) =>
+        page.page !== streamDeckCurrentPage.page
+          ? page
+          : {
+              ...page,
+              buttons: nextButtons,
+            },
+      ),
+    });
+  };
+
+  const copySelectedStreamDeckButton = () => {
+    if (!streamDeckSelectedButton) {
+      return;
+    }
+    setStreamDeckClipboardButton(cloneStreamDeckButtonConfig(streamDeckSelectedButton));
+    setStreamDeckTransferError("");
+    setStreamDeckTransferMessage(
+      `Button ${streamDeckSelectedButton.index + 1} copied.`,
+    );
+  };
+
+  const pasteIntoSelectedStreamDeckButton = () => {
+    if (!streamDeckClipboardButton || !streamDeckSelectedButton) {
+      return;
+    }
+    updateStreamDeckSelectedButton((button) => ({
+      ...cloneStreamDeckButtonConfig(streamDeckClipboardButton),
+      index: button.index,
+    }));
+    setStreamDeckTransferError("");
+    setStreamDeckTransferMessage(
+      `Pasted into button ${streamDeckSelectedButton.index + 1}.`,
+    );
+  };
+
+  const clearSelectedStreamDeckButton = () => {
+    if (!streamDeckSelectedButton) {
+      return;
+    }
+    updateStreamDeckSelectedButton((button) => ({ index: button.index }));
+    setStreamDeckTransferError("");
+    setStreamDeckTransferMessage(
+      `Button ${streamDeckSelectedButton.index + 1} cleared.`,
+    );
+  };
+
+  const swapStreamDeckButtons = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) {
+      return;
+    }
+    updateStreamDeckCurrentPageButtons((buttons) => {
+      const source = buttons.find((button) => button.index === fromIndex);
+      const target = buttons.find((button) => button.index === toIndex);
+      if (!source || !target) {
+        return buttons;
+      }
+      const sourceClone = cloneStreamDeckButtonConfig(source);
+      const targetClone = cloneStreamDeckButtonConfig(target);
+      return buttons.map((button) => {
+        if (button.index === fromIndex) {
+          return { ...targetClone, index: fromIndex };
+        }
+        if (button.index === toIndex) {
+          return { ...sourceClone, index: toIndex };
+        }
+        return button;
+      });
+    });
+    setStreamDeckSelectedButtonIndex(toIndex);
+    setStreamDeckTransferError("");
+    setStreamDeckTransferMessage(
+      `Moved button ${fromIndex + 1} to ${toIndex + 1}.`,
+    );
+  };
+
+  const handleStreamDeckButtonDragStart = (buttonIndex: number) => {
+    setStreamDeckDragSourceIndex(buttonIndex);
+    setStreamDeckDropTargetIndex(buttonIndex);
+    setStreamDeckSelectedButtonIndex(buttonIndex);
+  };
+
+  const handleStreamDeckButtonDrop = (buttonIndex: number) => {
+    if (streamDeckDragSourceIndex === null) {
+      return;
+    }
+    swapStreamDeckButtons(streamDeckDragSourceIndex, buttonIndex);
+    setStreamDeckDragSourceIndex(null);
+    setStreamDeckDropTargetIndex(null);
+  };
+
+  const resetStreamDeckDragState = () => {
+    setStreamDeckDragSourceIndex(null);
+    setStreamDeckDropTargetIndex(null);
   };
 
   const setStreamDeckActionType = (type: StreamDeckActionType) => {
@@ -685,13 +860,21 @@ export function StationIntercomView({
       if (type === "none") {
         return { ...button, action: undefined };
       }
-      if (type === "ptt_room") {
+      if (
+        type === "ptt_room" ||
+        type === "select_talk_room" ||
+        type === "listen_room" ||
+        type === "call_room"
+      ) {
         return {
           ...button,
           action: {
             type,
             roomId:
-              button.action?.type === "ptt_room"
+              button.action?.type === "ptt_room" ||
+              button.action?.type === "select_talk_room" ||
+              button.action?.type === "listen_room" ||
+              button.action?.type === "call_room"
                 ? button.action.roomId
                 : appData.rooms[0]?.id,
           },
@@ -751,7 +934,7 @@ export function StationIntercomView({
     if (nextPage === undefined || nextPage === streamDeckSettings.selectedPage) {
       return;
     }
-    onStreamDeckSettingsChange({
+    applyStreamDeckSettings({
       ...streamDeckSettings,
       selectedPage: nextPage,
     });
@@ -765,7 +948,7 @@ export function StationIntercomView({
       nextPageNumber += 1;
     }
     const buttonCount = streamDeckSettings.gridColumns * streamDeckSettings.gridRows;
-    onStreamDeckSettingsChange({
+    applyStreamDeckSettings({
       ...streamDeckSettings,
       selectedPage: nextPageNumber,
       pages: [
@@ -792,7 +975,7 @@ export function StationIntercomView({
     if (fallbackPage === undefined) {
       return;
     }
-    onStreamDeckSettingsChange({
+    applyStreamDeckSettings({
       ...streamDeckSettings,
       selectedPage: fallbackPage,
       pages: nextPages,
@@ -841,11 +1024,10 @@ export function StationIntercomView({
     try {
       const text = await file.text();
       const nextSettings = parseStreamDeckImportDocument(text);
-      onStreamDeckSettingsChange(nextSettings);
-      setStreamDeckTransferError("");
-      setStreamDeckTransferMessage(
-        `${file.name} loaded. Click Save to persist it to your account.`,
-      );
+      applyStreamDeckSettings(nextSettings, {
+        message: `${file.name} loaded. Click Save to persist it to your account.`,
+        error: "",
+      });
     } catch (error) {
       setStreamDeckTransferMessage("");
       setStreamDeckTransferError(
@@ -1738,6 +1920,9 @@ export function StationIntercomView({
                             Test mode active: press and hold any key in the grid to trigger down/up events without a physical Stream Deck.
                           </small>
                         ) : null}
+                        <small className="station-settings-meta">
+                          Drag one key onto another to swap them. Use Copy and Paste to duplicate button setups.
+                        </small>
 
                         <div className="streamdeck-layout">
                           <div className="streamdeck-grid" role="grid" aria-label="Stream Deck 5x3 grid">
@@ -1746,6 +1931,9 @@ export function StationIntercomView({
                                 streamDeckPreviewImageByIndex.get(button.index) || "";
                               const isPressedInPreview =
                                 streamDeckPreviewPressedIndexes.includes(button.index);
+                              const showPressedRing =
+                                isPressedInPreview &&
+                                button.action?.type !== "listen_room";
                               return (
                                 <button
                                   type="button"
@@ -1755,8 +1943,39 @@ export function StationIntercomView({
                                     streamDeckSelectedButton?.index === button.index
                                       ? "active"
                                       : ""
-                                  } ${isPressedInPreview ? "test-pressed" : ""}`}
+                                  } ${showPressedRing ? "test-pressed" : ""} ${
+                                    streamDeckDragSourceIndex === button.index
+                                      ? "drag-source"
+                                      : ""
+                                  } ${
+                                    streamDeckDropTargetIndex === button.index &&
+                                    streamDeckDragSourceIndex !== button.index
+                                      ? "drag-target"
+                                      : ""
+                                  }`}
+                                  draggable={!streamDeckTestMode}
                                   onClick={() => setStreamDeckSelectedButtonIndex(button.index)}
+                                  onDragStart={(event) => {
+                                    event.dataTransfer.effectAllowed = "move";
+                                    handleStreamDeckButtonDragStart(button.index);
+                                  }}
+                                  onDragOver={(event) => {
+                                    event.preventDefault();
+                                    if (streamDeckDragSourceIndex !== null) {
+                                      event.dataTransfer.dropEffect = "move";
+                                      setStreamDeckDropTargetIndex(button.index);
+                                    }
+                                  }}
+                                  onDragEnter={() => {
+                                    if (streamDeckDragSourceIndex !== null) {
+                                      setStreamDeckDropTargetIndex(button.index);
+                                    }
+                                  }}
+                                  onDragEnd={resetStreamDeckDragState}
+                                  onDrop={(event) => {
+                                    event.preventDefault();
+                                    handleStreamDeckButtonDrop(button.index);
+                                  }}
                                   onPointerDown={() =>
                                     startStreamDeckPreviewPress(button.index)
                                   }
@@ -1787,6 +2006,40 @@ export function StationIntercomView({
                         <h5>
                           Button {(streamDeckSelectedButton?.index || 0) + 1}
                         </h5>
+                        <div className="streamdeck-editor-actions">
+                          <button
+                            type="button"
+                            className="shortcut-btn"
+                            onClick={undoLastStreamDeckChange}
+                            disabled={streamDeckUndoStack.length === 0}
+                          >
+                            Undo
+                          </button>
+                          <button
+                            type="button"
+                            className="shortcut-btn"
+                            onClick={copySelectedStreamDeckButton}
+                            disabled={!streamDeckSelectedButton}
+                          >
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            className="shortcut-btn"
+                            onClick={pasteIntoSelectedStreamDeckButton}
+                            disabled={!streamDeckSelectedButton || !streamDeckClipboardButton}
+                          >
+                            Paste
+                          </button>
+                          <button
+                            type="button"
+                            className="shortcut-btn shortcut-btn-clear"
+                            onClick={clearSelectedStreamDeckButton}
+                            disabled={!streamDeckSelectedButton}
+                          >
+                            Clear
+                          </button>
+                        </div>
                         <label className="streamdeck-control">
                           <span>Label</span>
                           <input
@@ -1827,17 +2080,32 @@ export function StationIntercomView({
                             }
                           >
                             <option value="none">None</option>
-                            <option value="ptt_room">PTT channel</option>
-                            <option value="direct_role">Direct role</option>
-                            <option value="reply_to_caller">Reply to caller</option>
-                            <option value="broadcast_ptt">Broadcast PTT</option>
-                            <option value="volume_delta">Volume +/-</option>
-                            <option value="page_up">Page up</option>
-                            <option value="page_down">Page down</option>
+                            <optgroup label="Talk channels">
+                              <option value="select_talk_room">Select talk channel</option>
+                              <option value="ptt_selected">PTT selected channels</option>
+                              <option value="ptt_room">PTT fixed channel</option>
+                              <option value="listen_room">Listen channel</option>
+                              <option value="call_room">Call channel</option>
+                            </optgroup>
+                            <optgroup label="Direct communication">
+                              <option value="direct_role">Direct role</option>
+                              <option value="reply_to_caller">Reply to caller</option>
+                            </optgroup>
+                            <optgroup label="Broadcast and audio">
+                              <option value="broadcast_ptt">Broadcast PTT</option>
+                              <option value="volume_delta">Volume +/-</option>
+                            </optgroup>
+                            <optgroup label="Navigation">
+                              <option value="page_up">Page up</option>
+                              <option value="page_down">Page down</option>
+                            </optgroup>
                           </select>
                         </label>
 
-                        {streamDeckSelectedButton?.action?.type === "ptt_room" ? (
+                        {streamDeckSelectedButton?.action?.type === "ptt_room" ||
+                        streamDeckSelectedButton?.action?.type === "select_talk_room" ||
+                        streamDeckSelectedButton?.action?.type === "listen_room" ||
+                        streamDeckSelectedButton?.action?.type === "call_room" ? (
                           <label className="streamdeck-control">
                             <span>Channel</span>
                             <select
@@ -1847,7 +2115,7 @@ export function StationIntercomView({
                                 updateStreamDeckSelectedButton((button) => ({
                                   ...button,
                                   action: {
-                                    type: "ptt_room",
+                                    type: streamDeckSelectedButton.action?.type || "ptt_room",
                                     roomId: event.target.value,
                                   },
                                 }))

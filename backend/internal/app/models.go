@@ -67,6 +67,10 @@ type StreamDeckActionType string
 const (
 	StreamDeckActionTypeNone          StreamDeckActionType = "none"
 	StreamDeckActionTypePTTRoom       StreamDeckActionType = "ptt_room"
+	StreamDeckActionTypeSelectTalkRoom StreamDeckActionType = "select_talk_room"
+	StreamDeckActionTypePTTSelected   StreamDeckActionType = "ptt_selected"
+	StreamDeckActionTypeListenRoom    StreamDeckActionType = "listen_room"
+	StreamDeckActionTypeCallRoom      StreamDeckActionType = "call_room"
 	StreamDeckActionTypeDirectUser    StreamDeckActionType = "direct_user"
 	StreamDeckActionTypeDirectRole    StreamDeckActionType = "direct_role"
 	StreamDeckActionTypeReplyToCaller StreamDeckActionType = "reply_to_caller"

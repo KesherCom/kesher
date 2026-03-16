@@ -291,7 +291,8 @@ export function App() {
               broadcastGroups: currentAppData.broadcastGroups,
             }),
             isListening:
-              rawButton.action?.type === "ptt_room" &&
+              (rawButton.action?.type === "ptt_room" ||
+                rawButton.action?.type === "listen_room") &&
               !!rawButton.action.roomId &&
               listenRoomIds.includes(rawButton.action.roomId),
           },
@@ -905,6 +906,45 @@ export function App() {
         payload.buttonIndex,
       );
 
+      const roleId = currentAppData.self.roleId;
+      const isRoomTalkAllowed = (roomId: string): boolean => {
+        const room = currentAppData.rooms.find((entry) => entry.id === roomId);
+        return !!room && roleAllowed(room.senderRoleIds, roleId);
+      };
+      const isRoomListenAllowed = (roomId: string): boolean => {
+        const room = currentAppData.rooms.find((entry) => entry.id === roomId);
+        return !!room && roleAllowed(room.receiverRoleIds, roleId);
+      };
+      const isBroadcastActionAllowed = (groupId: string): boolean => {
+        const group = currentAppData.broadcastGroups.find(
+          (entry) => entry.id === groupId,
+        );
+        if (!group) return false;
+        const allowedRoleIds = Array.isArray(group.allowedRoleIds)
+          ? group.allowedRoleIds
+          : [];
+        const roleAllowedForGroup =
+          allowedRoleIds.length === 0 || allowedRoleIds.includes(roleId);
+        if (!roleAllowedForGroup) return false;
+        return group.roomIds.some((roomId) => isRoomTalkAllowed(roomId));
+      };
+      const isDirectToRoleAllowed = (targetRoleId: string): boolean => {
+        if (!targetRoleId) return false;
+        return currentAppData.rooms.some(
+          (room) =>
+            roleAllowed(room.senderRoleIds, roleId) &&
+            roleAllowed(room.receiverRoleIds, targetRoleId),
+        );
+      };
+      const isDirectToUserAllowed = (targetUserId: string): boolean => {
+        const targetUser = currentAppData.users.find(
+          (user) => user.id === targetUserId,
+        );
+        if (!targetUser) return false;
+        if (targetUser.id === currentAppData.self.id) return false;
+        return isDirectToRoleAllowed(targetUser.roleId);
+      };
+
       setStreamDeckConnected(true);
       setStreamDeckLastEvent(
         `P${effectivePage + 1}/B${payload.buttonIndex + 1} ${payload.state}`,
@@ -972,6 +1012,12 @@ export function App() {
         return;
       }
       if (action.type === "ptt_room" && action.roomId) {
+        if (payload.state === "down" && !isRoomTalkAllowed(action.roomId)) {
+          setStreamDeckLastEvent(
+            `P${effectivePage + 1}/B${payload.buttonIndex + 1} NOT ALLOW`,
+          );
+          return;
+        }
         if (payload.state === "down") {
           session.handleChannelPttStart(action.roomId);
         } else {
@@ -979,14 +1025,80 @@ export function App() {
         }
         return;
       }
+      if (action.type === "select_talk_room" && action.roomId) {
+        if (payload.state !== "down") {
+          return;
+        }
+        if (!isRoomTalkAllowed(action.roomId)) {
+          setStreamDeckLastEvent(
+            `P${effectivePage + 1}/B${payload.buttonIndex + 1} NOT ALLOW`,
+          );
+          return;
+        }
+        session.toggleTalkRoom(action.roomId);
+        return;
+      }
+      if (action.type === "ptt_selected") {
+        const selectedTalkRooms = session.talkRoomIds;
+        const hasAllowedSelection = selectedTalkRooms.some((roomId) =>
+          isRoomTalkAllowed(roomId),
+        );
+        if (!hasAllowedSelection) {
+          if (payload.state === "down") {
+            setStreamDeckLastEvent(
+              `P${effectivePage + 1}/B${payload.buttonIndex + 1} NOT ALLOW`,
+            );
+          }
+          return;
+        }
+        if (payload.state === "down") {
+          session.startPtt();
+        } else {
+          session.stopPtt();
+        }
+        return;
+      }
+      if (action.type === "listen_room" && action.roomId) {
+        if (payload.state !== "down") {
+          return;
+        }
+        if (!isRoomListenAllowed(action.roomId)) {
+          setStreamDeckLastEvent(
+            `P${effectivePage + 1}/B${payload.buttonIndex + 1} NOT ALLOW`,
+          );
+          return;
+        }
+        session.toggleListenRoom(action.roomId);
+        return;
+      }
+      if (action.type === "call_room" && action.roomId) {
+        if (payload.state !== "down") {
+          return;
+        }
+        if (!isRoomTalkAllowed(action.roomId)) {
+          setStreamDeckLastEvent(
+            `P${effectivePage + 1}/B${payload.buttonIndex + 1} NOT ALLOW`,
+          );
+          return;
+        }
+        session.sendScopedSignal("room", action.roomId, "call");
+        return;
+      }
       if (action.type === "direct_role" && action.roleId) {
         const buttonKey = `${effectivePage}:${payload.buttonIndex}`;
         if (payload.state === "down") {
+          if (!isDirectToRoleAllowed(action.roleId)) {
+            setStreamDeckLastEvent(
+              `P${effectivePage + 1}/B${payload.buttonIndex + 1} NOT ALLOW`,
+            );
+            return;
+          }
           const candidates = session.presence
             .filter(
               (entry) =>
                 entry.userId !== currentAppData.self.id &&
-                entry.roleId === action.roleId,
+                entry.roleId === action.roleId &&
+                isDirectToUserAllowed(entry.userId),
             )
             .sort((a, b) => a.username.localeCompare(b.username));
           const chosen = candidates[0];
@@ -1009,6 +1121,12 @@ export function App() {
         return;
       }
       if (action.type === "direct_user" && action.userId) {
+        if (payload.state === "down" && !isDirectToUserAllowed(action.userId)) {
+          setStreamDeckLastEvent(
+            `P${effectivePage + 1}/B${payload.buttonIndex + 1} NOT ALLOW`,
+          );
+          return;
+        }
         if (payload.state === "down") {
           session.startDirectPtt(action.userId);
         } else {
@@ -1019,6 +1137,12 @@ export function App() {
       if (action.type === "reply_to_caller") {
         const callerId = session.lastDirectCallerUserId;
         if (!callerId) return;
+        if (payload.state === "down" && !isDirectToUserAllowed(callerId)) {
+          setStreamDeckLastEvent(
+            `P${effectivePage + 1}/B${payload.buttonIndex + 1} NOT ALLOW`,
+          );
+          return;
+        }
         if (payload.state === "down") {
           session.startDirectPtt(callerId);
         } else {
@@ -1027,6 +1151,15 @@ export function App() {
         return;
       }
       if (action.type === "broadcast_ptt" && action.broadcastGroupId) {
+        if (
+          payload.state === "down" &&
+          !isBroadcastActionAllowed(action.broadcastGroupId)
+        ) {
+          setStreamDeckLastEvent(
+            `P${effectivePage + 1}/B${payload.buttonIndex + 1} NOT ALLOW`,
+          );
+          return;
+        }
         if (payload.state === "down") {
           session.startBroadcastPtt(action.broadcastGroupId);
         } else {
