@@ -90,6 +90,9 @@ function getActionAccent(actionType?: string): string {
       return "#f94144";
     case "volume_delta":
       return "#8a7dff";
+    case "page_up":
+    case "page_down":
+      return "#55d6ff";
     default:
       return "#7fb2ff";
   }
@@ -106,6 +109,8 @@ function getDisplayLabel(button: StreamDeckButtonConfig): string {
   if (actionType === "broadcast_ptt") return "Broadcast";
   if (actionType === "mute_toggle") return "Mute";
   if (actionType === "volume_delta") return "Volume";
+  if (actionType === "page_up") return "Page +";
+  if (actionType === "page_down") return "Page -";
   return "";
 }
 
@@ -168,6 +173,13 @@ function getButtonPalette(button: StreamDeckButtonConfig, pressed: boolean): Key
         background: "#000000",
         border: "#9d8cff",
         label: "#f2f0ff",
+      };
+    case "page_up":
+    case "page_down":
+      return {
+        background: "#000000",
+        border: "#58ccf6",
+        label: "#effbff",
       };
     default:
       return {

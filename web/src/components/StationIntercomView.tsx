@@ -49,6 +49,10 @@ function sliderFillPercent(gain: number): number {
 
 const METER_DBFS_MIN = -60;
 
+function createEmptyStreamDeckButtons(count: number) {
+  return Array.from({ length: count }, (_, index) => ({ index }));
+}
+
 function meterDbFsToPercent(dbFs: number): number {
   const clamped = Math.max(METER_DBFS_MIN, Math.min(0, dbFs));
   return ((clamped - METER_DBFS_MIN) / (0 - METER_DBFS_MIN)) * 100;
@@ -607,6 +611,48 @@ export function StationIntercomView({
     onStreamDeckSettingsChange({
       ...streamDeckSettings,
       selectedPage: nextPage,
+    });
+  };
+
+  const addStreamDeckPage = () => {
+    if (!streamDeckSettings) return;
+    const existing = new Set(streamDeckSettings.pages.map((page) => page.page));
+    let nextPageNumber = 0;
+    while (existing.has(nextPageNumber)) {
+      nextPageNumber += 1;
+    }
+    const buttonCount = streamDeckSettings.gridColumns * streamDeckSettings.gridRows;
+    onStreamDeckSettingsChange({
+      ...streamDeckSettings,
+      selectedPage: nextPageNumber,
+      pages: [
+        ...streamDeckSettings.pages,
+        {
+          page: nextPageNumber,
+          buttons: createEmptyStreamDeckButtons(buttonCount),
+        },
+      ],
+    });
+  };
+
+  const removeCurrentStreamDeckPage = () => {
+    if (!streamDeckSettings || streamDeckSettings.pages.length <= 1) {
+      return;
+    }
+    const nextPages = streamDeckSettings.pages.filter(
+      (page) => page.page !== streamDeckSettings.selectedPage,
+    );
+    const nextOrder = nextPages.map((page) => page.page).sort((a, b) => a - b);
+    const fallbackPage =
+      nextOrder.find((pageNo) => pageNo > streamDeckSettings.selectedPage) ??
+      nextOrder[nextOrder.length - 1];
+    if (fallbackPage === undefined) {
+      return;
+    }
+    onStreamDeckSettingsChange({
+      ...streamDeckSettings,
+      selectedPage: fallbackPage,
+      pages: nextPages,
     });
   };
 
@@ -1425,6 +1471,26 @@ export function StationIntercomView({
                           </div>
                           <button
                             type="button"
+                            className="shortcut-btn"
+                            onClick={addStreamDeckPage}
+                            disabled={streamDeckBusy || !streamDeckSettings}
+                          >
+                            + Page
+                          </button>
+                          <button
+                            type="button"
+                            className="shortcut-btn shortcut-btn-clear"
+                            onClick={removeCurrentStreamDeckPage}
+                            disabled={
+                              streamDeckBusy ||
+                              !streamDeckSettings ||
+                              streamDeckSettings.pages.length <= 1
+                            }
+                          >
+                            - Page
+                          </button>
+                          <button
+                            type="button"
                             className={`shortcut-btn ${streamDeckTestMode ? "active" : ""}`}
                             onClick={() => setStreamDeckTestMode((value) => !value)}
                             disabled={streamDeckBusy}
@@ -1533,6 +1599,8 @@ export function StationIntercomView({
                             <option value="reply_to_caller">Reply to caller</option>
                             <option value="broadcast_ptt">Broadcast PTT</option>
                             <option value="volume_delta">Volume +/-</option>
+                            <option value="page_up">Page up</option>
+                            <option value="page_down">Page down</option>
                           </select>
                         </label>
 

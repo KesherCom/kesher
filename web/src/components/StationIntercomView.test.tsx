@@ -319,6 +319,64 @@ describe("StationIntercomView", () => {
     );
   });
 
+  it("allows assigning page-up in stream deck settings", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    await user.selectOptions(screen.getByLabelText("Stream Deck function"), "page_up");
+
+    expect(onStreamDeckSettingsChange).toHaveBeenCalled();
+    const calls = onStreamDeckSettingsChange.mock.calls;
+    const lastCallArg = calls[calls.length - 1]?.[0];
+    expect(lastCallArg?.pages?.[0]?.buttons?.[0]?.action?.type).toBe("page_up");
+  });
+
+  it("adds and removes stream deck pages from toolbar buttons", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    const { rerender } = render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    await user.click(screen.getByRole("button", { name: "+ Page" }));
+
+    const addArg = onStreamDeckSettingsChange.mock.calls[0]?.[0];
+    expect(addArg?.pages?.length).toBe(2);
+    expect(addArg?.selectedPage).toBe(1);
+
+    rerender(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        streamDeckSettings={addArg}
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "- Page" }));
+
+    const removeArg = onStreamDeckSettingsChange.mock.calls[1]?.[0];
+    expect(removeArg?.pages?.length).toBe(1);
+    expect(removeArg?.selectedPage).toBe(0);
+
+    expect(onStreamDeckSettingsChange).toHaveBeenCalledTimes(2);
+  });
+
   it("triggers save from stream deck settings header", async () => {
     const user = userEvent.setup();
     const onSaveStreamDeckSettings = vi.fn();

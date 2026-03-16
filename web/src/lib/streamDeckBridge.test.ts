@@ -89,4 +89,27 @@ describe("streamDeckBridge", () => {
     expect(lowered).toBeGreaterThanOrEqual(0);
     expect(lowered).toBeLessThanOrEqual(2);
   });
+
+  it("resolves page-up action from settings", () => {
+    const action = resolveStreamDeckButtonAction(
+      {
+        version: 1,
+        gridColumns: 5,
+        gridRows: 3,
+        selectedPage: 0,
+        pages: [
+          {
+            page: 0,
+            buttons: [
+              { index: 0, action: { type: "page_up" } },
+              ...Array.from({ length: 14 }, (_, idx) => ({ index: idx + 1 })),
+            ],
+          },
+        ],
+      },
+      0,
+      0,
+    );
+    expect(action).toEqual({ type: "page_up" });
+  });
 });

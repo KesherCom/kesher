@@ -356,3 +356,31 @@ func TestUserStreamDeckSettingsAcceptsDirectRoleAction(t *testing.T) {
 		t.Fatalf("unexpected role id: %q", stored.Pages[0].Buttons[1].Action.RoleID)
 	}
 }
+
+func TestUserStreamDeckSettingsAcceptsPageNavigationAction(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	user, err := store.UpsertUser(ctx, "deckpage", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[2].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp}
+
+	stored, err := store.UpsertUserStreamDeckSettings(ctx, user.ID, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Pages[0].Buttons[2].Action == nil {
+		t.Fatal("expected action to be stored")
+	}
+	if stored.Pages[0].Buttons[2].Action.Type != StreamDeckActionTypePageUp {
+		t.Fatalf("unexpected action type: %s", stored.Pages[0].Buttons[2].Action.Type)
+	}
+}

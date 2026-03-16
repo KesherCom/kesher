@@ -934,6 +934,43 @@ export function App() {
         }
         return;
       }
+      if (action.type === "page_up" || action.type === "page_down") {
+        if (payload.state !== "down") {
+          return;
+        }
+        setStreamDeckSettings((prev) => {
+          if (!prev || prev.pages.length === 0) {
+            return prev;
+          }
+          const pageOrder = prev.pages
+            .map((entry) => entry.page)
+            .sort((a, b) => a - b);
+          if (pageOrder.length === 0) {
+            return prev;
+          }
+          const currentIndex = pageOrder.findIndex(
+            (pageNo) => pageNo === prev.selectedPage,
+          );
+          const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+          const offset = action.type === "page_up" ? 1 : -1;
+          const nextIndex = Math.max(
+            0,
+            Math.min(pageOrder.length - 1, safeIndex + offset),
+          );
+          const nextPage = pageOrder[nextIndex];
+          if (nextPage === undefined || nextPage === prev.selectedPage) {
+            return prev;
+          }
+          setStreamDeckLastEvent(
+            `P${safeIndex + 1} -> P${nextIndex + 1} (${action.type === "page_up" ? "page up" : "page down"})`,
+          );
+          return {
+            ...prev,
+            selectedPage: nextPage,
+          };
+        });
+        return;
+      }
       if (action.type === "ptt_room" && action.roomId) {
         if (payload.state === "down") {
           session.handleChannelPttStart(action.roomId);

@@ -50,6 +50,10 @@ function resolveActionLabel(
       return "Mute";
     case "volume_delta":
       return "Volume";
+    case "page_up":
+      return "Page +";
+    case "page_down":
+      return "Page -";
     case "none":
     default:
       return undefined;

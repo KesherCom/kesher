@@ -28,6 +28,8 @@ const streamDeckActionTypes: StreamDeckActionType[] = [
   "broadcast_ptt",
   "mute_toggle",
   "volume_delta",
+  "page_up",
+  "page_down",
 ];
 
 export function parseStreamDeckBridgeEvent(

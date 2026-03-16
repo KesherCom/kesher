@@ -73,6 +73,8 @@ const (
 	StreamDeckActionTypeBroadcastPTT  StreamDeckActionType = "broadcast_ptt"
 	StreamDeckActionTypeMuteToggle    StreamDeckActionType = "mute_toggle"
 	StreamDeckActionTypeVolumeDelta   StreamDeckActionType = "volume_delta"
+	StreamDeckActionTypePageUp        StreamDeckActionType = "page_up"
+	StreamDeckActionTypePageDown      StreamDeckActionType = "page_down"
 )
 
 const (

@@ -324,4 +324,26 @@ describe("api helpers", () => {
     expect(reset.gridColumns).toBe(5);
     expect(reset.pages[0]?.page).toBe(0);
   });
+
+  it("keeps page navigation actions when loading stream deck settings", async () => {
+    server.use(
+      http.get("http://localhost/api/user/stream-deck/settings", () => {
+        return HttpResponse.json({
+          version: 1,
+          gridColumns: 5,
+          gridRows: 3,
+          selectedPage: 0,
+          pages: [
+            {
+              page: 0,
+              buttons: [{ index: 0, action: { type: "page_up" } }],
+            },
+          ],
+        });
+      }),
+    );
+
+    const settings = await getStreamDeckSettings("token-123");
+    expect(settings.pages[0]?.buttons[0]?.action?.type).toBe("page_up");
+  });
 });

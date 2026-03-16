@@ -176,6 +176,8 @@ function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
     "broadcast_ptt",
     "mute_toggle",
     "volume_delta",
+    "page_up",
+    "page_down",
   ];
   const raw = (data ?? {}) as Record<string, unknown>;
   const version =

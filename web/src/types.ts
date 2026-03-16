@@ -175,7 +175,9 @@ export type StreamDeckActionType =
   | "reply_to_caller"
   | "broadcast_ptt"
   | "mute_toggle"
-  | "volume_delta";
+  | "volume_delta"
+  | "page_up"
+  | "page_down";
 
 export type StreamDeckButtonAction = {
   type: StreamDeckActionType;
