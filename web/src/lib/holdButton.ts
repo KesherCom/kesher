@@ -15,6 +15,7 @@ type HoldButtonProps<T extends HTMLElement> = Pick<
 >;
 
 const ACTIVE_POINTER_DATASET_KEY = "holdPointerId";
+const activePointerStops = new WeakMap<HTMLElement, () => void>();
 
 function getActivePointerId(target: HTMLElement): number | null {
   const rawValue = target.dataset[ACTIVE_POINTER_DATASET_KEY];
@@ -28,6 +29,7 @@ function getActivePointerId(target: HTMLElement): number | null {
 
 function clearActivePointer(target: HTMLElement) {
   delete target.dataset[ACTIVE_POINTER_DATASET_KEY];
+  activePointerStops.delete(target);
 }
 
 function releasePointerCaptureSafely(target: HTMLElement, pointerId: number) {
@@ -43,15 +45,15 @@ function releasePointerCaptureSafely(target: HTMLElement, pointerId: number) {
 function finishHold(
   target: HTMLElement,
   pointerId: number,
-  onStop: () => void,
 ) {
   if (getActivePointerId(target) !== pointerId) {
     return;
   }
 
+  const stop = activePointerStops.get(target);
   clearActivePointer(target);
   releasePointerCaptureSafely(target, pointerId);
-  onStop();
+  stop?.();
 }
 
 export function createHoldButtonProps<T extends HTMLElement>(
@@ -74,6 +76,7 @@ export function createHoldButtonProps<T extends HTMLElement>(
       }
 
       target.dataset[ACTIVE_POINTER_DATASET_KEY] = String(event.pointerId);
+      activePointerStops.set(target, onStop);
       if (typeof target.setPointerCapture === "function") {
         try {
           target.setPointerCapture(event.pointerId);
@@ -85,10 +88,10 @@ export function createHoldButtonProps<T extends HTMLElement>(
       onStart();
     },
     onPointerUp: (event: ReactPointerEvent<T>) => {
-      finishHold(event.currentTarget, event.pointerId, onStop);
+      finishHold(event.currentTarget, event.pointerId);
     },
     onPointerCancel: (event: ReactPointerEvent<T>) => {
-      finishHold(event.currentTarget, event.pointerId, onStop);
+      finishHold(event.currentTarget, event.pointerId);
     },
     onLostPointerCapture: (event: ReactPointerEvent<T>) => {
       const target = event.currentTarget;
@@ -96,8 +99,9 @@ export function createHoldButtonProps<T extends HTMLElement>(
         return;
       }
 
+      const stop = activePointerStops.get(target);
       clearActivePointer(target);
-      onStop();
+      stop?.();
     },
   };
 }

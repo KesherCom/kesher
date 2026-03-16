@@ -72,4 +72,53 @@ describe("createHoldButtonProps", () => {
 
     expect(onStop).toHaveBeenCalledTimes(1);
   });
+
+  it("uses the stop handler from pointer down even after rerender", () => {
+    const initialStop = vi.fn();
+    const nextStop = vi.fn();
+
+    function TestButton({ onStop }: { onStop: () => void }) {
+      return (
+        <button
+          type="button"
+          {...createHoldButtonProps({ onStart: vi.fn(), onStop })}
+        >
+          Hold
+        </button>
+      );
+    }
+
+    const { rerender } = render(<TestButton onStop={initialStop} />);
+    const button = screen.getByRole("button", { name: "Hold" });
+
+    let capturedPointerId: number | null = null;
+    Object.defineProperties(button, {
+      setPointerCapture: {
+        configurable: true,
+        value: (pointerId: number) => {
+          capturedPointerId = pointerId;
+        },
+      },
+      hasPointerCapture: {
+        configurable: true,
+        value: (pointerId: number) => capturedPointerId === pointerId,
+      },
+      releasePointerCapture: {
+        configurable: true,
+        value: (pointerId: number) => {
+          if (capturedPointerId === pointerId) {
+            capturedPointerId = null;
+          }
+        },
+      },
+    });
+
+    fireEvent.pointerDown(button, { button: 0, pointerId: 11, pointerType: "touch" });
+
+    rerender(<TestButton onStop={nextStop} />);
+    fireEvent.pointerUp(button, { pointerId: 11, pointerType: "touch" });
+
+    expect(initialStop).toHaveBeenCalledTimes(1);
+    expect(nextStop).not.toHaveBeenCalled();
+  });
 });
