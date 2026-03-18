@@ -62,6 +62,76 @@ type Session struct {
 	ExpiresAt time.Time
 }
 
+type StreamDeckActionType string
+
+const (
+	StreamDeckActionTypeNone          StreamDeckActionType = "none"
+	StreamDeckActionTypePTTRoom       StreamDeckActionType = "ptt_room"
+	StreamDeckActionTypeSelectTalkRoom StreamDeckActionType = "select_talk_room"
+	StreamDeckActionTypePTTSelected   StreamDeckActionType = "ptt_selected"
+	StreamDeckActionTypeListenRoom    StreamDeckActionType = "listen_room"
+	StreamDeckActionTypeCallRoom      StreamDeckActionType = "call_room"
+	StreamDeckActionTypeDirectUser    StreamDeckActionType = "direct_user"
+	StreamDeckActionTypeDirectRole    StreamDeckActionType = "direct_role"
+	StreamDeckActionTypeReplyToCaller StreamDeckActionType = "reply_to_caller"
+	StreamDeckActionTypeBroadcastPTT  StreamDeckActionType = "broadcast_ptt"
+	StreamDeckActionTypeMuteToggle    StreamDeckActionType = "mute_toggle"
+	StreamDeckActionTypeVolumeDelta   StreamDeckActionType = "volume_delta"
+	StreamDeckActionTypePageUp        StreamDeckActionType = "page_up"
+	StreamDeckActionTypePageDown      StreamDeckActionType = "page_down"
+)
+
+const (
+	StreamDeckGridColumns = 5
+	StreamDeckGridRows    = 3
+	StreamDeckButtonCount = StreamDeckGridColumns * StreamDeckGridRows
+)
+
+type StreamDeckButtonAction struct {
+	Type             StreamDeckActionType `json:"type"`
+	RoomID           string               `json:"roomId,omitempty"`
+	UserID           string               `json:"userId,omitempty"`
+	RoleID           string               `json:"roleId,omitempty"`
+	BroadcastGroupID string               `json:"broadcastGroupId,omitempty"`
+	VolumeDelta      int                  `json:"volumeDelta,omitempty"`
+}
+
+type StreamDeckButtonConfig struct {
+	Index  int                     `json:"index"`
+	Label  string                  `json:"label,omitempty"`
+	Color  string                  `json:"color,omitempty"`
+	Action *StreamDeckButtonAction `json:"action,omitempty"`
+}
+
+type StreamDeckPageConfig struct {
+	Page    int                      `json:"page"`
+	Buttons []StreamDeckButtonConfig `json:"buttons"`
+}
+
+type StreamDeckSettings struct {
+	Version      int                    `json:"version"`
+	GridColumns  int                    `json:"gridColumns"`
+	GridRows     int                    `json:"gridRows"`
+	SelectedPage int                    `json:"selectedPage"`
+	Pages        []StreamDeckPageConfig `json:"pages"`
+}
+
+func DefaultStreamDeckSettings() StreamDeckSettings {
+	buttons := make([]StreamDeckButtonConfig, 0, StreamDeckButtonCount)
+	for i := 0; i < StreamDeckButtonCount; i++ {
+		buttons = append(buttons, StreamDeckButtonConfig{Index: i})
+	}
+	return StreamDeckSettings{
+		Version:      1,
+		GridColumns:  StreamDeckGridColumns,
+		GridRows:     StreamDeckGridRows,
+		SelectedPage: 0,
+		Pages: []StreamDeckPageConfig{
+			{Page: 0, Buttons: buttons},
+		},
+	}
+}
+
 type BootstrapResponse struct {
 	Self            User             `json:"self"`
 	Roles           []Role           `json:"roles"`
@@ -90,6 +160,22 @@ type LoginResponse struct {
 	User  User   `json:"user"`
 }
 
+type LoginConflictResponse struct {
+	RequiresTakeover bool   `json:"requiresTakeover"`
+	ConflictRoleID   string `json:"conflictRoleId"`
+	ConflictRoleName string `json:"conflictRoleName,omitempty"`
+	ConflictUsername string `json:"conflictUsername,omitempty"`
+}
+
+type LoginTakeoverRequest struct {
+	Username string `json:"username"`
+	RoleID   string `json:"roleId"`
+}
+
+type AdminLoginRequest struct {
+	PIN string `json:"pin"`
+}
+
 type WSInbound struct {
 	Type string `json:"type"`
 	Data any    `json:"data"`
@@ -98,6 +184,11 @@ type WSInbound struct {
 type WSOutbound struct {
 	Type string `json:"type"`
 	Data any    `json:"data"`
+}
+
+type SessionRevokedEvent struct {
+	Reason    string `json:"reason"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 type RoomMatrixEvent struct {
@@ -201,13 +292,13 @@ type TelegramMapping struct {
 }
 
 type TelegramAllowlistEntry struct {
-	ID                 string `json:"id"`
-	TelegramUsername   string `json:"telegramUsername"`
-	TelegramNumericID  string `json:"telegramNumericId,omitempty"`
-	KesherUsername     string `json:"kesherUsername"`
-	CreatedAt          int64  `json:"createdAt"`
-	Status             string `json:"status"`
-	IsBound            bool   `json:"isBound"`
+	ID                string `json:"id"`
+	TelegramUsername  string `json:"telegramUsername"`
+	TelegramNumericID string `json:"telegramNumericId,omitempty"`
+	KesherUsername    string `json:"kesherUsername"`
+	CreatedAt         int64  `json:"createdAt"`
+	Status            string `json:"status"`
+	IsBound           bool   `json:"isBound"`
 }
 
 type TelegramUserMapping struct {

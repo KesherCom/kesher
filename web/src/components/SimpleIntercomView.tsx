@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createHoldButtonProps } from "../lib/holdButton";
 
 type DirectReplyTarget = {
   userId: string;
@@ -61,6 +62,29 @@ export function SimpleIntercomView({
   const mainActive =
     pressedButton === "main" || (pttPressed && pressedButton == null);
   const replyActive = pressedButton === "reply";
+  const mainPttButtonProps = createHoldButtonProps<HTMLButtonElement>({
+    onStart: () => {
+      setPressedButton("main");
+      onStartPpt();
+    },
+    onStop: () => {
+      setPressedButton(null);
+      onStopPpt();
+    },
+  });
+  const replyButtonProps = createHoldButtonProps<HTMLButtonElement>({
+    disabled: !replyTarget,
+    onStart: () => {
+      if (!replyTarget) return;
+      setPressedButton("reply");
+      onStartPpt();
+    },
+    onStop: () => {
+      if (!replyTarget) return;
+      setPressedButton(null);
+      onStopPpt();
+    },
+  });
 
   return (
     <div className="root app simple-shell">
@@ -81,50 +105,16 @@ export function SimpleIntercomView({
           </button>
         </div>
         <button
-          className={`simple-ptt ${mainActive ? "active" : ""}`}
-          onPointerDown={() => {
-            setPressedButton("main");
-            onStartPpt();
-          }}
-          onPointerUp={() => {
-            setPressedButton(null);
-            onStopPpt();
-          }}
-          onPointerLeave={() => {
-            setPressedButton(null);
-            onStopPpt();
-          }}
-          onPointerCancel={() => {
-            setPressedButton(null);
-            onStopPpt();
-          }}
+          className={`simple-ptt hold-button ${mainActive ? "active" : ""}`}
+          {...mainPttButtonProps}
         >
           Hold to talk
           <small>{simplePptTargetLabel}</small>
         </button>
         <button
-          className={`simple-reply ${replyTarget ? "" : "disabled"} ${replyActive ? "active" : ""}`}
+          className={`simple-reply hold-button ${replyTarget ? "" : "disabled"} ${replyActive ? "active" : ""}`}
           disabled={!replyTarget}
-          onPointerDown={() => {
-            if (!replyTarget) return;
-            setPressedButton("reply");
-            onStartPpt();
-          }}
-          onPointerUp={() => {
-            if (!replyTarget) return;
-            setPressedButton(null);
-            onStopPpt();
-          }}
-          onPointerLeave={() => {
-            if (!replyTarget) return;
-            setPressedButton(null);
-            onStopPpt();
-          }}
-          onPointerCancel={() => {
-            if (!replyTarget) return;
-            setPressedButton(null);
-            onStopPpt();
-          }}
+          {...replyButtonProps}
         >
           Reply to caller
           <small>

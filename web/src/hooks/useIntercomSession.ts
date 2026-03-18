@@ -21,6 +21,7 @@ import type {
   Presence,
   PublicBootstrap,
   RoutedEvent,
+  SessionRevokedEvent,
 } from "../types";
 import { useLocalMic } from "./useLocalMic";
 import { useRemoteAudio } from "./useRemoteAudio";
@@ -72,6 +73,7 @@ type WsMessage =
       type: "webrtc_ice_candidate";
       data: { candidate: string; sdpMid?: string; sdpMLineIndex?: number };
     }
+  | { type: "session_revoked"; data: SessionRevokedEvent }
   | { type: "config_updated"; data: unknown };
 const opusMaxBitrateBps = 24000;
 const opusSpeechFmtpParams = [
@@ -134,6 +136,18 @@ function tuneOpusSdpForSpeech(sdp: string): string {
     }
   }
   return lines.join("\r\n");
+}
+
+function isMobileClient(): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return false;
+  }
+  const ua = navigator.userAgent || "";
+  const isMobileUserAgent = /Android|iPhone|iPad|iPod|Mobi/i.test(ua);
+  const isCoarsePointer =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(pointer: coarse)").matches;
+  return isMobileUserAgent || isCoarsePointer;
 }
 
 async function applyOutgoingAudioSenderBitrate(pc: RTCPeerConnection) {
@@ -203,6 +217,7 @@ export type UseIntercomSessionOptions = {
     React.SetStateAction<PublicBootstrap | null>
   >;
   onRefreshAudioDevices: () => Promise<void>;
+  onSessionRevoked: () => void;
 };
 
 export type UseIntercomSessionResult = {
@@ -305,7 +320,13 @@ export function useIntercomSession({
   onUpdateAppData,
   onUpdatePublicData,
   onRefreshAudioDevices,
+  onSessionRevoked,
 }: UseIntercomSessionOptions): UseIntercomSessionResult {
+  const forcePttOnMobile = isMobileClient();
+  const resolveVoiceModeForClient = (
+    mode: "always_on" | "ptt",
+  ): "always_on" | "ptt" => (forcePttOnMobile ? "ptt" : mode);
+
   // ── State ──
   const [connectionState, setConnectionState] = useState<
     "connecting" | "connected" | "reconnecting" | "offline"
@@ -342,7 +363,7 @@ export function useIntercomSession({
   } | null>(null);
   const [attentionFlashKey, setAttentionFlashKey] = useState(0);
   const [voiceMode, setVoiceMode] = useState<"always_on" | "ptt">(
-    initialVoiceMode,
+    resolveVoiceModeForClient(initialVoiceMode),
   );
   const [pttPressed, setPttPressed] = useState(false);
   const [broadcastPttPressed, setBroadcastPttPressed] = useState<string | null>(
@@ -398,7 +419,9 @@ export function useIntercomSession({
   const observedVoiceSendersRef = useRef<Set<string>>(new Set());
   const incomingAttentionTimeoutRef = useRef<number | null>(null);
   const roomSwitchTimerRef = useRef<number | null>(null);
-  const voiceModeRef = useRef<"always_on" | "ptt">(initialVoiceMode);
+  const voiceModeRef = useRef<"always_on" | "ptt">(
+    resolveVoiceModeForClient(initialVoiceMode),
+  );
   const prevChannelRef = useRef<string>("");
   const pendingInitialRoomRestoreRef = useRef(hadStoredSessionSettings);
   const appDataRef = useRef(appData);
@@ -847,6 +870,59 @@ export function useIntercomSession({
   );
 
   // ── Sending helpers ──
+  function canSelfSendToRoom(roomId: string): boolean {
+    const ad = appDataRef.current;
+    if (!ad || !roomId) return false;
+    return canRoleSendToRoom(roomId, ad.self.roleId);
+  }
+
+  function canSelfSendToBroadcastGroup(groupId: string): boolean {
+    const ad = appDataRef.current;
+    if (!ad || !groupId) return false;
+    const group = ad.broadcastGroups.find((entry) => entry.id === groupId);
+    if (!group) return false;
+    const allowedRoleIds = Array.isArray(group.allowedRoleIds)
+      ? group.allowedRoleIds
+      : [];
+    const roleAllowedForGroup =
+      allowedRoleIds.length === 0 || allowedRoleIds.includes(ad.self.roleId);
+    if (!roleAllowedForGroup) return false;
+    return group.roomIds.some((roomId) => canRoleSendToRoom(roomId, ad.self.roleId));
+  }
+
+  function canSelfDirectToRole(targetRoleId: string): boolean {
+    const ad = appDataRef.current;
+    if (!ad || !targetRoleId) return false;
+    return ad.rooms.some(
+      (room) =>
+        roleAllowed(room.senderRoleIds, ad.self.roleId) &&
+        roleAllowed(room.receiverRoleIds, targetRoleId),
+    );
+  }
+
+  function canSelfSendDirectToUser(targetUserId: string): boolean {
+    const ad = appDataRef.current;
+    if (!ad || !targetUserId) return false;
+    if (targetUserId === ad.self.id) return false;
+    const targetUser = ad.users.find((user) => user.id === targetUserId);
+    if (!targetUser) return false;
+    return canSelfDirectToRole(targetUser.roleId);
+  }
+
+  function canSendScopedVoiceState(
+    scopeValue: "direct" | "room" | "broadcast",
+    scopedTargetId: string,
+  ): boolean {
+    if (!scopedTargetId) return false;
+    if (scopeValue === "direct") {
+      return canSelfSendDirectToUser(scopedTargetId);
+    }
+    if (scopeValue === "room") {
+      return canSelfSendToRoom(scopedTargetId);
+    }
+    return canSelfSendToBroadcastGroup(scopedTargetId);
+  }
+
   function sendScopedVoiceState(
     scopeValue: "direct" | "room" | "broadcast",
     scopedTargetId: string,
@@ -858,6 +934,9 @@ export function useIntercomSession({
       !scopedTargetId
     )
       return;
+    if (!canSendScopedVoiceState(scopeValue, scopedTargetId)) {
+      return;
+    }
     const stream = mic.localStreamRef.current;
     if (stream) {
       for (const track of stream.getAudioTracks()) {
@@ -884,7 +963,7 @@ export function useIntercomSession({
       listenRoomIdsRef.current,
       talkRoomIdsRef.current,
     );
-    if (!voiceTargetId) return;
+    if (!voiceTargetId || !canSelfSendToRoom(voiceTargetId)) return;
     sendScopedVoiceState("room", voiceTargetId, state);
   }
 
@@ -899,6 +978,9 @@ export function useIntercomSession({
       !scopedTargetId
     )
       return;
+    if (!canSendScopedVoiceState(scopeValue, scopedTargetId)) {
+      return;
+    }
     wsRef.current.send(
       JSON.stringify({
         type: "signal",
@@ -909,6 +991,16 @@ export function useIntercomSession({
 
   // ── Voice mode actions ──
   function setAlwaysOn(enabled: boolean) {
+    if (forcePttOnMobile) {
+      if (voiceModeRef.current !== "ptt") {
+        setVoiceMode("ptt");
+        voiceModeRef.current = "ptt";
+      }
+      setPttPressed(false);
+      setPttPressedChannelId(null);
+      sendVoiceState("always_off");
+      return;
+    }
     if (enabled && enableDirectPpt) {
       if (voiceModeRef.current !== "ptt") {
         setVoiceMode("ptt");
@@ -948,21 +1040,25 @@ export function useIntercomSession({
   }
 
   function startBroadcastPtt(groupId: string) {
+    if (!canSelfSendToBroadcastGroup(groupId)) return;
     setBroadcastPttPressed(groupId);
     sendScopedVoiceState("broadcast", groupId, "ptt_start");
   }
 
   function stopBroadcastPtt(groupId: string) {
+    if (!canSelfSendToBroadcastGroup(groupId)) return;
     setBroadcastPttPressed((current) => (current === groupId ? null : current));
     sendScopedVoiceState("broadcast", groupId, "ptt_stop");
   }
 
   function startDirectPtt(userId: string) {
+    if (!canSendScopedVoiceState("direct", userId)) return;
     setdirectPttPressedUserId(userId);
     sendScopedVoiceState("direct", userId, "ptt_start");
   }
 
   function stopDirectPtt(userId: string) {
+    if (!canSendScopedVoiceState("direct", userId)) return;
     setdirectPttPressedUserId((current) =>
       current === userId ? null : current,
     );
@@ -972,6 +1068,7 @@ export function useIntercomSession({
   // ── Channel PTT ──
   function handleChannelPttStart(channelId: string) {
     if (!appDataRef.current || !channelId) return;
+    if (!canSelfSendToRoom(channelId)) return;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     setTalkRoomIds([channelId]);
     setPttPressed(true);
@@ -1070,7 +1167,9 @@ export function useIntercomSession({
         (role) => role.id === data.self.roleId,
       );
       if (roleDefaults?.defaultVoiceMode) {
-        const nextMode = roleDefaults.defaultVoiceMode as "always_on" | "ptt";
+        const nextMode = resolveVoiceModeForClient(
+          roleDefaults.defaultVoiceMode as "always_on" | "ptt",
+        );
         setVoiceMode(nextMode);
         voiceModeRef.current = nextMode;
       }
@@ -1136,7 +1235,7 @@ export function useIntercomSession({
         }
       }
     },
-    [hadStoredSessionSettings],
+    [hadStoredSessionSettings, forcePttOnMobile],
   );
 
   // ── Admin mode: reset operator state ──
@@ -1367,6 +1466,16 @@ export function useIntercomSession({
             });
             return sameStringArray(prev, next) ? prev : next;
           });
+          return;
+        }
+        if (msg.type === "session_revoked") {
+          shouldReconnectRef.current = false;
+          setConnectionState("offline");
+          pushDebugEvent(
+            `system · session revoked · reason:${msg.data.reason || "unknown"}`,
+          );
+          onSessionRevoked();
+          ws.close(4001, "session revoked");
           return;
         }
         if (msg.type === "companion_command") {
@@ -1662,6 +1771,10 @@ export function useIntercomSession({
           setConnectionState("offline");
           return;
         }
+        if (event.code === 4001) {
+          setConnectionState("offline");
+          return;
+        }
         console.warn("WebSocket closed:", {
           code: event.code,
           reason: event.reason,
@@ -1848,7 +1961,9 @@ export function useIntercomSession({
         : selfPresence.talkRooms,
     );
     const nextVoiceMode =
-      selfPresence.voiceMode === "always_on" ? "always_on" : "ptt";
+      resolveVoiceModeForClient(
+        selfPresence.voiceMode === "always_on" ? "always_on" : "ptt",
+      );
     if (nextVoiceMode !== voiceModeRef.current) {
       setVoiceMode(nextVoiceMode);
       voiceModeRef.current = nextVoiceMode;

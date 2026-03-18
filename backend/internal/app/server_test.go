@@ -244,6 +244,92 @@ func TestServerHandleLoginSuccess(t *testing.T) {
 	}
 }
 
+func TestServerHandleLoginConflictReturnsTakeoverHint(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute), hub: NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))}
+	_ = s.sessions.Create(User{ID: "u-existing", Username: "alice", RoleID: "audio"})
+
+	body := bytes.NewBufferString("{\"username\":\"tim\",\"roleId\":\"audio\"}")
+	req := httptest.NewRequest(http.MethodPost, "/api/login", body)
+	rec := httptest.NewRecorder()
+	s.handleLogin(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", rec.Code)
+	}
+	var resp LoginConflictResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode conflict response: %v", err)
+	}
+	if !resp.RequiresTakeover || resp.ConflictRoleID != "audio" || resp.ConflictUsername != "alice" {
+		t.Fatalf("unexpected conflict response: %+v", resp)
+	}
+}
+
+func TestServerHandleLoginTakeoverReplacesExistingRoleSession(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute), hub: NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))}
+	existing := s.sessions.Create(User{ID: "u-existing", Username: "alice", RoleID: "audio"})
+
+	body := bytes.NewBufferString("{\"username\":\"tim\",\"roleId\":\"audio\"}")
+	req := httptest.NewRequest(http.MethodPost, "/api/login/takeover", body)
+	rec := httptest.NewRecorder()
+	s.handleLoginTakeover(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if _, ok := s.sessions.Get(existing.Token); ok {
+		t.Fatal("expected old role session to be removed by takeover")
+	}
+	var resp LoginResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode takeover response: %v", err)
+	}
+	if resp.Token == "" || resp.User.Username != "tim" || resp.User.RoleID != "audio" {
+		t.Fatalf("unexpected takeover response: %+v", resp)
+	}
+}
+
+func TestServerHandleAdminLoginCreatesRoleFreeSession(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute)}
+	body := bytes.NewBufferString("{\"pin\":\"123456\"}")
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/login", body)
+	rec := httptest.NewRecorder()
+	s.handleAdminLogin(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp LoginResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode admin login response: %v", err)
+	}
+	if resp.Token == "" || resp.User.Username != "admin" || resp.User.RoleID != "" {
+		t.Fatalf("unexpected admin login response: %+v", resp)
+	}
+	stored, ok := s.sessions.Get(resp.Token)
+	if !ok {
+		t.Fatal("expected admin session to exist")
+	}
+	if stored.RoleID != "" {
+		t.Fatalf("expected admin session role to be empty, got %q", stored.RoleID)
+	}
+	if _, conflict := s.sessions.LatestForRole("audio"); conflict {
+		t.Fatal("admin session must not create role conflict")
+	}
+}
+
 func TestServerHandleLoginRejectsWhitespaceInUsername(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
@@ -1085,5 +1171,104 @@ func TestServerWriteStoreErrMappings(t *testing.T) {
 				t.Fatalf("unexpected status code: got %d want %d", rec.Code, tc.code)
 			}
 		})
+	}
+}
+
+func TestServerHandleUserStreamDeckSettingsGetReturnsDefaultWhenMissing(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute)}
+	user, err := store.UpsertUser(context.Background(), "deck-default", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := s.sessions.Create(user)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/stream-deck/settings", nil)
+	rec := httptest.NewRecorder()
+	s.handleUserStreamDeckSettings(rec, req, session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var got StreamDeckSettings
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if got.GridColumns != StreamDeckGridColumns || got.GridRows != StreamDeckGridRows {
+		t.Fatalf("unexpected default grid: %+v", got)
+	}
+}
+
+func TestServerHandleUserStreamDeckSettingsPutAndDelete(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute)}
+	user, err := store.UpsertUser(context.Background(), "deck-put", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := s.sessions.Create(user)
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeReplyToCaller}
+	body, _ := json.Marshal(settings)
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/user/stream-deck/settings", bytes.NewBuffer(body))
+	putRec := httptest.NewRecorder()
+	s.handleUserStreamDeckSettings(putRec, putReq, session)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for PUT, got %d", putRec.Code)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/user/stream-deck/settings", nil)
+	getRec := httptest.NewRecorder()
+	s.handleUserStreamDeckSettings(getRec, getReq, session)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for GET, got %d", getRec.Code)
+	}
+	var got StreamDeckSettings
+	if err := json.Unmarshal(getRec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("failed to decode GET response: %v", err)
+	}
+	if got.Pages[0].Buttons[0].Action == nil || got.Pages[0].Buttons[0].Action.Type != StreamDeckActionTypeReplyToCaller {
+		t.Fatalf("expected reply-to-caller action, got %+v", got.Pages[0].Buttons[0].Action)
+	}
+
+	delReq := httptest.NewRequest(http.MethodDelete, "/api/user/stream-deck/settings", nil)
+	delRec := httptest.NewRecorder()
+	s.handleUserStreamDeckSettings(delRec, delReq, session)
+	if delRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for DELETE, got %d", delRec.Code)
+	}
+}
+
+func TestServerHandleUserStreamDeckSettingsRejectsInvalidPayload(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute)}
+	user, err := store.UpsertUser(context.Background(), "deck-invalid", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := s.sessions.Create(user)
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeVolumeDelta, VolumeDelta: 0}
+	body, _ := json.Marshal(settings)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/user/stream-deck/settings", bytes.NewBuffer(body))
+	rec := httptest.NewRecorder()
+	s.handleUserStreamDeckSettings(rec, req, session)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
 	}
 }

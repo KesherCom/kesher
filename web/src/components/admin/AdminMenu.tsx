@@ -26,21 +26,44 @@ export function AdminMenu({
 
   return (
     <div className="admin-stack">
-      <AdminConfigCard
-        token={token}
-        adminPin={adminPin}
-        appData={appData}
-        refreshBootstrapData={refreshBootstrapData}
-      />
+      <div className="admin-settings-layout">
+        <section className="admin-settings-main" aria-label="Configuration settings">
+          <div className="admin-layout-intro">
+            <span className="admin-layout-eyebrow">Configuration</span>
+            <h2>Core setup</h2>
+            <p>
+              Manage showfiles, operator roles, party lines, channels, Telegram
+              mappings, users and routing.
+            </p>
+          </div>
 
-      <AdminPinCard onUpdateAdminPin={onUpdateAdminPin} />
+          <AdminConfigCard
+            token={token}
+            adminPin={adminPin}
+            appData={appData}
+            refreshBootstrapData={refreshBootstrapData}
+          />
+        </section>
 
-      <AdminMonitoringCard
-        token={token}
-        adminPin={adminPin}
-        audioStats={audioStats}
-        activeRoutesCount={activeRoutesCount}
-      />
+        <aside className="admin-settings-side" aria-label="Security and monitoring">
+          <div className="admin-layout-intro admin-layout-intro-compact">
+            <span className="admin-layout-eyebrow">Operations</span>
+            <h2>Access and runtime</h2>
+            <p>
+              Keep admin access under control and monitor live system health.
+            </p>
+          </div>
+
+          <AdminPinCard onUpdateAdminPin={onUpdateAdminPin} />
+
+          <AdminMonitoringCard
+            token={token}
+            adminPin={adminPin}
+            audioStats={audioStats}
+            activeRoutesCount={activeRoutesCount}
+          />
+        </aside>
+      </div>
     </div>
   );
 }

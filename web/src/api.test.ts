@@ -2,11 +2,18 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import {
+  adminLogin,
   bootstrap,
   createRole,
+  exportConfiguration,
   getPublicBootstrap,
+  getStreamDeckSettings,
+  importConfiguration,
   login,
+  loginTakeover,
   logout,
+  resetStreamDeckSettings,
+  updateStreamDeckSettings,
 } from "./api";
 
 const server = setupServer(
@@ -25,6 +32,23 @@ const server = setupServer(
     return HttpResponse.json({
       token: "token-123",
       user: { id: "u1", username: body.username, roleId: body.roleId },
+    });
+  }),
+  http.post("http://localhost/api/login/takeover", async ({ request }) => {
+    const body = (await request.json()) as { username: string; roleId: string };
+    return HttpResponse.json({
+      token: "token-takeover",
+      user: { id: "u1", username: body.username, roleId: body.roleId },
+    });
+  }),
+  http.post("http://localhost/api/admin/login", async ({ request }) => {
+    const body = (await request.json()) as { pin: string };
+    if (!body.pin) {
+      return new HttpResponse("forbidden", { status: 403 });
+    }
+    return HttpResponse.json({
+      token: "admin-token",
+      user: { id: "", username: "admin", roleId: "" },
     });
   }),
   http.get("http://localhost/api/bootstrap", ({ request }) => {
@@ -54,6 +78,85 @@ const server = setupServer(
       return new HttpResponse("invalid", { status: 400 });
     return new HttpResponse(null, { status: 204 });
   }),
+  http.get("http://localhost/api/admin/configuration-export", () => {
+    return HttpResponse.json({
+      meta: {
+        format: "kesher-showfile",
+        schemaVersion: 1,
+        exportedAt: "2026-03-14T12:00:00Z",
+        sourceVersion: { version: "test", buildTimestamp: "2026-03-14T12:00:00Z" },
+        sections: [
+          "roles",
+          "users",
+          "rooms",
+          "broadcastGroups",
+          "telegramAllowlist",
+          "ackSettings",
+          "streamDeckSettings",
+        ],
+      },
+      roles: [{ id: "op", name: "Operator" }],
+      users: [{ username: "tim", roleId: "op" }],
+      rooms: [],
+      broadcastGroups: [],
+      telegramAllowlist: [
+        {
+          id: "allow-1",
+          telegramUsername: "tim_telegram",
+          telegramNumericId: "",
+          kesherUsername: "tim",
+          createdAt: 0,
+          status: "Pending",
+          isBound: false,
+        },
+      ],
+      ackSettings: { enabled: true },
+      streamDeckSettings: [],
+    });
+  }),
+  http.post("http://localhost/api/admin/configuration-import", async ({ request }) => {
+    const body = (await request.json()) as {
+      document?: { meta?: { format?: string } };
+      sections?: string[];
+    };
+    if (!body.document?.meta?.format || !body.sections?.length) {
+      return new HttpResponse("invalid", { status: 400 });
+    }
+    return HttpResponse.json({ importedSections: body.sections });
+  }),
+  http.get("http://localhost/api/user/stream-deck/settings", () => {
+    return HttpResponse.json({
+      version: 1,
+      gridColumns: 5,
+      gridRows: 3,
+      selectedPage: 0,
+      pages: [
+        {
+          page: 0,
+          buttons: [{ index: 0, action: { type: "reply_to_caller" } }],
+        },
+      ],
+    });
+  }),
+  http.put("http://localhost/api/user/stream-deck/settings", async ({ request }) => {
+    const body = (await request.json()) as {
+      gridColumns?: number;
+      gridRows?: number;
+    };
+    if (body.gridColumns !== 5 || body.gridRows !== 3) {
+      return new HttpResponse("invalid", { status: 400 });
+    }
+    return HttpResponse.json(body);
+  }),
+  http.delete("http://localhost/api/user/stream-deck/settings", () => {
+    return HttpResponse.json({
+      version: 1,
+      gridColumns: 5,
+      gridRows: 3,
+      selectedPage: 0,
+      pages: [{ page: 0, buttons: [{ index: 0 }] }],
+    });
+  }),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -69,8 +172,22 @@ describe("api helpers", () => {
 
   it("logs in and returns token + user", async () => {
     const result = await login("Tim", "op");
+    if ("requiresTakeover" in result) {
+      throw new Error("expected successful login payload");
+    }
     expect(result.token).toBe("token-123");
     expect(result.user.username).toBe("Tim");
+  });
+
+  it("executes takeover login", async () => {
+    const result = await loginTakeover("Tim", "op");
+    expect(result.token).toBe("token-takeover");
+  });
+
+  it("executes admin login without role", async () => {
+    const result = await adminLogin("123456");
+    expect(result.token).toBe("admin-token");
+    expect(result.user.roleId).toBe("");
   });
 
   it("loads authenticated bootstrap", async () => {
@@ -139,5 +256,98 @@ describe("api helpers", () => {
     await expect(
       createRole("token-123", "1234", { id: "op", name: "Operator" }),
     ).rejects.toThrow("role exists");
+  });
+
+  it("loads configuration export documents", async () => {
+    const document = await exportConfiguration("token-123", "123456");
+    expect(document.meta.format).toBe("kesher-showfile");
+    expect(document.users[0]?.username).toBe("tim");
+    expect(document.telegramAllowlist[0]?.telegramUsername).toBe(
+      "tim_telegram",
+    );
+    expect(document.ackSettings?.enabled).toBe(true);
+  });
+
+  it("posts configuration imports with selected sections", async () => {
+    const response = await importConfiguration(
+      "token-123",
+      "123456",
+      {
+        meta: {
+          format: "kesher-showfile",
+          schemaVersion: 1,
+          exportedAt: "2026-03-14T12:00:00Z",
+          sourceVersion: {
+            version: "test",
+            buildTimestamp: "2026-03-14T12:00:00Z",
+          },
+          sections: [
+            "roles",
+            "users",
+            "rooms",
+            "broadcastGroups",
+            "telegramAllowlist",
+            "ackSettings",
+            "streamDeckSettings",
+          ],
+        },
+        roles: [],
+        users: [],
+        rooms: [],
+        broadcastGroups: [],
+        telegramAllowlist: [],
+        ackSettings: { enabled: true },
+        streamDeckSettings: [],
+      },
+      ["roles", "rooms"],
+    );
+    expect(response.importedSections).toEqual(["roles", "rooms"]);
+  });
+
+  it("loads stream deck settings", async () => {
+    const settings = await getStreamDeckSettings("token-123");
+    expect(settings.gridColumns).toBe(5);
+    expect(settings.pages[0]?.buttons[0]?.action?.type).toBe("reply_to_caller");
+  });
+
+  it("updates stream deck settings", async () => {
+    const settings = {
+      version: 1,
+      gridColumns: 5,
+      gridRows: 3,
+      selectedPage: 0,
+      pages: [{ page: 0, buttons: [{ index: 0, action: { type: "reply_to_caller" as const } }] }],
+    };
+    const updated = await updateStreamDeckSettings("token-123", settings);
+    expect(updated.gridRows).toBe(3);
+    expect(updated.pages[0]?.buttons[0]?.action?.type).toBe("reply_to_caller");
+  });
+
+  it("resets stream deck settings", async () => {
+    const reset = await resetStreamDeckSettings("token-123");
+    expect(reset.gridColumns).toBe(5);
+    expect(reset.pages[0]?.page).toBe(0);
+  });
+
+  it("keeps page navigation actions when loading stream deck settings", async () => {
+    server.use(
+      http.get("http://localhost/api/user/stream-deck/settings", () => {
+        return HttpResponse.json({
+          version: 1,
+          gridColumns: 5,
+          gridRows: 3,
+          selectedPage: 0,
+          pages: [
+            {
+              page: 0,
+              buttons: [{ index: 0, action: { type: "page_up" } }],
+            },
+          ],
+        });
+      }),
+    );
+
+    const settings = await getStreamDeckSettings("token-123");
+    expect(settings.pages[0]?.buttons[0]?.action?.type).toBe("page_up");
   });
 });

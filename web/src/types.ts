@@ -29,6 +29,59 @@ export type BroadcastGroup = {
   allowedRoleIds: string[];
 };
 export type User = { id: string; username: string; roleId: string };
+export type ConfigurationSection =
+  | "roles"
+  | "users"
+  | "rooms"
+  | "broadcastGroups"
+  | "telegramAllowlist"
+  | "ackSettings"
+  | "streamDeckSettings";
+
+export type ConfigurationMetadata = {
+  format: string;
+  schemaVersion: number;
+  exportedAt: string;
+  sourceVersion: VersionInfo;
+  sections: ConfigurationSection[];
+};
+
+export type ConfigurationUserAssignment = {
+  username: string;
+  roleId: string;
+};
+
+export type ConfigurationUserStreamDeckSettings = {
+  username: string;
+  settings: StreamDeckSettings;
+};
+
+export type ConfigurationDocument = {
+  meta: ConfigurationMetadata;
+  roles: Role[];
+  users: ConfigurationUserAssignment[];
+  rooms: Room[];
+  broadcastGroups: BroadcastGroup[];
+  telegramAllowlist: TelegramAllowlistEntry[];
+  ackSettings: { enabled: boolean } | null;
+  streamDeckSettings: ConfigurationUserStreamDeckSettings[];
+};
+
+export type ConfigurationImportResponse = {
+  importedSections: ConfigurationSection[];
+};
+
+export type LoginSuccess = { token: string; user: User };
+export type LoginConflict = {
+  requiresTakeover: true;
+  conflictRoleId: string;
+  conflictRoleName?: string;
+  conflictUsername?: string;
+};
+export type SessionRevokedEvent = {
+  reason: string;
+  timestamp: number;
+};
 export type Presence = {
   userId: string;
   username: string;
@@ -119,6 +172,51 @@ export type RealtimeStatsResponse = {
 export type StatusResponse = {
   roomListenerCounts: Record<string, number>;
   timestampUnixMs: number;
+};
+
+export type StreamDeckActionType =
+  | "none"
+  | "ptt_room"
+  | "select_talk_room"
+  | "ptt_selected"
+  | "listen_room"
+  | "call_room"
+  | "direct_user"
+  | "direct_role"
+  | "reply_to_caller"
+  | "broadcast_ptt"
+  | "mute_toggle"
+  | "volume_delta"
+  | "page_up"
+  | "page_down";
+
+export type StreamDeckButtonAction = {
+  type: StreamDeckActionType;
+  roomId?: string;
+  userId?: string;
+  roleId?: string;
+  broadcastGroupId?: string;
+  volumeDelta?: number;
+};
+
+export type StreamDeckButtonConfig = {
+  index: number;
+  label?: string;
+  color?: string;
+  action?: StreamDeckButtonAction;
+};
+
+export type StreamDeckPageConfig = {
+  page: number;
+  buttons: StreamDeckButtonConfig[];
+};
+
+export type StreamDeckSettings = {
+  version: number;
+  gridColumns: number;
+  gridRows: number;
+  selectedPage: number;
+  pages: StreamDeckPageConfig[];
 };
 
 export type RoutedEvent = {

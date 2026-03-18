@@ -20,9 +20,13 @@ const baseProps = {
   onUsernameChange: vi.fn(),
   onRoleChange: vi.fn(),
   onLogin: vi.fn(),
+  loginError: "",
   adminPin: "",
   onAdminPinChange: vi.fn(),
   onAdminLogin: vi.fn(),
+  takeoverConflict: null,
+  onConfirmTakeover: vi.fn(),
+  onCancelTakeover: vi.fn(),
 };
 
 describe("LoginView", () => {
@@ -34,6 +38,21 @@ describe("LoginView", () => {
 
     rerender(<LoginView {...baseProps} username="Tim" roleId="op" />);
     expect(screen.getByRole("button", { name: "Join Intercom" })).toBeEnabled();
+  });
+
+  it("shows operator login error in the main login form", () => {
+    render(
+      <LoginView
+        {...baseProps}
+        username="Tim"
+        roleId="op"
+        loginError="Die Rolle Operator ist bereits angemeldet."
+      />,
+    );
+
+    expect(
+      screen.getByText("Die Rolle Operator ist bereits angemeldet."),
+    ).toBeVisible();
   });
 
   it("calls callbacks when typing/selecting and joining", async () => {
@@ -119,5 +138,32 @@ describe("LoginView", () => {
     expect(
       screen.queryByRole("heading", { name: "Admin console" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("renders and handles takeover confirmation controls", async () => {
+    const user = userEvent.setup();
+    const onConfirmTakeover = vi.fn();
+    const onCancelTakeover = vi.fn();
+
+    render(
+      <LoginView
+        {...baseProps}
+        takeoverConflict={{
+          requiresTakeover: true,
+          conflictRoleId: "op",
+          conflictRoleName: "Operator",
+          conflictUsername: "Alex",
+        }}
+        onConfirmTakeover={onConfirmTakeover}
+        onCancelTakeover={onCancelTakeover}
+      />,
+    );
+
+    expect(screen.getByText(/Role currently in use/i)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Confirm takeover" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onConfirmTakeover).toHaveBeenCalledTimes(1);
+    expect(onCancelTakeover).toHaveBeenCalledTimes(1);
   });
 });

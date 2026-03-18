@@ -54,6 +54,27 @@ func TestCreateRoleRejectsInvalidDefaultVoiceMode(t *testing.T) {
 	}
 }
 
+func TestSeedRolesDefaultVoiceModeIsPTT(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	roles, err := store.ListRoles(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roles) == 0 {
+		t.Fatal("expected seeded roles")
+	}
+	for _, role := range roles {
+		if role.DefaultVoiceMode != "ptt" {
+			t.Fatalf("expected role %q default voice mode to be ptt, got %q", role.ID, role.DefaultVoiceMode)
+		}
+	}
+}
+
 func TestDeleteRoleConflictsWhenRoleAssignedToUser(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
@@ -259,5 +280,128 @@ func TestNewStoreMigratesLegacyTelegramUserMappingsSchema(t *testing.T) {
 	}
 	if created.ID != "telegram_user_67890" {
 		t.Fatalf("unexpected created mapping id: %q", created.ID)
+	}
+}
+
+func TestUserStreamDeckSettingsRoundTrip(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	user, err := store.UpsertUser(ctx, "deckuser", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Label = "Reply"
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeReplyToCaller}
+
+	stored, err := store.UpsertUserStreamDeckSettings(ctx, user.ID, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Pages[0].Buttons[0].Action == nil || stored.Pages[0].Buttons[0].Action.Type != StreamDeckActionTypeReplyToCaller {
+		t.Fatalf("unexpected stored action: %+v", stored.Pages[0].Buttons[0].Action)
+	}
+
+	loaded, err := store.GetUserStreamDeckSettings(ctx, user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Pages[0].Buttons[0].Label != "Reply" {
+		t.Fatalf("expected label Reply, got %q", loaded.Pages[0].Buttons[0].Label)
+	}
+	if loaded.Pages[0].Buttons[0].Action == nil || loaded.Pages[0].Buttons[0].Action.Type != StreamDeckActionTypeReplyToCaller {
+		t.Fatalf("unexpected loaded action: %+v", loaded.Pages[0].Buttons[0].Action)
+	}
+}
+
+func TestDeleteUserStreamDeckSettings(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	user, err := store.UpsertUser(ctx, "deckdelete", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertUserStreamDeckSettings(ctx, user.ID, DefaultStreamDeckSettings()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.DeleteUserStreamDeckSettings(ctx, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetUserStreamDeckSettings(ctx, user.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestUserStreamDeckSettingsAcceptsDirectRoleAction(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	user, err := store.UpsertUser(ctx, "deckrole", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[1].Action = &StreamDeckButtonAction{
+		Type:   StreamDeckActionTypeDirectRole,
+		RoleID: "video",
+	}
+
+	stored, err := store.UpsertUserStreamDeckSettings(ctx, user.ID, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Pages[0].Buttons[1].Action == nil {
+		t.Fatal("expected action to be stored")
+	}
+	if stored.Pages[0].Buttons[1].Action.Type != StreamDeckActionTypeDirectRole {
+		t.Fatalf("unexpected action type: %s", stored.Pages[0].Buttons[1].Action.Type)
+	}
+	if stored.Pages[0].Buttons[1].Action.RoleID != "video" {
+		t.Fatalf("unexpected role id: %q", stored.Pages[0].Buttons[1].Action.RoleID)
+	}
+}
+
+func TestUserStreamDeckSettingsAcceptsPageNavigationAction(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	user, err := store.UpsertUser(ctx, "deckpage", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[2].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp}
+
+	stored, err := store.UpsertUserStreamDeckSettings(ctx, user.ID, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Pages[0].Buttons[2].Action == nil {
+		t.Fatal("expected action to be stored")
+	}
+	if stored.Pages[0].Buttons[2].Action.Type != StreamDeckActionTypePageUp {
+		t.Fatalf("unexpected action type: %s", stored.Pages[0].Buttons[2].Action.Type)
 	}
 }

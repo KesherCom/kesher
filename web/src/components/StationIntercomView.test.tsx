@@ -1,8 +1,9 @@
 import type { ComponentProps } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { StationIntercomView } from "./StationIntercomView";
+import type { StreamDeckSettings } from "../types";
 const baseProps: ComponentProps<typeof StationIntercomView> = {
   connectionState: "connected",
   appData: {
@@ -99,6 +100,26 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
   selectedOutputLabel: "Default output",
   outputSelectionSupported: false,
   setSelectedOutputDeviceId: vi.fn(),
+  streamDeckSettings: {
+    version: 1,
+    gridColumns: 5,
+    gridRows: 3,
+    selectedPage: 0,
+    pages: [{ page: 0, buttons: Array.from({ length: 15 }, (_, i) => ({ index: i })) }],
+  },
+  streamDeckBusy: false,
+  streamDeckError: "",
+  onStreamDeckSettingsChange: vi.fn(),
+  onSaveStreamDeckSettings: vi.fn(),
+  onResetStreamDeckSettings: vi.fn(),
+  streamDeckWebHidSupported: true,
+  streamDeckWebHidActive: false,
+  streamDeckWebHidBusy: false,
+  onConnectStreamDeckWebHid: vi.fn(),
+  onDisconnectStreamDeckWebHid: vi.fn(),
+  streamDeckBridgeConnected: false,
+  streamDeckBridgeLastEvent: "",
+  onStreamDeckTestButtonEvent: vi.fn(),
 };
 
 describe("StationIntercomView", () => {
@@ -220,5 +241,424 @@ describe("StationIntercomView", () => {
     expect(secondaryColumn).not.toBeNull();
     expect(secondaryColumn).toHaveTextContent("Chat");
     expect(secondaryColumn).toHaveTextContent("Chat content");
+  });
+
+  it("keeps hold-to-talk active when the pointer moves away before release", () => {
+    const startPtt = vi.fn();
+    const stopPtt = vi.fn();
+
+    render(
+      <StationIntercomView
+        {...baseProps}
+        startPtt={startPtt}
+        stopPtt={stopPtt}
+      />,
+    );
+
+    const holdButton = screen.getByRole("button", { name: "Hold to talk" });
+    let capturedPointerId: number | null = null;
+
+    Object.defineProperties(holdButton, {
+      setPointerCapture: {
+        configurable: true,
+        value: (pointerId: number) => {
+          capturedPointerId = pointerId;
+        },
+      },
+      hasPointerCapture: {
+        configurable: true,
+        value: (pointerId: number) => capturedPointerId === pointerId,
+      },
+      releasePointerCapture: {
+        configurable: true,
+        value: (pointerId: number) => {
+          if (capturedPointerId === pointerId) {
+            capturedPointerId = null;
+          }
+        },
+      },
+    });
+
+    fireEvent.pointerDown(holdButton, {
+      button: 0,
+      pointerId: 12,
+      pointerType: "touch",
+    });
+    fireEvent.pointerLeave(holdButton, { pointerId: 12, pointerType: "touch" });
+
+    expect(startPtt).toHaveBeenCalledTimes(1);
+    expect(stopPtt).not.toHaveBeenCalled();
+
+    fireEvent.pointerUp(holdButton, { pointerId: 12, pointerType: "touch" });
+
+    expect(stopPtt).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows assigning reply-to-caller in stream deck settings", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    await user.selectOptions(
+      screen.getByLabelText("Stream Deck function"),
+      "reply_to_caller",
+    );
+
+    expect(onStreamDeckSettingsChange).toHaveBeenCalled();
+    const calls = onStreamDeckSettingsChange.mock.calls;
+    const lastCallArg = calls[calls.length - 1]?.[0];
+    expect(lastCallArg?.pages?.[0]?.buttons?.[0]?.action?.type).toBe(
+      "reply_to_caller",
+    );
+  });
+
+  it("allows assigning page-up in stream deck settings", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    await user.selectOptions(screen.getByLabelText("Stream Deck function"), "page_up");
+
+    expect(onStreamDeckSettingsChange).toHaveBeenCalled();
+    const calls = onStreamDeckSettingsChange.mock.calls;
+    const lastCallArg = calls[calls.length - 1]?.[0];
+    expect(lastCallArg?.pages?.[0]?.buttons?.[0]?.action?.type).toBe("page_up");
+  });
+
+  it("copies and pastes a stream deck button configuration", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    const streamDeckSettings: StreamDeckSettings = {
+      version: 1,
+      gridColumns: 5,
+      gridRows: 3,
+      selectedPage: 0,
+      pages: [
+        {
+          page: 0,
+          buttons: Array.from({ length: 15 }, (_, i) =>
+            i === 0
+              ? { index: 0, action: { type: "reply_to_caller" as const } }
+              : { index: i },
+          ),
+        },
+      ],
+    };
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        streamDeckSettings={streamDeckSettings}
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+    await user.click(screen.getByRole("button", { name: "Copy" }));
+    await user.click(screen.getByRole("button", { name: "Deck key 2" }));
+    await user.click(screen.getByRole("button", { name: "Paste" }));
+
+    const calls = onStreamDeckSettingsChange.mock.calls;
+    const lastCallArg = calls[calls.length - 1]?.[0];
+    expect(lastCallArg?.pages?.[0]?.buttons?.[1]?.action?.type).toBe(
+      "reply_to_caller",
+    );
+  });
+
+  it("undoes the last stream deck button change", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    const { rerender } = render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+    await user.selectOptions(
+      screen.getByLabelText("Stream Deck function"),
+      "reply_to_caller",
+    );
+
+    const changedSettings = onStreamDeckSettingsChange.mock.calls[0]?.[0];
+    rerender(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        streamDeckSettings={changedSettings}
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Undo" }));
+
+    const undoCallArg = onStreamDeckSettingsChange.mock.calls[1]?.[0];
+    expect(undoCallArg?.pages?.[0]?.buttons?.[0]?.action).toBeUndefined();
+  });
+
+  it("swaps stream deck buttons via drag and drop", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    const streamDeckSettings: StreamDeckSettings = {
+      version: 1,
+      gridColumns: 5,
+      gridRows: 3,
+      selectedPage: 0,
+      pages: [
+        {
+          page: 0,
+          buttons: Array.from({ length: 15 }, (_, i) => {
+            if (i === 0) {
+              return { index: 0, action: { type: "reply_to_caller" as const } };
+            }
+            if (i === 1) {
+              return { index: 1, action: { type: "page_up" as const } };
+            }
+            return { index: i };
+          }),
+        },
+      ],
+    };
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        streamDeckSettings={streamDeckSettings}
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    const keyOne = screen.getByRole("button", { name: "Deck key 1" });
+    const keyTwo = screen.getByRole("button", { name: "Deck key 2" });
+
+    fireEvent.dragStart(keyOne, {
+      dataTransfer: {
+        effectAllowed: "",
+        setData: vi.fn(),
+        getData: vi.fn(),
+      },
+    });
+    fireEvent.dragOver(keyTwo, {
+      dataTransfer: {
+        dropEffect: "",
+      },
+    });
+    fireEvent.drop(keyTwo);
+
+    const calls = onStreamDeckSettingsChange.mock.calls;
+    const lastCallArg = calls[calls.length - 1]?.[0];
+    expect(lastCallArg?.pages?.[0]?.buttons?.[0]?.action?.type).toBe("page_up");
+    expect(lastCallArg?.pages?.[0]?.buttons?.[1]?.action?.type).toBe(
+      "reply_to_caller",
+    );
+  });
+
+  it("adds and removes stream deck pages from toolbar buttons", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    const { rerender } = render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    await user.click(screen.getByRole("button", { name: "+ Page" }));
+
+    const addArg = onStreamDeckSettingsChange.mock.calls[0]?.[0];
+    expect(addArg?.pages?.length).toBe(2);
+    expect(addArg?.selectedPage).toBe(1);
+
+    rerender(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        streamDeckSettings={addArg}
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "- Page" }));
+
+    const removeArg = onStreamDeckSettingsChange.mock.calls[1]?.[0];
+    expect(removeArg?.pages?.length).toBe(1);
+    expect(removeArg?.selectedPage).toBe(0);
+
+    expect(onStreamDeckSettingsChange).toHaveBeenCalledTimes(2);
+  });
+
+  it("triggers save from stream deck settings header", async () => {
+    const user = userEvent.setup();
+    const onSaveStreamDeckSettings = vi.fn();
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onSaveStreamDeckSettings={onSaveStreamDeckSettings}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSaveStreamDeckSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("exports stream deck settings as a JSON file", async () => {
+    const user = userEvent.setup();
+    const createObjectURLSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:streamdeck-export");
+    const revokeObjectURLSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+
+    render(<StationIntercomView {...baseProps} isUserSettingsOpen />);
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+    await user.click(screen.getByRole("button", { name: "Export" }));
+
+    expect(createObjectURLSpy).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURLSpy).toHaveBeenCalledWith("blob:streamdeck-export");
+
+    createObjectURLSpy.mockRestore();
+    revokeObjectURLSpy.mockRestore();
+  });
+
+  it("imports stream deck settings from JSON and applies them", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    const { container } = render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    const input = container.querySelector(
+      '[data-testid="streamdeck-import-input"]',
+    ) as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+
+    const importedSettings = {
+      meta: {
+        format: "kesher-user-streamdeck",
+        schemaVersion: 1,
+        exportedAt: "2026-03-16T10:00:00Z",
+        username: "tim",
+      },
+      settings: {
+        version: 1,
+        gridColumns: 5,
+        gridRows: 3,
+        selectedPage: 0,
+        pages: [
+          {
+            page: 0,
+            buttons: Array.from({ length: 15 }, (_, i) =>
+              i === 0
+                ? { index: 0, action: { type: "reply_to_caller" } }
+                : { index: i },
+            ),
+          },
+        ],
+      },
+    };
+
+    const file = new File([JSON.stringify(importedSettings)], "streamdeck.json", {
+      type: "application/json",
+    });
+
+    await user.upload(input!, file);
+
+    expect(onStreamDeckSettingsChange).toHaveBeenCalled();
+    const streamDeckCalls = onStreamDeckSettingsChange.mock.calls;
+    const lastCallArg = streamDeckCalls[streamDeckCalls.length - 1]?.[0];
+    expect(lastCallArg?.pages?.[0]?.buttons?.[0]?.action?.type).toBe(
+      "reply_to_caller",
+    );
+  });
+
+  it("collapses and expands stream deck settings", async () => {
+    const user = userEvent.setup();
+
+    render(<StationIntercomView {...baseProps} isUserSettingsOpen />);
+
+    expect(
+      screen.queryByRole("grid", { name: "Stream Deck 5x3 grid" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    expect(
+      screen.getByRole("grid", { name: "Stream Deck 5x3 grid" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    expect(
+      screen.queryByRole("grid", { name: "Stream Deck 5x3 grid" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("emits down and up events in stream deck browser test mode", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckTestButtonEvent = vi.fn();
+
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onStreamDeckTestButtonEvent={onStreamDeckTestButtonEvent}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+    await user.click(screen.getByRole("button", { name: "Test mode off" }));
+
+    const key = screen.getByRole("button", {
+      name: "Deck key 1",
+    });
+
+    fireEvent.pointerDown(key);
+    fireEvent.pointerUp(key);
+
+    expect(onStreamDeckTestButtonEvent).toHaveBeenNthCalledWith(1, {
+      page: 0,
+      buttonIndex: 0,
+      state: "down",
+    });
+    expect(onStreamDeckTestButtonEvent).toHaveBeenNthCalledWith(2, {
+      page: 0,
+      buttonIndex: 0,
+      state: "up",
+    });
   });
 });

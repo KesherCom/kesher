@@ -31,6 +31,7 @@ type Server struct {
 	logger      *slog.Logger
 	store       *Store
 	sessions    *SessionManager
+	sessionMu   sync.Mutex
 	hub         *Hub
 	media       *MediaManager
 	telegram    *TelegramBot
@@ -399,9 +400,12 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/healthz", s.handleHealth)
 	mux.HandleFunc("/api/public-bootstrap", s.handlePublicBootstrap)
 	mux.HandleFunc("/api/login", s.handleLogin)
+	mux.HandleFunc("/api/admin/login", s.handleAdminLogin)
+	mux.HandleFunc("/api/login/takeover", s.handleLoginTakeover)
 	mux.HandleFunc("/api/logout", s.withAuth(s.handleLogout))
 	mux.HandleFunc("/api/bootstrap", s.withAuth(s.handleBootstrap))
 	mux.HandleFunc("/api/status", s.withAuth(s.handleStatus))
+	mux.HandleFunc("/api/user/stream-deck/settings", s.withAuth(s.handleUserStreamDeckSettings))
 	mux.HandleFunc("/api/admin/roles", s.withAuth(s.handleAdminRoles))
 	mux.HandleFunc("/api/admin/roles/", s.withAuth(s.handleAdminRoleByID))
 	mux.HandleFunc("/api/admin/rooms", s.withAuth(s.handleAdminRooms))
@@ -414,6 +418,8 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/pin", s.withAuth(s.handleAdminPin))
 	mux.HandleFunc("/api/admin/chat-history/clear", s.withAuth(s.handleAdminClearChatHistory))
 	mux.HandleFunc("/api/admin/ack-settings", s.withAuth(s.handleAdminAckSettings))
+	mux.HandleFunc("/api/admin/configuration-export", s.withAuth(s.handleAdminConfigurationExport))
+	mux.HandleFunc("/api/admin/configuration-import", s.withAuth(s.handleAdminConfigurationImport))
 	mux.HandleFunc("/api/admin/routing-matrix", s.withAuth(s.handleAdminRoutingMatrix))
 	mux.HandleFunc("/api/companion/discovery", s.handleCompanionDiscovery)
 	mux.HandleFunc("/api/companion/ws", s.handleCompanionWS)
@@ -592,7 +598,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Username = strings.TrimSpace(req.Username)
-	if req.Username == "" || req.RoleID == "" {
+	if !isValidLoginRequest(req.Username, req.RoleID) {
 		http.Error(w, "username and roleId required", http.StatusBadRequest)
 		return
 	}
@@ -609,6 +615,17 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid role", http.StatusBadRequest)
 		return
 	}
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	if existing, conflict := s.sessions.LatestForRole(req.RoleID); conflict {
+		s.writeJSON(w, http.StatusConflict, LoginConflictResponse{
+			RequiresTakeover: true,
+			ConflictRoleID:   req.RoleID,
+			ConflictRoleName: s.roleNameByID(r.Context(), req.RoleID),
+			ConflictUsername: existing.Username,
+		})
+		return
+	}
 	user, err := s.store.UpsertUser(r.Context(), req.Username, req.RoleID)
 	if err != nil {
 		if errors.Is(err, ErrInvalidInput) {
@@ -620,6 +637,87 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	session := s.sessions.Create(user)
 	s.writeJSON(w, http.StatusOK, LoginResponse{Token: session.Token, User: user})
+}
+
+func (s *Server) handleLoginTakeover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req LoginTakeoverRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	req.Username = strings.TrimSpace(req.Username)
+	if !isValidLoginRequest(req.Username, req.RoleID) {
+		http.Error(w, "username and roleId required", http.StatusBadRequest)
+		return
+	}
+	if strings.ContainsAny(req.Username, " \t\n\r") {
+		http.Error(w, "username must not contain whitespace", http.StatusBadRequest)
+		return
+	}
+	ok, err := s.store.RoleExists(r.Context(), req.RoleID)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	if !ok {
+		http.Error(w, "invalid role", http.StatusBadRequest)
+		return
+	}
+
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+
+	revokedSessions := s.sessions.DeleteByRole(req.RoleID)
+	revokedTokens := make(map[string]struct{}, len(revokedSessions))
+	for _, revoked := range revokedSessions {
+		revokedTokens[revoked.Token] = struct{}{}
+	}
+	for _, token := range s.hub.TokensForRole(req.RoleID) {
+		if _, ok := revokedTokens[token]; !ok {
+			s.sessions.Delete(token)
+		}
+		s.hub.RemoveWithReason(token, "takeover")
+	}
+
+	user, err := s.store.UpsertUser(r.Context(), req.Username, req.RoleID)
+	if err != nil {
+		if errors.Is(err, ErrInvalidInput) {
+			http.Error(w, "username must not contain whitespace", http.StatusBadRequest)
+			return
+		}
+		s.internalErr(w, err)
+		return
+	}
+	session := s.sessions.Create(user)
+	s.writeJSON(w, http.StatusOK, LoginResponse{Token: session.Token, User: user})
+}
+
+func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req AdminLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	configuredPIN, err := s.store.GetAdminPIN(r.Context())
+	if err != nil || strings.TrimSpace(configuredPIN) == "" {
+		http.Error(w, "admin pin unavailable", http.StatusForbidden)
+		return
+	}
+	presentedPIN := strings.TrimSpace(req.PIN)
+	if subtle.ConstantTimeCompare([]byte(presentedPIN), []byte(configuredPIN)) != 1 {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	session := s.sessions.Create(User{Username: "admin"})
+	s.writeJSON(w, http.StatusOK, LoginResponse{Token: session.Token, User: User{Username: "admin"}})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request, session Session) {
@@ -690,6 +788,52 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, _ Session)
 	})
 }
 
+func (s *Server) handleUserStreamDeckSettings(w http.ResponseWriter, r *http.Request, session Session) {
+	switch r.Method {
+	case http.MethodGet:
+		settings, err := s.store.GetUserStreamDeckSettings(r.Context(), session.UserID)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				s.writeJSON(w, http.StatusOK, DefaultStreamDeckSettings())
+				return
+			}
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, settings)
+	case http.MethodPut:
+		var req StreamDeckSettings
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		settings, err := s.store.UpsertUserStreamDeckSettings(r.Context(), session.UserID, req)
+		if err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, settings)
+	case http.MethodDelete:
+		err := s.store.DeleteUserStreamDeckSettings(r.Context(), session.UserID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, DefaultStreamDeckSettings())
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 func filterBroadcastGroupsForRole(roleID string, groups []BroadcastGroup) []BroadcastGroup {
 	filtered := make([]BroadcastGroup, 0, len(groups))
 	for _, group := range groups {
@@ -698,6 +842,23 @@ func filterBroadcastGroupsForRole(roleID string, groups []BroadcastGroup) []Broa
 		}
 	}
 	return filtered
+}
+
+func isValidLoginRequest(username, roleID string) bool {
+	return strings.TrimSpace(username) != "" && strings.TrimSpace(roleID) != ""
+}
+
+func (s *Server) roleNameByID(ctx context.Context, roleID string) string {
+	roles, err := s.store.ListRoles(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, role := range roles {
+		if role.ID == roleID {
+			return role.Name
+		}
+	}
+	return ""
 }
 
 type upsertRoleRequest struct {
@@ -1007,6 +1168,60 @@ func (s *Server) handleAdminAckSettings(w http.ResponseWriter, r *http.Request, 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) handleAdminConfigurationExport(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	doc, err := s.exportConfigurationDocument(r.Context())
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", "attachment; filename=kesher-showfile.json")
+	s.writeJSON(w, http.StatusOK, doc)
+}
+
+func (s *Server) handleAdminConfigurationImport(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req ConfigurationImportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	state, sections, revokedUsernames, err := s.importConfigurationDocument(r.Context(), req)
+	if err != nil {
+		s.logger.Warn("configuration import rejected",
+			"admin", session.Username,
+			"requestedSections", req.Sections,
+			"documentSections", req.Document.Meta.Sections,
+			"error", err.Error(),
+		)
+		if errors.Is(err, ErrInvalidInput) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if s.writeStoreErr(w, err) {
+			return
+		}
+		http.Error(w, "invalid input", http.StatusBadRequest)
+		return
+	}
+	s.revokeSessionsForUsernames(revokedUsernames)
+	s.broadcastImportedConfiguration(state)
+	s.writeJSON(w, http.StatusOK, ConfigurationImportResponse{ImportedSections: sections})
 }
 
 func (s *Server) isAckEnabled() bool {
@@ -1352,6 +1567,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	c := &client{
 		session:         session,
 		user:            user,
+		closeNow:        conn.Close,
 		listenRooms:     toRoomSet(listenRooms),
 		talkRooms:       toRoomSet(talkRooms),
 		voiceMode:       initialVoiceMode,
@@ -1759,7 +1975,6 @@ func (s *Server) staticHandler() http.Handler {
 			return
 		}
 		http.ServeFile(w, r, s.cfg.StaticDir+"/index.html")
-		return
 	})
 }
 

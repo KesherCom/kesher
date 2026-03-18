@@ -1,8 +1,15 @@
 import type {
   Bootstrap,
+  ConfigurationDocument,
+  ConfigurationImportResponse,
+  ConfigurationSection,
+  LoginConflict,
+  LoginSuccess,
   PublicBootstrap,
   RealtimeStatsResponse,
   StatusResponse,
+  StreamDeckActionType,
+  StreamDeckSettings,
   TelegramAllowlistEntry,
   TelegramStatus,
   User,
@@ -84,6 +91,199 @@ function normalizeBootstrap(data: unknown): Bootstrap {
   };
 }
 
+function normalizeConfigurationDocument(data: unknown): ConfigurationDocument {
+  const raw = (data ?? {}) as Record<string, unknown>;
+  const normalizedPublic = normalizePublicBootstrap(raw);
+  const users = Array.isArray(raw.users) ? raw.users : [];
+  const telegramAllowlist = Array.isArray(raw.telegramAllowlist)
+    ? raw.telegramAllowlist
+    : [];
+  const streamDeckSettings = Array.isArray(raw.streamDeckSettings)
+    ? raw.streamDeckSettings
+    : [];
+  const meta = (raw.meta ?? {}) as Record<string, unknown>;
+  const ackSettings = (raw.ackSettings ?? null) as Record<string, unknown> | null;
+
+  return {
+    meta: {
+      format: typeof meta.format === "string" ? meta.format : "",
+      schemaVersion:
+        typeof meta.schemaVersion === "number" ? meta.schemaVersion : 0,
+      exportedAt: typeof meta.exportedAt === "string" ? meta.exportedAt : "",
+      sourceVersion: {
+        version:
+          typeof (meta.sourceVersion as any)?.version === "string"
+            ? (meta.sourceVersion as any).version
+            : "unknown",
+        buildTimestamp:
+          typeof (meta.sourceVersion as any)?.buildTimestamp === "string"
+            ? (meta.sourceVersion as any).buildTimestamp
+            : "unknown",
+      },
+      sections: toStringArray(meta.sections) as ConfigurationSection[],
+    },
+    roles: normalizedPublic.roles,
+    users: users.map((user) => {
+      const entry = user as Record<string, unknown>;
+      return {
+        username: typeof entry.username === "string" ? entry.username : "",
+        roleId: typeof entry.roleId === "string" ? entry.roleId : "",
+      };
+    }),
+    rooms: normalizedPublic.rooms,
+    broadcastGroups: normalizedPublic.broadcastGroups,
+    telegramAllowlist: telegramAllowlist.map((allowlistEntry) => {
+      const entry = allowlistEntry as Record<string, unknown>;
+      return {
+        id: typeof entry.id === "string" ? entry.id : "",
+        telegramUsername:
+          typeof entry.telegramUsername === "string"
+            ? entry.telegramUsername
+            : "",
+        telegramNumericId:
+          typeof entry.telegramNumericId === "string"
+            ? entry.telegramNumericId
+            : "",
+        kesherUsername:
+          typeof entry.kesherUsername === "string" ? entry.kesherUsername : "",
+        createdAt: typeof entry.createdAt === "number" ? entry.createdAt : 0,
+        status: typeof entry.status === "string" ? entry.status : "",
+        isBound: typeof entry.isBound === "boolean" ? entry.isBound : false,
+      };
+    }),
+    ackSettings:
+      ackSettings && typeof ackSettings.enabled === "boolean"
+        ? { enabled: ackSettings.enabled }
+        : null,
+    streamDeckSettings: streamDeckSettings.map((assignment) => {
+      const entry = assignment as Record<string, unknown>;
+      return {
+        username: typeof entry.username === "string" ? entry.username : "",
+        settings: normalizeStreamDeckSettings(entry.settings),
+      };
+    }),
+  };
+}
+
+function defaultStreamDeckSettings(): StreamDeckSettings {
+  const buttons = Array.from({ length: 15 }, (_, index) => ({ index }));
+  return {
+    version: 1,
+    gridColumns: 5,
+    gridRows: 3,
+    selectedPage: 0,
+    pages: [{ page: 0, buttons }],
+  };
+}
+
+function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
+  const allowedActionTypes: StreamDeckActionType[] = [
+    "none",
+    "ptt_room",
+    "select_talk_room",
+    "ptt_selected",
+    "listen_room",
+    "call_room",
+    "direct_user",
+    "direct_role",
+    "reply_to_caller",
+    "broadcast_ptt",
+    "mute_toggle",
+    "volume_delta",
+    "page_up",
+    "page_down",
+  ];
+  const raw = (data ?? {}) as Record<string, unknown>;
+  const version =
+    typeof raw.version === "number" && Number.isFinite(raw.version)
+      ? raw.version
+      : 1;
+  const gridColumns =
+    typeof raw.gridColumns === "number" && Number.isFinite(raw.gridColumns)
+      ? raw.gridColumns
+      : 5;
+  const gridRows =
+    typeof raw.gridRows === "number" && Number.isFinite(raw.gridRows)
+      ? raw.gridRows
+      : 3;
+  const selectedPage =
+    typeof raw.selectedPage === "number" && Number.isFinite(raw.selectedPage)
+      ? raw.selectedPage
+      : 0;
+  const pagesRaw = Array.isArray(raw.pages) ? raw.pages : [];
+  const pages = pagesRaw
+    .map((page) => {
+      const pageEntry = page as Record<string, unknown>;
+      const pageNo =
+        typeof pageEntry.page === "number" && Number.isFinite(pageEntry.page)
+          ? pageEntry.page
+          : -1;
+      const buttonsRaw = Array.isArray(pageEntry.buttons)
+        ? pageEntry.buttons
+        : [];
+      const buttons = buttonsRaw
+        .map((button) => {
+          const buttonEntry = button as Record<string, unknown>;
+          const index =
+            typeof buttonEntry.index === "number" &&
+            Number.isFinite(buttonEntry.index)
+              ? buttonEntry.index
+              : -1;
+          const actionRaw = (buttonEntry.action ?? null) as
+            | Record<string, unknown>
+            | null;
+          const typeCandidate =
+            typeof actionRaw?.type === "string" ? actionRaw.type : "none";
+          const type: StreamDeckActionType = allowedActionTypes.includes(
+            typeCandidate as StreamDeckActionType,
+          )
+            ? (typeCandidate as StreamDeckActionType)
+            : "none";
+          const action = actionRaw
+            ? {
+                type,
+                roomId:
+                  typeof actionRaw.roomId === "string" ? actionRaw.roomId : undefined,
+                userId:
+                  typeof actionRaw.userId === "string" ? actionRaw.userId : undefined,
+                roleId:
+                  typeof actionRaw.roleId === "string" ? actionRaw.roleId : undefined,
+                broadcastGroupId:
+                  typeof actionRaw.broadcastGroupId === "string"
+                    ? actionRaw.broadcastGroupId
+                    : undefined,
+                volumeDelta:
+                  typeof actionRaw.volumeDelta === "number"
+                    ? actionRaw.volumeDelta
+                    : undefined,
+              }
+            : undefined;
+          return {
+            index,
+            label:
+              typeof buttonEntry.label === "string" ? buttonEntry.label : undefined,
+            color:
+              typeof buttonEntry.color === "string" ? buttonEntry.color : undefined,
+            action,
+          };
+        })
+        .filter((button) => button.index >= 0);
+      return { page: pageNo, buttons };
+    })
+    .filter((page) => page.page >= 0);
+
+  if (gridColumns !== 5 || gridRows !== 3 || pages.length === 0) {
+    return defaultStreamDeckSettings();
+  }
+  return {
+    version,
+    gridColumns,
+    gridRows,
+    selectedPage,
+    pages,
+  };
+}
+
 export async function getPublicBootstrap(): Promise<PublicBootstrap> {
   const res = await fetch("/api/public-bootstrap");
   if (!res.ok) throw new Error("failed to load public bootstrap");
@@ -94,14 +294,40 @@ export async function getPublicBootstrap(): Promise<PublicBootstrap> {
 export async function login(
   username: string,
   roleId: string,
-): Promise<{ token: string; user: User }> {
+): Promise<LoginSuccess | LoginConflict> {
   const res = await fetch("/api/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, roleId }),
   });
+  if (res.status === 409) {
+    return (await res.json()) as LoginConflict;
+  }
   if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return (await res.json()) as LoginSuccess;
+}
+
+export async function loginTakeover(
+  username: string,
+  roleId: string,
+): Promise<LoginSuccess> {
+  const res = await fetch("/api/login/takeover", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, roleId }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as LoginSuccess;
+}
+
+export async function adminLogin(pin: string): Promise<LoginSuccess> {
+  const res = await fetch("/api/admin/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pin }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as LoginSuccess;
 }
 
 export async function bootstrap(token: string): Promise<Bootstrap> {
@@ -309,6 +535,40 @@ export async function deleteBroadcastGroup(
   );
 }
 
+export async function exportConfiguration(
+  token: string,
+  adminPin: string,
+): Promise<ConfigurationDocument> {
+  const res = await fetch("/api/admin/configuration-export", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+    },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const raw = (await res.json()) as unknown;
+  return normalizeConfigurationDocument(raw);
+}
+
+export async function importConfiguration(
+  token: string,
+  adminPin: string,
+  document: ConfigurationDocument,
+  sections: ConfigurationSection[],
+): Promise<ConfigurationImportResponse> {
+  const res = await fetch("/api/admin/configuration-import", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ document, sections }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ConfigurationImportResponse>;
+}
+
 export async function getTelegramStatus(
   token: string,
   adminPin: string,
@@ -461,4 +721,44 @@ export async function updateAckSettings(
     throw new Error(await res.text());
   }
   return res.json() as Promise<{ enabled: boolean }>;
+}
+
+export async function getStreamDeckSettings(
+  token: string,
+): Promise<StreamDeckSettings> {
+  const res = await fetch("/api/user/stream-deck/settings", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const raw = (await res.json()) as unknown;
+  return normalizeStreamDeckSettings(raw);
+}
+
+export async function updateStreamDeckSettings(
+  token: string,
+  settings: StreamDeckSettings,
+): Promise<StreamDeckSettings> {
+  const res = await fetch("/api/user/stream-deck/settings", {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const raw = (await res.json()) as unknown;
+  return normalizeStreamDeckSettings(raw);
+}
+
+export async function resetStreamDeckSettings(
+  token: string,
+): Promise<StreamDeckSettings> {
+  const res = await fetch("/api/user/stream-deck/settings", {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const raw = (await res.json()) as unknown;
+  return normalizeStreamDeckSettings(raw);
 }

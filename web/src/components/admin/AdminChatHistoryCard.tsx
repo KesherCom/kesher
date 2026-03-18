@@ -15,7 +15,7 @@ export function AdminChatHistoryCard({
   appData,
   refreshBootstrapData,
 }: AdminChatHistoryCardProps) {
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [busyAck, setBusyAck] = useState(false);
   const [message, setMessage] = useState("");
@@ -70,7 +70,7 @@ export function AdminChatHistoryCard({
   return (
     <div className="admin-card">
       <div className="admin-card-header">
-        <div className="admin-card-title">Chat</div>
+        <div className="admin-card-title">Chat · Maintenance</div>
         <div className="admin-card-actions">
           <button
             className="admin-toggle-button"
@@ -83,36 +83,64 @@ export function AdminChatHistoryCard({
       </div>
       {isOpen ? (
         <div className="admin-card-body">
-          <p>Aktiviert oder deaktiviert ACK-Cue-Nachrichten global.</p>
-          <label className="admin-checkbox-row">
-            <input
-              type="checkbox"
-              checked={ackEnabled}
-              disabled={busyAck}
-              onChange={(e) => {
-                void handleAckToggle(e.target.checked);
-              }}
-            />
-            ACK-Nachrichten aktivieren
-          </label>
-          <p>
-            Leert den fluechtigen Chat-Verlauf fuer alle Party-Lines und
-            Direktnachrichten, z. B. vor Show-Beginn.
-          </p>
-          <div className="admin-form-actions">
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                void handleClear();
-              }}
-              disabled={busy}
-            >
-              {busy ? "Loesche..." : "Clear for new Show"}
-            </button>
+          <div className="admin-block admin-chat-block">
+            <div className="admin-block-header">
+              <h4>ACK cues</h4>
+              <span className={ackEnabled ? "admin-status-ok" : "admin-status-warn"}>
+                {ackEnabled ? "Aktiv" : "Inaktiv"}
+              </span>
+            </div>
+
+            <p>
+              Aktiviert oder deaktiviert ACK-Cue-Nachrichten global fuer alle
+              Clients.
+            </p>
+
+            <label className="admin-chat-toggle-row">
+              <input
+                type="checkbox"
+                checked={ackEnabled}
+                disabled={busyAck}
+                onChange={(e) => {
+                  void handleAckToggle(e.target.checked);
+                }}
+              />
+              <span>
+                <strong>ACK-Nachrichten aktivieren</strong>
+                <small>Bei Aktivierung koennen ACK-Cues im Chat genutzt werden.</small>
+              </span>
+            </label>
           </div>
+
+          <div className="admin-block admin-chat-block">
+            <div className="admin-block-header">
+              <h4>Verlauf bereinigen</h4>
+            </div>
+            <p>
+              Leert den fluechtigen Chat-Verlauf fuer alle Party-Lines und
+              Direktnachrichten, z. B. vor Show-Beginn.
+            </p>
+            <div className="admin-form-actions admin-chat-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  void handleClear();
+                }}
+                disabled={busy}
+              >
+                {busy ? "Loesche..." : "Clear for new Show"}
+              </button>
+            </div>
+          </div>
+
+          {message ? (
+            <p className="admin-chat-message admin-chat-message-success">
+              {message}
+            </p>
+          ) : null}
+
           {error ? <p className="admin-error">{error}</p> : null}
-          {message ? <p>{message}</p> : null}
         </div>
       ) : null}
     </div>
