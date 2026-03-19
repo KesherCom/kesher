@@ -268,6 +268,16 @@ type CompanionCommand struct {
 	TalkRoomIDs   []string `json:"talkRoomIds,omitempty"`
 }
 
+type CompanionCommandResult struct {
+	CommandID string `json:"commandId,omitempty"`
+	Command   string `json:"command,omitempty"`
+	OK        bool   `json:"ok"`
+	Status    string `json:"status,omitempty"`
+	Error     string `json:"error,omitempty"`
+	Source    string `json:"source,omitempty"`
+	Timestamp int64  `json:"timestamp,omitempty"`
+}
+
 type CompanionBridgeState struct {
 	Username            string         `json:"username"`
 	Bound               bool           `json:"bound"`

@@ -347,6 +347,12 @@ type StationIntercomViewProps = {
   onDisconnectStreamDeckWebHid: () => void;
   streamDeckBridgeConnected: boolean;
   streamDeckBridgeLastEvent: string;
+  lastCompanionCommand: {
+    command: string;
+    status: "executing" | "executed" | "rejected" | "failed";
+    error?: string;
+    at: number;
+  } | null;
   onStreamDeckTestButtonEvent: (event: {
     page: number;
     buttonIndex: number;
@@ -447,6 +453,7 @@ export function StationIntercomView({
   onDisconnectStreamDeckWebHid,
   streamDeckBridgeConnected,
   streamDeckBridgeLastEvent,
+  lastCompanionCommand,
   onStreamDeckTestButtonEvent,
 }: StationIntercomViewProps) {
   const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
@@ -1901,6 +1908,16 @@ export function StationIntercomView({
                         ? ` · Last event: ${streamDeckBridgeLastEvent}`
                         : ""}
                     </small>
+                    {lastCompanionCommand ? (
+                      <small className="station-settings-meta">
+                        Companion: {lastCompanionCommand.command || "unknown"}
+                        {` · ${lastCompanionCommand.status}`}
+                        {lastCompanionCommand.error
+                          ? ` · ${lastCompanionCommand.error}`
+                          : ""}
+                        {` · ${new Date(lastCompanionCommand.at).toLocaleTimeString()}`}
+                      </small>
+                    ) : null}
                     {showDebug ? (
                       <small className="station-settings-meta">
                         Debug: use window.__kesherStreamDeckDev.buttonTap(0, 0)

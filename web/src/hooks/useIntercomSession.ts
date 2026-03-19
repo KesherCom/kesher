@@ -58,6 +58,7 @@ type WsMessage =
   | {
       type: "companion_command";
       data: {
+        commandId?: string;
         command: string;
         mode?: "always_on" | "ptt";
         scope?: "direct" | "room" | "broadcast";
@@ -245,6 +246,12 @@ export type UseIntercomSessionResult = {
   incomingAudioActive: boolean;
   activeVoiceRoutes: VoiceRoute[];
   incomingAttention: { title: string; detail: string } | null;
+  lastCompanionCommand: {
+    command: string;
+    status: "executing" | "executed" | "rejected" | "failed";
+    error?: string;
+    at: number;
+  } | null;
   attentionFlashKey: number;
   voiceMode: "always_on" | "ptt";
   voiceModeRef: React.RefObject<"always_on" | "ptt">;
@@ -360,6 +367,12 @@ export function useIntercomSession({
   const [incomingAttention, setIncomingAttention] = useState<{
     title: string;
     detail: string;
+  } | null>(null);
+  const [lastCompanionCommand, setLastCompanionCommand] = useState<{
+    command: string;
+    status: "executing" | "executed" | "rejected" | "failed";
+    error?: string;
+    at: number;
   } | null>(null);
   const [attentionFlashKey, setAttentionFlashKey] = useState(0);
   const [voiceMode, setVoiceMode] = useState<"always_on" | "ptt">(
@@ -989,6 +1002,32 @@ export function useIntercomSession({
     );
   }
 
+  function sendCompanionCommandResult(
+    commandID: string,
+    command: string,
+    ok: boolean,
+    status: "executed" | "rejected" | "failed",
+    error?: string,
+  ) {
+    if (!commandID || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    wsRef.current.send(
+      JSON.stringify({
+        type: "companion_command_result",
+        data: {
+          commandId: commandID,
+          command,
+          ok,
+          status,
+          error,
+          source: "browser",
+          timestamp: Date.now(),
+        },
+      }),
+    );
+  }
+
   // ── Voice mode actions ──
   function setAlwaysOn(enabled: boolean) {
     if (forcePttOnMobile) {
@@ -1479,8 +1518,43 @@ export function useIntercomSession({
           return;
         }
         if (msg.type === "companion_command") {
+          const commandID = String(msg.data.commandId || "").trim();
+          const command = String(msg.data.command || "");
+          setLastCompanionCommand({
+            command,
+            status: "executing",
+            at: Date.now(),
+          });
+          const ackSuccess = () => {
+            setLastCompanionCommand({
+              command,
+              status: "executed",
+              at: Date.now(),
+            });
+            sendCompanionCommandResult(commandID, command, true, "executed");
+          };
+          const ackRejected = (error: string) => {
+            setLastCompanionCommand({
+              command,
+              status: "rejected",
+              error,
+              at: Date.now(),
+            });
+            sendCompanionCommandResult(commandID, command, false, "rejected", error);
+          };
+          const ackFailed = (error: string) => {
+            setLastCompanionCommand({
+              command,
+              status: "failed",
+              error,
+              at: Date.now(),
+            });
+            sendCompanionCommandResult(commandID, command, false, "failed", error);
+          };
+
           if (msg.data.command === "set_voice_mode" && msg.data.mode) {
             setAlwaysOn(msg.data.mode === "always_on");
+            ackSuccess();
             return;
           }
           if (msg.data.command === "ptt") {
@@ -1513,9 +1587,12 @@ export function useIntercomSession({
                 );
               }
             }
-            if (resolvedTargetId) {
-              sendScopedVoiceState(nextScope, resolvedTargetId, desiredState);
+            if (!resolvedTargetId) {
+              ackRejected("missing targetId");
+              return;
             }
+            sendScopedVoiceState(nextScope, resolvedTargetId, desiredState);
+            ackSuccess();
             return;
           }
           if (msg.data.command === "signal") {
@@ -1528,9 +1605,16 @@ export function useIntercomSession({
                     talkRoomIdsRef.current,
                   )
                 : "");
-            if (resolvedTargetId && msg.data.signal) {
-              sendScopedSignal(nextScope, resolvedTargetId, msg.data.signal);
+            if (!resolvedTargetId) {
+              ackRejected("missing targetId");
+              return;
             }
+            if (!msg.data.signal) {
+              ackRejected("missing signal");
+              return;
+            }
+            sendScopedSignal(nextScope, resolvedTargetId, msg.data.signal);
+            ackSuccess();
             return;
           }
           if (msg.data.command === "set_room_matrix") {
@@ -1554,8 +1638,10 @@ export function useIntercomSession({
                 }),
               );
             }
+            ackSuccess();
             return;
           }
+          ackFailed("unsupported command");
           return;
         }
         if (msg.type === "webrtc_offer") {
@@ -2004,6 +2090,7 @@ export function useIntercomSession({
     incomingAudioActive: remote.incomingAudioActive,
     activeVoiceRoutes,
     incomingAttention,
+    lastCompanionCommand,
     attentionFlashKey,
     voiceMode,
     voiceModeRef,

@@ -1669,6 +1669,7 @@ export function App() {
         stopPtt={session.stopPtt}
         voiceMode={session.voiceMode}
         setAlwaysOn={session.setAlwaysOn}
+        lastCompanionCommand={session.lastCompanionCommand}
         chatAndSignalPanel={chatAndSignalBlock}
         showDebug={showDebug}
         realtimeDebugBlock={realtimeDebugBlock}

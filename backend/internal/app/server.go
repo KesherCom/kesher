@@ -42,6 +42,8 @@ type Server struct {
 	ackMu       sync.RWMutex
 	ackEnabled  bool
 	ackSet      bool
+	companionMu sync.RWMutex
+	companionWS map[string]map[chan CompanionCommandResult]struct{}
 }
 
 type tlsProvider interface {
@@ -144,11 +146,22 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 	presenceCh, unsubscribe := s.hub.SubscribePresence()
 	defer unsubscribe()
+	resultCh, unsubscribeResults := s.subscribeCompanionResults(roleID)
+	defer unsubscribeResults()
 	var connMu sync.Mutex
 	writeJSON := func(msg WSOutbound) {
 		connMu.Lock()
 		defer connMu.Unlock()
 		_ = conn.WriteJSON(msg)
+	}
+	writeCommandResult := func(result CompanionCommandResult) {
+		if result.Timestamp == 0 {
+			result.Timestamp = time.Now().UnixMilli()
+		}
+		if strings.TrimSpace(result.Source) == "" {
+			result.Source = "bridge"
+		}
+		writeJSON(WSOutbound{Type: "companion_command_result", Data: result})
 	}
 
 	writeState := func() {
@@ -191,6 +204,11 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				writeState()
+			case result, ok := <-resultCh:
+				if !ok {
+					return
+				}
+				writeCommandResult(result)
 			}
 		}
 	}()
@@ -208,26 +226,31 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		commandID := strings.TrimSpace(in.Data.CommandID)
+<<<<<<< Updated upstream
 		token, ok := s.hub.LatestTokenForUsername(username)
-		if !ok {
-			writeJSON(WSOutbound{
-				Type: "companion_command_result",
-				Data: map[string]any{"ok": false, "error": "target unavailable", "commandId": commandID},
+=======
+		writeRejected := func(errMsg string) {
+			writeCommandResult(CompanionCommandResult{
+				CommandID: commandID,
+				Command:   in.Data.Command,
+				OK:        false,
+				Status:    "failed",
+				Error:     errMsg,
+				Source:    "bridge",
 			})
+		}
+		token, ok := s.hub.LatestTokenForRoleID(roleID)
+>>>>>>> Stashed changes
+		if !ok {
+			writeRejected("target unavailable")
 			continue
 		}
 		if in.Data.Command == "" {
-			writeJSON(WSOutbound{
-				Type: "companion_command_result",
-				Data: map[string]any{"ok": false, "error": "missing command", "commandId": commandID},
-			})
+			writeRejected("missing command")
 			continue
 		}
 		if in.Data.Command == "set_voice_mode" && in.Data.Mode == "" {
-			writeJSON(WSOutbound{
-				Type: "companion_command_result",
-				Data: map[string]any{"ok": false, "error": "missing mode", "commandId": commandID},
-			})
+			writeRejected("missing mode")
 			continue
 		}
 		sent := s.hub.SendToToken(token, WSOutbound{
@@ -235,16 +258,61 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			Data: in.Data,
 		})
 		if !sent {
-			writeJSON(WSOutbound{
-				Type: "companion_command_result",
-				Data: map[string]any{"ok": false, "error": "failed to deliver command", "commandId": commandID},
-			})
+			writeRejected("failed to deliver command")
 			continue
 		}
-		writeJSON(WSOutbound{
-			Type: "companion_command_result",
-			Data: map[string]any{"ok": true, "commandId": commandID},
+		writeCommandResult(CompanionCommandResult{
+			CommandID: commandID,
+			Command:   in.Data.Command,
+			OK:        true,
+			Status:    "queued",
+			Source:    "bridge",
 		})
+	}
+}
+
+func (s *Server) subscribeCompanionResults(roleID string) (chan CompanionCommandResult, func()) {
+	ch := make(chan CompanionCommandResult, 16)
+	s.companionMu.Lock()
+	if s.companionWS[roleID] == nil {
+		s.companionWS[roleID] = make(map[chan CompanionCommandResult]struct{})
+	}
+	s.companionWS[roleID][ch] = struct{}{}
+	s.companionMu.Unlock()
+
+	unsubscribe := func() {
+		s.companionMu.Lock()
+		if subscribers, ok := s.companionWS[roleID]; ok {
+			if _, exists := subscribers[ch]; exists {
+				delete(subscribers, ch)
+			}
+			if len(subscribers) == 0 {
+				delete(s.companionWS, roleID)
+			}
+		}
+		s.companionMu.Unlock()
+	}
+	return ch, unsubscribe
+}
+
+func (s *Server) publishCompanionResult(roleID string, result CompanionCommandResult) {
+	s.companionMu.RLock()
+	subscribers := s.companionWS[roleID]
+	if len(subscribers) == 0 {
+		s.companionMu.RUnlock()
+		return
+	}
+	channels := make([]chan CompanionCommandResult, 0, len(subscribers))
+	for ch := range subscribers {
+		channels = append(channels, ch)
+	}
+	s.companionMu.RUnlock()
+
+	for _, ch := range channels {
+		select {
+		case ch <- result:
+		default:
+		}
 	}
 }
 
@@ -372,13 +440,14 @@ func NewServer(cfg Config) (*Server, error) {
 		}
 	}
 	s := &Server{
-		cfg:        cfg,
-		logger:     logger,
-		store:      store,
-		sessions:   NewSessionManager(cfg.SessionTTL),
-		hub:        NewHub(store, logger),
-		ackEnabled: true,
-		ackSet:     true,
+		cfg:         cfg,
+		logger:      logger,
+		store:       store,
+		sessions:    NewSessionManager(cfg.SessionTTL),
+		hub:         NewHub(store, logger),
+		companionWS: make(map[string]map[chan CompanionCommandResult]struct{}),
+		ackEnabled:  true,
+		ackSet:      true,
 		upgrader: websocket.Upgrader{
 			CheckOrigin:      func(r *http.Request) bool { return true },
 			HandshakeTimeout: 10 * time.Second,
@@ -1698,6 +1767,20 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			s.routeInbound(r.Context(), session, in, "voice_state")
+		case "companion_command_result":
+			raw, _ := json.Marshal(in.Data)
+			var result CompanionCommandResult
+			_ = json.Unmarshal(raw, &result)
+			if strings.TrimSpace(result.CommandID) == "" {
+				continue
+			}
+			if result.Timestamp == 0 {
+				result.Timestamp = time.Now().UnixMilli()
+			}
+			if strings.TrimSpace(result.Source) == "" {
+				result.Source = "browser"
+			}
+			s.publishCompanionResult(session.RoleID, result)
 		case "webrtc_answer":
 			raw, _ := json.Marshal(in.Data)
 			var e WebRTCAnswer
