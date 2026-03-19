@@ -146,7 +146,7 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 	presenceCh, unsubscribe := s.hub.SubscribePresence()
 	defer unsubscribe()
-	resultCh, unsubscribeResults := s.subscribeCompanionResults(roleID)
+	resultCh, unsubscribeResults := s.subscribeCompanionResults(username)
 	defer unsubscribeResults()
 	var connMu sync.Mutex
 	writeJSON := func(msg WSOutbound) {
@@ -226,9 +226,6 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		commandID := strings.TrimSpace(in.Data.CommandID)
-<<<<<<< Updated upstream
-		token, ok := s.hub.LatestTokenForUsername(username)
-=======
 		writeRejected := func(errMsg string) {
 			writeCommandResult(CompanionCommandResult{
 				CommandID: commandID,
@@ -239,8 +236,7 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 				Source:    "bridge",
 			})
 		}
-		token, ok := s.hub.LatestTokenForRoleID(roleID)
->>>>>>> Stashed changes
+		token, ok := s.hub.LatestTokenForUsername(username)
 		if !ok {
 			writeRejected("target unavailable")
 			continue
@@ -1780,7 +1776,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if strings.TrimSpace(result.Source) == "" {
 				result.Source = "browser"
 			}
-			s.publishCompanionResult(session.RoleID, result)
+			s.publishCompanionResult(user.Username, result)
 		case "webrtc_answer":
 			raw, _ := json.Marshal(in.Data)
 			var e WebRTCAnswer
