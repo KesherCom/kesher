@@ -54,8 +54,8 @@ flowchart LR
 
   subgraph COMP["Bitfocus Companion path"]
     MOD["Companion module\n(companion-module-kesher repo)"]
-    CDISC["GET /api/companion/discovery?username=..."]
-    CWS["WS /api/companion/ws?username=..."]
+    CDISC["GET /api/companion/discovery?roleId=..."]
+    CWS["WS /api/companion/ws?roleId=..."]
   end
 
   OTHER["Other operators\n(browser clients)"]
@@ -167,12 +167,12 @@ sequenceDiagram
   participant HUB as Hub
   participant FE as Target browser session
 
-  MOD->>API: GET /api/companion/discovery?username=...
+  MOD->>API: GET /api/companion/discovery?roleId=...
   API-->>MOD: Allowed party-lines/users/broadcast groups for role
-  MOD->>API: WS /api/companion/ws?username=...
+  MOD->>API: WS /api/companion/ws?roleId=...
   API-->>MOD: companion_state (bound, presence, reply target, signal state)
   MOD->>API: command payload (set_voice_mode / ptt / signal / party-line matrix)
-  API->>HUB: Resolve latest token for username + SendToToken(companion_command)
+  API->>HUB: Resolve latest token for roleId + SendToToken(companion_command)
   HUB-->>FE: companion_command via operator WS
   FE-->>API: command effect reflected via normal WS events/presence
   API-->>MOD: companion_command_result + refreshed companion_state

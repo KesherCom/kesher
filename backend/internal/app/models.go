@@ -65,20 +65,20 @@ type Session struct {
 type StreamDeckActionType string
 
 const (
-	StreamDeckActionTypeNone          StreamDeckActionType = "none"
-	StreamDeckActionTypePTTRoom       StreamDeckActionType = "ptt_room"
+	StreamDeckActionTypeNone           StreamDeckActionType = "none"
+	StreamDeckActionTypePTTRoom        StreamDeckActionType = "ptt_room"
 	StreamDeckActionTypeSelectTalkRoom StreamDeckActionType = "select_talk_room"
-	StreamDeckActionTypePTTSelected   StreamDeckActionType = "ptt_selected"
-	StreamDeckActionTypeListenRoom    StreamDeckActionType = "listen_room"
-	StreamDeckActionTypeCallRoom      StreamDeckActionType = "call_room"
-	StreamDeckActionTypeDirectUser    StreamDeckActionType = "direct_user"
-	StreamDeckActionTypeDirectRole    StreamDeckActionType = "direct_role"
-	StreamDeckActionTypeReplyToCaller StreamDeckActionType = "reply_to_caller"
-	StreamDeckActionTypeBroadcastPTT  StreamDeckActionType = "broadcast_ptt"
-	StreamDeckActionTypeMuteToggle    StreamDeckActionType = "mute_toggle"
-	StreamDeckActionTypeVolumeDelta   StreamDeckActionType = "volume_delta"
-	StreamDeckActionTypePageUp        StreamDeckActionType = "page_up"
-	StreamDeckActionTypePageDown      StreamDeckActionType = "page_down"
+	StreamDeckActionTypePTTSelected    StreamDeckActionType = "ptt_selected"
+	StreamDeckActionTypeListenRoom     StreamDeckActionType = "listen_room"
+	StreamDeckActionTypeCallRoom       StreamDeckActionType = "call_room"
+	StreamDeckActionTypeDirectUser     StreamDeckActionType = "direct_user"
+	StreamDeckActionTypeDirectRole     StreamDeckActionType = "direct_role"
+	StreamDeckActionTypeReplyToCaller  StreamDeckActionType = "reply_to_caller"
+	StreamDeckActionTypeBroadcastPTT   StreamDeckActionType = "broadcast_ptt"
+	StreamDeckActionTypeMuteToggle     StreamDeckActionType = "mute_toggle"
+	StreamDeckActionTypeVolumeDelta    StreamDeckActionType = "volume_delta"
+	StreamDeckActionTypePageUp         StreamDeckActionType = "page_up"
+	StreamDeckActionTypePageDown       StreamDeckActionType = "page_down"
 )
 
 const (
@@ -269,6 +269,7 @@ type CompanionCommand struct {
 }
 
 type CompanionBridgeState struct {
+	RoleID              string         `json:"roleId"`
 	Username            string         `json:"username"`
 	Bound               bool           `json:"bound"`
 	Presence            *PresenceState `json:"presence,omitempty"`

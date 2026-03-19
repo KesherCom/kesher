@@ -67,12 +67,48 @@ func (h *Hub) ReplyTargetForUsername(username string) (string, string, bool) {
 	return selected.lastDirectFrom, selected.lastDirectName, true
 }
 
+func (h *Hub) ReplyTargetForRoleID(roleID string) (string, string, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var selected *client
+	for _, c := range h.clients {
+		if c.session.RoleID != roleID {
+			continue
+		}
+		if selected == nil || c.connectedAt.After(selected.connectedAt) {
+			selected = c
+		}
+	}
+	if selected == nil || selected.lastDirectFrom == "" {
+		return "", "", false
+	}
+	return selected.lastDirectFrom, selected.lastDirectName, true
+}
+
 func (h *Hub) SignalStateForUsername(username string) (string, string, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	var selected *client
 	for _, c := range h.clients {
 		if c.user.Username != username {
+			continue
+		}
+		if selected == nil || c.connectedAt.After(selected.connectedAt) {
+			selected = c
+		}
+	}
+	if selected == nil || time.Now().After(selected.signalUntil) || selected.signalFrom == "" {
+		return "", "", false
+	}
+	return selected.signalFrom, selected.signalMessage, true
+}
+
+func (h *Hub) SignalStateForRoleID(roleID string) (string, string, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var selected *client
+	for _, c := range h.clients {
+		if c.session.RoleID != roleID {
 			continue
 		}
 		if selected == nil || c.connectedAt.After(selected.connectedAt) {
@@ -990,12 +1026,59 @@ func (h *Hub) LatestTokenForUsername(username string) (string, bool) {
 	return selectedToken, true
 }
 
+func (h *Hub) LatestTokenForRoleID(roleID string) (string, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var selectedToken string
+	var selectedAt time.Time
+	for token, c := range h.clients {
+		if c.session.RoleID != roleID {
+			continue
+		}
+		if selectedToken == "" || c.connectedAt.After(selectedAt) {
+			selectedToken = token
+			selectedAt = c.connectedAt
+		}
+	}
+	if selectedToken == "" {
+		return "", false
+	}
+	return selectedToken, true
+}
+
 func (h *Hub) PresenceForUsername(username string) (PresenceState, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	var selected *client
 	for _, c := range h.clients {
 		if c.user.Username != username {
+			continue
+		}
+		if selected == nil || c.connectedAt.After(selected.connectedAt) {
+			selected = c
+		}
+	}
+	if selected == nil {
+		return PresenceState{}, false
+	}
+	return PresenceState{
+		UserID:          selected.user.ID,
+		Username:        selected.user.Username,
+		RoleID:          selected.user.RoleID,
+		ListenRooms:     roomSetToSortedSlice(selected.listenRooms),
+		TalkRooms:       roomSetToSortedSlice(selected.talkRooms),
+		VoiceMode:       selected.voiceMode,
+		MicEnabled:      selected.micEnabled,
+		BroadcastActive: len(selected.broadcastGroups) > 0,
+	}, true
+}
+
+func (h *Hub) PresenceForRoleID(roleID string) (PresenceState, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var selected *client
+	for _, c := range h.clients {
+		if c.session.RoleID != roleID {
 			continue
 		}
 		if selected == nil || c.connectedAt.After(selected.connectedAt) {

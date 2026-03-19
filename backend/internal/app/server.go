@@ -130,10 +130,47 @@ func startWebSocketKeepalive(conn *websocket.Conn, connMu *sync.Mutex) func() {
 	}
 }
 
-func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
-	username := strings.TrimSpace(r.URL.Query().Get("username"))
+func (s *Server) resolveCompanionBinding(ctx context.Context, roleIDInput string, usernameInput string) (string, string, error) {
+	roleID := strings.TrimSpace(roleIDInput)
+	username := strings.TrimSpace(usernameInput)
+	if roleID != "" {
+		roles, err := s.store.ListRoles(ctx)
+		if err != nil {
+			return "", "", err
+		}
+		for _, role := range roles {
+			if role.ID == roleID {
+				return roleID, username, nil
+			}
+		}
+		return "", "", ErrNotFound
+	}
 	if username == "" {
-		http.Error(w, "username required", http.StatusBadRequest)
+		return "", "", ErrInvalidInput
+	}
+	targetUser, err := s.store.FindUserByUsername(ctx, username)
+	if err != nil {
+		return "", "", err
+	}
+	return targetUser.RoleID, targetUser.Username, nil
+}
+
+func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
+	roleID, username, err := s.resolveCompanionBinding(
+		r.Context(),
+		r.URL.Query().Get("roleId"),
+		r.URL.Query().Get("username"),
+	)
+	if err != nil {
+		if errors.Is(err, ErrInvalidInput) {
+			http.Error(w, "roleId or username required", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "unknown roleId or username", http.StatusNotFound)
+			return
+		}
+		s.internalErr(w, err)
 		return
 	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
@@ -153,18 +190,20 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 
 	writeState := func() {
 		state := CompanionBridgeState{
+			RoleID:   roleID,
 			Username: username,
 			Bound:    false,
 		}
-		if presence, ok := s.hub.PresenceForUsername(username); ok {
+		if presence, ok := s.hub.PresenceForRoleID(roleID); ok {
 			state.Bound = true
 			state.Presence = &presence
+			state.Username = presence.Username
 		}
-		if replyUserID, replyUsername, ok := s.hub.ReplyTargetForUsername(username); ok {
+		if replyUserID, replyUsername, ok := s.hub.ReplyTargetForRoleID(roleID); ok {
 			state.ReplyDirectUserID = replyUserID
 			state.ReplyDirectUsername = replyUsername
 		}
-		if signalFrom, signalMessage, signalActive := s.hub.SignalStateForUsername(username); signalActive {
+		if signalFrom, signalMessage, signalActive := s.hub.SignalStateForRoleID(roleID); signalActive {
 			state.SignalActive = true
 			state.SignalFrom = signalFrom
 			state.SignalMessage = signalMessage
@@ -199,7 +238,7 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 		var in companionInbound
 		if err := conn.ReadJSON(&in); err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				s.logger.Warn("companion websocket closed unexpectedly", "username", username, "error", err)
+				s.logger.Warn("companion websocket closed unexpectedly", "roleId", roleID, "username", username, "error", err)
 			}
 			return
 		}
@@ -208,7 +247,7 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		commandID := strings.TrimSpace(in.Data.CommandID)
-		token, ok := s.hub.LatestTokenForUsername(username)
+		token, ok := s.hub.LatestTokenForRoleID(roleID)
 		if !ok {
 			writeJSON(WSOutbound{
 				Type: "companion_command_result",
@@ -253,14 +292,21 @@ func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	username := strings.TrimSpace(r.URL.Query().Get("username"))
-	if username == "" {
-		http.Error(w, "username required", http.StatusBadRequest)
-		return
-	}
-	targetUser, err := s.store.FindUserByUsername(r.Context(), username)
+	roleID, username, err := s.resolveCompanionBinding(
+		r.Context(),
+		r.URL.Query().Get("roleId"),
+		r.URL.Query().Get("username"),
+	)
 	if err != nil {
-		http.Error(w, "unknown username", http.StatusNotFound)
+		if errors.Is(err, ErrInvalidInput) {
+			http.Error(w, "roleId or username required", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "unknown roleId or username", http.StatusNotFound)
+			return
+		}
+		s.internalErr(w, err)
 		return
 	}
 	rooms, err := s.store.ListRooms(r.Context())
@@ -273,19 +319,24 @@ func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request
 		s.internalErr(w, err)
 		return
 	}
+	if username == "" {
+		if presence, ok := s.hub.PresenceForRoleID(roleID); ok {
+			username = presence.Username
+		}
+	}
 	groups, err := s.store.ListBroadcastGroups(r.Context())
 	if err != nil {
 		s.internalErr(w, err)
 		return
 	}
-	groups = filterBroadcastGroupsForRole(targetUser.RoleID, groups)
+	groups = filterBroadcastGroupsForRole(roleID, groups)
 	roomDiscovery := make([]CompanionRoomDiscovery, 0, len(rooms))
 	for _, room := range rooms {
-		canTalk, err := s.store.RoomAllowsSenderRole(r.Context(), room.ID, targetUser.RoleID)
+		canTalk, err := s.store.RoomAllowsSenderRole(r.Context(), room.ID, roleID)
 		if err != nil {
 			continue
 		}
-		canListen, err := s.store.RoomAllowsReceiverRole(r.Context(), room.ID, targetUser.RoleID)
+		canListen, err := s.store.RoomAllowsReceiverRole(r.Context(), room.ID, roleID)
 		if err != nil {
 			continue
 		}
@@ -297,8 +348,8 @@ func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request
 		})
 	}
 	s.writeJSON(w, http.StatusOK, CompanionDiscoveryResponse{
-		Username:        targetUser.Username,
-		RoleID:          targetUser.RoleID,
+		Username:        username,
+		RoleID:          roleID,
 		Rooms:           roomDiscovery,
 		Users:           users,
 		BroadcastGroups: groups,
