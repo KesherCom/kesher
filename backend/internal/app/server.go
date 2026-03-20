@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -134,9 +135,28 @@ func startWebSocketKeepalive(conn *websocket.Conn, connMu *sync.Mutex) func() {
 
 func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 	username := strings.TrimSpace(r.URL.Query().Get("username"))
-	if username == "" {
-		http.Error(w, "username required", http.StatusBadRequest)
+	roleID := strings.TrimSpace(r.URL.Query().Get("roleId"))
+	if username == "" && roleID == "" {
+		http.Error(w, "username or roleId required", http.StatusBadRequest)
 		return
+	}
+	if roleID != "" {
+		users, err := s.store.ListUsers(r.Context())
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		knownRole := false
+		for i := range users {
+			if strings.TrimSpace(users[i].RoleID) == roleID {
+				knownRole = true
+				break
+			}
+		}
+		if !knownRole {
+			http.Error(w, "unknown roleId", http.StatusNotFound)
+			return
+		}
 	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -144,9 +164,26 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+	resolveUsername := func() string {
+		if username != "" {
+			return username
+		}
+		if roleID == "" {
+			return ""
+		}
+		session, ok := s.sessions.LatestForRole(roleID)
+		if !ok {
+			return ""
+		}
+		return strings.TrimSpace(session.Username)
+	}
 	presenceCh, unsubscribe := s.hub.SubscribePresence()
 	defer unsubscribe()
-	resultCh, unsubscribeResults := s.subscribeCompanionResults(username)
+	resultKey := username
+	if resultKey == "" {
+		resultKey = roleID
+	}
+	resultCh, unsubscribeResults := s.subscribeCompanionResults(resultKey)
 	defer unsubscribeResults()
 	var connMu sync.Mutex
 	writeJSON := func(msg WSOutbound) {
@@ -165,22 +202,25 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeState := func() {
+		resolvedUsername := resolveUsername()
 		state := CompanionBridgeState{
-			Username: username,
+			Username: resolvedUsername,
 			Bound:    false,
 		}
-		if presence, ok := s.hub.PresenceForUsername(username); ok {
-			state.Bound = true
-			state.Presence = &presence
-		}
-		if replyUserID, replyUsername, ok := s.hub.ReplyTargetForUsername(username); ok {
-			state.ReplyDirectUserID = replyUserID
-			state.ReplyDirectUsername = replyUsername
-		}
-		if signalFrom, signalMessage, signalActive := s.hub.SignalStateForUsername(username); signalActive {
-			state.SignalActive = true
-			state.SignalFrom = signalFrom
-			state.SignalMessage = signalMessage
+		if resolvedUsername != "" {
+			if presence, ok := s.hub.PresenceForUsername(resolvedUsername); ok {
+				state.Bound = true
+				state.Presence = &presence
+			}
+			if replyUserID, replyUsername, ok := s.hub.ReplyTargetForUsername(resolvedUsername); ok {
+				state.ReplyDirectUserID = replyUserID
+				state.ReplyDirectUsername = replyUsername
+			}
+			if signalFrom, signalMessage, signalActive := s.hub.SignalStateForUsername(resolvedUsername); signalActive {
+				state.SignalActive = true
+				state.SignalFrom = signalFrom
+				state.SignalMessage = signalMessage
+			}
 		}
 		writeJSON(WSOutbound{
 			Type: "companion_state",
@@ -217,7 +257,11 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 		var in companionInbound
 		if err := conn.ReadJSON(&in); err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				s.logger.Warn("companion websocket closed unexpectedly", "username", username, "error", err)
+				targetLabel := username
+				if targetLabel == "" {
+					targetLabel = "roleId=" + roleID
+				}
+				s.logger.Warn("companion websocket closed unexpectedly", "target", targetLabel, "error", err)
 			}
 			return
 		}
@@ -236,7 +280,12 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 				Source:    "bridge",
 			})
 		}
-		token, ok := s.hub.LatestTokenForUsername(username)
+		resolvedUsername := resolveUsername()
+		if resolvedUsername == "" {
+			writeRejected("target unavailable")
+			continue
+		}
+		token, ok := s.hub.LatestTokenForUsername(resolvedUsername)
 		if !ok {
 			writeRejected("target unavailable")
 			continue
@@ -317,14 +366,39 @@ func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// Handle both username and roleId query parameters
 	username := strings.TrimSpace(r.URL.Query().Get("username"))
-	if username == "" {
-		http.Error(w, "username required", http.StatusBadRequest)
-		return
-	}
-	targetUser, err := s.store.FindUserByUsername(r.Context(), username)
-	if err != nil {
-		http.Error(w, "unknown username", http.StatusNotFound)
+	roleID := strings.TrimSpace(r.URL.Query().Get("roleId"))
+	
+	var targetUser User
+	if username != "" {
+		var err error
+		targetUser, err = s.store.FindUserByUsername(r.Context(), username)
+		if err != nil {
+			http.Error(w, "unknown username", http.StatusNotFound)
+			return
+		}
+	} else if roleID != "" {
+		// Find first user with this roleId
+		allUsers, err := s.store.ListUsers(r.Context())
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		found := false
+		for i := range allUsers {
+			if strings.TrimSpace(allUsers[i].RoleID) == roleID {
+				targetUser = allUsers[i]
+				found = true
+				break
+			}
+		}
+		if !found {
+			http.Error(w, "unknown roleId", http.StatusNotFound)
+			return
+		}
+	} else {
+		http.Error(w, "username or roleId parameter required", http.StatusBadRequest)
 		return
 	}
 	rooms, err := s.store.ListRooms(r.Context())
@@ -337,6 +411,29 @@ func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request
 		s.internalErr(w, err)
 		return
 	}
+	roleIDs := make(map[string]struct{}, len(users))
+	for _, user := range users {
+		rid := strings.TrimSpace(user.RoleID)
+		if rid == "" {
+			continue
+		}
+		roleIDs[rid] = struct{}{}
+	}
+	activeRoleUsers := make([]CompanionRoleUser, 0, len(roleIDs))
+	for rid := range roleIDs {
+		session, ok := s.sessions.LatestForRole(rid)
+		if !ok {
+			continue
+		}
+		activeRoleUsers = append(activeRoleUsers, CompanionRoleUser{
+			RoleID:   rid,
+			Username: session.Username,
+			UserID:   session.UserID,
+		})
+	}
+	sort.Slice(activeRoleUsers, func(i, j int) bool {
+		return activeRoleUsers[i].RoleID < activeRoleUsers[j].RoleID
+	})
 	groups, err := s.store.ListBroadcastGroups(r.Context())
 	if err != nil {
 		s.internalErr(w, err)
@@ -365,6 +462,7 @@ func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request
 		RoleID:          targetUser.RoleID,
 		Rooms:           roomDiscovery,
 		Users:           users,
+		ActiveRoleUsers: activeRoleUsers,
 		BroadcastGroups: groups,
 	})
 }
@@ -1777,6 +1875,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				result.Source = "browser"
 			}
 			s.publishCompanionResult(user.Username, result)
+			s.publishCompanionResult(user.RoleID, result)
 		case "webrtc_answer":
 			raw, _ := json.Marshal(in.Data)
 			var e WebRTCAnswer

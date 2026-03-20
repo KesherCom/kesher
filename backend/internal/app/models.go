@@ -30,7 +30,14 @@ type CompanionDiscoveryResponse struct {
 	RoleID          string                   `json:"roleId"`
 	Rooms           []CompanionRoomDiscovery `json:"rooms"`
 	Users           []User                   `json:"users"`
+	ActiveRoleUsers []CompanionRoleUser      `json:"activeRoleUsers,omitempty"`
 	BroadcastGroups []BroadcastGroup         `json:"broadcastGroups"`
+}
+
+type CompanionRoleUser struct {
+	RoleID   string `json:"roleId"`
+	Username string `json:"username"`
+	UserID   string `json:"userId"`
 }
 
 type Room struct {
@@ -65,20 +72,20 @@ type Session struct {
 type StreamDeckActionType string
 
 const (
-	StreamDeckActionTypeNone          StreamDeckActionType = "none"
-	StreamDeckActionTypePTTRoom       StreamDeckActionType = "ptt_room"
+	StreamDeckActionTypeNone           StreamDeckActionType = "none"
+	StreamDeckActionTypePTTRoom        StreamDeckActionType = "ptt_room"
 	StreamDeckActionTypeSelectTalkRoom StreamDeckActionType = "select_talk_room"
-	StreamDeckActionTypePTTSelected   StreamDeckActionType = "ptt_selected"
-	StreamDeckActionTypeListenRoom    StreamDeckActionType = "listen_room"
-	StreamDeckActionTypeCallRoom      StreamDeckActionType = "call_room"
-	StreamDeckActionTypeDirectUser    StreamDeckActionType = "direct_user"
-	StreamDeckActionTypeDirectRole    StreamDeckActionType = "direct_role"
-	StreamDeckActionTypeReplyToCaller StreamDeckActionType = "reply_to_caller"
-	StreamDeckActionTypeBroadcastPTT  StreamDeckActionType = "broadcast_ptt"
-	StreamDeckActionTypeMuteToggle    StreamDeckActionType = "mute_toggle"
-	StreamDeckActionTypeVolumeDelta   StreamDeckActionType = "volume_delta"
-	StreamDeckActionTypePageUp        StreamDeckActionType = "page_up"
-	StreamDeckActionTypePageDown      StreamDeckActionType = "page_down"
+	StreamDeckActionTypePTTSelected    StreamDeckActionType = "ptt_selected"
+	StreamDeckActionTypeListenRoom     StreamDeckActionType = "listen_room"
+	StreamDeckActionTypeCallRoom       StreamDeckActionType = "call_room"
+	StreamDeckActionTypeDirectUser     StreamDeckActionType = "direct_user"
+	StreamDeckActionTypeDirectRole     StreamDeckActionType = "direct_role"
+	StreamDeckActionTypeReplyToCaller  StreamDeckActionType = "reply_to_caller"
+	StreamDeckActionTypeBroadcastPTT   StreamDeckActionType = "broadcast_ptt"
+	StreamDeckActionTypeMuteToggle     StreamDeckActionType = "mute_toggle"
+	StreamDeckActionTypeVolumeDelta    StreamDeckActionType = "volume_delta"
+	StreamDeckActionTypePageUp         StreamDeckActionType = "page_up"
+	StreamDeckActionTypePageDown       StreamDeckActionType = "page_down"
 )
 
 const (
