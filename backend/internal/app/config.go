@@ -37,6 +37,7 @@ type Config struct {
 	TelegramBotToken            string
 	TelegramWebhookSecret       string
 	TelegramMode                string // "polling" (default) or "webhook"
+	CompanionSharedSecret       string
 }
 type fileConfig struct {
 	Addr                               string   `yaml:"app_addr"`
@@ -64,6 +65,7 @@ type fileConfig struct {
 	TelegramBotToken                   string   `yaml:"telegram_bot_token"`
 	TelegramWebhookSecret              string   `yaml:"telegram_webhook_secret"`
 	TelegramMode                       string   `yaml:"telegram_mode"`
+	CompanionSharedSecret              string   `yaml:"companion_shared_secret"`
 }
 
 func getEnvWithPresence(k, fallback string) (string, bool) {
@@ -101,6 +103,7 @@ func defaultConfig() Config {
 		TelegramBotToken:            "",
 		TelegramWebhookSecret:       "",
 		TelegramMode:                "polling",
+		CompanionSharedSecret:       "",
 	}
 }
 
@@ -225,6 +228,9 @@ func loadConfigFromFile(path string) (Config, error) {
 	if fileCfg.TelegramMode != "" {
 		cfg.TelegramMode = fileCfg.TelegramMode
 	}
+	if fileCfg.CompanionSharedSecret != "" {
+		cfg.CompanionSharedSecret = fileCfg.CompanionSharedSecret
+	}
 	return cfg, nil
 }
 
@@ -259,6 +265,7 @@ func loadConfigFromEnv() Config {
 		TelegramBotToken:      getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramWebhookSecret: getEnv("TELEGRAM_WEBHOOK_SECRET", ""),
 		TelegramMode:          getEnv("TELEGRAM_MODE", "polling"),
+		CompanionSharedSecret: getEnv("COMPANION_SHARED_SECRET", ""),
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -134,11 +135,22 @@ func startWebSocketKeepalive(conn *websocket.Conn, connMu *sync.Mutex) func() {
 }
 
 func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCompanionSecret(w, r) {
+		return
+	}
 	username := strings.TrimSpace(r.URL.Query().Get("username"))
 	roleID := strings.TrimSpace(r.URL.Query().Get("roleId"))
 	if username == "" && roleID == "" {
-		http.Error(w, "username or roleId required", http.StatusBadRequest)
-		return
+		autoRoleID, err := s.store.ResolveSinglePublishedCompanionRole(r.Context())
+		if err != nil {
+			if errors.Is(err, ErrConflict) {
+				http.Error(w, "multiple published profiles found; provide roleId or username", http.StatusConflict)
+				return
+			}
+			http.Error(w, "username or roleId required", http.StatusBadRequest)
+			return
+		}
+		roleID = autoRoleID
 	}
 	if roleID != "" {
 		users, err := s.store.ListUsers(r.Context())
@@ -206,6 +218,21 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 		state := CompanionBridgeState{
 			Username: resolvedUsername,
 			Bound:    false,
+		}
+		profileRoleID := strings.TrimSpace(roleID)
+		if profileRoleID == "" && resolvedUsername != "" {
+			if u, err := s.store.FindUserByUsername(r.Context(), resolvedUsername); err == nil {
+				profileRoleID = strings.TrimSpace(u.RoleID)
+			}
+		}
+		if profileRoleID != "" {
+			if profile, err := s.store.GetCompanionProfileByRole(r.Context(), profileRoleID); err == nil {
+				state.ProfileVersion = profile.ProfileVersion
+				state.ProfileStatus = profile.ProfileStatus
+				state.ProfileUpdatedAt = profile.ProfileUpdatedAt
+			} else if errors.Is(err, ErrNotFound) {
+				state.ProfileStatus = "unpublished"
+			}
 		}
 		if resolvedUsername != "" {
 			if presence, ok := s.hub.PresenceForUsername(resolvedUsername); ok {
@@ -362,6 +389,9 @@ func (s *Server) publishCompanionResult(roleID string, result CompanionCommandRe
 }
 
 func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCompanionSecret(w, r) {
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -369,101 +399,46 @@ func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request
 	// Handle both username and roleId query parameters
 	username := strings.TrimSpace(r.URL.Query().Get("username"))
 	roleID := strings.TrimSpace(r.URL.Query().Get("roleId"))
-	
-	var targetUser User
-	if username != "" {
-		var err error
-		targetUser, err = s.store.FindUserByUsername(r.Context(), username)
-		if err != nil {
-			http.Error(w, "unknown username", http.StatusNotFound)
+	targetUser, err := s.resolveCompanionTargetUser(r.Context(), username, roleID)
+	if err != nil {
+		if errors.Is(err, ErrInvalidInput) {
+			http.Error(w, "username or roleId parameter required unless exactly one profile is published", http.StatusBadRequest)
 			return
 		}
-	} else if roleID != "" {
-		// Find first user with this roleId
-		allUsers, err := s.store.ListUsers(r.Context())
-		if err != nil {
-			s.internalErr(w, err)
+		if errors.Is(err, ErrConflict) {
+			http.Error(w, "multiple published profiles found; provide roleId or username", http.StatusConflict)
 			return
 		}
-		found := false
-		for i := range allUsers {
-			if strings.TrimSpace(allUsers[i].RoleID) == roleID {
-				targetUser = allUsers[i]
-				found = true
-				break
-			}
-		}
-		if !found {
-			http.Error(w, "unknown roleId", http.StatusNotFound)
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "unknown username or roleId", http.StatusNotFound)
 			return
 		}
-	} else {
-		http.Error(w, "username or roleId parameter required", http.StatusBadRequest)
+		s.internalErr(w, err)
 		return
 	}
-	rooms, err := s.store.ListRooms(r.Context())
+	profileResp, err := s.buildCompanionProfileResponse(r.Context(), targetUser)
 	if err != nil {
 		s.internalErr(w, err)
 		return
 	}
-	users, err := s.store.ListUsers(r.Context())
-	if err != nil {
-		s.internalErr(w, err)
-		return
-	}
-	roleIDs := make(map[string]struct{}, len(users))
-	for _, user := range users {
-		rid := strings.TrimSpace(user.RoleID)
-		if rid == "" {
-			continue
-		}
-		roleIDs[rid] = struct{}{}
-	}
-	activeRoleUsers := make([]CompanionRoleUser, 0, len(roleIDs))
-	for rid := range roleIDs {
-		session, ok := s.sessions.LatestForRole(rid)
-		if !ok {
-			continue
-		}
-		activeRoleUsers = append(activeRoleUsers, CompanionRoleUser{
-			RoleID:   rid,
-			Username: session.Username,
-			UserID:   session.UserID,
-		})
-	}
-	sort.Slice(activeRoleUsers, func(i, j int) bool {
-		return activeRoleUsers[i].RoleID < activeRoleUsers[j].RoleID
-	})
-	groups, err := s.store.ListBroadcastGroups(r.Context())
-	if err != nil {
-		s.internalErr(w, err)
-		return
-	}
-	groups = filterBroadcastGroupsForRole(targetUser.RoleID, groups)
-	roomDiscovery := make([]CompanionRoomDiscovery, 0, len(rooms))
-	for _, room := range rooms {
-		canTalk, err := s.store.RoomAllowsSenderRole(r.Context(), room.ID, targetUser.RoleID)
-		if err != nil {
-			continue
-		}
-		canListen, err := s.store.RoomAllowsReceiverRole(r.Context(), room.ID, targetUser.RoleID)
-		if err != nil {
-			continue
-		}
-		roomDiscovery = append(roomDiscovery, CompanionRoomDiscovery{
-			ID:        room.ID,
-			Name:      room.Name,
-			CanTalk:   canTalk,
-			CanListen: canListen,
-		})
+	profileVersion := 0
+	profileStatus := "unpublished"
+	profileUpdatedAt := int64(0)
+	if storedProfile, err := s.store.GetCompanionProfileByRole(r.Context(), targetUser.RoleID); err == nil {
+		profileVersion = storedProfile.ProfileVersion
+		profileStatus = storedProfile.ProfileStatus
+		profileUpdatedAt = storedProfile.ProfileUpdatedAt
 	}
 	s.writeJSON(w, http.StatusOK, CompanionDiscoveryResponse{
-		Username:        targetUser.Username,
-		RoleID:          targetUser.RoleID,
-		Rooms:           roomDiscovery,
-		Users:           users,
-		ActiveRoleUsers: activeRoleUsers,
-		BroadcastGroups: groups,
+		Username:         profileResp.Username,
+		RoleID:           profileResp.RoleID,
+		Rooms:            profileResp.Rooms,
+		Users:            profileResp.Users,
+		ActiveRoleUsers:  profileResp.ActiveRoleUsers,
+		BroadcastGroups:  profileResp.BroadcastGroups,
+		ProfileVersion:   profileVersion,
+		ProfileStatus:    profileStatus,
+		ProfileUpdatedAt: profileUpdatedAt,
 	})
 }
 
@@ -569,6 +544,8 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/bootstrap", s.withAuth(s.handleBootstrap))
 	mux.HandleFunc("/api/status", s.withAuth(s.handleStatus))
 	mux.HandleFunc("/api/user/stream-deck/settings", s.withAuth(s.handleUserStreamDeckSettings))
+	mux.HandleFunc("/api/companion/profile", s.handleCompanionProfile)
+	mux.HandleFunc("/api/admin/companion/publish", s.withAuth(s.handleAdminCompanionPublish))
 	mux.HandleFunc("/api/admin/roles", s.withAuth(s.handleAdminRoles))
 	mux.HandleFunc("/api/admin/roles/", s.withAuth(s.handleAdminRoleByID))
 	mux.HandleFunc("/api/admin/rooms", s.withAuth(s.handleAdminRooms))
@@ -995,6 +972,225 @@ func (s *Server) handleUserStreamDeckSettings(w http.ResponseWriter, r *http.Req
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+type publishCompanionProfileRequest struct {
+	RoleID string `json:"roleId"`
+}
+
+func (s *Server) handleAdminCompanionPublish(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req publishCompanionProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	roleID := strings.TrimSpace(req.RoleID)
+	if roleID == "" {
+		roleID = strings.TrimSpace(session.RoleID)
+	}
+	if roleID == "" {
+		http.Error(w, "roleId required", http.StatusBadRequest)
+		return
+	}
+	targetUser, err := s.resolveCompanionTargetUser(r.Context(), "", roleID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "unknown roleId", http.StatusNotFound)
+			return
+		}
+		s.internalErr(w, err)
+		return
+	}
+	profile, err := s.buildCompanionProfileResponse(r.Context(), targetUser)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	published, err := s.store.PublishCompanionProfile(r.Context(), roleID, session.UserID, profile)
+	if err != nil {
+		if s.writeStoreErr(w, err) {
+			return
+		}
+		s.internalErr(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, published)
+}
+
+func (s *Server) requireCompanionSecret(w http.ResponseWriter, r *http.Request) bool {
+	expected := strings.TrimSpace(s.cfg.CompanionSharedSecret)
+	if expected == "" {
+		return true
+	}
+	presented := strings.TrimSpace(r.Header.Get("X-Companion-Secret"))
+	if presented == "" {
+		presented = strings.TrimSpace(r.URL.Query().Get("secret"))
+	}
+	if subtle.ConstantTimeCompare([]byte(presented), []byte(expected)) != 1 {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+func (s *Server) handleCompanionProfile(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCompanionSecret(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	username := strings.TrimSpace(r.URL.Query().Get("username"))
+	roleID := strings.TrimSpace(r.URL.Query().Get("roleId"))
+	targetUser, err := s.resolveCompanionTargetUser(r.Context(), username, roleID)
+	if err != nil {
+		if errors.Is(err, ErrInvalidInput) {
+			http.Error(w, "username or roleId required unless exactly one profile is published", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, ErrConflict) {
+			http.Error(w, "multiple published profiles found; provide roleId or username", http.StatusConflict)
+			return
+		}
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "unknown username or roleId", http.StatusNotFound)
+			return
+		}
+		s.internalErr(w, err)
+		return
+	}
+	profile, err := s.store.GetCompanionProfileByRole(r.Context(), targetUser.RoleID)
+	if err == nil {
+		s.writeJSON(w, http.StatusOK, profile)
+		return
+	}
+	if !errors.Is(err, ErrNotFound) {
+		s.internalErr(w, err)
+		return
+	}
+	fallback, err := s.buildCompanionProfileResponse(r.Context(), targetUser)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	fallback.ProfileStatus = "unpublished"
+	s.writeJSON(w, http.StatusOK, fallback)
+}
+
+func (s *Server) resolveCompanionTargetUser(ctx context.Context, username, roleID string) (User, error) {
+	if username != "" {
+		targetUser, err := s.store.FindUserByUsername(ctx, username)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return User{}, ErrNotFound
+			}
+			return User{}, err
+		}
+		return targetUser, nil
+	}
+	if roleID == "" {
+		autoRoleID, err := s.store.ResolveSinglePublishedCompanionRole(ctx)
+		if err != nil {
+			if errors.Is(err, ErrConflict) {
+				return User{}, ErrConflict
+			}
+			if errors.Is(err, ErrNotFound) {
+				return User{}, ErrInvalidInput
+			}
+			return User{}, err
+		}
+		roleID = autoRoleID
+	}
+	allUsers, err := s.store.ListUsers(ctx)
+	if err != nil {
+		return User{}, err
+	}
+	for i := range allUsers {
+		if strings.TrimSpace(allUsers[i].RoleID) == strings.TrimSpace(roleID) {
+			return allUsers[i], nil
+		}
+	}
+	return User{}, ErrNotFound
+}
+
+func (s *Server) buildCompanionProfileResponse(ctx context.Context, targetUser User) (CompanionProfileResponse, error) {
+	rooms, err := s.store.ListRooms(ctx)
+	if err != nil {
+		return CompanionProfileResponse{}, err
+	}
+	users, err := s.store.ListUsers(ctx)
+	if err != nil {
+		return CompanionProfileResponse{}, err
+	}
+	roleIDs := make(map[string]struct{}, len(users))
+	for _, user := range users {
+		rid := strings.TrimSpace(user.RoleID)
+		if rid == "" {
+			continue
+		}
+		roleIDs[rid] = struct{}{}
+	}
+	activeRoleUsers := make([]CompanionRoleUser, 0, len(roleIDs))
+	for rid := range roleIDs {
+		session, ok := s.sessions.LatestForRole(rid)
+		if !ok {
+			continue
+		}
+		activeRoleUsers = append(activeRoleUsers, CompanionRoleUser{
+			RoleID:   rid,
+			Username: session.Username,
+			UserID:   session.UserID,
+		})
+	}
+	sort.Slice(activeRoleUsers, func(i, j int) bool {
+		return activeRoleUsers[i].RoleID < activeRoleUsers[j].RoleID
+	})
+	groups, err := s.store.ListBroadcastGroups(ctx)
+	if err != nil {
+		return CompanionProfileResponse{}, err
+	}
+	groups = filterBroadcastGroupsForRole(targetUser.RoleID, groups)
+	roomDiscovery := make([]CompanionRoomDiscovery, 0, len(rooms))
+	for _, room := range rooms {
+		canTalk, err := s.store.RoomAllowsSenderRole(ctx, room.ID, targetUser.RoleID)
+		if err != nil {
+			continue
+		}
+		canListen, err := s.store.RoomAllowsReceiverRole(ctx, room.ID, targetUser.RoleID)
+		if err != nil {
+			continue
+		}
+		roomDiscovery = append(roomDiscovery, CompanionRoomDiscovery{
+			ID:        room.ID,
+			Name:      room.Name,
+			CanTalk:   canTalk,
+			CanListen: canListen,
+		})
+	}
+	settings, err := s.store.GetUserStreamDeckSettings(ctx, targetUser.ID)
+	if err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			return CompanionProfileResponse{}, err
+		}
+		settings = DefaultStreamDeckSettings()
+	}
+	return CompanionProfileResponse{
+		RoleID:          targetUser.RoleID,
+		Username:        targetUser.Username,
+		Rooms:           roomDiscovery,
+		Users:           users,
+		ActiveRoleUsers: activeRoleUsers,
+		BroadcastGroups: groups,
+		StreamDeck:      settings,
+	}, nil
 }
 
 func filterBroadcastGroupsForRole(roleID string, groups []BroadcastGroup) []BroadcastGroup {

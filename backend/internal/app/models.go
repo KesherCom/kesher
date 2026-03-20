@@ -32,6 +32,22 @@ type CompanionDiscoveryResponse struct {
 	Users           []User                   `json:"users"`
 	ActiveRoleUsers []CompanionRoleUser      `json:"activeRoleUsers,omitempty"`
 	BroadcastGroups []BroadcastGroup         `json:"broadcastGroups"`
+	ProfileVersion  int                      `json:"profileVersion,omitempty"`
+	ProfileStatus   string                   `json:"profileStatus,omitempty"`
+	ProfileUpdatedAt int64                   `json:"profileUpdatedAt,omitempty"`
+}
+
+type CompanionProfileResponse struct {
+	RoleID          string                   `json:"roleId"`
+	Username        string                   `json:"username"`
+	Rooms           []CompanionRoomDiscovery `json:"rooms"`
+	Users           []User                   `json:"users"`
+	ActiveRoleUsers []CompanionRoleUser      `json:"activeRoleUsers,omitempty"`
+	BroadcastGroups []BroadcastGroup         `json:"broadcastGroups"`
+	StreamDeck      StreamDeckSettings       `json:"streamDeckSettings"`
+	ProfileVersion  int                      `json:"profileVersion"`
+	ProfileStatus   string                   `json:"profileStatus"`
+	ProfileUpdatedAt int64                   `json:"profileUpdatedAt,omitempty"`
 }
 
 type CompanionRoleUser struct {
@@ -294,6 +310,9 @@ type CompanionBridgeState struct {
 	SignalActive        bool           `json:"signalActive"`
 	SignalFrom          string         `json:"signalFrom,omitempty"`
 	SignalMessage       string         `json:"signalMessage,omitempty"`
+	ProfileVersion      int            `json:"profileVersion,omitempty"`
+	ProfileStatus       string         `json:"profileStatus,omitempty"`
+	ProfileUpdatedAt    int64          `json:"profileUpdatedAt,omitempty"`
 }
 
 type StatusResponse struct {

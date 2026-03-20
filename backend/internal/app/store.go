@@ -521,6 +521,16 @@ func (s *Store) migrate(ctx context.Context) error {
 	)`); err != nil {
 		return err
 	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS companion_profiles (
+		role_id TEXT PRIMARY KEY,
+		profile_version INTEGER NOT NULL,
+		profile_json TEXT NOT NULL,
+		published_by_user_id TEXT,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -835,6 +845,129 @@ func (s *Store) DeleteUserStreamDeckSettings(ctx context.Context, userID string)
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (s *Store) ResolveSinglePublishedCompanionRole(ctx context.Context) (string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT role_id FROM companion_profiles ORDER BY updated_at DESC LIMIT 2`)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	roles := make([]string, 0, 2)
+	for rows.Next() {
+		var roleID string
+		if err := rows.Scan(&roleID); err != nil {
+			return "", err
+		}
+		roleID = strings.TrimSpace(roleID)
+		if roleID != "" {
+			roles = append(roles, roleID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if len(roles) == 0 {
+		return "", ErrNotFound
+	}
+	if len(roles) > 1 {
+		return "", ErrConflict
+	}
+	return roles[0], nil
+}
+
+func (s *Store) GetCompanionProfileByRole(ctx context.Context, roleID string) (CompanionProfileResponse, error) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return CompanionProfileResponse{}, ErrInvalidInput
+	}
+	var (
+		version   int
+		profileJSON string
+		updatedAt int64
+	)
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT profile_version, profile_json, updated_at FROM companion_profiles WHERE role_id = ?`,
+		roleID,
+	).Scan(&version, &profileJSON, &updatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return CompanionProfileResponse{}, ErrNotFound
+		}
+		return CompanionProfileResponse{}, err
+	}
+	var profile CompanionProfileResponse
+	if err := json.Unmarshal([]byte(profileJSON), &profile); err != nil {
+		return CompanionProfileResponse{}, ErrInvalidInput
+	}
+	profile.ProfileVersion = version
+	profile.ProfileUpdatedAt = updatedAt
+	if strings.TrimSpace(profile.ProfileStatus) == "" {
+		profile.ProfileStatus = "published"
+	}
+	return profile, nil
+}
+
+func (s *Store) PublishCompanionProfile(ctx context.Context, roleID string, publishedByUserID string, profile CompanionProfileResponse) (CompanionProfileResponse, error) {
+	roleID = strings.TrimSpace(roleID)
+	publishedByUserID = strings.TrimSpace(publishedByUserID)
+	if roleID == "" || publishedByUserID == "" {
+		return CompanionProfileResponse{}, ErrInvalidInput
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return CompanionProfileResponse{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	version := 1
+	if errScan := tx.QueryRowContext(ctx, `SELECT profile_version FROM companion_profiles WHERE role_id = ?`, roleID).Scan(&version); errScan == nil {
+		version++
+	} else if !errors.Is(errScan, sql.ErrNoRows) {
+		err = errScan
+		return CompanionProfileResponse{}, err
+	}
+
+	now := time.Now().UnixMilli()
+	profile.RoleID = roleID
+	profile.ProfileVersion = version
+	profile.ProfileUpdatedAt = now
+	profile.ProfileStatus = "published"
+	body, errMarshal := json.Marshal(profile)
+	if errMarshal != nil {
+		err = errMarshal
+		return CompanionProfileResponse{}, err
+	}
+
+	_, err = tx.ExecContext(
+		ctx,
+		`INSERT INTO companion_profiles (role_id, profile_version, profile_json, published_by_user_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(role_id) DO UPDATE SET
+			profile_version = excluded.profile_version,
+			profile_json = excluded.profile_json,
+			published_by_user_id = excluded.published_by_user_id,
+			updated_at = excluded.updated_at`,
+		roleID,
+		version,
+		string(body),
+		publishedByUserID,
+		now,
+		now,
+	)
+	if err != nil {
+		return CompanionProfileResponse{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return CompanionProfileResponse{}, err
+	}
+	return profile, nil
 }
 
 func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
