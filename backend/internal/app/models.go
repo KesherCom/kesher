@@ -32,6 +32,7 @@ type CompanionDiscoveryResponse struct {
 	Users           []User                   `json:"users"`
 	ActiveRoleUsers []CompanionRoleUser      `json:"activeRoleUsers,omitempty"`
 	BroadcastGroups []BroadcastGroup         `json:"broadcastGroups"`
+	CurrentPageNumber int                    `json:"currentPageNumber,omitempty"`
 	ProfileVersion  int                      `json:"profileVersion,omitempty"`
 	ProfileStatus   string                   `json:"profileStatus,omitempty"`
 	ProfileUpdatedAt int64                   `json:"profileUpdatedAt,omitempty"`
@@ -40,6 +41,8 @@ type CompanionDiscoveryResponse struct {
 type CompanionProfileResponse struct {
 	RoleID          string                   `json:"roleId"`
 	Username        string                   `json:"username"`
+	PageNumber      int                      `json:"pageNumber,omitempty"`
+	CurrentPageNumber int                    `json:"currentPageNumber,omitempty"`
 	Rooms           []CompanionRoomDiscovery `json:"rooms"`
 	Users           []User                   `json:"users"`
 	ActiveRoleUsers []CompanionRoleUser      `json:"activeRoleUsers,omitempty"`
@@ -48,6 +51,19 @@ type CompanionProfileResponse struct {
 	ProfileVersion  int                      `json:"profileVersion"`
 	ProfileStatus   string                   `json:"profileStatus"`
 	ProfileUpdatedAt int64                   `json:"profileUpdatedAt,omitempty"`
+}
+
+type CompanionPublishedProfileSummary struct {
+	RoleID           string `json:"roleId"`
+	Username         string `json:"username"`
+	ProfileVersion   int    `json:"profileVersion"`
+	ProfileStatus    string `json:"profileStatus"`
+	ProfileUpdatedAt int64  `json:"profileUpdatedAt,omitempty"`
+}
+
+type CompanionAdminSummaryResponse struct {
+	SharedSecret     string                            `json:"sharedSecret"`
+	PublishedProfiles []CompanionPublishedProfileSummary `json:"publishedProfiles"`
 }
 
 type CompanionRoleUser struct {
@@ -287,6 +303,8 @@ type CompanionCommand struct {
 	TargetID      string   `json:"targetId,omitempty"`
 	State         string   `json:"state,omitempty"`
 	Signal        string   `json:"signal,omitempty"`
+	ButtonIndex   int      `json:"buttonIndex,omitempty"`
+	VolumeDelta   int      `json:"volumeDelta,omitempty"`
 	ListenRoomIDs []string `json:"listenRoomIds,omitempty"`
 	TalkRoomIDs   []string `json:"talkRoomIds,omitempty"`
 }
@@ -310,6 +328,7 @@ type CompanionBridgeState struct {
 	SignalActive        bool           `json:"signalActive"`
 	SignalFrom          string         `json:"signalFrom,omitempty"`
 	SignalMessage       string         `json:"signalMessage,omitempty"`
+	CurrentPageNumber   int            `json:"currentPageNumber,omitempty"`
 	ProfileVersion      int            `json:"profileVersion,omitempty"`
 	ProfileStatus       string         `json:"profileStatus,omitempty"`
 	ProfileUpdatedAt    int64          `json:"profileUpdatedAt,omitempty"`

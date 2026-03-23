@@ -46,6 +46,9 @@ type Server struct {
 	ackSet      bool
 	companionMu sync.RWMutex
 	companionWS map[string]map[chan CompanionCommandResult]struct{}
+	companionState map[string]map[chan struct{}]struct{}
+	companionPageByRole map[string]int
+	companionHeldTargets map[string]string
 }
 
 type tlsProvider interface {
@@ -197,6 +200,8 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 	}
 	resultCh, unsubscribeResults := s.subscribeCompanionResults(resultKey)
 	defer unsubscribeResults()
+	stateCh, unsubscribeState := s.subscribeCompanionState(resultKey)
+	defer unsubscribeState()
 	var connMu sync.Mutex
 	writeJSON := func(msg WSOutbound) {
 		connMu.Lock()
@@ -226,6 +231,7 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if profileRoleID != "" {
+			state.CurrentPageNumber = s.currentCompanionPage(r.Context(), profileRoleID)
 			if profile, err := s.store.GetCompanionProfileByRole(r.Context(), profileRoleID); err == nil {
 				state.ProfileVersion = profile.ProfileVersion
 				state.ProfileStatus = profile.ProfileStatus
@@ -276,6 +282,11 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				writeCommandResult(result)
+			case _, ok := <-stateCh:
+				if !ok {
+					return
+				}
+				writeState()
 			}
 		}
 	}()
@@ -307,6 +318,28 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 				Source:    "bridge",
 			})
 		}
+		if in.Data.Command == "" {
+			writeRejected("missing command")
+			continue
+		}
+		resolvedRoleID := strings.TrimSpace(roleID)
+		if resolvedRoleID == "" {
+			resolvedUsername := resolveUsername()
+			if resolvedUsername != "" {
+				if targetUser, err := s.store.FindUserByUsername(r.Context(), resolvedUsername); err == nil {
+					resolvedRoleID = strings.TrimSpace(targetUser.RoleID)
+				}
+			}
+		}
+		if in.Data.Command == "press_button" {
+			if resolvedRoleID == "" {
+				writeRejected("target role unavailable")
+				continue
+			}
+			result := s.executeCompanionButtonPress(r.Context(), resolvedRoleID, resolveUsername(), in.Data)
+			writeCommandResult(result)
+			continue
+		}
 		resolvedUsername := resolveUsername()
 		if resolvedUsername == "" {
 			writeRejected("target unavailable")
@@ -315,10 +348,6 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 		token, ok := s.hub.LatestTokenForUsername(resolvedUsername)
 		if !ok {
 			writeRejected("target unavailable")
-			continue
-		}
-		if in.Data.Command == "" {
-			writeRejected("missing command")
 			continue
 		}
 		if in.Data.Command == "set_voice_mode" && in.Data.Mode == "" {
@@ -367,6 +396,30 @@ func (s *Server) subscribeCompanionResults(roleID string) (chan CompanionCommand
 	return ch, unsubscribe
 }
 
+func (s *Server) subscribeCompanionState(roleID string) (chan struct{}, func()) {
+	ch := make(chan struct{}, 4)
+	s.companionMu.Lock()
+	if s.companionState[roleID] == nil {
+		s.companionState[roleID] = make(map[chan struct{}]struct{})
+	}
+	s.companionState[roleID][ch] = struct{}{}
+	s.companionMu.Unlock()
+
+	unsubscribe := func() {
+		s.companionMu.Lock()
+		if subscribers, ok := s.companionState[roleID]; ok {
+			if _, exists := subscribers[ch]; exists {
+				delete(subscribers, ch)
+			}
+			if len(subscribers) == 0 {
+				delete(s.companionState, roleID)
+			}
+		}
+		s.companionMu.Unlock()
+	}
+	return ch, unsubscribe
+}
+
 func (s *Server) publishCompanionResult(roleID string, result CompanionCommandResult) {
 	s.companionMu.RLock()
 	subscribers := s.companionWS[roleID]
@@ -386,6 +439,315 @@ func (s *Server) publishCompanionResult(roleID string, result CompanionCommandRe
 		default:
 		}
 	}
+}
+
+func (s *Server) publishCompanionState(roleID string) {
+	s.companionMu.RLock()
+	subscribers := s.companionState[roleID]
+	if len(subscribers) == 0 {
+		s.companionMu.RUnlock()
+		return
+	}
+	channels := make([]chan struct{}, 0, len(subscribers))
+	for ch := range subscribers {
+		channels = append(channels, ch)
+	}
+	s.companionMu.RUnlock()
+	for _, ch := range channels {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (s *Server) resetCompanionCurrentPage(roleID string) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return
+	}
+	s.companionMu.Lock()
+	delete(s.companionPageByRole, roleID)
+	s.companionMu.Unlock()
+	s.publishCompanionState(roleID)
+}
+
+func (s *Server) currentCompanionPage(ctx context.Context, roleID string) int {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return 0
+	}
+	s.companionMu.RLock()
+	page, ok := s.companionPageByRole[roleID]
+	s.companionMu.RUnlock()
+	if ok {
+		return page
+	}
+	settings, err := s.store.GetRoleStreamDeckSettings(ctx, roleID)
+	if err != nil {
+		settings = DefaultStreamDeckSettings()
+	}
+	page = settings.SelectedPage
+	s.companionMu.Lock()
+	s.companionPageByRole[roleID] = page
+	s.companionMu.Unlock()
+	return page
+}
+
+func (s *Server) setCompanionCurrentPage(roleID string, page int) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return
+	}
+	s.companionMu.Lock()
+	s.companionPageByRole[roleID] = page
+	s.companionMu.Unlock()
+	s.publishCompanionState(roleID)
+}
+
+func (s *Server) rememberCompanionHeldTarget(key, targetID string) {
+	if key == "" || targetID == "" {
+		return
+	}
+	s.companionMu.Lock()
+	s.companionHeldTargets[key] = targetID
+	s.companionMu.Unlock()
+}
+
+func (s *Server) consumeCompanionHeldTarget(key string) string {
+	if key == "" {
+		return ""
+	}
+	s.companionMu.Lock()
+	targetID := s.companionHeldTargets[key]
+	delete(s.companionHeldTargets, key)
+	s.companionMu.Unlock()
+	return targetID
+}
+
+func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string, username string, command CompanionCommand) CompanionCommandResult {
+	result := CompanionCommandResult{
+		CommandID: command.CommandID,
+		Command:   command.Command,
+		OK:        false,
+		Status:    "failed",
+		Source:    "server",
+		Timestamp: time.Now().UnixMilli(),
+	}
+	settings, err := s.store.GetRoleStreamDeckSettings(ctx, roleID)
+	if err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			result.Error = err.Error()
+			return result
+		}
+		settings = DefaultStreamDeckSettings()
+	}
+	currentPage := s.currentCompanionPage(ctx, roleID)
+	page := settings.Pages[0]
+	for _, candidate := range settings.Pages {
+		if candidate.Page == currentPage {
+			page = candidate
+			break
+		}
+	}
+	var button *StreamDeckButtonConfig
+	for i := range page.Buttons {
+		if page.Buttons[i].Index == command.ButtonIndex {
+			button = &page.Buttons[i]
+			break
+		}
+	}
+	if button == nil || button.Action == nil || button.Action.Type == StreamDeckActionTypeNone {
+		result.OK = true
+		result.Status = "executed"
+		return result
+	}
+
+	phase := strings.TrimSpace(command.State)
+	if phase == "" {
+		phase = "down"
+	}
+	holdKey := fmt.Sprintf("%s:%d:%d", roleID, currentPage, command.ButtonIndex)
+	presence, _ := s.hub.PresenceForUsername(username)
+	queueBrowserCommand := func(next CompanionCommand) CompanionCommandResult {
+		queued, err := s.queueCompanionBrowserCommand(username, next)
+		if err != nil {
+			result.Error = err.Error()
+			return result
+		}
+		queued.CommandID = command.CommandID
+		queued.Command = command.Command
+		return queued
+	}
+
+	switch button.Action.Type {
+	case StreamDeckActionTypePageUp, StreamDeckActionTypePageDown:
+		pageOrder := make([]int, 0, len(settings.Pages))
+		for _, entry := range settings.Pages {
+			pageOrder = append(pageOrder, entry.Page)
+		}
+		sort.Ints(pageOrder)
+		currentIndex := 0
+		for i, pageNo := range pageOrder {
+			if pageNo == currentPage {
+				currentIndex = i
+				break
+			}
+		}
+		offset := 1
+		if button.Action.Type == StreamDeckActionTypePageDown {
+			offset = -1
+		}
+		nextIndex := currentIndex + offset
+		if nextIndex < 0 {
+			nextIndex = 0
+		}
+		if nextIndex >= len(pageOrder) {
+			nextIndex = len(pageOrder) - 1
+		}
+		if len(pageOrder) > 0 {
+			s.setCompanionCurrentPage(roleID, pageOrder[nextIndex])
+		}
+		result.OK = true
+		result.Status = "executed"
+		return result
+	case StreamDeckActionTypeMuteToggle:
+		mode := "always_on"
+		if strings.TrimSpace(presence.VoiceMode) == "always_on" {
+			mode = "ptt"
+		}
+		return queueBrowserCommand(CompanionCommand{Command: "set_voice_mode", Mode: mode})
+	case StreamDeckActionTypePTTRoom:
+		return queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "room", TargetID: button.Action.RoomID, State: map[bool]string{true: "ptt_start", false: "ptt_stop"}[phase == "down"]})
+	case StreamDeckActionTypeSelectTalkRoom:
+		if phase != "down" {
+			result.OK = true
+			result.Status = "executed"
+			return result
+		}
+		nextTalk := append([]string(nil), presence.TalkRooms...)
+		roomID := strings.TrimSpace(button.Action.RoomID)
+		found := false
+		filtered := make([]string, 0, len(nextTalk))
+		for _, entry := range nextTalk {
+			if entry == roomID {
+				found = true
+				continue
+			}
+			filtered = append(filtered, entry)
+		}
+		if !found && roomID != "" {
+			filtered = append(filtered, roomID)
+		}
+		return queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: append([]string(nil), presence.ListenRooms...), TalkRoomIDs: filtered})
+	case StreamDeckActionTypePTTSelected:
+		targetID := ""
+		if len(presence.TalkRooms) > 0 {
+			targetID = presence.TalkRooms[0]
+		} else if len(presence.ListenRooms) > 0 {
+			targetID = presence.ListenRooms[0]
+		}
+		return queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "room", TargetID: targetID, State: map[bool]string{true: "ptt_start", false: "ptt_stop"}[phase == "down"]})
+	case StreamDeckActionTypeListenRoom:
+		if phase != "down" {
+			result.OK = true
+			result.Status = "executed"
+			return result
+		}
+		roomID := strings.TrimSpace(button.Action.RoomID)
+		nextListen := append([]string(nil), presence.ListenRooms...)
+		found := false
+		filtered := make([]string, 0, len(nextListen))
+		for _, entry := range nextListen {
+			if entry == roomID {
+				found = true
+				continue
+			}
+			filtered = append(filtered, entry)
+		}
+		if !found && roomID != "" {
+			filtered = append(filtered, roomID)
+		}
+		return queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: filtered, TalkRoomIDs: append([]string(nil), presence.TalkRooms...)})
+	case StreamDeckActionTypeCallRoom:
+		if phase != "down" {
+			result.OK = true
+			result.Status = "executed"
+			return result
+		}
+		return queueBrowserCommand(CompanionCommand{Command: "signal", Scope: "room", TargetID: button.Action.RoomID, Signal: "call"})
+	case StreamDeckActionTypeDirectUser:
+		return queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: button.Action.UserID, State: map[bool]string{true: "ptt_start", false: "ptt_stop"}[phase == "down"]})
+	case StreamDeckActionTypeDirectRole:
+		if phase == "down" {
+			session, ok := s.sessions.LatestForRole(strings.TrimSpace(button.Action.RoleID))
+			if !ok {
+				result.Error = fmt.Sprintf("no active user found for role %s", strings.TrimSpace(button.Action.RoleID))
+				return result
+			}
+			s.rememberCompanionHeldTarget(holdKey, session.UserID)
+			return queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: session.UserID, State: "ptt_start"})
+		}
+		targetID := s.consumeCompanionHeldTarget(holdKey)
+		if targetID == "" {
+			result.OK = true
+			result.Status = "executed"
+			return result
+		}
+		return queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: targetID, State: "ptt_stop"})
+	case StreamDeckActionTypeReplyToCaller:
+		if phase == "down" {
+			replyUserID, _, ok := s.hub.ReplyTargetForUsername(username)
+			if !ok || strings.TrimSpace(replyUserID) == "" {
+				result.Error = "no reply target available"
+				return result
+			}
+			s.rememberCompanionHeldTarget(holdKey, replyUserID)
+			return queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: replyUserID, State: "ptt_start"})
+		}
+		targetID := s.consumeCompanionHeldTarget(holdKey)
+		if targetID == "" {
+			result.OK = true
+			result.Status = "executed"
+			return result
+		}
+		return queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: targetID, State: "ptt_stop"})
+	case StreamDeckActionTypeBroadcastPTT:
+		return queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "broadcast", TargetID: button.Action.BroadcastGroupID, State: map[bool]string{true: "ptt_start", false: "ptt_stop"}[phase == "down"]})
+	case StreamDeckActionTypeVolumeDelta:
+		if phase != "down" {
+			result.OK = true
+			result.Status = "executed"
+			return result
+		}
+		return queueBrowserCommand(CompanionCommand{Command: "input_gain_delta", VolumeDelta: button.Action.VolumeDelta})
+	default:
+		result.Error = "unsupported button action"
+		return result
+	}
+}
+
+func (s *Server) queueCompanionBrowserCommand(username string, command CompanionCommand) (CompanionCommandResult, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return CompanionCommandResult{}, errors.New("target unavailable")
+	}
+	token, ok := s.hub.LatestTokenForUsername(username)
+	if !ok {
+		return CompanionCommandResult{}, errors.New("target unavailable")
+	}
+	sent := s.hub.SendToToken(token, WSOutbound{Type: "companion_command", Data: command})
+	if !sent {
+		return CompanionCommandResult{}, errors.New("failed to deliver command")
+	}
+	return CompanionCommandResult{
+		CommandID: command.CommandID,
+		Command:   command.Command,
+		OK:        true,
+		Status:    "queued",
+		Source:    "server",
+		Timestamp: time.Now().UnixMilli(),
+	}, nil
 }
 
 func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request) {
@@ -436,6 +798,7 @@ func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request
 		Users:            profileResp.Users,
 		ActiveRoleUsers:  profileResp.ActiveRoleUsers,
 		BroadcastGroups:  profileResp.BroadcastGroups,
+		CurrentPageNumber: s.currentCompanionPage(r.Context(), targetUser.RoleID),
 		ProfileVersion:   profileVersion,
 		ProfileStatus:    profileStatus,
 		ProfileUpdatedAt: profileUpdatedAt,
@@ -515,6 +878,9 @@ func NewServer(cfg Config) (*Server, error) {
 		sessions:    NewSessionManager(cfg.SessionTTL),
 		hub:         NewHub(store, logger),
 		companionWS: make(map[string]map[chan CompanionCommandResult]struct{}),
+		companionState: make(map[string]map[chan struct{}]struct{}),
+		companionPageByRole: make(map[string]int),
+		companionHeldTargets: make(map[string]string),
 		ackEnabled:  true,
 		ackSet:      true,
 		upgrader: websocket.Upgrader{
@@ -544,8 +910,12 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/bootstrap", s.withAuth(s.handleBootstrap))
 	mux.HandleFunc("/api/status", s.withAuth(s.handleStatus))
 	mux.HandleFunc("/api/user/stream-deck/settings", s.withAuth(s.handleUserStreamDeckSettings))
+	mux.HandleFunc("/api/admin/stream-deck/settings", s.withAuth(s.handleAdminRoleStreamDeckSettings))
+	mux.HandleFunc("/api/admin/companion/config", s.withAuth(s.handleAdminCompanionConfig))
 	mux.HandleFunc("/api/companion/profile", s.handleCompanionProfile)
 	mux.HandleFunc("/api/admin/companion/publish", s.withAuth(s.handleAdminCompanionPublish))
+	mux.HandleFunc("/api/admin/companion/role-pages", s.withAuth(s.handleAdminCompanionRolePages))
+	mux.HandleFunc("/api/user/companion/publish", s.withAuth(s.handleUserCompanionPublish))
 	mux.HandleFunc("/api/admin/roles", s.withAuth(s.handleAdminRoles))
 	mux.HandleFunc("/api/admin/roles/", s.withAuth(s.handleAdminRoleByID))
 	mux.HandleFunc("/api/admin/rooms", s.withAuth(s.handleAdminRooms))
@@ -929,9 +1299,38 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, _ Session)
 }
 
 func (s *Server) handleUserStreamDeckSettings(w http.ResponseWriter, r *http.Request, session Session) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "stream deck settings are managed in the admin panel", http.StatusForbidden)
+		return
+	}
+	settings, err := s.store.GetRoleStreamDeckSettings(r.Context(), session.RoleID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			s.writeJSON(w, http.StatusOK, DefaultStreamDeckSettings())
+			return
+		}
+		if s.writeStoreErr(w, err) {
+			return
+		}
+		s.internalErr(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, settings)
+}
+
+func (s *Server) handleAdminRoleStreamDeckSettings(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	roleID := strings.TrimSpace(r.URL.Query().Get("roleId"))
+	if roleID == "" {
+		http.Error(w, "roleId required", http.StatusBadRequest)
+		return
+	}
+
 	switch r.Method {
 	case http.MethodGet:
-		settings, err := s.store.GetUserStreamDeckSettings(r.Context(), session.UserID)
+		settings, err := s.store.GetRoleStreamDeckSettings(r.Context(), roleID)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				s.writeJSON(w, http.StatusOK, DefaultStreamDeckSettings())
@@ -945,12 +1344,14 @@ func (s *Server) handleUserStreamDeckSettings(w http.ResponseWriter, r *http.Req
 		}
 		s.writeJSON(w, http.StatusOK, settings)
 	case http.MethodPut:
-		var req StreamDeckSettings
+		var req struct {
+			Settings StreamDeckSettings `json:"settings"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		settings, err := s.store.UpsertUserStreamDeckSettings(r.Context(), session.UserID, req)
+		settings, err := s.store.UpsertRoleStreamDeckSettings(r.Context(), roleID, req.Settings)
 		if err != nil {
 			if s.writeStoreErr(w, err) {
 				return
@@ -958,9 +1359,10 @@ func (s *Server) handleUserStreamDeckSettings(w http.ResponseWriter, r *http.Req
 			s.internalErr(w, err)
 			return
 		}
+		s.resetCompanionCurrentPage(roleID)
 		s.writeJSON(w, http.StatusOK, settings)
 	case http.MethodDelete:
-		err := s.store.DeleteUserStreamDeckSettings(r.Context(), session.UserID)
+		err := s.store.DeleteRoleStreamDeckSettings(r.Context(), roleID)
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			if s.writeStoreErr(w, err) {
 				return
@@ -968,6 +1370,7 @@ func (s *Server) handleUserStreamDeckSettings(w http.ResponseWriter, r *http.Req
 			s.internalErr(w, err)
 			return
 		}
+		s.resetCompanionCurrentPage(roleID)
 		s.writeJSON(w, http.StatusOK, DefaultStreamDeckSettings())
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -976,6 +1379,58 @@ func (s *Server) handleUserStreamDeckSettings(w http.ResponseWriter, r *http.Req
 
 type publishCompanionProfileRequest struct {
 	RoleID string `json:"roleId"`
+}
+
+func (s *Server) handleAdminCompanionConfig(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	users, err := s.store.ListUsers(r.Context())
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	usernameByRoleID := make(map[string]string, len(users))
+	for _, user := range users {
+		roleID := strings.TrimSpace(user.RoleID)
+		if roleID == "" {
+			continue
+		}
+		if _, exists := usernameByRoleID[roleID]; !exists {
+			usernameByRoleID[roleID] = user.Username
+		}
+	}
+	roleIDs := make([]string, 0, len(usernameByRoleID))
+	for roleID := range usernameByRoleID {
+		roleIDs = append(roleIDs, roleID)
+	}
+	sort.Strings(roleIDs)
+	publishedProfiles := make([]CompanionPublishedProfileSummary, 0, len(roleIDs))
+	for _, roleID := range roleIDs {
+		profile, err := s.store.GetCompanionProfileByRole(r.Context(), roleID)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			s.internalErr(w, err)
+			return
+		}
+		publishedProfiles = append(publishedProfiles, CompanionPublishedProfileSummary{
+			RoleID:           roleID,
+			Username:         profile.Username,
+			ProfileVersion:   profile.ProfileVersion,
+			ProfileStatus:    profile.ProfileStatus,
+			ProfileUpdatedAt: profile.ProfileUpdatedAt,
+		})
+	}
+	s.writeJSON(w, http.StatusOK, CompanionAdminSummaryResponse{
+		SharedSecret:      s.cfg.CompanionSharedSecret,
+		PublishedProfiles: publishedProfiles,
+	})
 }
 
 func (s *Server) handleAdminCompanionPublish(w http.ResponseWriter, r *http.Request, session Session) {
@@ -1021,7 +1476,71 @@ func (s *Server) handleAdminCompanionPublish(w http.ResponseWriter, r *http.Requ
 		s.internalErr(w, err)
 		return
 	}
+	s.resetCompanionCurrentPage(roleID)
 	s.writeJSON(w, http.StatusOK, published)
+}
+
+type companionRolePageRequest struct {
+	RoleID     string `json:"roleId"`
+	PageNumber int    `json:"pageNumber"`
+}
+
+type companionRolePageResponse struct {
+	RoleID     string `json:"roleId"`
+	PageNumber int    `json:"pageNumber"`
+}
+
+type companionRolePagesResponse struct {
+	RolePages map[string]int `json:"rolePages"`
+}
+
+func (s *Server) handleAdminCompanionRolePages(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var req companionRolePageRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		roleID := strings.TrimSpace(req.RoleID)
+		if roleID == "" {
+			http.Error(w, "roleId required", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.SaveCompanionRolePage(r.Context(), roleID, req.PageNumber); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, companionRolePageResponse{
+			RoleID:     roleID,
+			PageNumber: req.PageNumber,
+		})
+	} else if r.Method == http.MethodGet {
+		rolePages, err := s.store.GetAllCompanionRolePages(r.Context())
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, companionRolePagesResponse{
+			RolePages: rolePages,
+		})
+	} else {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleUserCompanionPublish(w http.ResponseWriter, r *http.Request, session Session) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	http.Error(w, "companion publishing is managed in the admin panel", http.StatusForbidden)
 }
 
 func (s *Server) requireCompanionSecret(w http.ResponseWriter, r *http.Request) bool {
@@ -1069,6 +1588,7 @@ func (s *Server) handleCompanionProfile(w http.ResponseWriter, r *http.Request) 
 	}
 	profile, err := s.store.GetCompanionProfileByRole(r.Context(), targetUser.RoleID)
 	if err == nil {
+		profile.CurrentPageNumber = s.currentCompanionPage(r.Context(), targetUser.RoleID)
 		s.writeJSON(w, http.StatusOK, profile)
 		return
 	}
@@ -1082,6 +1602,7 @@ func (s *Server) handleCompanionProfile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	fallback.ProfileStatus = "unpublished"
+	fallback.CurrentPageNumber = s.currentCompanionPage(r.Context(), targetUser.RoleID)
 	s.writeJSON(w, http.StatusOK, fallback)
 }
 
@@ -1175,16 +1696,22 @@ func (s *Server) buildCompanionProfileResponse(ctx context.Context, targetUser U
 			CanListen: canListen,
 		})
 	}
-	settings, err := s.store.GetUserStreamDeckSettings(ctx, targetUser.ID)
+	settings, err := s.store.GetRoleStreamDeckSettings(ctx, targetUser.RoleID)
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
 			return CompanionProfileResponse{}, err
 		}
 		settings = DefaultStreamDeckSettings()
 	}
+	pageNumber, err := s.store.GetCompanionRolePage(ctx, targetUser.RoleID)
+	if err != nil {
+		return CompanionProfileResponse{}, err
+	}
 	return CompanionProfileResponse{
 		RoleID:          targetUser.RoleID,
 		Username:        targetUser.Username,
+		PageNumber:      pageNumber,
+		CurrentPageNumber: s.currentCompanionPage(ctx, targetUser.RoleID),
 		Rooms:           roomDiscovery,
 		Users:           users,
 		ActiveRoleUsers: activeRoleUsers,

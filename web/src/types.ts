@@ -71,6 +71,37 @@ export type ConfigurationImportResponse = {
   importedSections: ConfigurationSection[];
 };
 
+export type CompanionPublishedProfileSummary = {
+  roleId: string;
+  username: string;
+  profileVersion: number;
+  profileStatus: string;
+  profileUpdatedAt?: number;
+};
+
+export type CompanionAdminSummary = {
+  sharedSecret: string;
+  publishedProfiles: CompanionPublishedProfileSummary[];
+};
+
+export type CompanionProfileResponse = {
+  roleId: string;
+  username: string;
+  pageNumber?: number;
+  profileVersion: number;
+  profileStatus: string;
+  profileUpdatedAt?: number;
+};
+
+export type CompanionRolePageConfig = {
+  roleId: string;
+  pageNumber: number;
+};
+
+export type CompanionRolePagesResponse = {
+  rolePages: Record<string, number>;
+};
+
 export type LoginSuccess = { token: string; user: User };
 export type LoginConflict = {
   requiresTakeover: true;

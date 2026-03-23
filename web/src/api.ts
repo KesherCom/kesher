@@ -1,5 +1,9 @@
 import type {
   Bootstrap,
+  CompanionAdminSummary,
+  CompanionProfileResponse,
+  CompanionRolePageConfig,
+  CompanionRolePagesResponse,
   ConfigurationDocument,
   ConfigurationImportResponse,
   ConfigurationSection,
@@ -176,7 +180,7 @@ function defaultStreamDeckSettings(): StreamDeckSettings {
   };
 }
 
-function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
+export function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
   const allowedActionTypes: StreamDeckActionType[] = [
     "none",
     "ptt_room",
@@ -569,6 +573,86 @@ export async function importConfiguration(
   return res.json() as Promise<ConfigurationImportResponse>;
 }
 
+export async function getCompanionAdminSummary(
+  token: string,
+  adminPin: string,
+): Promise<CompanionAdminSummary> {
+  const res = await fetch("/api/admin/companion/config", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+    },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<CompanionAdminSummary>;
+}
+
+export async function publishCompanionProfile(
+  token: string,
+  adminPin: string,
+  roleId?: string,
+): Promise<CompanionProfileResponse> {
+  const res = await fetch("/api/admin/companion/publish", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ roleId: roleId?.trim() || undefined }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<CompanionProfileResponse>;
+}
+
+export async function publishUserCompanionProfile(
+  token: string,
+): Promise<CompanionProfileResponse> {
+  const res = await fetch("/api/user/companion/publish", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<CompanionProfileResponse>;
+}
+
+export async function getAdminCompanionRolePages(
+  token: string,
+  adminPin: string,
+): Promise<CompanionRolePagesResponse> {
+  const res = await fetch("/api/admin/companion/role-pages", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+    },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<CompanionRolePagesResponse>;
+}
+
+export async function saveAdminCompanionRolePage(
+  token: string,
+  adminPin: string,
+  roleId: string,
+  pageNumber: number,
+): Promise<CompanionRolePageConfig> {
+  const res = await fetch("/api/admin/companion/role-pages", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ roleId, pageNumber }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<CompanionRolePageConfig>;
+}
+
 export async function getTelegramStatus(
   token: string,
   adminPin: string,
@@ -758,6 +842,68 @@ export async function resetStreamDeckSettings(
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
+  if (!res.ok) throw new Error(await res.text());
+  const raw = (await res.json()) as unknown;
+  return normalizeStreamDeckSettings(raw);
+}
+
+export async function getAdminRoleStreamDeckSettings(
+  token: string,
+  adminPin: string,
+  roleId: string,
+): Promise<StreamDeckSettings> {
+  const res = await fetch(
+    `/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        [adminPinHeaderName]: adminPin,
+      },
+    },
+  );
+  if (!res.ok) throw new Error(await res.text());
+  const raw = (await res.json()) as unknown;
+  return normalizeStreamDeckSettings(raw);
+}
+
+export async function updateAdminRoleStreamDeckSettings(
+  token: string,
+  adminPin: string,
+  roleId: string,
+  settings: StreamDeckSettings,
+): Promise<StreamDeckSettings> {
+  const res = await fetch(
+    `/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        [adminPinHeaderName]: adminPin,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ settings }),
+    },
+  );
+  if (!res.ok) throw new Error(await res.text());
+  const raw = (await res.json()) as unknown;
+  return normalizeStreamDeckSettings(raw);
+}
+
+export async function resetAdminRoleStreamDeckSettings(
+  token: string,
+  adminPin: string,
+  roleId: string,
+): Promise<StreamDeckSettings> {
+  const res = await fetch(
+    `/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        [adminPinHeaderName]: adminPin,
+      },
+    },
+  );
   if (!res.ok) throw new Error(await res.text());
   const raw = (await res.json()) as unknown;
   return normalizeStreamDeckSettings(raw);

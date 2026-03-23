@@ -249,6 +249,7 @@ function formatDbFs(dbFs: number): string {
 }
 
 type StationIntercomViewProps = {
+  token: string;
   connectionState: "connecting" | "connected" | "reconnecting" | "offline";
   appData: Bootstrap;
   doLogout: () => void;
@@ -361,6 +362,7 @@ type StationIntercomViewProps = {
 };
 
 export function StationIntercomView({
+  token,
   connectionState,
   appData,
   doLogout,
@@ -1863,7 +1865,7 @@ export function StationIntercomView({
                             type="button"
                             className="shortcut-btn"
                             onClick={openStreamDeckImportPicker}
-                            disabled={streamDeckBusy}
+                            disabled
                           >
                             Import
                           </button>
@@ -1871,20 +1873,25 @@ export function StationIntercomView({
                             type="button"
                             className="shortcut-btn"
                             onClick={onSaveStreamDeckSettings}
-                            disabled={streamDeckBusy || !streamDeckSettings}
+                            disabled
                           >
-                            {streamDeckBusy ? "Saving..." : "Save"}
+                            Admin managed
                           </button>
                           <button
                             type="button"
                             className="shortcut-btn shortcut-btn-clear"
                             onClick={onResetStreamDeckSettings}
-                            disabled={streamDeckBusy}
+                            disabled
                           >
                             Reset
                           </button>
                         </div>
                       </div>
+                    <div className="streamdeck-settings-actions" style={{ marginBottom: "0.6rem" }}>
+                      <small className="station-settings-meta">
+                        Stream Deck layouts and Companion publishing are managed in the admin panel for your role ({appData.self.roleId}).
+                      </small>
+                    </div>
                     {streamDeckError ? (
                       <small className="streamdeck-error">{streamDeckError}</small>
                     ) : null}
@@ -1933,7 +1940,8 @@ export function StationIntercomView({
                         Loading Stream Deck settings...
                       </small>
                     ) : (
-                      <>
+                      <div className="streamdeck-readonly-shell">
+                        <fieldset disabled style={{ border: 0, margin: 0, padding: 0 }}>
                         <div className="streamdeck-toolbar">
                           <label className="streamdeck-control">
                             <span>Profile</span>
@@ -2328,7 +2336,8 @@ export function StationIntercomView({
                         ) : null}
                           </div>
                         </div>
-                      </>
+                        </fieldset>
+                      </div>
                     )}
                     </div>
                   ) : null}

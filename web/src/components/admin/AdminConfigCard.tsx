@@ -8,6 +8,9 @@ import { AdminTelegramUsersCard } from "./AdminTelegramUsersCard";
 import { AdminRoutingMatrixCard } from "./AdminRoutingMatrixCard";
 import { AdminChatHistoryCard } from "./AdminChatHistoryCard";
 import { AdminShowfileCard } from "./AdminShowfileCard";
+import { AdminCompanionCard } from "./AdminCompanionCard";
+import { AdminCompanionPageConfigCard } from "./AdminCompanionPageConfigCard";
+import { AdminStreamDeckCard } from "./AdminStreamDeckCard";
 
 type AdminConfigCardProps = {
   token: string;
@@ -77,8 +80,14 @@ export function AdminConfigCard({
       <section className="admin-theme-group" aria-label="External integrations">
         <div className="admin-theme-group-head">
           <h3>Integrations</h3>
-          <p>Telegram bot mapping and access control.</p>
+          <p>Companion publish flow, Telegram bot mapping and access control.</p>
         </div>
+
+        <AdminCompanionCard token={token} adminPin={adminPin} appData={appData} />
+
+        <AdminStreamDeckCard token={token} adminPin={adminPin} appData={appData} />
+
+        <AdminCompanionPageConfigCard token={token} adminPin={adminPin} appData={appData} />
 
         <AdminTelegramCard token={token} adminPin={adminPin} appData={appData} />
 

@@ -513,8 +513,8 @@ func (s *Store) migrate(ctx context.Context) error {
 	)`); err != nil {
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS user_stream_deck_settings (
-		user_id TEXT PRIMARY KEY,
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS role_stream_deck_settings (
+		role_id TEXT PRIMARY KEY,
 		settings_json TEXT NOT NULL,
 		created_at INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL
@@ -527,6 +527,13 @@ func (s *Store) migrate(ctx context.Context) error {
 		profile_json TEXT NOT NULL,
 		published_by_user_id TEXT,
 		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS companion_role_pages (
+		role_id TEXT PRIMARY KEY,
+		page_number INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL
 	)`); err != nil {
 		return err
@@ -777,13 +784,13 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 	return in, nil
 }
 
-func (s *Store) GetUserStreamDeckSettings(ctx context.Context, userID string) (StreamDeckSettings, error) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
+func (s *Store) GetRoleStreamDeckSettings(ctx context.Context, roleID string) (StreamDeckSettings, error) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
 		return StreamDeckSettings{}, ErrInvalidInput
 	}
 	var raw string
-	err := s.db.QueryRowContext(ctx, `SELECT settings_json FROM user_stream_deck_settings WHERE user_id = ?`, userID).Scan(&raw)
+	err := s.db.QueryRowContext(ctx, `SELECT settings_json FROM role_stream_deck_settings WHERE role_id = ?`, roleID).Scan(&raw)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return StreamDeckSettings{}, ErrNotFound
@@ -797,20 +804,20 @@ func (s *Store) GetUserStreamDeckSettings(ctx context.Context, userID string) (S
 	return validateStreamDeckSettings(settings)
 }
 
-func (s *Store) UpsertUserStreamDeckSettings(ctx context.Context, userID string, settings StreamDeckSettings) (StreamDeckSettings, error) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
+func (s *Store) UpsertRoleStreamDeckSettings(ctx context.Context, roleID string, settings StreamDeckSettings) (StreamDeckSettings, error) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
 		return StreamDeckSettings{}, ErrInvalidInput
 	}
 	normalized, err := validateStreamDeckSettings(settings)
 	if err != nil {
 		return StreamDeckSettings{}, err
 	}
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM users WHERE id = ?`, userID).Scan(&count); err != nil {
+	exists, err := s.RoleExists(ctx, roleID)
+	if err != nil {
 		return StreamDeckSettings{}, err
 	}
-	if count == 0 {
+	if !exists {
 		return StreamDeckSettings{}, ErrNotFound
 	}
 	body, err := json.Marshal(normalized)
@@ -818,22 +825,22 @@ func (s *Store) UpsertUserStreamDeckSettings(ctx context.Context, userID string,
 		return StreamDeckSettings{}, err
 	}
 	now := time.Now().Unix()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO user_stream_deck_settings (user_id, settings_json, created_at, updated_at)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO role_stream_deck_settings (role_id, settings_json, created_at, updated_at)
 		VALUES (?, ?, ?, ?)
-		ON CONFLICT(user_id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at`,
-		userID, string(body), now, now)
+		ON CONFLICT(role_id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at`,
+		roleID, string(body), now, now)
 	if err != nil {
 		return StreamDeckSettings{}, err
 	}
 	return normalized, nil
 }
 
-func (s *Store) DeleteUserStreamDeckSettings(ctx context.Context, userID string) error {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
+func (s *Store) DeleteRoleStreamDeckSettings(ctx context.Context, roleID string) error {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
 		return ErrInvalidInput
 	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM user_stream_deck_settings WHERE user_id = ?`, userID)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM role_stream_deck_settings WHERE role_id = ?`, roleID)
 	if err != nil {
 		return err
 	}
@@ -846,6 +853,69 @@ func (s *Store) DeleteUserStreamDeckSettings(ctx context.Context, userID string)
 	}
 	return nil
 }
+
+func (s *Store) ListRoleStreamDeckSettings(ctx context.Context) (map[string]StreamDeckSettings, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT role_id, settings_json FROM role_stream_deck_settings ORDER BY role_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]StreamDeckSettings)
+	for rows.Next() {
+		var roleID string
+		var raw string
+		if err := rows.Scan(&roleID, &raw); err != nil {
+			return nil, err
+		}
+		var settings StreamDeckSettings
+		if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+			return nil, ErrInvalidInput
+		}
+		normalized, err := validateStreamDeckSettings(settings)
+		if err != nil {
+			return nil, err
+		}
+		result[strings.TrimSpace(roleID)] = normalized
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *Store) GetUserStreamDeckSettings(ctx context.Context, userID string) (StreamDeckSettings, error) {
+	user, err := s.FindUserByID(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return StreamDeckSettings{}, ErrNotFound
+		}
+		return StreamDeckSettings{}, err
+	}
+	return s.GetRoleStreamDeckSettings(ctx, user.RoleID)
+}
+
+func (s *Store) UpsertUserStreamDeckSettings(ctx context.Context, userID string, settings StreamDeckSettings) (StreamDeckSettings, error) {
+	user, err := s.FindUserByID(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return StreamDeckSettings{}, ErrNotFound
+		}
+		return StreamDeckSettings{}, err
+	}
+	return s.UpsertRoleStreamDeckSettings(ctx, user.RoleID, settings)
+}
+
+func (s *Store) DeleteUserStreamDeckSettings(ctx context.Context, userID string) error {
+	user, err := s.FindUserByID(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return s.DeleteRoleStreamDeckSettings(ctx, user.RoleID)
+}
+
 
 func (s *Store) ResolveSinglePublishedCompanionRole(ctx context.Context) (string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT role_id FROM companion_profiles ORDER BY updated_at DESC LIMIT 2`)
@@ -968,6 +1038,63 @@ func (s *Store) PublishCompanionProfile(ctx context.Context, roleID string, publ
 		return CompanionProfileResponse{}, err
 	}
 	return profile, nil
+}
+
+func (s *Store) SaveCompanionRolePage(ctx context.Context, roleID string, pageNumber int) error {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return ErrInvalidInput
+	}
+	if pageNumber < 0 || pageNumber > 14 {
+		return ErrInvalidInput
+	}
+	now := time.Now().UnixMilli()
+	_, err := s.db.ExecContext(
+		ctx,
+		`INSERT INTO companion_role_pages (role_id, page_number, updated_at)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(role_id) DO UPDATE SET
+			page_number = excluded.page_number,
+			updated_at = excluded.updated_at`,
+		roleID,
+		pageNumber,
+		now,
+	)
+	return err
+}
+
+func (s *Store) GetCompanionRolePage(ctx context.Context, roleID string) (int, error) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return 0, ErrInvalidInput
+	}
+	var pageNumber int
+	err := s.db.QueryRowContext(ctx, `SELECT page_number FROM companion_role_pages WHERE role_id = ?`, roleID).Scan(&pageNumber)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil // default to page 0
+		}
+		return 0, err
+	}
+	return pageNumber, nil
+}
+
+func (s *Store) GetAllCompanionRolePages(ctx context.Context) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT role_id, page_number FROM companion_role_pages`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]int)
+	for rows.Next() {
+		var roleID string
+		var pageNumber int
+		if err := rows.Scan(&roleID, &pageNumber); err != nil {
+			return nil, err
+		}
+		result[roleID] = pageNumber
+	}
+	return result, rows.Err()
 }
 
 func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {

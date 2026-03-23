@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { StationIntercomView } from "./StationIntercomView";
 import type { StreamDeckSettings } from "../types";
 const baseProps: ComponentProps<typeof StationIntercomView> = {
+  token: "test-token",
   connectionState: "connected",
   appData: {
     self: { id: "u1", username: "tim", roleId: "op" },

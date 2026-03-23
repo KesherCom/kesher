@@ -237,6 +237,7 @@ export function App() {
     isUserSettingsOpen,
     isUserSettingsOpenRef,
     selectedInputGainFor: settings.selectedInputGainFor,
+    onInputGainChange: settings.onInputGainChange,
     initialListenRoomIds: storedSession.listenRoomIds ?? [],
     initialTalkRoomIds: storedSession.talkRoomIds ?? [],
     hadStoredSessionSettings: settings.hadStoredSessionSettings,
@@ -1634,6 +1635,7 @@ export function App() {
   return (
     <>
       <StationIntercomView
+        token={token}
         connectionState={session.connectionState}
         appData={appData}
         doLogout={() => void doLogout()}

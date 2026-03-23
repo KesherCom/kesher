@@ -9,6 +9,7 @@ import {
 } from "../lib/intercom";
 import { normalizePresenceList, samePresenceList } from "../lib/presence";
 import { clampGainValue } from "../app/settings";
+import { gainWithDbDelta } from "../lib/streamDeckBridge";
 import {
   sameStringArray,
   sameStringSet,
@@ -65,6 +66,7 @@ type WsMessage =
         targetId?: string;
         state?: "ptt_start" | "ptt_stop";
         signal?: string;
+        volumeDelta?: number;
         listenRoomIds?: string[];
         talkRoomIds?: string[];
       };
@@ -205,6 +207,7 @@ export type UseIntercomSessionOptions = {
   isUserSettingsOpen: boolean;
   isUserSettingsOpenRef: React.MutableRefObject<boolean>;
   selectedInputGainFor: (deviceId: string) => number;
+  onInputGainChange: (deviceId: string, gain: number) => void;
 
   // Initial room matrix from session storage
   initialListenRoomIds: string[];
@@ -320,6 +323,7 @@ export function useIntercomSession({
   isUserSettingsOpen,
   isUserSettingsOpenRef,
   selectedInputGainFor,
+  onInputGainChange,
   initialListenRoomIds,
   initialTalkRoomIds,
   hadStoredSessionSettings,
@@ -1638,6 +1642,22 @@ export function useIntercomSession({
                 }),
               );
             }
+            ackSuccess();
+            return;
+          }
+          if (msg.data.command === "input_gain_delta") {
+            const delta = Number(msg.data.volumeDelta || 0);
+            if (!Number.isFinite(delta) || delta === 0) {
+              ackRejected("missing volumeDelta");
+              return;
+            }
+            onInputGainChange(
+              selectedInputDeviceIdRef.current,
+              gainWithDbDelta(
+                selectedInputGainFor(selectedInputDeviceIdRef.current),
+                delta,
+              ),
+            );
             ackSuccess();
             return;
           }
