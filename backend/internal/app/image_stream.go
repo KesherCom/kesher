@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"image"
@@ -10,8 +11,12 @@ import (
 	"image/png"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 // ImageStreamMessage represents an image update message sent via WebSocket
@@ -52,11 +57,11 @@ func NewButtonImageRenderer(config *ButtonImageRenderConfig) (*ButtonImageRender
 
 // ButtonState represents the state of a button for rendering
 type ButtonState struct {
-	Channel    string
-	State      string // "IDLE", "TALK", "LISTEN", "BROADCAST"
-	Label      string
-	TalkCount  int
-	IsActive   bool
+	Channel   string
+	State     string // "IDLE", "TALK", "LISTEN", "BROADCAST"
+	Label     string
+	TalkCount int
+	IsActive  bool
 }
 
 // RenderButtonImage renders a button state to a PNG buffer
@@ -301,6 +306,7 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	defer conn.Close()
+	targetRoleID := s.resolveImageStreamRoleID(r.Context(), r)
 
 	client := &ImageStreamClient{
 		send:   make(chan ImageStreamMessage, 16),
@@ -312,6 +318,7 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 	if s.imageStreamCoord != nil {
 		s.imageStreamCoord.RegisterClient(client)
 		defer s.imageStreamCoord.UnregisterClient(client)
+		s.enqueueInitialImageSnapshot(r.Context(), client, targetRoleID)
 	}
 
 	// Ping ticker
@@ -329,7 +336,7 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 
 		case <-ticker.C:
 			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := conn.WriteControl(1, []byte{}, time.Now().Add(10*time.Second)); err != nil {
+			if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
 				return
 			}
 
@@ -337,4 +344,186 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
+}
+
+func (s *Server) resolveImageStreamRoleID(ctx context.Context, r *http.Request) string {
+	if s.store == nil {
+		return ""
+	}
+	roleID := strings.TrimSpace(r.URL.Query().Get("roleId"))
+	if roleID != "" {
+		return roleID
+	}
+	username := strings.TrimSpace(r.URL.Query().Get("username"))
+	if username != "" {
+		if u, err := s.store.FindUserByUsername(ctx, username); err == nil {
+			return strings.TrimSpace(u.RoleID)
+		}
+	}
+	autoRoleID, err := s.store.ResolveSinglePublishedCompanionRole(ctx)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(autoRoleID)
+}
+
+func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageStreamClient, roleID string) {
+	if s.imageStreamCoord == nil || client == nil || strings.TrimSpace(roleID) == "" {
+		return
+	}
+
+	profile, err := s.store.GetCompanionProfileByRole(ctx, roleID)
+	if err != nil {
+		s.logger.Debug("image snapshot skipped: profile unavailable", "roleId", roleID, "error", err)
+		return
+	}
+
+	pageNumber := s.currentCompanionPage(ctx, roleID)
+	var page *StreamDeckPageConfig
+	for i := range profile.StreamDeck.Pages {
+		if profile.StreamDeck.Pages[i].Page == pageNumber {
+			page = &profile.StreamDeck.Pages[i]
+			break
+		}
+	}
+	if page == nil && len(profile.StreamDeck.Pages) > 0 {
+		page = &profile.StreamDeck.Pages[0]
+	}
+	if page == nil {
+		return
+	}
+
+	for i := range page.Buttons {
+		button := page.Buttons[i]
+		state := ButtonState{
+			State:   "IDLE",
+			Label:   strings.TrimSpace(button.Label),
+			Channel: companionButtonChannel(button),
+		}
+		img, renderErr := s.imageStreamCoord.renderer.RenderButtonImage(state)
+		if renderErr != nil {
+			s.logger.Warn("image snapshot render failed", "roleId", roleID, "index", button.Index, "error", renderErr)
+			continue
+		}
+
+		msg := ImageStreamMessage{
+			Type:        "update_button_image",
+			Bank:        page.Page,
+			ButtonIndex: button.Index,
+			ImageBuffer: base64.StdEncoding.EncodeToString(img),
+			Label:       state.Label,
+			Channel:     state.Channel,
+			State:       state.State,
+		}
+
+		select {
+		case client.send <- msg:
+		default:
+			s.logger.Warn("image snapshot queue full", "roleId", roleID)
+			return
+		}
+	}
+}
+
+// HandleDebugButtonImage renders a single button image as PNG for browser-based inspection.
+func (s *Server) HandleDebugButtonImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	state := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("state")))
+	switch state {
+	case "IDLE", "TALK", "LISTEN", "BROADCAST":
+	default:
+		state = "IDLE"
+	}
+
+	label := strings.TrimSpace(r.URL.Query().Get("label"))
+	if label == "" {
+		label = state
+	}
+
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = "debug"
+	}
+
+	width := parseDebugInt(r.URL.Query().Get("width"), 72)
+	height := parseDebugInt(r.URL.Query().Get("height"), 72)
+
+	renderer, err := NewButtonImageRenderer(&ButtonImageRenderConfig{Width: width, Height: height})
+	if err != nil {
+		http.Error(w, "failed to initialize renderer", http.StatusInternalServerError)
+		return
+	}
+
+	imageBuf, err := renderer.RenderButtonImage(ButtonState{
+		Channel: channel,
+		State:   state,
+		Label:   label,
+	})
+	if err != nil {
+		http.Error(w, "failed to render image", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Kesher-Button-State", state)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(imageBuf)
+}
+
+// HandleDebugButtonImagePreview serves a tiny HTML page to inspect generated images.
+func (s *Server) HandleDebugButtonImagePreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	const page = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kesher Button Image Debug</title>
+  <style>
+    body { font-family: Segoe UI, sans-serif; margin: 24px; color: #222; }
+    h1 { margin-top: 0; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; max-width: 900px; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; background: #fafafa; }
+    img { width: 144px; height: 144px; image-rendering: pixelated; border: 1px solid #ccc; background: #fff; }
+    code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Kesher Backend Image Preview</h1>
+  <p>PNG endpoint: <code>/api/debug/button-image?state=IDLE&amp;label=IDLE&amp;channel=debug</code></p>
+  <div class="grid">
+    <div class="card"><div>IDLE</div><img src="/api/debug/button-image?state=IDLE&amp;label=IDLE&amp;channel=debug" alt="IDLE" /></div>
+    <div class="card"><div>TALK</div><img src="/api/debug/button-image?state=TALK&amp;label=TALK&amp;channel=debug" alt="TALK" /></div>
+    <div class="card"><div>LISTEN</div><img src="/api/debug/button-image?state=LISTEN&amp;label=LISTEN&amp;channel=debug" alt="LISTEN" /></div>
+    <div class="card"><div>BROADCAST</div><img src="/api/debug/button-image?state=BROADCAST&amp;label=BROADCAST&amp;channel=debug" alt="BROADCAST" /></div>
+  </div>
+</body>
+</html>`
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(page))
+}
+
+func parseDebugInt(raw string, fallback int) int {
+	v, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return fallback
+	}
+	if v < 16 {
+		return 16
+	}
+	if v > 512 {
+		return 512
+	}
+	return v
 }
