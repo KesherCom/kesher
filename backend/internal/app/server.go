@@ -49,6 +49,7 @@ type Server struct {
 	companionState       map[string]map[chan struct{}]struct{}
 	companionPageByRole  map[string]int
 	companionHeldTargets map[string]string
+	imageStreamCoord     *ImageStreamCoordinator
 }
 
 type tlsProvider interface {
@@ -893,6 +894,13 @@ func NewServer(cfg Config) (*Server, error) {
 	if cfg.TelegramBotToken != "" {
 		s.telegram = NewTelegramBot(cfg.TelegramBotToken, cfg.TelegramWebhookSecret, cfg.TelegramMode, store, s.hub, logger)
 	}
+	// Initialize image stream coordinator for Companion module
+	imageStreamCoord, err := NewImageStreamCoordinator(logger)
+	if err != nil {
+		logger.Warn("failed to initialize image stream coordinator", "error", err)
+	} else {
+		s.imageStreamCoord = imageStreamCoord
+	}
 	if strings.EqualFold(cfg.TLSMode, "certmagic") {
 		certMagicCfg, err := newCertMagicConfig(cfg)
 		if err != nil {
@@ -933,6 +941,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/routing-matrix", s.withAuth(s.handleAdminRoutingMatrix))
 	mux.HandleFunc("/api/companion/discovery", s.handleCompanionDiscovery)
 	mux.HandleFunc("/api/companion/ws", s.handleCompanionWS)
+	mux.HandleFunc("/api/image-stream", s.HandleImageStreamWebSocket)
 	mux.HandleFunc("/api/telegram/webhook", s.handleTelegramWebhook)
 	mux.HandleFunc("/api/admin/telegram", s.withAuth(s.handleAdminTelegram))
 	mux.HandleFunc("/api/admin/telegram/", s.withAuth(s.handleAdminTelegramByID))
