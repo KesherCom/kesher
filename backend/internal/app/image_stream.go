@@ -5,18 +5,20 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"image"
-	"image/color"
-	"image/draw"
-	"image/png"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/fogleman/gg"
+	"github.com/golang/freetype/truetype"
 	"github.com/gorilla/websocket"
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/gofont/gobold"
+	"golang.org/x/image/font/gofont/goregular"
 )
 
 // ImageStreamMessage represents an image update message sent via WebSocket
@@ -60,162 +62,116 @@ type ButtonState struct {
 	Channel   string
 	State     string // "IDLE", "TALK", "LISTEN", "BROADCAST"
 	Label     string
+	Subtitle  string
 	TalkCount int
 	IsActive  bool
 }
 
-// RenderButtonImage renders a button state to a PNG buffer
+// RenderButtonImage renders a button state as a PNG using the WebHID visual style:
+// pure black canvas, rounded card with a colored state border, and a text label.
 func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	width := r.config.Width
-	height := r.config.Height
+	w := float64(r.config.Width)
+	h := float64(r.config.Height)
 
-	// Create a new RGBA image
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	dc := gg.NewContext(r.config.Width, r.config.Height)
 
-	// Fill background color based on state
-	bgColor := getStateColor(state.State)
-	draw.Draw(img, img.Bounds(), &image.Uniform{bgColor}, image.Point{}, draw.Src)
+	// Black canvas background
+	dc.SetHexColor("#000000")
+	dc.Clear()
 
-	// Draw border
-	drawBorder(img, color.White, 1)
+	// Rounded card: filled black, then stroked with state border color
+	const inset = 2.0
+	const cardRadius = 10.0
+	dc.SetHexColor("#000000")
+	dc.DrawRoundedRectangle(inset, inset, w-inset*2, h-inset*2, cardRadius)
+	dc.Fill()
 
-	// Draw icon based on state
-	drawButtonIcon(img, state.State)
+	dc.SetHexColor(getBorderColor(state.State))
+	dc.SetLineWidth(3)
+	dc.DrawRoundedRectangle(inset, inset, w-inset*2, h-inset*2, cardRadius)
+	dc.Stroke()
 
-	// Encode to PNG
+	// Text rendering
+	label := strings.TrimSpace(state.Label)
+	subtitle := strings.TrimSpace(state.Subtitle)
+
+	if label != "" {
+		if subtitle != "" {
+			// Two-line layout: large primary near top, small subtitle near bottom
+			primarySize := fitButtonFontSize(dc, label, w-24, math.Max(20, w*0.2), gobold.TTF)
+			if face, err := loadButtonFontFace(gobold.TTF, primarySize); err == nil {
+				dc.SetFontFace(face)
+			}
+			dc.SetHexColor("#eef4ff")
+			dc.DrawStringAnchored(label, w/2, h*0.38, 0.5, 0.5)
+
+			subSize := fitButtonFontSize(dc, subtitle, w-26, math.Max(11, w*0.1), goregular.TTF)
+			if face, err := loadButtonFontFace(goregular.TTF, subSize); err == nil {
+				dc.SetFontFace(face)
+			}
+			dc.SetHexColor("#aeb6c0")
+			dc.DrawStringAnchored(subtitle, w/2, h*0.68, 0.5, 0.5)
+		} else {
+			// Single-line layout: bold label centered
+			labelSize := fitButtonFontSize(dc, label, w-24, math.Max(20, w*0.2), gobold.TTF)
+			if face, err := loadButtonFontFace(gobold.TTF, labelSize); err == nil {
+				dc.SetFontFace(face)
+			}
+			dc.SetHexColor("#eef4ff")
+			dc.DrawStringAnchored(label, w/2, h*0.56, 0.5, 0.5)
+		}
+	}
+
 	var buf bytes.Buffer
-	err := png.Encode(&buf, img)
-	if err != nil {
+	if err := dc.EncodePNG(&buf); err != nil {
 		return nil, fmt.Errorf("failed to encode PNG: %w", err)
 	}
 	return buf.Bytes(), nil
 }
 
-func getStateColor(state string) color.Color {
+// getBorderColor returns the WebHID-style colored border hex for a given state.
+func getBorderColor(state string) string {
 	switch state {
 	case "TALK":
-		return color.RGBA{0xDC, 0x14, 0x3C, 0xFF} // Crimson red
+		return "#ff2d26" // red — active/transmitting
 	case "LISTEN":
-		return color.RGBA{0x1E, 0x90, 0xFF, 0xFF} // Dodger blue
+		return "#26d07c" // green — listening
 	case "BROADCAST":
-		return color.RGBA{0xFF, 0x8C, 0x00, 0xFF} // Dark orange
-	default:
-		return color.RGBA{0x40, 0x40, 0x40, 0xFF} // Dark gray
+		return "#ffc067" // orange — broadcast/call
+	default: // IDLE
+		return "#1b2026" // near-black — idle
 	}
 }
 
-func drawBorder(img *image.RGBA, c color.Color, width int) {
-	bounds := img.Bounds()
-	// Top
-	for x := bounds.Min.X; x < bounds.Max.X; x++ {
-		for y := 0; y < width; y++ {
-			img.Set(x, y, c)
-		}
+// loadButtonFontFace parses a TTF byte slice and returns a font.Face at the given point size.
+func loadButtonFontFace(ttfBytes []byte, size float64) (font.Face, error) {
+	f, err := truetype.Parse(ttfBytes)
+	if err != nil {
+		return nil, err
 	}
-	// Bottom
-	for x := bounds.Min.X; x < bounds.Max.X; x++ {
-		for y := bounds.Max.Y - width; y < bounds.Max.Y; y++ {
-			img.Set(x, y, c)
-		}
-	}
-	// Left
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := 0; x < width; x++ {
-			img.Set(x, y, c)
-		}
-	}
-	// Right
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Max.X - width; x < bounds.Max.X; x++ {
-			img.Set(x, y, c)
-		}
-	}
+	return truetype.NewFace(f, &truetype.Options{
+		Size:    size,
+		DPI:     72,
+		Hinting: font.HintingFull,
+	}), nil
 }
 
-func drawButtonIcon(img *image.RGBA, state string) {
-	bounds := img.Bounds()
-	centerX := bounds.Max.X / 2
-	centerY := bounds.Max.Y / 2
-	c := color.White
-
-	switch state {
-	case "TALK":
-		// Draw microphone icon (circle + stand)
-		drawCircle(img, c, centerX, centerY-8, 4, true)
-		drawLine(img, c, centerX, centerY-4, centerX, centerY+8)
-	case "LISTEN":
-		// Draw ear-like shape (two overlapping circles)
-		drawCircle(img, c, centerX-4, centerY, 3, true)
-		drawCircle(img, c, centerX+4, centerY, 3, true)
-	case "BROADCAST":
-		// Draw broadcast signal (concentric circles)
-		drawCircle(img, c, centerX, centerY, 2, true)
-		drawCircle(img, c, centerX, centerY, 6, false)
-	default:
-		// Draw dash for IDLE
-		drawLine(img, c, centerX-6, centerY, centerX+6, centerY)
-	}
-}
-
-func drawCircle(img *image.RGBA, c color.Color, cx, cy, r int, filled bool) {
-	for x := cx - r; x <= cx+r; x++ {
-		for y := cy - r; y <= cy+r; y++ {
-			dx := x - cx
-			dy := y - cy
-			dist := dx*dx + dy*dy
-			rsq := r * r
-			if filled {
-				if dist <= rsq {
-					bounds := img.Bounds()
-					if x >= bounds.Min.X && x < bounds.Max.X && y >= bounds.Min.Y && y < bounds.Max.Y {
-						img.Set(x, y, c)
-					}
-				}
-			} else {
-				if dist <= rsq && dist >= (r-1)*(r-1) {
-					bounds := img.Bounds()
-					if x >= bounds.Min.X && x < bounds.Max.X && y >= bounds.Min.Y && y < bounds.Max.Y {
-						img.Set(x, y, c)
-					}
-				}
+// fitButtonFontSize shrinks point size from initialSize down to 12 until the string fits maxWidth.
+func fitButtonFontSize(dc *gg.Context, text string, maxWidth, initialSize float64, ttfBytes []byte) float64 {
+	size := initialSize
+	for size > 12 {
+		if face, err := loadButtonFontFace(ttfBytes, size); err == nil {
+			dc.SetFontFace(face)
+			if w, _ := dc.MeasureString(text); w <= maxWidth {
+				return size
 			}
 		}
+		size--
 	}
-}
-
-func drawLine(img *image.RGBA, c color.Color, x1, y1, x2, y2 int) {
-	dx := x2 - x1
-	dy := y2 - y1
-	steps := abs(dx)
-	if abs(dy) > steps {
-		steps = abs(dy)
-	}
-	if steps == 0 {
-		bounds := img.Bounds()
-		if x1 >= bounds.Min.X && x1 < bounds.Max.X && y1 >= bounds.Min.Y && y1 < bounds.Max.Y {
-			img.Set(x1, y1, c)
-		}
-		return
-	}
-
-	for i := 0; i <= steps; i++ {
-		x := x1 + dx*i/steps
-		y := y1 + dy*i/steps
-		bounds := img.Bounds()
-		if x >= bounds.Min.X && x < bounds.Max.X && y >= bounds.Min.Y && y < bounds.Max.Y {
-			img.Set(x, y, c)
-		}
-	}
-}
-
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
+	return size
 }
 
 // ImageStreamCoordinator manages image stream connections and broadcasting
@@ -395,10 +351,12 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 
 	for i := range page.Buttons {
 		button := page.Buttons[i]
+		primary, subtitle := s.resolveButtonLabel(ctx, button)
 		state := ButtonState{
-			State:   "IDLE",
-			Label:   strings.TrimSpace(button.Label),
-			Channel: companionButtonChannel(button),
+			State:    "IDLE",
+			Label:    primary,
+			Subtitle: subtitle,
+			Channel:  companionButtonChannel(button),
 		}
 		img, renderErr := s.imageStreamCoord.renderer.RenderButtonImage(state)
 		if renderErr != nil {

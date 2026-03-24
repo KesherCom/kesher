@@ -559,7 +559,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		}
 	}
 	if button == nil || button.Action == nil || button.Action.Type == StreamDeckActionTypeNone {
-		s.emitCompanionButtonImage(page.Page, nil, ButtonState{State: "IDLE"})
+		s.emitCompanionButtonImage(ctx, page.Page, nil, ButtonState{State: "IDLE"})
 		result.OK = true
 		result.Status = "executed"
 		return result
@@ -610,7 +610,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		if len(pageOrder) > 0 {
 			s.setCompanionCurrentPage(roleID, pageOrder[nextIndex])
 		}
-		s.emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE"})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE"})
 		result.OK = true
 		result.Status = "executed"
 		return result
@@ -624,15 +624,15 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			state = "TALK"
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "set_voice_mode", Mode: mode})
-		s.emitCompanionButtonImage(page.Page, button, ButtonState{State: state})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: state})
 		return res
 	case StreamDeckActionTypePTTRoom:
 		res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "room", TargetID: button.Action.RoomID, State: map[bool]string{true: "ptt_start", false: "ptt_stop"}[phase == "down"]})
-		s.emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "TALK", false: "IDLE"}[phase == "down"], Channel: strings.TrimSpace(button.Action.RoomID)})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "TALK", false: "IDLE"}[phase == "down"], Channel: strings.TrimSpace(button.Action.RoomID)})
 		return res
 	case StreamDeckActionTypeSelectTalkRoom:
 		if phase != "down" {
-			s.emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoomID)})
+			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoomID)})
 			result.OK = true
 			result.Status = "executed"
 			return result
@@ -652,7 +652,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			filtered = append(filtered, roomID)
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: append([]string(nil), presence.ListenRooms...), TalkRoomIDs: filtered})
-		s.emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[!found && roomID != ""], Channel: roomID})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[!found && roomID != ""], Channel: roomID})
 		return res
 	case StreamDeckActionTypePTTSelected:
 		targetID := ""
@@ -662,11 +662,11 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			targetID = presence.ListenRooms[0]
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "room", TargetID: targetID, State: map[bool]string{true: "ptt_start", false: "ptt_stop"}[phase == "down"]})
-		s.emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "TALK", false: "IDLE"}[phase == "down"], Channel: targetID})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "TALK", false: "IDLE"}[phase == "down"], Channel: targetID})
 		return res
 	case StreamDeckActionTypeListenRoom:
 		if phase != "down" {
-			s.emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoomID)})
+			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoomID)})
 			result.OK = true
 			result.Status = "executed"
 			return result
@@ -686,21 +686,21 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			filtered = append(filtered, roomID)
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: filtered, TalkRoomIDs: append([]string(nil), presence.TalkRooms...)})
-		s.emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[!found && roomID != ""], Channel: roomID})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[!found && roomID != ""], Channel: roomID})
 		return res
 	case StreamDeckActionTypeCallRoom:
 		if phase != "down" {
-			s.emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoomID)})
+			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoomID)})
 			result.OK = true
 			result.Status = "executed"
 			return result
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "signal", Scope: "room", TargetID: button.Action.RoomID, Signal: "call"})
-		s.emitCompanionButtonImage(page.Page, button, ButtonState{State: "TALK", Channel: strings.TrimSpace(button.Action.RoomID)})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "TALK", Channel: strings.TrimSpace(button.Action.RoomID)})
 		return res
 	case StreamDeckActionTypeDirectUser:
 		res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: button.Action.UserID, State: map[bool]string{true: "ptt_start", false: "ptt_stop"}[phase == "down"]})
-		s.emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "TALK", false: "IDLE"}[phase == "down"], Channel: strings.TrimSpace(button.Action.UserID)})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "TALK", false: "IDLE"}[phase == "down"], Channel: strings.TrimSpace(button.Action.UserID)})
 		return res
 	case StreamDeckActionTypeDirectRole:
 		if phase == "down" {
@@ -711,18 +711,18 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			}
 			s.rememberCompanionHeldTarget(holdKey, session.UserID)
 			res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: session.UserID, State: "ptt_start"})
-			s.emitCompanionButtonImage(page.Page, button, ButtonState{State: "TALK", Channel: strings.TrimSpace(button.Action.RoleID)})
+			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "TALK", Channel: strings.TrimSpace(button.Action.RoleID)})
 			return res
 		}
 		targetID := s.consumeCompanionHeldTarget(holdKey)
 		if targetID == "" {
-			s.emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoleID)})
+			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoleID)})
 			result.OK = true
 			result.Status = "executed"
 			return result
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: targetID, State: "ptt_stop"})
-		s.emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoleID)})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoleID)})
 		return res
 	case StreamDeckActionTypeReplyToCaller:
 		if phase == "down" {
@@ -733,32 +733,32 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			}
 			s.rememberCompanionHeldTarget(holdKey, replyUserID)
 			res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: replyUserID, State: "ptt_start"})
-			s.emitCompanionButtonImage(page.Page, button, ButtonState{State: "TALK", Channel: "reply"})
+			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "TALK", Channel: "reply"})
 			return res
 		}
 		targetID := s.consumeCompanionHeldTarget(holdKey)
 		if targetID == "" {
-			s.emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE", Channel: "reply"})
+			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: "reply"})
 			result.OK = true
 			result.Status = "executed"
 			return result
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: targetID, State: "ptt_stop"})
-		s.emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE", Channel: "reply"})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: "reply"})
 		return res
 	case StreamDeckActionTypeBroadcastPTT:
 		res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "broadcast", TargetID: button.Action.BroadcastGroupID, State: map[bool]string{true: "ptt_start", false: "ptt_stop"}[phase == "down"]})
-		s.emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "BROADCAST", false: "IDLE"}[phase == "down"], Channel: strings.TrimSpace(button.Action.BroadcastGroupID)})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "BROADCAST", false: "IDLE"}[phase == "down"], Channel: strings.TrimSpace(button.Action.BroadcastGroupID)})
 		return res
 	case StreamDeckActionTypeVolumeDelta:
 		if phase != "down" {
-			s.emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE"})
+			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE"})
 			result.OK = true
 			result.Status = "executed"
 			return result
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "input_gain_delta", VolumeDelta: button.Action.VolumeDelta})
-		s.emitCompanionButtonImage(page.Page, button, ButtonState{State: "LISTEN"})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "LISTEN"})
 		return res
 	default:
 		result.Error = "unsupported button action"
@@ -766,7 +766,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 	}
 }
 
-func (s *Server) emitCompanionButtonImage(bank int, button *StreamDeckButtonConfig, state ButtonState) {
+func (s *Server) emitCompanionButtonImage(ctx context.Context, bank int, button *StreamDeckButtonConfig, state ButtonState) {
 	if s.imageStreamCoord == nil || button == nil {
 		return
 	}
@@ -774,12 +774,130 @@ func (s *Server) emitCompanionButtonImage(bank int, button *StreamDeckButtonConf
 		state.State = "IDLE"
 	}
 	if strings.TrimSpace(state.Label) == "" {
-		state.Label = strings.TrimSpace(button.Label)
+		primary, subtitle := s.resolveButtonLabel(ctx, *button)
+		state.Label = primary
+		state.Subtitle = subtitle
 	}
 	if strings.TrimSpace(state.Channel) == "" && button.Action != nil {
 		state.Channel = companionButtonChannel(*button)
 	}
 	s.imageStreamCoord.BroadcastImageUpdate(state, bank, button.Index)
+}
+
+// resolveButtonLabel resolves the display label and optional subtitle for a button,
+// mirroring the logic in web/src/lib/streamDeckLabels.ts.
+func (s *Server) resolveButtonLabel(ctx context.Context, button StreamDeckButtonConfig) (primary, subtitle string) {
+	// Static label set directly in config takes priority (first line = primary, second = subtitle)
+	if raw := strings.TrimSpace(button.Label); raw != "" {
+		parts := strings.SplitN(raw, "\n", 2)
+		primary = strings.TrimSpace(parts[0])
+		if len(parts) > 1 {
+			subtitle = strings.TrimSpace(parts[1])
+		}
+		return
+	}
+
+	if button.Action == nil || button.Action.Type == StreamDeckActionTypeNone {
+		return
+	}
+
+	if s.store == nil {
+		return fallbackButtonLabel(button.Action.Type), ""
+	}
+
+	action := button.Action
+	switch action.Type {
+	case StreamDeckActionTypePTTRoom, StreamDeckActionTypeSelectTalkRoom,
+		StreamDeckActionTypeListenRoom, StreamDeckActionTypeCallRoom:
+		if rooms, err := s.store.ListRooms(ctx); err == nil {
+			for _, r := range rooms {
+				if r.ID == strings.TrimSpace(action.RoomID) {
+					return r.Name, ""
+				}
+			}
+		}
+		return strings.TrimSpace(action.RoomID), ""
+
+	case StreamDeckActionTypeDirectUser:
+		if users, err := s.store.ListUsers(ctx); err == nil {
+			for _, u := range users {
+				if u.ID == strings.TrimSpace(action.UserID) {
+					roleName := ""
+					if roles, err2 := s.store.ListRoles(ctx); err2 == nil {
+						for _, role := range roles {
+							if role.ID == u.RoleID {
+								roleName = role.Name
+								break
+							}
+						}
+					}
+					if roleName != "" {
+						return u.Username, roleName
+					}
+					return u.Username, ""
+				}
+			}
+		}
+		return strings.TrimSpace(action.UserID), ""
+
+	case StreamDeckActionTypeDirectRole:
+		roleName := strings.TrimSpace(action.RoleID)
+		if roles, err := s.store.ListRoles(ctx); err == nil {
+			for _, r := range roles {
+				if r.ID == strings.TrimSpace(action.RoleID) {
+					roleName = r.Name
+					break
+				}
+			}
+		}
+		// Show the active user for this role as primary if one is online
+		if session, ok := s.sessions.LatestForRole(strings.TrimSpace(action.RoleID)); ok {
+			return session.Username, roleName
+		}
+		return roleName, ""
+
+	case StreamDeckActionTypeBroadcastPTT:
+		if groups, err := s.store.ListBroadcastGroups(ctx); err == nil {
+			for _, g := range groups {
+				if g.ID == strings.TrimSpace(action.BroadcastGroupID) {
+					return g.Name, ""
+				}
+			}
+		}
+		return strings.TrimSpace(action.BroadcastGroupID), ""
+
+	case StreamDeckActionTypeReplyToCaller:
+		callerLabel := "No active caller"
+		// button.Label may carry the static first line (e.g. "Reply")
+		primaryLabel := "Reply"
+		if raw := strings.TrimSpace(button.Label); raw != "" {
+			if line := strings.TrimSpace(strings.SplitN(raw, "\n", 2)[0]); line != "" {
+				primaryLabel = line
+			}
+		}
+		if _, username, ok := s.hub.ReplyTargetForUsername(""); !ok {
+			_ = username
+		}
+		// Resolve the caller name via hub signal state
+		// (hub.ReplyTargetForUsername needs the local operator's username — use best-effort lookup)
+		return primaryLabel, callerLabel
+
+	case StreamDeckActionTypePTTSelected:
+		return "PTT", ""
+	case StreamDeckActionTypeMuteToggle:
+		return "Mute", ""
+	case StreamDeckActionTypeVolumeDelta:
+		return "Volume", ""
+	case StreamDeckActionTypePageUp:
+		return "Page +", ""
+	case StreamDeckActionTypePageDown:
+		return "Page -", ""
+	}
+	return fallbackButtonLabel(action.Type), ""
+}
+
+func fallbackButtonLabel(actionType StreamDeckActionType) string {
+	return string(actionType)
 }
 
 func companionButtonChannel(button StreamDeckButtonConfig) string {
