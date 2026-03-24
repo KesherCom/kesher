@@ -113,6 +113,12 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
   onStreamDeckSettingsChange: vi.fn(),
   onSaveStreamDeckSettings: vi.fn(),
   onResetStreamDeckSettings: vi.fn(),
+  onPublishCompanionProfile: vi.fn().mockResolvedValue({
+    roleId: "op",
+    username: "tim",
+    profileVersion: 1,
+    profileStatus: "active",
+  }),
   streamDeckWebHidSupported: true,
   streamDeckWebHidActive: false,
   streamDeckWebHidBusy: false,

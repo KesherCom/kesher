@@ -916,7 +916,6 @@ func (s *Store) DeleteUserStreamDeckSettings(ctx context.Context, userID string)
 	return s.DeleteRoleStreamDeckSettings(ctx, user.RoleID)
 }
 
-
 func (s *Store) ResolveSinglePublishedCompanionRole(ctx context.Context) (string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT role_id FROM companion_profiles ORDER BY updated_at DESC LIMIT 2`)
 	if err != nil {
@@ -953,9 +952,9 @@ func (s *Store) GetCompanionProfileByRole(ctx context.Context, roleID string) (C
 		return CompanionProfileResponse{}, ErrInvalidInput
 	}
 	var (
-		version   int
+		version     int
 		profileJSON string
-		updatedAt int64
+		updatedAt   int64
 	)
 	err := s.db.QueryRowContext(
 		ctx,

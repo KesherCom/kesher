@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Bootstrap,
   BroadcastGroup,
+  CompanionProfileResponse,
   Presence,
   StreamDeckActionType,
   StreamDeckButtonConfig,
@@ -341,6 +342,7 @@ type StationIntercomViewProps = {
   onStreamDeckSettingsChange: (next: StreamDeckSettings) => void;
   onSaveStreamDeckSettings: () => void;
   onResetStreamDeckSettings: () => void;
+  onPublishCompanionProfile: () => Promise<CompanionProfileResponse>;
   streamDeckWebHidSupported: boolean;
   streamDeckWebHidActive: boolean;
   streamDeckWebHidBusy: boolean;
@@ -448,6 +450,7 @@ export function StationIntercomView({
   onStreamDeckSettingsChange,
   onSaveStreamDeckSettings,
   onResetStreamDeckSettings,
+  onPublishCompanionProfile,
   streamDeckWebHidSupported,
   streamDeckWebHidActive,
   streamDeckWebHidBusy,
@@ -468,6 +471,7 @@ export function StationIntercomView({
   const streamDeckImportInputRef = useRef<HTMLInputElement>(null);
   const [streamDeckTransferMessage, setStreamDeckTransferMessage] = useState("");
   const [streamDeckTransferError, setStreamDeckTransferError] = useState("");
+  const [companionPublishBusy, setCompanionPublishBusy] = useState(false);
   const [streamDeckPreviewPressedIndexes, setStreamDeckPreviewPressedIndexes] =
     useState<number[]>([]);
   const [activeDirectTab, setActiveDirectTab] = useState<string>("all");
@@ -1113,6 +1117,24 @@ export function StationIntercomView({
       );
     } finally {
       event.target.value = "";
+    }
+  };
+
+  const publishCompanionProfile = async () => {
+    setCompanionPublishBusy(true);
+    try {
+      const published = await onPublishCompanionProfile();
+      setStreamDeckTransferError("");
+      setStreamDeckTransferMessage(
+        `Companion profile published as v${published.profileVersion} for role ${published.roleId}.`,
+      );
+    } catch (error) {
+      setStreamDeckTransferMessage("");
+      setStreamDeckTransferError(
+        error instanceof Error ? error.message : "Companion publish failed.",
+      );
+    } finally {
+      setCompanionPublishBusy(false);
     }
   };
 
@@ -1865,7 +1887,7 @@ export function StationIntercomView({
                             type="button"
                             className="shortcut-btn"
                             onClick={openStreamDeckImportPicker}
-                            disabled
+                            disabled={streamDeckBusy || !streamDeckSettings}
                           >
                             Import
                           </button>
@@ -1873,15 +1895,29 @@ export function StationIntercomView({
                             type="button"
                             className="shortcut-btn"
                             onClick={onSaveStreamDeckSettings}
-                            disabled
+                            disabled={streamDeckBusy || !streamDeckSettings}
                           >
-                            Admin managed
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            className="shortcut-btn"
+                            onClick={() => void publishCompanionProfile()}
+                            disabled={
+                              streamDeckBusy ||
+                              companionPublishBusy ||
+                              !streamDeckSettings
+                            }
+                          >
+                            {companionPublishBusy
+                              ? "Publishing..."
+                              : "Publish to Companion"}
                           </button>
                           <button
                             type="button"
                             className="shortcut-btn shortcut-btn-clear"
                             onClick={onResetStreamDeckSettings}
-                            disabled
+                            disabled={streamDeckBusy || !streamDeckSettings}
                           >
                             Reset
                           </button>
@@ -1889,7 +1925,9 @@ export function StationIntercomView({
                       </div>
                     <div className="streamdeck-settings-actions" style={{ marginBottom: "0.6rem" }}>
                       <small className="station-settings-meta">
-                        Stream Deck layouts and Companion publishing are managed in the admin panel for your role ({appData.self.roleId}).
+                        Configure your Stream Deck layout here and click Save.
+                        Companion sync is triggered automatically. Use Publish to
+                        Companion only as a manual retry.
                       </small>
                     </div>
                     {streamDeckError ? (
@@ -1940,8 +1978,8 @@ export function StationIntercomView({
                         Loading Stream Deck settings...
                       </small>
                     ) : (
-                      <div className="streamdeck-readonly-shell">
-                        <fieldset disabled style={{ border: 0, margin: 0, padding: 0 }}>
+                      <div className="streamdeck-editor-shell">
+                        <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
                         <div className="streamdeck-toolbar">
                           <label className="streamdeck-control">
                             <span>Profile</span>

@@ -12,6 +12,7 @@ import {
   getStatus,
   login,
   loginTakeover,
+  publishUserCompanionProfile,
   resetStreamDeckSettings,
   logout,
   updateStreamDeckSettings,
@@ -1402,6 +1403,13 @@ export function App() {
     }
   }, [token]);
 
+  const handlePublishUserCompanionProfile = useCallback(async () => {
+    if (!token) {
+      throw new Error("Not authenticated.");
+    }
+    return publishUserCompanionProfile(token);
+  }, [token]);
+
   // ── Early returns ──
   if (!publicData) return <div className="root">Loading configuration...</div>;
 
@@ -1733,6 +1741,7 @@ export function App() {
         onStreamDeckSettingsChange={handleStreamDeckSettingsChange}
         onSaveStreamDeckSettings={() => void handleSaveStreamDeckSettings()}
         onResetStreamDeckSettings={() => void handleResetStreamDeckSettings()}
+        onPublishCompanionProfile={handlePublishUserCompanionProfile}
         streamDeckWebHidSupported={streamDeckWebHidSupported}
         streamDeckWebHidActive={streamDeckWebHidActive}
         streamDeckWebHidBusy={streamDeckWebHidBusy}

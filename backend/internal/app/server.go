@@ -29,25 +29,25 @@ type AckSettings struct {
 }
 
 type Server struct {
-	cfg         Config
-	logger      *slog.Logger
-	store       *Store
-	sessions    *SessionManager
-	sessionMu   sync.Mutex
-	hub         *Hub
-	media       *MediaManager
-	telegram    *TelegramBot
-	certMagic   tlsProvider
-	httpSrv     *http.Server
-	redirectSrv *http.Server
-	upgrader    websocket.Upgrader
-	ackMu       sync.RWMutex
-	ackEnabled  bool
-	ackSet      bool
-	companionMu sync.RWMutex
-	companionWS map[string]map[chan CompanionCommandResult]struct{}
-	companionState map[string]map[chan struct{}]struct{}
-	companionPageByRole map[string]int
+	cfg                  Config
+	logger               *slog.Logger
+	store                *Store
+	sessions             *SessionManager
+	sessionMu            sync.Mutex
+	hub                  *Hub
+	media                *MediaManager
+	telegram             *TelegramBot
+	certMagic            tlsProvider
+	httpSrv              *http.Server
+	redirectSrv          *http.Server
+	upgrader             websocket.Upgrader
+	ackMu                sync.RWMutex
+	ackEnabled           bool
+	ackSet               bool
+	companionMu          sync.RWMutex
+	companionWS          map[string]map[chan CompanionCommandResult]struct{}
+	companionState       map[string]map[chan struct{}]struct{}
+	companionPageByRole  map[string]int
 	companionHeldTargets map[string]string
 }
 
@@ -792,16 +792,16 @@ func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request
 		profileUpdatedAt = storedProfile.ProfileUpdatedAt
 	}
 	s.writeJSON(w, http.StatusOK, CompanionDiscoveryResponse{
-		Username:         profileResp.Username,
-		RoleID:           profileResp.RoleID,
-		Rooms:            profileResp.Rooms,
-		Users:            profileResp.Users,
-		ActiveRoleUsers:  profileResp.ActiveRoleUsers,
-		BroadcastGroups:  profileResp.BroadcastGroups,
+		Username:          profileResp.Username,
+		RoleID:            profileResp.RoleID,
+		Rooms:             profileResp.Rooms,
+		Users:             profileResp.Users,
+		ActiveRoleUsers:   profileResp.ActiveRoleUsers,
+		BroadcastGroups:   profileResp.BroadcastGroups,
 		CurrentPageNumber: s.currentCompanionPage(r.Context(), targetUser.RoleID),
-		ProfileVersion:   profileVersion,
-		ProfileStatus:    profileStatus,
-		ProfileUpdatedAt: profileUpdatedAt,
+		ProfileVersion:    profileVersion,
+		ProfileStatus:     profileStatus,
+		ProfileUpdatedAt:  profileUpdatedAt,
 	})
 }
 
@@ -872,17 +872,17 @@ func NewServer(cfg Config) (*Server, error) {
 		}
 	}
 	s := &Server{
-		cfg:         cfg,
-		logger:      logger,
-		store:       store,
-		sessions:    NewSessionManager(cfg.SessionTTL),
-		hub:         NewHub(store, logger),
-		companionWS: make(map[string]map[chan CompanionCommandResult]struct{}),
-		companionState: make(map[string]map[chan struct{}]struct{}),
-		companionPageByRole: make(map[string]int),
+		cfg:                  cfg,
+		logger:               logger,
+		store:                store,
+		sessions:             NewSessionManager(cfg.SessionTTL),
+		hub:                  NewHub(store, logger),
+		companionWS:          make(map[string]map[chan CompanionCommandResult]struct{}),
+		companionState:       make(map[string]map[chan struct{}]struct{}),
+		companionPageByRole:  make(map[string]int),
 		companionHeldTargets: make(map[string]string),
-		ackEnabled:  true,
-		ackSet:      true,
+		ackEnabled:           true,
+		ackSet:               true,
 		upgrader: websocket.Upgrader{
 			CheckOrigin:      func(r *http.Request) bool { return true },
 			HandshakeTimeout: 10 * time.Second,
@@ -1299,23 +1299,93 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, _ Session)
 }
 
 func (s *Server) handleUserStreamDeckSettings(w http.ResponseWriter, r *http.Request, session Session) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "stream deck settings are managed in the admin panel", http.StatusForbidden)
-		return
-	}
-	settings, err := s.store.GetRoleStreamDeckSettings(r.Context(), session.RoleID)
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			s.writeJSON(w, http.StatusOK, DefaultStreamDeckSettings())
+	switch r.Method {
+	case http.MethodGet:
+		settings, err := s.store.GetRoleStreamDeckSettings(r.Context(), session.RoleID)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				s.writeJSON(w, http.StatusOK, DefaultStreamDeckSettings())
+				return
+			}
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
 			return
 		}
-		if s.writeStoreErr(w, err) {
+		s.writeJSON(w, http.StatusOK, settings)
+	case http.MethodPut:
+		var req StreamDeckSettings
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		s.internalErr(w, err)
-		return
+		saved, err := s.store.UpsertUserStreamDeckSettings(r.Context(), session.UserID, req)
+		if err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		targetUser, err := s.store.FindUserByID(r.Context(), session.UserID)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				http.Error(w, "unknown user", http.StatusNotFound)
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		profile, err := s.buildCompanionProfileResponse(r.Context(), targetUser)
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		if _, err := s.store.PublishCompanionProfile(r.Context(), targetUser.RoleID, session.UserID, profile); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.resetCompanionCurrentPage(session.RoleID)
+		s.writeJSON(w, http.StatusOK, saved)
+	case http.MethodDelete:
+		err := s.store.DeleteUserStreamDeckSettings(r.Context(), session.UserID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		targetUser, err := s.store.FindUserByID(r.Context(), session.UserID)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				http.Error(w, "unknown user", http.StatusNotFound)
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		profile, err := s.buildCompanionProfileResponse(r.Context(), targetUser)
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		if _, err := s.store.PublishCompanionProfile(r.Context(), targetUser.RoleID, session.UserID, profile); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.resetCompanionCurrentPage(session.RoleID)
+		s.writeJSON(w, http.StatusOK, DefaultStreamDeckSettings())
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
-	s.writeJSON(w, http.StatusOK, settings)
 }
 
 func (s *Server) handleAdminRoleStreamDeckSettings(w http.ResponseWriter, r *http.Request, session Session) {
@@ -1540,7 +1610,30 @@ func (s *Server) handleUserCompanionPublish(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	http.Error(w, "companion publishing is managed in the admin panel", http.StatusForbidden)
+	user, err := s.store.FindUserByID(r.Context(), session.UserID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "unknown user", http.StatusNotFound)
+			return
+		}
+		s.internalErr(w, err)
+		return
+	}
+	profile, err := s.buildCompanionProfileResponse(r.Context(), user)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	published, err := s.store.PublishCompanionProfile(r.Context(), user.RoleID, session.UserID, profile)
+	if err != nil {
+		if s.writeStoreErr(w, err) {
+			return
+		}
+		s.internalErr(w, err)
+		return
+	}
+	s.resetCompanionCurrentPage(user.RoleID)
+	s.writeJSON(w, http.StatusOK, published)
 }
 
 func (s *Server) requireCompanionSecret(w http.ResponseWriter, r *http.Request) bool {
@@ -1708,15 +1801,15 @@ func (s *Server) buildCompanionProfileResponse(ctx context.Context, targetUser U
 		return CompanionProfileResponse{}, err
 	}
 	return CompanionProfileResponse{
-		RoleID:          targetUser.RoleID,
-		Username:        targetUser.Username,
-		PageNumber:      pageNumber,
+		RoleID:            targetUser.RoleID,
+		Username:          targetUser.Username,
+		PageNumber:        pageNumber,
 		CurrentPageNumber: s.currentCompanionPage(ctx, targetUser.RoleID),
-		Rooms:           roomDiscovery,
-		Users:           users,
-		ActiveRoleUsers: activeRoleUsers,
-		BroadcastGroups: groups,
-		StreamDeck:      settings,
+		Rooms:             roomDiscovery,
+		Users:             users,
+		ActiveRoleUsers:   activeRoleUsers,
+		BroadcastGroups:   groups,
+		StreamDeck:        settings,
 	}, nil
 }
 

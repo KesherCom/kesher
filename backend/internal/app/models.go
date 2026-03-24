@@ -26,31 +26,31 @@ type CompanionRoomDiscovery struct {
 }
 
 type CompanionDiscoveryResponse struct {
-	Username        string                   `json:"username"`
-	RoleID          string                   `json:"roleId"`
-	Rooms           []CompanionRoomDiscovery `json:"rooms"`
-	Users           []User                   `json:"users"`
-	ActiveRoleUsers []CompanionRoleUser      `json:"activeRoleUsers,omitempty"`
-	BroadcastGroups []BroadcastGroup         `json:"broadcastGroups"`
-	CurrentPageNumber int                    `json:"currentPageNumber,omitempty"`
-	ProfileVersion  int                      `json:"profileVersion,omitempty"`
-	ProfileStatus   string                   `json:"profileStatus,omitempty"`
-	ProfileUpdatedAt int64                   `json:"profileUpdatedAt,omitempty"`
+	Username          string                   `json:"username"`
+	RoleID            string                   `json:"roleId"`
+	Rooms             []CompanionRoomDiscovery `json:"rooms"`
+	Users             []User                   `json:"users"`
+	ActiveRoleUsers   []CompanionRoleUser      `json:"activeRoleUsers,omitempty"`
+	BroadcastGroups   []BroadcastGroup         `json:"broadcastGroups"`
+	CurrentPageNumber int                      `json:"currentPageNumber,omitempty"`
+	ProfileVersion    int                      `json:"profileVersion,omitempty"`
+	ProfileStatus     string                   `json:"profileStatus,omitempty"`
+	ProfileUpdatedAt  int64                    `json:"profileUpdatedAt,omitempty"`
 }
 
 type CompanionProfileResponse struct {
-	RoleID          string                   `json:"roleId"`
-	Username        string                   `json:"username"`
-	PageNumber      int                      `json:"pageNumber,omitempty"`
-	CurrentPageNumber int                    `json:"currentPageNumber,omitempty"`
-	Rooms           []CompanionRoomDiscovery `json:"rooms"`
-	Users           []User                   `json:"users"`
-	ActiveRoleUsers []CompanionRoleUser      `json:"activeRoleUsers,omitempty"`
-	BroadcastGroups []BroadcastGroup         `json:"broadcastGroups"`
-	StreamDeck      StreamDeckSettings       `json:"streamDeckSettings"`
-	ProfileVersion  int                      `json:"profileVersion"`
-	ProfileStatus   string                   `json:"profileStatus"`
-	ProfileUpdatedAt int64                   `json:"profileUpdatedAt,omitempty"`
+	RoleID            string                   `json:"roleId"`
+	Username          string                   `json:"username"`
+	PageNumber        int                      `json:"pageNumber,omitempty"`
+	CurrentPageNumber int                      `json:"currentPageNumber,omitempty"`
+	Rooms             []CompanionRoomDiscovery `json:"rooms"`
+	Users             []User                   `json:"users"`
+	ActiveRoleUsers   []CompanionRoleUser      `json:"activeRoleUsers,omitempty"`
+	BroadcastGroups   []BroadcastGroup         `json:"broadcastGroups"`
+	StreamDeck        StreamDeckSettings       `json:"streamDeckSettings"`
+	ProfileVersion    int                      `json:"profileVersion"`
+	ProfileStatus     string                   `json:"profileStatus"`
+	ProfileUpdatedAt  int64                    `json:"profileUpdatedAt,omitempty"`
 }
 
 type CompanionPublishedProfileSummary struct {
@@ -62,7 +62,7 @@ type CompanionPublishedProfileSummary struct {
 }
 
 type CompanionAdminSummaryResponse struct {
-	SharedSecret     string                            `json:"sharedSecret"`
+	SharedSecret      string                             `json:"sharedSecret"`
 	PublishedProfiles []CompanionPublishedProfileSummary `json:"publishedProfiles"`
 }
 
