@@ -1313,7 +1313,6 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			return rejectUnauthorized("not allowed to talk to room")
 		}
 		if phase != "down" {
-			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: roomID})
 			result.OK = true
 			result.Status = "executed"
 			return result

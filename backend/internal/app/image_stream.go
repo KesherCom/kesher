@@ -97,7 +97,8 @@ func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, erro
 	h := float64(r.config.Height)
 	actionType := strings.TrimSpace(state.ActionType)
 	pressed := state.IsActive || state.State == "TALK" || state.State == "BROADCAST"
-	useEmergencyPressedColor := pressed && actionType != string(StreamDeckActionTypeListenRoom)
+	useCallPressedColor := pressed && actionType == string(StreamDeckActionTypeCallRoom)
+	useEmergencyPressedColor := pressed && actionType != string(StreamDeckActionTypeListenRoom) && actionType != string(StreamDeckActionTypeCallRoom)
 	palette := getButtonPalette(actionType, state.Color, pressed)
 	strokeColor := palette.border
 	if pressed {
@@ -128,6 +129,12 @@ func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, erro
 
 	if useEmergencyPressedColor {
 		dc.SetRGBA255(255, 115, 115, 72)
+		dc.SetLineWidth(2)
+		dc.DrawRoundedRectangle(cardInset-1, cardInset-1, w-(cardInset-1)*2, h-(cardInset-1)*2, radius+1)
+		dc.Stroke()
+	}
+	if useCallPressedColor {
+		dc.SetRGBA255(255, 214, 102, 90)
 		dc.SetLineWidth(2)
 		dc.DrawRoundedRectangle(cardInset-1, cardInset-1, w-(cardInset-1)*2, h-(cardInset-1)*2, radius+1)
 		dc.Stroke()
@@ -198,6 +205,14 @@ func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, erro
 }
 
 func getButtonPalette(actionType, color string, pressed bool) keyPalette {
+	if pressed && actionType == string(StreamDeckActionTypeCallRoom) {
+		return keyPalette{
+			background: "#f2c94c",
+			border:     "#ffd76a",
+			label:      "#2a2110",
+		}
+	}
+
 	useEmergencyPressedColor := pressed && actionType != string(StreamDeckActionTypeNone) && actionType != string(StreamDeckActionTypeListenRoom)
 	if useEmergencyPressedColor {
 		return keyPalette{

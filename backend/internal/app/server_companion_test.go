@@ -376,3 +376,74 @@ func TestExecuteCompanionButtonPressPTTSelectedStopsOriginalHeldTarget(t *testin
 		t.Fatalf("expected held target to be cleared after release, got %q", heldTarget)
 	}
 }
+
+func TestExecuteCompanionButtonPressCallRoomKeepsVisibleFeedbackUntilRefresh(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	coord, err := NewImageStreamCoordinator(logger)
+	if err != nil {
+		t.Fatalf("NewImageStreamCoordinator failed: %v", err)
+	}
+	s.imageStreamCoord = coord
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if err := s.store.CreateRoom(ctx, "room-a", "Room A", []string{"source"}, []string{"source"}, nil); err != nil {
+		t.Fatalf("CreateRoom room-a failed: %v", err)
+	}
+	user, err := s.store.UpsertUser(ctx, "operator", "source")
+	if err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+	session := s.sessions.Create(user)
+
+	hubClient := &client{
+		session:      session,
+		user:         user,
+		send:         make(chan WSOutbound, 8),
+		sendPriority: make(chan WSOutbound, 8),
+		listenRooms:  map[string]struct{}{},
+		talkRooms:    map[string]struct{}{},
+	}
+	s.hub.Add(hubClient)
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeCallRoom, RoomID: "room-a"}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	imageClient := &ImageStreamClient{send: make(chan ImageStreamMessage, 32), done: make(chan struct{}), logger: logger}
+	s.imageStreamCoord.RegisterClient(imageClient)
+	defer s.imageStreamCoord.UnregisterClient(imageClient)
+
+	down := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{Command: "press_button", ButtonIndex: 0, State: "down"})
+	if !down.OK || down.Status != "queued" {
+		t.Fatalf("expected down press to queue, got %+v", down)
+	}
+	commandOutbound := <-hubClient.sendPriority
+	command, ok := commandOutbound.Data.(CompanionCommand)
+	if !ok {
+		t.Fatalf("expected CompanionCommand payload, got %T", commandOutbound.Data)
+	}
+	if command.Command != "signal" || command.Signal != "call" || command.TargetID != "room-a" {
+		t.Fatalf("unexpected call command payload: %+v", command)
+	}
+	imageDown := <-imageClient.send
+	if imageDown.State != "TALK" {
+		t.Fatalf("expected call button image to switch to TALK, got %q", imageDown.State)
+	}
+
+	up := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{Command: "press_button", ButtonIndex: 0, State: "up"})
+	if !up.OK || up.Status != "executed" {
+		t.Fatalf("expected release to complete without immediate reset, got %+v", up)
+	}
+	select {
+	case msg := <-imageClient.send:
+		t.Fatalf("expected no immediate idle image on call button release, got state %q", msg.State)
+	default:
+	}
+}

@@ -37,3 +37,16 @@ func TestButtonImageRendererRenderButtonImageProducesValidPNG(t *testing.T) {
 		})
 	}
 }
+
+func TestGetButtonPaletteUsesYellowPressedPaletteForCallRoom(t *testing.T) {
+	palette := getButtonPalette(string(StreamDeckActionTypeCallRoom), "", true)
+	if palette.background != "#f2c94c" {
+		t.Fatalf("unexpected pressed call background: got %q", palette.background)
+	}
+	if palette.border != "#ffd76a" {
+		t.Fatalf("unexpected pressed call border: got %q", palette.border)
+	}
+	if palette.label != "#2a2110" {
+		t.Fatalf("unexpected pressed call label: got %q", palette.label)
+	}
+}
