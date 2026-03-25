@@ -531,6 +531,19 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 		return
 	}
 
+	listeningRooms := make(map[string]struct{})
+	renderUsername := ""
+	if s.hub != nil {
+		if session, ok := s.hub.LatestRoleSession(roleID); ok {
+			renderUsername = strings.TrimSpace(session.Username)
+			for _, roomID := range s.hub.ListenRoomsForToken(session.Token) {
+				if trimmed := strings.TrimSpace(roomID); trimmed != "" {
+					listeningRooms[trimmed] = struct{}{}
+				}
+			}
+		}
+	}
+
 	profile, err := s.store.GetCompanionProfileByRole(ctx, roleID)
 	if err != nil {
 		s.logger.Debug("image snapshot skipped: profile unavailable", "roleId", roleID, "error", err)
@@ -555,12 +568,23 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 	for i := range page.Buttons {
 		button := page.Buttons[i]
 		primary, subtitle := s.resolveButtonLabel(ctx, button)
+		if button.Action != nil && button.Action.Type == StreamDeckActionTypeReplyToCaller {
+			primary, subtitle = s.resolveReplyToCallerLabels(button, renderUsername)
+		}
+		isListening := false
+		if button.Action != nil {
+			actionType := button.Action.Type
+			roomID := strings.TrimSpace(button.Action.RoomID)
+			if roomID != "" && (actionType == StreamDeckActionTypePTTRoom || actionType == StreamDeckActionTypeListenRoom) {
+				_, isListening = listeningRooms[roomID]
+			}
+		}
 		state := ButtonState{
 			State:       "IDLE",
 			Label:       primary,
 			Subtitle:    subtitle,
 			Channel:     companionButtonChannel(button),
-			IsListening: false,
+			IsListening: isListening,
 		}
 		if button.Action != nil {
 			state.ActionType = string(button.Action.Type)

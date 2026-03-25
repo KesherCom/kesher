@@ -726,6 +726,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoleID)})
 		return res
 	case StreamDeckActionTypeReplyToCaller:
+		replyLabel, replySubtitle := s.resolveReplyToCallerLabels(*button, username)
 		if phase == "down" {
 			replyUserID, _, ok := s.hub.ReplyTargetForUsername(username)
 			if !ok || strings.TrimSpace(replyUserID) == "" {
@@ -734,18 +735,18 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			}
 			s.rememberCompanionHeldTarget(holdKey, replyUserID)
 			res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: replyUserID, State: "ptt_start"})
-			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "TALK", Channel: "reply"})
+			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "TALK", Channel: "reply", Label: replyLabel, Subtitle: replySubtitle})
 			return res
 		}
 		targetID := s.consumeCompanionHeldTarget(holdKey)
 		if targetID == "" {
-			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: "reply"})
+			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: "reply", Label: replyLabel, Subtitle: replySubtitle})
 			result.OK = true
 			result.Status = "executed"
 			return result
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: targetID, State: "ptt_stop"})
-		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: "reply"})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: "reply", Label: replyLabel, Subtitle: replySubtitle})
 		return res
 	case StreamDeckActionTypeBroadcastPTT:
 		res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "broadcast", TargetID: button.Action.BroadcastGroupID, State: map[bool]string{true: "ptt_start", false: "ptt_stop"}[phase == "down"]})
@@ -782,6 +783,10 @@ func (s *Server) emitCompanionCurrentPageImages(ctx context.Context, roleID stri
 	}
 
 	currentPage := s.currentCompanionPage(ctx, roleID)
+	renderUsername := ""
+	if session, ok := s.sessions.LatestForRole(strings.TrimSpace(roleID)); ok {
+		renderUsername = strings.TrimSpace(session.Username)
+	}
 	page := settings.Pages[0]
 	for _, candidate := range settings.Pages {
 		if candidate.Page == currentPage {
@@ -792,7 +797,11 @@ func (s *Server) emitCompanionCurrentPageImages(ctx context.Context, roleID stri
 
 	for i := range page.Buttons {
 		button := &page.Buttons[i]
-		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE"})
+		state := ButtonState{State: "IDLE"}
+		if button.Action != nil && button.Action.Type == StreamDeckActionTypeReplyToCaller {
+			state.Label, state.Subtitle = s.resolveReplyToCallerLabels(*button, renderUsername)
+		}
+		s.emitCompanionButtonImage(ctx, page.Page, button, state)
 	}
 }
 
@@ -821,6 +830,24 @@ func (s *Server) emitCompanionButtonImage(ctx context.Context, bank int, button 
 		state.Channel = companionButtonChannel(*button)
 	}
 	s.imageStreamCoord.BroadcastImageUpdate(state, bank, button.Index)
+}
+
+func (s *Server) resolveReplyToCallerLabels(button StreamDeckButtonConfig, username string) (primary, subtitle string) {
+	primary = "Reply"
+	if raw := strings.TrimSpace(button.Label); raw != "" {
+		parts := strings.SplitN(raw, "\n", 2)
+		if line := strings.TrimSpace(parts[0]); line != "" {
+			primary = line
+		}
+	}
+	if s.hub == nil || strings.TrimSpace(username) == "" {
+		return primary, "No active caller"
+	}
+	_, replyUsername, ok := s.hub.ReplyTargetForUsername(username)
+	if !ok || strings.TrimSpace(replyUsername) == "" {
+		return primary, "No active caller"
+	}
+	return primary, strings.TrimSpace(replyUsername)
 }
 
 // resolveButtonLabel resolves the display label and optional subtitle for a button,
@@ -906,20 +933,7 @@ func (s *Server) resolveButtonLabel(ctx context.Context, button StreamDeckButton
 		return strings.TrimSpace(action.BroadcastGroupID), ""
 
 	case StreamDeckActionTypeReplyToCaller:
-		callerLabel := "No active caller"
-		// button.Label may carry the static first line (e.g. "Reply")
-		primaryLabel := "Reply"
-		if raw := strings.TrimSpace(button.Label); raw != "" {
-			if line := strings.TrimSpace(strings.SplitN(raw, "\n", 2)[0]); line != "" {
-				primaryLabel = line
-			}
-		}
-		if _, username, ok := s.hub.ReplyTargetForUsername(""); !ok {
-			_ = username
-		}
-		// Resolve the caller name via hub signal state
-		// (hub.ReplyTargetForUsername needs the local operator's username — use best-effort lookup)
-		return primaryLabel, callerLabel
+		return s.resolveReplyToCallerLabels(button, "")
 
 	case StreamDeckActionTypePTTSelected:
 		return "PTT", ""
