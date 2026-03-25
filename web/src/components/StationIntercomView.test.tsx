@@ -328,25 +328,26 @@ describe("StationIntercomView", () => {
     );
   });
 
-  it("allows assigning page-up in stream deck settings", async () => {
+  it("does not offer unsupported stream deck functions in user settings", async () => {
     const user = userEvent.setup();
-    const onStreamDeckSettingsChange = vi.fn();
     render(
       <StationIntercomView
         {...baseProps}
         isUserSettingsOpen
-        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
       />,
     );
 
     await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
 
-    await user.selectOptions(screen.getByLabelText("Stream Deck function"), "page_up");
-
-    expect(onStreamDeckSettingsChange).toHaveBeenCalled();
-    const calls = onStreamDeckSettingsChange.mock.calls;
-    const lastCallArg = calls[calls.length - 1]?.[0];
-    expect(lastCallArg?.pages?.[0]?.buttons?.[0]?.action?.type).toBe("page_up");
+    expect(
+      screen.queryByRole("option", { name: "Volume +/-" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "Page up" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "Page down" }),
+    ).not.toBeInTheDocument();
   });
 
   it("copies and pastes a stream deck button configuration", async () => {

@@ -2226,11 +2226,6 @@ export function StationIntercomView({
                             </optgroup>
                             <optgroup label="Broadcast and audio">
                               <option value="broadcast_ptt">Broadcast PTT</option>
-                              <option value="volume_delta">Volume +/-</option>
-                            </optgroup>
-                            <optgroup label="Navigation">
-                              <option value="page_up">Page up</option>
-                              <option value="page_down">Page down</option>
                             </optgroup>
                           </select>
                         </label>
