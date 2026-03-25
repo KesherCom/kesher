@@ -21,6 +21,8 @@ import (
 	"golang.org/x/image/font/gofont/goregular"
 )
 
+const imageStreamRefreshInterval = 2 * time.Second
+
 // ImageStreamMessage represents an image update message sent via WebSocket
 type ImageStreamMessage struct {
 	Type        string `json:"type"` // "update_button_image"
@@ -30,6 +32,9 @@ type ImageStreamMessage struct {
 	Label       string `json:"label,omitempty"`
 	Channel     string `json:"channel,omitempty"`
 	State       string `json:"state,omitempty"` // "IDLE", "TALK", "LISTEN", "BROADCAST"
+	ActionType  string `json:"actionType,omitempty"`
+	Color       string `json:"color,omitempty"`
+	IsListening bool   `json:"isListening,omitempty"`
 }
 
 // ButtonImageRenderConfig holds rendering configuration
@@ -59,69 +64,129 @@ func NewButtonImageRenderer(config *ButtonImageRenderConfig) (*ButtonImageRender
 
 // ButtonState represents the state of a button for rendering
 type ButtonState struct {
-	Channel   string
-	State     string // "IDLE", "TALK", "LISTEN", "BROADCAST"
-	Label     string
-	Subtitle  string
-	TalkCount int
-	IsActive  bool
+	Channel     string
+	State       string // "IDLE", "TALK", "LISTEN", "BROADCAST"
+	Label       string
+	Subtitle    string
+	ActionType  string
+	Color       string
+	TalkCount   int
+	IsListening bool
+	IsActive    bool
 }
 
-// RenderButtonImage renders a button state as a PNG using the WebHID visual style:
-// pure black canvas, rounded card with a colored state border, and a text label.
+type keyPalette struct {
+	background string
+	border     string
+	label      string
+}
+
+const (
+	streamDeckCanvasBackground = "#000000"
+	defaultBackground          = "#182028"
+	defaultForeground          = "#eef4ff"
+)
+
+// RenderButtonImage renders a button state as a PNG using the same card palette and
+// typography rules as web/src/lib/streamDeckHardwareFeedback.ts.
 func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	w := float64(r.config.Width)
 	h := float64(r.config.Height)
+	actionType := strings.TrimSpace(state.ActionType)
+	pressed := state.IsActive || state.State == "TALK" || state.State == "BROADCAST"
+	useEmergencyPressedColor := pressed && actionType != string(StreamDeckActionTypeListenRoom)
+	palette := getButtonPalette(actionType, state.Color, pressed)
+	strokeColor := palette.border
+	if pressed {
+		strokeColor = mixColors(strokeColor, "#ffffff", 0.2)
+	}
 
 	dc := gg.NewContext(r.config.Width, r.config.Height)
 
 	// Black canvas background
-	dc.SetHexColor("#000000")
+	dc.SetHexColor(streamDeckCanvasBackground)
 	dc.Clear()
 
-	// Rounded card: filled black, then stroked with state border color
-	const inset = 2.0
-	const cardRadius = 10.0
-	dc.SetHexColor("#000000")
-	dc.DrawRoundedRectangle(inset, inset, w-inset*2, h-inset*2, cardRadius)
+	const cardInset = 2.0
+	radius := math.Max(10, math.Round(w*0.12))
+
+	dc.SetHexColor(palette.background)
+	dc.DrawRoundedRectangle(cardInset, cardInset, w-cardInset*2, h-cardInset*2, radius)
 	dc.Fill()
 
-	dc.SetHexColor(getBorderColor(state.State))
-	dc.SetLineWidth(3)
-	dc.DrawRoundedRectangle(inset, inset, w-inset*2, h-inset*2, cardRadius)
+	dc.SetHexColor(strokeColor)
+	if useEmergencyPressedColor {
+		dc.SetLineWidth(4)
+	} else {
+		dc.SetLineWidth(3)
+	}
+	dc.DrawRoundedRectangle(cardInset, cardInset, w-cardInset*2, h-cardInset*2, radius)
 	dc.Stroke()
+
+	if useEmergencyPressedColor {
+		dc.SetRGBA255(255, 115, 115, 72)
+		dc.SetLineWidth(2)
+		dc.DrawRoundedRectangle(cardInset-1, cardInset-1, w-(cardInset-1)*2, h-(cardInset-1)*2, radius+1)
+		dc.Stroke()
+	}
+
+	if (actionType == string(StreamDeckActionTypePTTRoom) || actionType == string(StreamDeckActionTypeListenRoom)) && state.IsListening {
+		stripeHeight := math.Max(6, math.Round(h*0.075))
+		dc.SetHexColor("#14c64b")
+		dc.DrawRoundedRectangle(
+			cardInset+3,
+			cardInset+(h-cardInset*2)-stripeHeight-2,
+			(w-cardInset*2)-6,
+			stripeHeight,
+			math.Max(3, math.Round(stripeHeight/2)),
+		)
+		dc.Fill()
+	}
 
 	// Text rendering
 	label := strings.TrimSpace(state.Label)
 	subtitle := strings.TrimSpace(state.Subtitle)
+	textColor := palette.label
 
 	if label != "" {
 		if subtitle != "" {
 			// Two-line layout: large primary near top, small subtitle near bottom
-			primarySize := fitButtonFontSize(dc, label, w-24, math.Max(20, w*0.2), gobold.TTF)
+			primarySize := fitButtonFontSize(dc, label, w-24, math.Max(20, w*0.2), 800, gobold.TTF)
 			if face, err := loadButtonFontFace(gobold.TTF, primarySize); err == nil {
 				dc.SetFontFace(face)
 			}
-			dc.SetHexColor("#eef4ff")
-			dc.DrawStringAnchored(label, w/2, h*0.38, 0.5, 0.5)
+			dc.SetHexColor(textColor)
+			primaryLines := wrapButtonLines(dc, label, w-24, 2)
+			primaryLineHeight := math.Round(primarySize * 1.1)
+			primaryBlockHeight := float64(len(primaryLines)) * primaryLineHeight
+			primaryStartY := math.Round(h*0.38) - primaryBlockHeight/2 + primaryLineHeight/2
+			for i, line := range primaryLines {
+				dc.DrawStringAnchored(line, w/2, primaryStartY+float64(i)*primaryLineHeight, 0.5, 0.5)
+			}
 
-			subSize := fitButtonFontSize(dc, subtitle, w-26, math.Max(11, w*0.1), goregular.TTF)
+			subSize := fitButtonFontSize(dc, subtitle, w-26, math.Max(11, w*0.1), 600, goregular.TTF)
 			if face, err := loadButtonFontFace(goregular.TTF, subSize); err == nil {
 				dc.SetFontFace(face)
 			}
-			dc.SetHexColor("#aeb6c0")
-			dc.DrawStringAnchored(subtitle, w/2, h*0.68, 0.5, 0.5)
+			dc.SetHexColor(mixColors(textColor, "#aeb6c0", 0.45))
+			secondaryLines := wrapButtonLines(dc, subtitle, w-26, 1)
+			dc.DrawStringAnchored(secondaryLines[0], w/2, math.Round(h*0.68), 0.5, 0.5)
 		} else {
-			// Single-line layout: bold label centered
-			labelSize := fitButtonFontSize(dc, label, w-24, math.Max(20, w*0.2), gobold.TTF)
+			// Single-label layout: up to two wrapped lines, centered in lower half
+			labelSize := fitButtonFontSize(dc, label, w-24, math.Max(18, w*0.15), 800, gobold.TTF)
 			if face, err := loadButtonFontFace(gobold.TTF, labelSize); err == nil {
 				dc.SetFontFace(face)
 			}
-			dc.SetHexColor("#eef4ff")
-			dc.DrawStringAnchored(label, w/2, h*0.56, 0.5, 0.5)
+			dc.SetHexColor(textColor)
+			labelLines := wrapButtonLines(dc, label, w-24, 2)
+			labelLineHeight := math.Round(labelSize * 1.03)
+			labelStartY := math.Round(h*0.56) - (float64(len(labelLines)-1)*labelLineHeight)/2
+			for i, line := range labelLines {
+				dc.DrawStringAnchored(line, w/2, labelStartY+float64(i)*labelLineHeight, 0.5, 0.5)
+			}
 		}
 	}
 
@@ -132,18 +197,87 @@ func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, erro
 	return buf.Bytes(), nil
 }
 
-// getBorderColor returns the WebHID-style colored border hex for a given state.
-func getBorderColor(state string) string {
-	switch state {
-	case "TALK":
-		return "#ff2d26" // red — active/transmitting
-	case "LISTEN":
-		return "#26d07c" // green — listening
-	case "BROADCAST":
-		return "#ffc067" // orange — broadcast/call
-	default: // IDLE
-		return "#1b2026" // near-black — idle
+func getButtonPalette(actionType, color string, pressed bool) keyPalette {
+	useEmergencyPressedColor := pressed && actionType != string(StreamDeckActionTypeNone) && actionType != string(StreamDeckActionTypeListenRoom)
+	if useEmergencyPressedColor {
+		return keyPalette{
+			background: "#ef1212",
+			border:     "#ff2d26",
+			label:      "#f7f7f7",
+		}
 	}
+
+	if strings.TrimSpace(color) != "" {
+		custom := normalizeHexColor(color)
+		amount := 0.22
+		if pressed {
+			amount = 0.42
+		}
+		return keyPalette{
+			background: "#000000",
+			border:     mixColors(custom, "#ffffff", amount),
+			label:      "#f2f5f8",
+		}
+	}
+
+	switch actionType {
+	case string(StreamDeckActionTypeBroadcastPTT):
+		return keyPalette{background: "#000000", border: "#ff2d26", label: "#f7f7f7"}
+	case string(StreamDeckActionTypeCallRoom):
+		return keyPalette{background: "#000000", border: "#ffc067", label: "#f6f0e8"}
+	case string(StreamDeckActionTypeSelectTalkRoom):
+		return keyPalette{background: "#000000", border: "#2da8ff", label: "#ecf7ff"}
+	case string(StreamDeckActionTypePTTSelected):
+		return keyPalette{background: "#000000", border: "#ff4d4d", label: "#fff1f1"}
+	case string(StreamDeckActionTypeListenRoom):
+		return keyPalette{background: "#000000", border: "#26d07c", label: "#ebfff3"}
+	case string(StreamDeckActionTypeDirectRole), string(StreamDeckActionTypeDirectUser):
+		return keyPalette{background: "#000000", border: "#ff2d26", label: "#f3f5f7"}
+	case string(StreamDeckActionTypePTTRoom):
+		return keyPalette{background: "#000000", border: "#1b2026", label: "#f1f4f8"}
+	case string(StreamDeckActionTypeReplyToCaller):
+		return keyPalette{background: "#000000", border: "#ffc067", label: "#f6f0e8"}
+	case string(StreamDeckActionTypeMuteToggle):
+		return keyPalette{background: "#000000", border: "#f84e4e", label: "#fff1f1"}
+	case string(StreamDeckActionTypeVolumeDelta):
+		return keyPalette{background: "#000000", border: "#9d8cff", label: "#f2f0ff"}
+	case string(StreamDeckActionTypePageUp), string(StreamDeckActionTypePageDown):
+		return keyPalette{background: "#000000", border: "#58ccf6", label: "#effbff"}
+	default:
+		return keyPalette{background: "#000000", border: "#1a1f26", label: "#edf2f8"}
+	}
+}
+
+func normalizeHexColor(input string) string {
+	value := strings.TrimSpace(input)
+	if value == "" {
+		return defaultBackground
+	}
+	if len(value) == 4 && value[0] == '#' {
+		return strings.ToLower(fmt.Sprintf("#%c%c%c%c%c%c", value[1], value[1], value[2], value[2], value[3], value[3]))
+	}
+	if len(value) == 7 && value[0] == '#' {
+		return strings.ToLower(value)
+	}
+	return defaultBackground
+}
+
+func hexToRGB(hex string) (int, int, int) {
+	normalized := normalizeHexColor(hex)
+	r, _ := strconv.ParseInt(normalized[1:3], 16, 64)
+	g, _ := strconv.ParseInt(normalized[3:5], 16, 64)
+	b, _ := strconv.ParseInt(normalized[5:7], 16, 64)
+	return int(r), int(g), int(b)
+}
+
+func mixColors(hex, target string, amount float64) string {
+	sr, sg, sb := hexToRGB(hex)
+	tr, tg, tb := hexToRGB(target)
+	mix := func(left, right int) int {
+		value := float64(left) + (float64(right-left) * amount)
+		return int(math.Round(value))
+	}
+	return fmt.Sprintf("#%02x%02x%02x", mix(sr, tr), mix(sg, tg), mix(sb, tb))
 }
 
 // loadButtonFontFace parses a TTF byte slice and returns a font.Face at the given point size.
@@ -160,7 +294,7 @@ func loadButtonFontFace(ttfBytes []byte, size float64) (font.Face, error) {
 }
 
 // fitButtonFontSize shrinks point size from initialSize down to 12 until the string fits maxWidth.
-func fitButtonFontSize(dc *gg.Context, text string, maxWidth, initialSize float64, ttfBytes []byte) float64 {
+func fitButtonFontSize(dc *gg.Context, text string, maxWidth, initialSize, _ float64, ttfBytes []byte) float64 {
 	size := initialSize
 	for size > 12 {
 		if face, err := loadButtonFontFace(ttfBytes, size); err == nil {
@@ -172,6 +306,64 @@ func fitButtonFontSize(dc *gg.Context, text string, maxWidth, initialSize float6
 		size--
 	}
 	return size
+}
+
+func wrapButtonLines(dc *gg.Context, text string, maxWidth float64, maxLines int) []string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{""}
+	}
+
+	lines := make([]string, 0, maxLines)
+	current := ""
+	for _, word := range words {
+		candidate := word
+		if current != "" {
+			candidate = current + " " + word
+		}
+		if width, _ := dc.MeasureString(candidate); width <= maxWidth {
+			current = candidate
+			continue
+		}
+		if current != "" {
+			lines = append(lines, current)
+			current = word
+		} else {
+			lines = append(lines, word)
+			current = ""
+		}
+		if len(lines) == maxLines-1 {
+			break
+		}
+	}
+
+	if len(lines) < maxLines && current != "" {
+		lines = append(lines, current)
+	}
+
+	if len(lines) == 0 {
+		return []string{""}
+	}
+
+	result := lines
+	if len(result) > maxLines {
+		result = result[:maxLines]
+	}
+
+	joined := strings.Join(words, " ")
+	if len(result) == maxLines && strings.Join(result, " ") != joined {
+		last := result[len(result)-1]
+		trimmed := strings.TrimSpace(last)
+		if trimmed != "" {
+			r := []rune(trimmed)
+			if len(r) > 0 {
+				trimmed = string(r[:len(r)-1])
+			}
+		}
+		result[len(result)-1] = trimmed + "..."
+	}
+
+	return result
 }
 
 // ImageStreamCoordinator manages image stream connections and broadcasting
@@ -226,6 +418,9 @@ func (c *ImageStreamCoordinator) BroadcastImageUpdate(state ButtonState, bank, b
 		Label:       state.Label,
 		Channel:     state.Channel,
 		State:       state.State,
+		ActionType:  state.ActionType,
+		Color:       state.Color,
+		IsListening: state.IsListening,
 	}
 
 	// Send to all clients
@@ -280,6 +475,8 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 	// Ping ticker
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+	refreshTicker := time.NewTicker(imageStreamRefreshInterval)
+	defer refreshTicker.Stop()
 
 	for {
 		select {
@@ -295,6 +492,12 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 			if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
 				return
 			}
+
+		case <-refreshTicker.C:
+			if strings.TrimSpace(targetRoleID) == "" {
+				targetRoleID = s.resolveImageStreamRoleID(context.Background(), r)
+			}
+			s.enqueueInitialImageSnapshot(context.Background(), client, targetRoleID)
 
 		case <-client.done:
 			return
@@ -353,11 +556,16 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 		button := page.Buttons[i]
 		primary, subtitle := s.resolveButtonLabel(ctx, button)
 		state := ButtonState{
-			State:    "IDLE",
-			Label:    primary,
-			Subtitle: subtitle,
-			Channel:  companionButtonChannel(button),
+			State:       "IDLE",
+			Label:       primary,
+			Subtitle:    subtitle,
+			Channel:     companionButtonChannel(button),
+			IsListening: false,
 		}
+		if button.Action != nil {
+			state.ActionType = string(button.Action.Type)
+		}
+		state.Color = strings.TrimSpace(button.Color)
 		img, renderErr := s.imageStreamCoord.renderer.RenderButtonImage(state)
 		if renderErr != nil {
 			s.logger.Warn("image snapshot render failed", "roleId", roleID, "index", button.Index, "error", renderErr)
@@ -372,6 +580,9 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 			Label:       state.Label,
 			Channel:     state.Channel,
 			State:       state.State,
+			ActionType:  state.ActionType,
+			Color:       state.Color,
+			IsListening: state.IsListening,
 		}
 
 		select {

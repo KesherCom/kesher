@@ -609,6 +609,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		}
 		if len(pageOrder) > 0 {
 			s.setCompanionCurrentPage(roleID, pageOrder[nextIndex])
+			s.emitCompanionCurrentPageImages(ctx, roleID)
 		}
 		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE"})
 		result.OK = true
@@ -766,12 +767,50 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 	}
 }
 
+func (s *Server) emitCompanionCurrentPageImages(ctx context.Context, roleID string) {
+	if s.imageStreamCoord == nil || strings.TrimSpace(roleID) == "" {
+		return
+	}
+
+	settings, err := s.store.GetRoleStreamDeckSettings(ctx, roleID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			settings = DefaultStreamDeckSettings()
+		} else {
+			return
+		}
+	}
+
+	currentPage := s.currentCompanionPage(ctx, roleID)
+	page := settings.Pages[0]
+	for _, candidate := range settings.Pages {
+		if candidate.Page == currentPage {
+			page = candidate
+			break
+		}
+	}
+
+	for i := range page.Buttons {
+		button := &page.Buttons[i]
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE"})
+	}
+}
+
 func (s *Server) emitCompanionButtonImage(ctx context.Context, bank int, button *StreamDeckButtonConfig, state ButtonState) {
 	if s.imageStreamCoord == nil || button == nil {
 		return
 	}
 	if strings.TrimSpace(state.State) == "" {
 		state.State = "IDLE"
+	}
+	if strings.TrimSpace(state.ActionType) == "" && button.Action != nil {
+		state.ActionType = string(button.Action.Type)
+	}
+	if strings.TrimSpace(state.Color) == "" {
+		state.Color = strings.TrimSpace(button.Color)
+	}
+	if !state.IsListening {
+		state.IsListening = state.State == "LISTEN"
 	}
 	if strings.TrimSpace(state.Label) == "" {
 		primary, subtitle := s.resolveButtonLabel(ctx, *button)
