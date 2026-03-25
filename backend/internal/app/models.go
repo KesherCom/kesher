@@ -314,6 +314,8 @@ type CompanionCommand struct {
 	VolumeDelta   int      `json:"volumeDelta,omitempty"`
 	ListenRoomIDs []string `json:"listenRoomIds,omitempty"`
 	TalkRoomIDs   []string `json:"talkRoomIds,omitempty"`
+	Brightness    int      `json:"brightness,omitempty"`
+	PageNumber    int      `json:"pageNumber,omitempty"`
 }
 
 type CompanionCommandResult struct {

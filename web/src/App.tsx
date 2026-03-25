@@ -217,6 +217,37 @@ export function App() {
   }, []);
 
   // ── Intercom session (WS + WebRTC + audio + voice) ──
+  const streamDeckHidSessionRef = useRef<{
+    deck: StreamDeckWeb;
+    pressedButtons: Set<number>;
+    onDown: (
+      control:
+        | StreamDeckButtonControlDefinition
+        | StreamDeckEncoderControlDefinition,
+    ) => void;
+    onUp: (
+      control:
+        | StreamDeckButtonControlDefinition
+        | StreamDeckEncoderControlDefinition,
+    ) => void;
+    onError: (error: unknown) => void;
+  } | null>(null);
+  const handleStreamDeckHardwareCommand = useCallback(
+    (cmd: { command: string; brightness?: number }) => {
+      const hidSession = streamDeckHidSessionRef.current;
+      if (!hidSession) return;
+      if (cmd.command === "set_streamdeck_brightness") {
+        void hidSession.deck.setBrightness(
+          Math.max(0, Math.min(100, cmd.brightness ?? 70)),
+        );
+      } else if (cmd.command === "clear_streamdeck_panel") {
+        void hidSession.deck.clearPanel();
+      } else if (cmd.command === "reset_streamdeck") {
+        void hidSession.deck.resetToLogo();
+      }
+    },
+    [],
+  );
   const session = useIntercomSession({
     token,
     appData,
@@ -252,6 +283,7 @@ export function App() {
       setToken(null);
       setAppData(null);
     },
+    onStreamDeckHardwareCommand: handleStreamDeckHardwareCommand,
   });
 
   // ── Computed values ──
@@ -300,21 +332,6 @@ export function App() {
   const incomingAttentionRef = useRef(false);
   const streamDeckAttentionPulseOnRef = useRef(false);
   const streamDeckPressedRoleTargetsRef = useRef<Map<string, string>>(new Map());
-  const streamDeckHidSessionRef = useRef<{
-    deck: StreamDeckWeb;
-    pressedButtons: Set<number>;
-    onDown: (
-      control:
-        | StreamDeckButtonControlDefinition
-        | StreamDeckEncoderControlDefinition,
-    ) => void;
-    onUp: (
-      control:
-        | StreamDeckButtonControlDefinition
-        | StreamDeckEncoderControlDefinition,
-    ) => void;
-    onError: (error: unknown) => void;
-  } | null>(null);
   const streamDeckRenderInFlightRef = useRef(false);
   const streamDeckPendingRenderRef = useRef<StreamDeckRenderRequest | null>(
     null,

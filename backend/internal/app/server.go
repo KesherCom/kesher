@@ -341,6 +341,83 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			writeCommandResult(result)
 			continue
 		}
+		if in.Data.Command == "navigate_to_page" {
+			if resolvedRoleID == "" {
+				writeRejected("target role unavailable")
+				continue
+			}
+			settings, err := s.store.GetRoleStreamDeckSettings(r.Context(), resolvedRoleID)
+			if err != nil {
+				settings = DefaultStreamDeckSettings()
+			}
+			targetPage := in.Data.PageNumber
+			found := false
+			for _, p := range settings.Pages {
+				if p.Page == targetPage {
+					found = true
+					break
+				}
+			}
+			if !found && len(settings.Pages) > 0 {
+				targetPage = settings.Pages[0].Page
+			}
+			s.setCompanionCurrentPage(resolvedRoleID, targetPage)
+			s.emitCompanionCurrentPageImages(r.Context(), resolvedRoleID)
+			writeCommandResult(CompanionCommandResult{
+				CommandID: commandID,
+				Command:   in.Data.Command,
+				OK:        true,
+				Status:    "executed",
+				Source:    "bridge",
+			})
+			continue
+		}
+		if in.Data.Command == "page_up" || in.Data.Command == "page_down" {
+			if resolvedRoleID == "" {
+				writeRejected("target role unavailable")
+				continue
+			}
+			settings, err := s.store.GetRoleStreamDeckSettings(r.Context(), resolvedRoleID)
+			if err != nil {
+				settings = DefaultStreamDeckSettings()
+			}
+			pageOrder := make([]int, 0, len(settings.Pages))
+			for _, entry := range settings.Pages {
+				pageOrder = append(pageOrder, entry.Page)
+			}
+			sort.Ints(pageOrder)
+			currentPage := s.currentCompanionPage(r.Context(), resolvedRoleID)
+			currentIndex := 0
+			for i, pageNo := range pageOrder {
+				if pageNo == currentPage {
+					currentIndex = i
+					break
+				}
+			}
+			offset := 1
+			if in.Data.Command == "page_down" {
+				offset = -1
+			}
+			nextIndex := currentIndex + offset
+			if nextIndex < 0 {
+				nextIndex = 0
+			}
+			if nextIndex >= len(pageOrder) {
+				nextIndex = len(pageOrder) - 1
+			}
+			if len(pageOrder) > 0 {
+				s.setCompanionCurrentPage(resolvedRoleID, pageOrder[nextIndex])
+				s.emitCompanionCurrentPageImages(r.Context(), resolvedRoleID)
+			}
+			writeCommandResult(CompanionCommandResult{
+				CommandID: commandID,
+				Command:   in.Data.Command,
+				OK:        true,
+				Status:    "executed",
+				Source:    "bridge",
+			})
+			continue
+		}
 		resolvedUsername := resolveUsername()
 		if resolvedUsername == "" {
 			writeRejected("target unavailable")
@@ -353,6 +430,73 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.Data.Command == "set_voice_mode" && in.Data.Mode == "" {
 			writeRejected("missing mode")
+			continue
+		}
+		if in.Data.Command == "toggle_listen_room" {
+			roomID := strings.TrimSpace(in.Data.TargetID)
+			if roomID == "" {
+				writeRejected("missing targetId")
+				continue
+			}
+			presence, ok := s.hub.PresenceForUsername(resolvedUsername)
+			if !ok {
+				writeRejected("target unavailable")
+				continue
+			}
+			stateKey := fmt.Sprintf("listen-bridge:%s:%s", resolvedUsername, roomID)
+			listening := false
+			for _, entry := range presence.ListenRooms {
+				if entry == roomID {
+					listening = true
+					break
+				}
+			}
+			s.companionMu.RLock()
+			if expected, ok := s.companionHeldTargets[stateKey]; ok {
+				if expected == "on" {
+					listening = true
+				} else if expected == "off" {
+					listening = false
+				}
+			}
+			s.companionMu.RUnlock()
+			nextListening := !listening
+			s.companionMu.Lock()
+			if nextListening {
+				s.companionHeldTargets[stateKey] = "on"
+			} else {
+				s.companionHeldTargets[stateKey] = "off"
+			}
+			s.companionMu.Unlock()
+
+			nextListen := make([]string, 0, len(presence.ListenRooms)+1)
+			for _, entry := range presence.ListenRooms {
+				if entry != roomID {
+					nextListen = append(nextListen, entry)
+				}
+			}
+			if nextListening {
+				nextListen = append(nextListen, roomID)
+			}
+			sent := s.hub.SendToToken(token, WSOutbound{
+				Type: "companion_command",
+				Data: CompanionCommand{
+					Command:       "set_room_matrix",
+					ListenRoomIDs: nextListen,
+					TalkRoomIDs:   append([]string(nil), presence.TalkRooms...),
+				},
+			})
+			if !sent {
+				writeRejected("failed to deliver command")
+				continue
+			}
+			writeCommandResult(CompanionCommandResult{
+				CommandID: commandID,
+				Command:   in.Data.Command,
+				OK:        true,
+				Status:    "queued",
+				Source:    "bridge",
+			})
 			continue
 		}
 		sent := s.hub.SendToToken(token, WSOutbound{
@@ -666,28 +810,64 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "TALK", false: "IDLE"}[phase == "down"], Channel: targetID})
 		return res
 	case StreamDeckActionTypeListenRoom:
+		roomID := strings.TrimSpace(button.Action.RoomID)
+		if roomID == "" {
+			result.Error = "roomId is required"
+			return result
+		}
 		if phase != "down" {
-			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoomID)})
+			_ = s.consumeCompanionHeldTarget(holdKey)
+			stillListening := false
+			for _, entry := range presence.ListenRooms {
+				if entry == roomID {
+					stillListening = true
+					break
+				}
+			}
+			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[stillListening], Channel: roomID})
 			result.OK = true
 			result.Status = "executed"
 			return result
 		}
-		roomID := strings.TrimSpace(button.Action.RoomID)
-		nextListen := append([]string(nil), presence.ListenRooms...)
-		found := false
-		filtered := make([]string, 0, len(nextListen))
-		for _, entry := range nextListen {
+
+		s.rememberCompanionHeldTarget(holdKey, roomID)
+		stateKey := fmt.Sprintf("listen-toggle:%s", holdKey)
+		currentListening := false
+		for _, entry := range presence.ListenRooms {
 			if entry == roomID {
-				found = true
-				continue
+				currentListening = true
+				break
 			}
-			filtered = append(filtered, entry)
 		}
-		if !found && roomID != "" {
+		s.companionMu.RLock()
+		if expected, ok := s.companionHeldTargets[stateKey]; ok {
+			if expected == "on" {
+				currentListening = true
+			} else if expected == "off" {
+				currentListening = false
+			}
+		}
+		s.companionMu.RUnlock()
+		nextListening := !currentListening
+		s.companionMu.Lock()
+		if nextListening {
+			s.companionHeldTargets[stateKey] = "on"
+		} else {
+			s.companionHeldTargets[stateKey] = "off"
+		}
+		s.companionMu.Unlock()
+
+		filtered := make([]string, 0, len(presence.ListenRooms)+1)
+		for _, entry := range presence.ListenRooms {
+			if entry != roomID {
+				filtered = append(filtered, entry)
+			}
+		}
+		if nextListening {
 			filtered = append(filtered, roomID)
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: filtered, TalkRoomIDs: append([]string(nil), presence.TalkRooms...)})
-		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[!found && roomID != ""], Channel: roomID})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[nextListening], Channel: roomID})
 		return res
 	case StreamDeckActionTypeCallRoom:
 		if phase != "down" {

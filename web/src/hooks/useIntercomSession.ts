@@ -69,6 +69,8 @@ type WsMessage =
         volumeDelta?: number;
         listenRoomIds?: string[];
         talkRoomIds?: string[];
+        brightness?: number;
+        pageNumber?: number;
       };
     }
   | { type: "webrtc_offer"; data: { sdp: string } }
@@ -222,6 +224,10 @@ export type UseIntercomSessionOptions = {
   >;
   onRefreshAudioDevices: () => Promise<void>;
   onSessionRevoked: () => void;
+  onStreamDeckHardwareCommand?: (cmd: {
+    command: string;
+    brightness?: number;
+  }) => void;
 };
 
 export type UseIntercomSessionResult = {
@@ -332,6 +338,7 @@ export function useIntercomSession({
   onUpdatePublicData,
   onRefreshAudioDevices,
   onSessionRevoked,
+  onStreamDeckHardwareCommand,
 }: UseIntercomSessionOptions): UseIntercomSessionResult {
   const forcePttOnMobile = isMobileClient();
   const resolveVoiceModeForClient = (
@@ -1658,6 +1665,18 @@ export function useIntercomSession({
                 delta,
               ),
             );
+            ackSuccess();
+            return;
+          }
+          if (
+            msg.data.command === "set_streamdeck_brightness" ||
+            msg.data.command === "clear_streamdeck_panel" ||
+            msg.data.command === "reset_streamdeck"
+          ) {
+            onStreamDeckHardwareCommand?.({
+              command: msg.data.command,
+              brightness: msg.data.brightness,
+            });
             ackSuccess();
             return;
           }
