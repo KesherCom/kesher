@@ -990,6 +990,18 @@ func (h *Hub) LatestTokenForUsername(username string) (string, bool) {
 	return selectedToken, true
 }
 
+func (h *Hub) SessionCountForUsername(username string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	count := 0
+	for _, c := range h.clients {
+		if c.user.Username == username {
+			count++
+		}
+	}
+	return count
+}
+
 func (h *Hub) PresenceForUsername(username string) (PresenceState, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

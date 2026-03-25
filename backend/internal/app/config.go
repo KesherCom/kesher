@@ -38,6 +38,7 @@ type Config struct {
 	TelegramWebhookSecret       string
 	TelegramMode                string // "polling" (default) or "webhook"
 	CompanionSharedSecret       string
+	CompanionAllowedUsernames   []string
 }
 type fileConfig struct {
 	Addr                               string   `yaml:"app_addr"`
@@ -66,6 +67,7 @@ type fileConfig struct {
 	TelegramWebhookSecret              string   `yaml:"telegram_webhook_secret"`
 	TelegramMode                       string   `yaml:"telegram_mode"`
 	CompanionSharedSecret              string   `yaml:"companion_shared_secret"`
+	CompanionAllowedUsernames          []string `yaml:"companion_allowed_usernames"`
 }
 
 func getEnvWithPresence(k, fallback string) (string, bool) {
@@ -104,6 +106,7 @@ func defaultConfig() Config {
 		TelegramWebhookSecret:       "",
 		TelegramMode:                "polling",
 		CompanionSharedSecret:       "",
+		CompanionAllowedUsernames:   nil,
 	}
 }
 
@@ -231,6 +234,9 @@ func loadConfigFromFile(path string) (Config, error) {
 	if fileCfg.CompanionSharedSecret != "" {
 		cfg.CompanionSharedSecret = fileCfg.CompanionSharedSecret
 	}
+	if len(fileCfg.CompanionAllowedUsernames) > 0 {
+		cfg.CompanionAllowedUsernames = append([]string{}, splitCSV(strings.Join(fileCfg.CompanionAllowedUsernames, ","))...)
+	}
 	return cfg, nil
 }
 
@@ -261,11 +267,12 @@ func loadConfigFromEnv() Config {
 		CertMagicPropagationTimeout: time.Duration(
 			getEnvInt("CERTMAGIC_PROPAGATION_TIMEOUT_SECONDS", 120),
 		) * time.Second,
-		CertMagicResolvers:    splitCSV(getEnv("CERTMAGIC_DNS_RESOLVERS", "")),
-		TelegramBotToken:      getEnv("TELEGRAM_BOT_TOKEN", ""),
-		TelegramWebhookSecret: getEnv("TELEGRAM_WEBHOOK_SECRET", ""),
-		TelegramMode:          getEnv("TELEGRAM_MODE", "polling"),
-		CompanionSharedSecret: getEnv("COMPANION_SHARED_SECRET", ""),
+		CertMagicResolvers:        splitCSV(getEnv("CERTMAGIC_DNS_RESOLVERS", "")),
+		TelegramBotToken:          getEnv("TELEGRAM_BOT_TOKEN", ""),
+		TelegramWebhookSecret:     getEnv("TELEGRAM_WEBHOOK_SECRET", ""),
+		TelegramMode:              getEnv("TELEGRAM_MODE", "polling"),
+		CompanionSharedSecret:     getEnv("COMPANION_SHARED_SECRET", ""),
+		CompanionAllowedUsernames: splitCSV(getEnv("COMPANION_ALLOWED_USERNAMES", "")),
 	}
 }
 

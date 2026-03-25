@@ -156,9 +156,9 @@ func (s *Store) currentConfigurationState(ctx context.Context) (configurationSta
 }
 
 func (s *Store) ListUserStreamDeckSettingsByUsername(ctx context.Context) ([]ConfigurationUserStreamDeckSettings, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT users.username, user_stream_deck_settings.settings_json
-		FROM user_stream_deck_settings
-		JOIN users ON users.id = user_stream_deck_settings.user_id
+	rows, err := s.db.QueryContext(ctx, `SELECT users.username, role_stream_deck_settings.settings_json
+		FROM role_stream_deck_settings
+		JOIN users ON users.role_id = role_stream_deck_settings.role_id
 		ORDER BY users.username`)
 	if err != nil {
 		return nil, err
@@ -624,7 +624,7 @@ func (s *Store) ReplaceConfiguration(ctx context.Context, state configurationSta
 	}
 
 	if rewriteStreamDeck {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM user_stream_deck_settings`); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM role_stream_deck_settings`); err != nil {
 			return err
 		}
 		now := time.Now().Unix()
@@ -633,8 +633,9 @@ func (s *Store) ReplaceConfiguration(ctx context.Context, state configurationSta
 			if err != nil {
 				return err
 			}
-			result, err := tx.ExecContext(ctx, `INSERT INTO user_stream_deck_settings (user_id, settings_json, created_at, updated_at)
-				SELECT users.id, ?, ?, ? FROM users WHERE users.username = ?`,
+			result, err := tx.ExecContext(ctx, `INSERT INTO role_stream_deck_settings (role_id, settings_json, created_at, updated_at)
+				SELECT users.role_id, ?, ?, ? FROM users WHERE users.username = ?
+				ON CONFLICT(role_id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at`,
 				string(settingsJSON),
 				now,
 				now,

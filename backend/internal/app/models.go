@@ -332,6 +332,8 @@ type CompanionBridgeState struct {
 	Username            string         `json:"username"`
 	Bound               bool           `json:"bound"`
 	Presence            *PresenceState `json:"presence,omitempty"`
+	SessionCount        int            `json:"sessionCount,omitempty"`
+	MultiSessionWarning bool           `json:"multiSessionWarning,omitempty"`
 	ReplyDirectUserID   string         `json:"replyDirectUserId,omitempty"`
 	ReplyDirectUsername string         `json:"replyDirectUsername,omitempty"`
 	SignalActive        bool           `json:"signalActive"`

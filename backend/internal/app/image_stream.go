@@ -533,9 +533,11 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 
 	listeningRooms := make(map[string]struct{})
 	renderUsername := ""
+	presence := PresenceState{}
 	if s.hub != nil {
 		if session, ok := s.hub.LatestRoleSession(roleID); ok {
 			renderUsername = strings.TrimSpace(session.Username)
+			presence, _ = s.hub.PresenceForUsername(renderUsername)
 			for _, roomID := range s.hub.ListenRoomsForToken(session.Token) {
 				if trimmed := strings.TrimSpace(roomID); trimmed != "" {
 					listeningRooms[trimmed] = struct{}{}
@@ -567,29 +569,26 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 
 	for i := range page.Buttons {
 		button := page.Buttons[i]
-		primary, subtitle := s.resolveButtonLabel(ctx, button)
-		if button.Action != nil && button.Action.Type == StreamDeckActionTypeReplyToCaller {
-			primary, subtitle = s.resolveReplyToCallerLabels(button, renderUsername)
-		}
-		isListening := false
-		if button.Action != nil {
+		state := s.companionButtonSnapshotState(ctx, roleID, page.Page, renderUsername, presence, button)
+		if !state.IsListening && button.Action != nil {
 			actionType := button.Action.Type
 			roomID := strings.TrimSpace(button.Action.RoomID)
 			if roomID != "" && (actionType == StreamDeckActionTypePTTRoom || actionType == StreamDeckActionTypeListenRoom) {
-				_, isListening = listeningRooms[roomID]
+				_, state.IsListening = listeningRooms[roomID]
 			}
 		}
-		state := ButtonState{
-			State:       "IDLE",
-			Label:       primary,
-			Subtitle:    subtitle,
-			Channel:     companionButtonChannel(button),
-			IsListening: isListening,
+		if strings.TrimSpace(state.Label) == "" {
+			state.Label, state.Subtitle = s.resolveButtonLabel(ctx, button)
 		}
-		if button.Action != nil {
+		if strings.TrimSpace(state.Channel) == "" {
+			state.Channel = companionButtonChannel(button)
+		}
+		if button.Action != nil && strings.TrimSpace(state.ActionType) == "" {
 			state.ActionType = string(button.Action.Type)
 		}
-		state.Color = strings.TrimSpace(button.Color)
+		if strings.TrimSpace(state.Color) == "" {
+			state.Color = strings.TrimSpace(button.Color)
+		}
 		img, renderErr := s.imageStreamCoord.renderer.RenderButtonImage(state)
 		if renderErr != nil {
 			s.logger.Warn("image snapshot render failed", "roleId", roleID, "index", button.Index, "error", renderErr)

@@ -1154,22 +1154,30 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 		if err := rows.Scan(&r.ID, &r.Name); err != nil {
 			return nil, err
 		}
-		senderRoleIDs, err := s.roomRoleIDs(ctx, "room_sender_roles", r.ID)
-		if err != nil {
-			return nil, err
-		}
-		receiverRoleIDs, err := s.roomRoleIDs(ctx, "room_receiver_roles", r.ID)
-		if err != nil {
-			return nil, err
-		}
-		forcedListenRoleIDs, err := s.roomRoleIDs(ctx, "room_forced_listen_roles", r.ID)
-		if err != nil {
-			return nil, err
-		}
-		r.SenderRoleIDs = senderRoleIDs
-		r.ReceiverRoleIDs = receiverRoleIDs
-		r.ForcedListenRoleIDs = forcedListenRoleIDs
 		rooms = append(rooms, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range rooms {
+		senderRoleIDs, err := s.roomRoleIDs(ctx, "room_sender_roles", rooms[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		receiverRoleIDs, err := s.roomRoleIDs(ctx, "room_receiver_roles", rooms[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		forcedListenRoleIDs, err := s.roomRoleIDs(ctx, "room_forced_listen_roles", rooms[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		rooms[i].SenderRoleIDs = senderRoleIDs
+		rooms[i].ReceiverRoleIDs = receiverRoleIDs
+		rooms[i].ForcedListenRoleIDs = forcedListenRoleIDs
 	}
 	return rooms, nil
 }
@@ -1189,7 +1197,16 @@ func (s *Store) ListBroadcastGroups(ctx context.Context) ([]BroadcastGroup, erro
 		if err := rows.Scan(&g.ID, &g.Name); err != nil {
 			return nil, err
 		}
-		roomRows, err := s.db.QueryContext(ctx, `SELECT room_id FROM broadcast_group_rooms WHERE broadcast_group_id = ?`, g.ID)
+		groups = append(groups, g)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range groups {
+		roomRows, err := s.db.QueryContext(ctx, `SELECT room_id FROM broadcast_group_rooms WHERE broadcast_group_id = ?`, groups[i].ID)
 		if err != nil {
 			return nil, err
 		}
@@ -1199,10 +1216,17 @@ func (s *Store) ListBroadcastGroups(ctx context.Context) ([]BroadcastGroup, erro
 				roomRows.Close()
 				return nil, err
 			}
-			g.RoomIDs = append(g.RoomIDs, rid)
+			groups[i].RoomIDs = append(groups[i].RoomIDs, rid)
 		}
-		roomRows.Close()
-		roleRows, err := s.db.QueryContext(ctx, `SELECT role_id FROM broadcast_group_roles WHERE broadcast_group_id = ? ORDER BY role_id`, g.ID)
+		if err := roomRows.Err(); err != nil {
+			roomRows.Close()
+			return nil, err
+		}
+		if err := roomRows.Close(); err != nil {
+			return nil, err
+		}
+
+		roleRows, err := s.db.QueryContext(ctx, `SELECT role_id FROM broadcast_group_roles WHERE broadcast_group_id = ? ORDER BY role_id`, groups[i].ID)
 		if err != nil {
 			return nil, err
 		}
@@ -1212,10 +1236,15 @@ func (s *Store) ListBroadcastGroups(ctx context.Context) ([]BroadcastGroup, erro
 				roleRows.Close()
 				return nil, err
 			}
-			g.AllowedRoleIDs = append(g.AllowedRoleIDs, roleID)
+			groups[i].AllowedRoleIDs = append(groups[i].AllowedRoleIDs, roleID)
 		}
-		roleRows.Close()
-		groups = append(groups, g)
+		if err := roleRows.Err(); err != nil {
+			roleRows.Close()
+			return nil, err
+		}
+		if err := roleRows.Close(); err != nil {
+			return nil, err
+		}
 	}
 	return groups, nil
 }

@@ -97,7 +97,6 @@ Nach der Installation musst du die Kesher-Instanz konfigurieren.
 | Feld | Beschreibung | Beispiel |
 |------|-------------|---------|
 | **Target role ID** | Die Rolle, die dieses Companion-Modul steuert | `Studio-A`, `Dispatcher` |
-| **Target username** | Alternative: Benutzername (Fallback, deprecated) | `operator1` |
 | **Target page override** | Zielseite für die aus Kesher synchronisierten Presets | `-1` (Kesher-Mapping), `3`, `5` |
 
 ### Konfigurationsbeispiel
@@ -108,7 +107,6 @@ Backend port:           8080
 Use TLS (wss):          ☐ (unchecked)
 Companion shared secret: (leer)
 Target role ID:         Studio-A
-Target username:        (leer)
 Target page override:   -1
 ```
 
@@ -116,6 +114,41 @@ Target page override:   -1
 - Verbindet sich mit Kesher auf `192.168.1.100:8080` ohne TLS
 - Steuert die Rolle `Studio-A`
 - Nutzt das Kesher-Backend für die Seiten-Auswahl (`-1`)
+
+Wichtig: Das Kesher-Backend akzeptiert für Discovery, Profil und Bridge nur noch `roleId`. Ein username-basierter Target-Pfad wird serverseitig nicht mehr unterstützt, auch wenn ältere Modulversionen das Feld noch anzeigen sollten.
+
+### Backend-Sicherheitsoptionen
+
+Das Backend kann Companion-Verbindungen zusätzlich absichern:
+
+| Option | Ort | Wirkung |
+|------|------|---------|
+| **Companion shared secret** | Companion-Modul + Kesher Backend | Schützt Discovery und Bridge-WebSocket per gemeinsamem Secret |
+| **companion_allowed_usernames** | Kesher Backend Config | Begrenzt Companion-Steuerung auf eine definierte Liste von Ziel-Usern |
+
+Beispiel in `config.yaml`:
+
+```yaml
+companion_shared_secret: "super-secret"
+companion_allowed_usernames:
+  - studio-a-op
+  - dispatcher-main
+```
+
+Oder per Umgebungsvariablen:
+
+```sh
+COMPANION_SHARED_SECRET=super-secret
+COMPANION_ALLOWED_USERNAMES=studio-a-op,dispatcher-main
+```
+
+Zusätzlich validiert das Backend Companion-Befehle vor der Weiterleitung gegen die bestehenden Kesher-Policies:
+
+- Talk-Rechte für Partyline-PTT und Room-Signale
+- Listen-Rechte für Listen/Room-Matrix
+- Direct-PTT/Direct-Signal nur bei erlaubter Rollenbeziehung
+- Broadcast nur für erlaubte Broadcast-Gruppen
+- Multi-Session-Warnstatus, wenn mehrere Browser-Sessions denselben User belegen
 
 ---
 
