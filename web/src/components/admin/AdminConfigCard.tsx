@@ -53,7 +53,12 @@ export function AdminConfigCard({
           refreshBootstrapData={refreshBootstrapData}
         />
 
-        <AdminUsersCard appData={appData} />
+        <AdminUsersCard
+          token={token}
+          adminPin={adminPin}
+          appData={appData}
+          refreshBootstrapData={refreshBootstrapData}
+        />
 
         <AdminRoomsCard
           token={token}

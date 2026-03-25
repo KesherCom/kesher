@@ -17,6 +17,7 @@ import type {
   TelegramAllowlistEntry,
   TelegramStatus,
   User,
+  UserWithOnlineStatus,
 } from "./types";
 import { toStringArray } from "./lib/normalize";
 
@@ -907,4 +908,31 @@ export async function resetAdminRoleStreamDeckSettings(
   if (!res.ok) throw new Error(await res.text());
   const raw = (await res.json()) as unknown;
   return normalizeStreamDeckSettings(raw);
+}
+
+export async function fetchAdminUsers(
+  token: string,
+  adminPin: string,
+): Promise<UserWithOnlineStatus[]> {
+  const res = await fetch("/api/admin/users", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+    },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<UserWithOnlineStatus[]>;
+}
+
+export async function deleteUser(
+  token: string,
+  adminPin: string,
+  userId: string,
+): Promise<void> {
+  await apiMutation(
+    `/api/admin/users/${encodeURIComponent(userId)}`,
+    token,
+    "DELETE",
+    adminPin,
+  );
 }

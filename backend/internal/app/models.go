@@ -93,6 +93,13 @@ type User struct {
 	RoleID   string `json:"roleId"`
 }
 
+type AdminUserView struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	RoleID   string `json:"roleId"`
+	Online   bool   `json:"online"`
+}
+
 type Session struct {
 	Token     string
 	UserID    string

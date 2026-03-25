@@ -1157,6 +1157,8 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/user/companion/publish", s.withAuth(s.handleUserCompanionPublish))
 	mux.HandleFunc("/api/admin/roles", s.withAuth(s.handleAdminRoles))
 	mux.HandleFunc("/api/admin/roles/", s.withAuth(s.handleAdminRoleByID))
+	mux.HandleFunc("/api/admin/users", s.withAuth(s.handleAdminUsers))
+	mux.HandleFunc("/api/admin/users/", s.withAuth(s.handleAdminUserByID))
 	mux.HandleFunc("/api/admin/rooms", s.withAuth(s.handleAdminRooms))
 	mux.HandleFunc("/api/admin/rooms/", s.withAuth(s.handleAdminRoomByID))
 	// backwards-compatible aliases using new terminology
@@ -2155,6 +2157,81 @@ func (s *Server) handleAdminRoleByID(w http.ResponseWriter, r *http.Request, ses
 		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	case http.MethodDelete:
 		if err := s.store.DeleteRole(r.Context(), roleID); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	users, err := s.store.ListUsers(r.Context())
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	activeClients := map[string]struct{}{}
+	if s.hub != nil {
+		for _, c := range s.hub.GetActiveClients(r.Context()) {
+			activeClients[c.Username] = struct{}{}
+		}
+	}
+	views := make([]AdminUserView, 0, len(users))
+	for _, u := range users {
+		_, online := activeClients[u.Username]
+		views = append(views, AdminUserView{
+			ID:       u.ID,
+			Username: u.Username,
+			RoleID:   u.RoleID,
+			Online:   online,
+		})
+	}
+	s.writeJSON(w, http.StatusOK, views)
+}
+
+func (s *Server) handleAdminUserByID(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	userID := strings.TrimPrefix(r.URL.Path, "/api/admin/users/")
+	if userID == "" || strings.Contains(userID, "/") {
+		http.Error(w, "invalid user id", http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodDelete:
+		user, err := s.store.FindUserByID(r.Context(), userID)
+		if err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		if s.hub != nil {
+			for _, c := range s.hub.GetActiveClients(r.Context()) {
+				if c.Username == user.Username {
+					http.Error(w, "user is currently active", http.StatusConflict)
+					return
+				}
+			}
+		}
+		s.sessionMu.Lock()
+		s.sessions.DeleteByUsername(user.Username)
+		s.sessionMu.Unlock()
+		if err := s.store.DeleteUser(r.Context(), userID); err != nil {
 			if s.writeStoreErr(w, err) {
 				return
 			}

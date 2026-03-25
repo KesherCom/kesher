@@ -29,6 +29,8 @@ export type BroadcastGroup = {
   allowedRoleIds: string[];
 };
 export type User = { id: string; username: string; roleId: string };
+
+export type UserWithOnlineStatus = User & { online: boolean };
 export type ConfigurationSection =
   | "roles"
   | "users"

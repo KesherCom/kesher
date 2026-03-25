@@ -689,6 +689,25 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	return users, nil
 }
 
+func (s *Store) DeleteUser(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrInvalidInput
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, error) {
 	if in.Version <= 0 {
 		in.Version = 1
