@@ -312,8 +312,8 @@ type CompanionCommand struct {
 	Signal        string   `json:"signal,omitempty"`
 	ButtonIndex   int      `json:"buttonIndex,omitempty"`
 	VolumeDelta   int      `json:"volumeDelta,omitempty"`
-	ListenRoomIDs []string `json:"listenRoomIds,omitempty"`
-	TalkRoomIDs   []string `json:"talkRoomIds,omitempty"`
+	ListenRoomIDs []string `json:"listenRoomIds"`
+	TalkRoomIDs   []string `json:"talkRoomIds"`
 	Brightness    int      `json:"brightness,omitempty"`
 	PageNumber    int      `json:"pageNumber,omitempty"`
 }
