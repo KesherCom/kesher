@@ -927,6 +927,9 @@ func (s *Server) companionButtonSnapshotState(ctx context.Context, roleID string
 	case StreamDeckActionTypePTTRoom, StreamDeckActionTypePTTSelected,
 		StreamDeckActionTypeDirectUser, StreamDeckActionTypeDirectRole,
 		StreamDeckActionTypeReplyToCaller:
+		if roomID != "" && contains(presence.ListenRooms, roomID) {
+			state.IsListening = true
+		}
 		if _, ok := s.companionHeldTarget(holdKey); ok {
 			state.State = "TALK"
 		}
@@ -949,6 +952,9 @@ func (s *Server) companionButtonSnapshotState(ctx context.Context, roleID string
 			state.IsListening = true
 		}
 	case StreamDeckActionTypeSelectTalkRoom:
+		if contains(presence.ListenRooms, roomID) {
+			state.IsListening = true
+		}
 		if contains(presence.TalkRooms, roomID) {
 			state.State = "LISTEN"
 		}
@@ -958,7 +964,7 @@ func (s *Server) companionButtonSnapshotState(ctx context.Context, roleID string
 		}
 	}
 
-	if state.State == "LISTEN" && roomID != "" {
+	if action.Type == StreamDeckActionTypeListenRoom && state.State == "LISTEN" && roomID != "" {
 		state.IsListening = true
 	}
 	if state.State == "BROADCAST" && broadcastGroupID != "" {
@@ -1201,14 +1207,28 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		if !allowed {
 			return rejectUnauthorized("not allowed to talk to room")
 		}
+		isListening := false
+		for _, entry := range presence.ListenRooms {
+			if entry == roomID {
+				isListening = true
+				break
+			}
+		}
 		if phase != "down" {
-			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "IDLE", Channel: roomID})
+			state := "IDLE"
+			for _, entry := range presence.TalkRooms {
+				if entry == roomID {
+					state = "LISTEN"
+					break
+				}
+			}
+			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: state, Channel: roomID, IsListening: isListening})
 			result.OK = true
 			result.Status = "executed"
 			return result
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: append([]string(nil), presence.ListenRooms...), TalkRoomIDs: []string{roomID}})
-		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "LISTEN", Channel: roomID})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "LISTEN", Channel: roomID, IsListening: isListening})
 		return res
 	case StreamDeckActionTypePTTSelected:
 		targetID := ""

@@ -610,6 +610,7 @@ function createButtonCanvasFromSize(
 
   if (
     (button.action?.type === "ptt_room" ||
+      button.action?.type === "select_talk_room" ||
       button.action?.type === "listen_room") &&
     button.isListening
   ) {

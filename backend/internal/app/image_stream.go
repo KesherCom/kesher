@@ -140,7 +140,7 @@ func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, erro
 		dc.Stroke()
 	}
 
-	if (actionType == string(StreamDeckActionTypePTTRoom) || actionType == string(StreamDeckActionTypeListenRoom)) && state.IsListening {
+	if (actionType == string(StreamDeckActionTypePTTRoom) || actionType == string(StreamDeckActionTypeListenRoom) || actionType == string(StreamDeckActionTypeSelectTalkRoom)) && state.IsListening {
 		stripeHeight := math.Max(6, math.Round(h*0.075))
 		dc.SetHexColor("#14c64b")
 		dc.DrawRoundedRectangle(

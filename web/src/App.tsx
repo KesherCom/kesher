@@ -407,6 +407,7 @@ export function App() {
                 }),
                 isListening:
                   (rawButton.action?.type === "ptt_room" ||
+                    rawButton.action?.type === "select_talk_room" ||
                     rawButton.action?.type === "listen_room") &&
                   !!rawButton.action.roomId &&
                   listeningRoomIds.has(rawButton.action.roomId),
