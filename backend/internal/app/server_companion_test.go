@@ -308,6 +308,162 @@ func TestCompanionButtonSnapshotStateKeepsHeldPTTRoomActive(t *testing.T) {
 	t.Fatal("did not receive snapshot image for target button")
 }
 
+func TestExecuteCompanionButtonPressPTTRoomSelectsFixedChannelBeforePTT(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if err := s.store.CreateRoom(ctx, "room-a", "Room A", []string{"source"}, []string{"source"}, nil); err != nil {
+		t.Fatalf("CreateRoom room-a failed: %v", err)
+	}
+	if err := s.store.CreateRoom(ctx, "room-b", "Room B", []string{"source"}, []string{"source"}, nil); err != nil {
+		t.Fatalf("CreateRoom room-b failed: %v", err)
+	}
+	user, err := s.store.UpsertUser(ctx, "operator", "source")
+	if err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+	session := s.sessions.Create(user)
+
+	client := &client{
+		session:      session,
+		user:         user,
+		send:         make(chan WSOutbound, 8),
+		sendPriority: make(chan WSOutbound, 8),
+		listenRooms:  map[string]struct{}{},
+		talkRooms:    map[string]struct{}{},
+	}
+	s.hub.Add(client)
+	s.hub.SetRoomMatrix(session.Token, nil, []string{"room-b"})
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePTTRoom, RoomID: "room-a"}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	down := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{Command: "press_button", ButtonIndex: 0, State: "down"})
+	if !down.OK || down.Status != "queued" {
+		t.Fatalf("expected down press to queue, got %+v", down)
+	}
+
+	firstOutbound := <-client.sendPriority
+	firstCommand, ok := firstOutbound.Data.(CompanionCommand)
+	if !ok {
+		t.Fatalf("expected CompanionCommand payload, got %T", firstOutbound.Data)
+	}
+	if firstCommand.Command != "set_room_matrix" {
+		t.Fatalf("expected first command to select talk room, got %+v", firstCommand)
+	}
+	if len(firstCommand.TalkRoomIDs) != 1 || firstCommand.TalkRoomIDs[0] != "room-a" {
+		t.Fatalf("expected fixed talk room selection [room-a], got %+v", firstCommand.TalkRoomIDs)
+	}
+
+	secondOutbound := <-client.sendPriority
+	secondCommand, ok := secondOutbound.Data.(CompanionCommand)
+	if !ok {
+		t.Fatalf("expected CompanionCommand payload, got %T", secondOutbound.Data)
+	}
+	if secondCommand.Command != "ptt" || secondCommand.TargetID != "room-a" || secondCommand.State != "ptt_start" {
+		t.Fatalf("expected room ptt_start for room-a after selection, got %+v", secondCommand)
+	}
+
+	s.hub.SetRoomMatrix(session.Token, nil, []string{"room-b"})
+
+	up := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{Command: "press_button", ButtonIndex: 0, State: "up"})
+	if !up.OK || up.Status != "queued" {
+		t.Fatalf("expected up press to queue, got %+v", up)
+	}
+
+	thirdOutbound := <-client.sendPriority
+	thirdCommand, ok := thirdOutbound.Data.(CompanionCommand)
+	if !ok {
+		t.Fatalf("expected CompanionCommand payload, got %T", thirdOutbound.Data)
+	}
+	if thirdCommand.Command != "ptt" || thirdCommand.TargetID != "room-a" || thirdCommand.State != "ptt_stop" {
+		t.Fatalf("expected ptt_stop for original fixed room-a, got %+v", thirdCommand)
+	}
+
+	if heldTarget, ok := s.companionHeldTarget("source:0:0"); ok || strings.TrimSpace(heldTarget) != "" {
+		t.Fatalf("expected held target to be cleared after release, got %q", heldTarget)
+	}
+}
+
+func TestExecuteCompanionButtonPressSelectTalkRoomSetsExclusiveSelection(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if err := s.store.CreateRoom(ctx, "room-a", "Room A", []string{"source"}, []string{"source"}, nil); err != nil {
+		t.Fatalf("CreateRoom room-a failed: %v", err)
+	}
+	if err := s.store.CreateRoom(ctx, "room-b", "Room B", []string{"source"}, []string{"source"}, nil); err != nil {
+		t.Fatalf("CreateRoom room-b failed: %v", err)
+	}
+	user, err := s.store.UpsertUser(ctx, "operator", "source")
+	if err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+	session := s.sessions.Create(user)
+
+	client := &client{
+		session:      session,
+		user:         user,
+		send:         make(chan WSOutbound, 8),
+		sendPriority: make(chan WSOutbound, 8),
+		listenRooms:  map[string]struct{}{},
+		talkRooms:    map[string]struct{}{},
+	}
+	s.hub.Add(client)
+	s.hub.SetRoomMatrix(session.Token, []string{"room-a"}, []string{"room-a"})
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeSelectTalkRoom, RoomID: "room-b"}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	down := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{Command: "press_button", ButtonIndex: 0, State: "down"})
+	if !down.OK || down.Status != "queued" {
+		t.Fatalf("expected down press to queue, got %+v", down)
+	}
+
+	firstOutbound := <-client.sendPriority
+	firstCommand, ok := firstOutbound.Data.(CompanionCommand)
+	if !ok {
+		t.Fatalf("expected CompanionCommand payload, got %T", firstOutbound.Data)
+	}
+	if firstCommand.Command != "set_room_matrix" {
+		t.Fatalf("expected set_room_matrix command, got %+v", firstCommand)
+	}
+	if len(firstCommand.ListenRoomIDs) != 1 || firstCommand.ListenRoomIDs[0] != "room-a" {
+		t.Fatalf("expected listen rooms to be preserved, got %+v", firstCommand.ListenRoomIDs)
+	}
+	if len(firstCommand.TalkRoomIDs) != 1 || firstCommand.TalkRoomIDs[0] != "room-b" {
+		t.Fatalf("expected exclusive talk room selection [room-b], got %+v", firstCommand.TalkRoomIDs)
+	}
+
+	s.hub.SetRoomMatrix(session.Token, []string{"room-a"}, []string{"room-b"})
+
+	repeat := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{Command: "press_button", ButtonIndex: 0, State: "down"})
+	if !repeat.OK || repeat.Status != "queued" {
+		t.Fatalf("expected repeat down press to stay queued, got %+v", repeat)
+	}
+
+	secondOutbound := <-client.sendPriority
+	secondCommand, ok := secondOutbound.Data.(CompanionCommand)
+	if !ok {
+		t.Fatalf("expected CompanionCommand payload, got %T", secondOutbound.Data)
+	}
+	if len(secondCommand.TalkRoomIDs) != 1 || secondCommand.TalkRoomIDs[0] != "room-b" {
+		t.Fatalf("expected repeat press to keep [room-b] selected, got %+v", secondCommand.TalkRoomIDs)
+	}
+}
+
 func TestExecuteCompanionButtonPressPTTSelectedStopsOriginalHeldTarget(t *testing.T) {
 	s := newCompanionTestServer(t)
 	ctx := context.Background()

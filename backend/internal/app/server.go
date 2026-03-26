@@ -1022,6 +1022,16 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		queued.Command = command.Command
 		return queued
 	}
+	queueBrowserCommands := func(commands ...CompanionCommand) CompanionCommandResult {
+		last := result
+		for _, next := range commands {
+			last = queueBrowserCommand(next)
+			if !last.OK {
+				return last
+			}
+		}
+		return last
+	}
 
 	rejectUnauthorized := func(reason string) CompanionCommandResult {
 		result.Error = reason
@@ -1156,6 +1166,21 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		targetID := roomID
 		if phase == "down" {
 			s.rememberCompanionHeldTarget(holdKey, roomID)
+			res := queueBrowserCommands(
+				CompanionCommand{
+					Command:       "set_room_matrix",
+					ListenRoomIDs: append([]string(nil), presence.ListenRooms...),
+					TalkRoomIDs:   []string{roomID},
+				},
+				CompanionCommand{
+					Command:  "ptt",
+					Scope:    "room",
+					TargetID: roomID,
+					State:    "ptt_start",
+				},
+			)
+			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "TALK", Channel: strings.TrimSpace(button.Action.RoomID)})
+			return res
 		} else if heldTargetID, ok := s.companionHeldTarget(holdKey); ok {
 			targetID = heldTargetID
 			_ = s.consumeCompanionHeldTarget(holdKey)
@@ -1182,21 +1207,8 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			result.Status = "executed"
 			return result
 		}
-		nextTalk := append([]string(nil), presence.TalkRooms...)
-		found := false
-		filtered := make([]string, 0, len(nextTalk))
-		for _, entry := range nextTalk {
-			if entry == roomID {
-				found = true
-				continue
-			}
-			filtered = append(filtered, entry)
-		}
-		if !found && roomID != "" {
-			filtered = append(filtered, roomID)
-		}
-		res := queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: append([]string(nil), presence.ListenRooms...), TalkRoomIDs: filtered})
-		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[!found && roomID != ""], Channel: roomID})
+		res := queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: append([]string(nil), presence.ListenRooms...), TalkRoomIDs: []string{roomID}})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "LISTEN", Channel: roomID})
 		return res
 	case StreamDeckActionTypePTTSelected:
 		targetID := ""
