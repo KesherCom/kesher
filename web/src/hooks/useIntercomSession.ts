@@ -89,6 +89,17 @@ const opusSpeechFmtpParams = [
   ["maxaveragebitrate", `${opusMaxBitrateBps}`],
 ] as const;
 
+const directRoutePriorityLevel = 3;
+const defaultRoutePriorityLevel = 1;
+const duckingGainLinear = 0.1;
+
+function clampPriorityLevel(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return defaultRoutePriorityLevel;
+  }
+  return Math.max(0, Math.min(3, Math.trunc(value)));
+}
+
 function upsertFmtpParams(existing: string): string {
   const desired = Object.fromEntries(opusSpeechFmtpParams) as Record<
     string,
@@ -510,6 +521,97 @@ export function useIntercomSession({
     const ad = appDataRef.current;
     if (!ad) return 1;
     const routes = Array.from(activeVoiceRoutesRef.current.values());
+
+    const roomPriorityByID = (roomID: string): number => {
+      const room = ad.rooms.find((entry) => entry.id === roomID);
+      return clampPriorityLevel(room?.priorityLevel);
+    };
+
+    const broadcastPriorityByID = (groupID: string): number => {
+      const group = ad.broadcastGroups.find((entry) => entry.id === groupID);
+      return clampPriorityLevel(group?.priorityLevel);
+    };
+
+    const isRouteAudibleToSelf = (route: VoiceRoute): boolean => {
+      if (route.scope === "direct") {
+        return route.targetID === ad.self.id;
+      }
+      if (route.scope === "room") {
+        return listenRoomIdsRef.current.includes(route.targetID);
+      }
+      const group = ad.broadcastGroups.find((entry) => entry.id === route.targetID);
+      if (!group) return false;
+      return (group.roomIds || []).some((roomID) =>
+        listenRoomIdsRef.current.includes(roomID),
+      );
+    };
+
+    const routePriority = (route: VoiceRoute): number => {
+      if (route.scope === "direct" && route.targetID === ad.self.id) {
+        return directRoutePriorityLevel;
+      }
+      if (route.scope === "room") {
+        return roomPriorityByID(route.targetID);
+      }
+      if (route.scope === "broadcast") {
+        return broadcastPriorityByID(route.targetID);
+      }
+      return defaultRoutePriorityLevel;
+    };
+
+    const maxPresencePriorityForSender = (senderUserID: string): number => {
+      const senderPresence = presenceRef.current.find(
+        (entry) => entry.userId === senderUserID,
+      );
+      if (
+        !senderPresence ||
+        !senderPresence.micEnabled ||
+        !Array.isArray(senderPresence.talkRooms)
+      ) {
+        return -1;
+      }
+      let maxPriority = -1;
+      for (const roomID of senderPresence.talkRooms) {
+        if (!listenRoomIdsRef.current.includes(roomID)) continue;
+        maxPriority = Math.max(maxPriority, roomPriorityByID(roomID));
+      }
+      return maxPriority;
+    };
+
+    const maxAudiblePriority = (): number => {
+      let maxPriority = -1;
+      for (const route of routes) {
+        if (!isRouteAudibleToSelf(route)) continue;
+        maxPriority = Math.max(maxPriority, routePriority(route));
+      }
+      for (const p of presenceRef.current) {
+        if (p.userId === ad.self.id) continue;
+        if (p.voiceMode !== "always_on" || !p.micEnabled) continue;
+        const senderPriority = maxPresencePriorityForSender(p.userId);
+        if (senderPriority >= 0) {
+          maxPriority = Math.max(maxPriority, senderPriority);
+        }
+      }
+      return maxPriority >= 0 ? maxPriority : defaultRoutePriorityLevel;
+    };
+
+    const applyDuckingForSource = (senderUserID: string, baseGain: number): number => {
+      const maxPriority = maxAudiblePriority();
+      let senderPriority = -1;
+      for (const route of routes) {
+        if (route.senderUserID !== senderUserID) continue;
+        if (!isRouteAudibleToSelf(route)) continue;
+        senderPriority = Math.max(senderPriority, routePriority(route));
+      }
+      if (senderPriority < 0) {
+        senderPriority = maxPresencePriorityForSender(senderUserID);
+      }
+      if (senderPriority >= 0 && senderPriority < maxPriority) {
+        return clampGainValue(baseGain * duckingGainLinear);
+      }
+      return clampGainValue(baseGain);
+    };
+
     if (!sourceUserID) {
       const directToSelfRoutes = routes.filter(
         (route) => route.scope === "direct" && route.targetID === ad.self.id,
@@ -575,7 +677,10 @@ export function useIntercomSession({
         route.targetID === ad.self.id,
     );
     if (directToSelf) {
-      return clampGainValue(directGainByUserIdRef.current[sourceUserID] ?? 1);
+      return applyDuckingForSource(
+        sourceUserID,
+        clampGainValue(directGainByUserIdRef.current[sourceUserID] ?? 1),
+      );
     }
     const senderHasActiveRoute = routes.some(
       (route) => route.senderUserID === sourceUserID,
@@ -599,8 +704,9 @@ export function useIntercomSession({
         listenRoomIdsRef.current.includes(roomID),
       );
       if (listenedTalkRooms.length > 0) {
-        return clampGainValue(
-          roomGainByIdRef.current[listenedTalkRooms[0]] ?? 1,
+        return applyDuckingForSource(
+          sourceUserID,
+          clampGainValue(roomGainByIdRef.current[listenedTalkRooms[0]] ?? 1),
         );
       }
     }
@@ -611,9 +717,12 @@ export function useIntercomSession({
         listenRoomIdsRef.current.includes(route.targetID),
     );
     if (routedRoom) {
-      return clampGainValue(roomGainByIdRef.current[routedRoom.targetID] ?? 1);
+      return applyDuckingForSource(
+        sourceUserID,
+        clampGainValue(roomGainByIdRef.current[routedRoom.targetID] ?? 1),
+      );
     }
-    return 1;
+    return applyDuckingForSource(sourceUserID, 1);
   }
 
   // Keep a stable ref so sub-hooks always call the latest version
@@ -1481,6 +1590,7 @@ export function useIntercomSession({
           setPresence((prev) =>
             samePresenceList(prev, nextPresence) ? prev : nextPresence,
           );
+          remote.applyVolumeToAllRemoteAudio();
           return;
         }
         if (msg.type === "config_updated") {
@@ -1516,6 +1626,7 @@ export function useIntercomSession({
             });
             return sameStringArray(prev, next) ? prev : next;
           });
+          remote.applyVolumeToAllRemoteAudio();
           return;
         }
         if (msg.type === "session_revoked") {

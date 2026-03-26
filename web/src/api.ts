@@ -46,6 +46,11 @@ export function normalizePublicBootstrap(data: unknown): PublicBootstrap {
         ...entry,
         id: typeof entry.id === "string" ? entry.id : "",
         name: typeof entry.name === "string" ? entry.name : "",
+        priorityLevel:
+          typeof entry.priorityLevel === "number" &&
+          Number.isFinite(entry.priorityLevel)
+            ? Math.max(0, Math.min(3, Math.trunc(entry.priorityLevel)))
+            : 1,
         senderRoleIds: toStringArray(entry.senderRoleIds),
         receiverRoleIds: toStringArray(entry.receiverRoleIds),
         forcedListenRoleIds: toStringArray(entry.forcedListenRoleIds),
@@ -57,6 +62,11 @@ export function normalizePublicBootstrap(data: unknown): PublicBootstrap {
         ...entry,
         id: typeof entry.id === "string" ? entry.id : "",
         name: typeof entry.name === "string" ? entry.name : "",
+        priorityLevel:
+          typeof entry.priorityLevel === "number" &&
+          Number.isFinite(entry.priorityLevel)
+            ? Math.max(0, Math.min(3, Math.trunc(entry.priorityLevel)))
+            : 1,
         roomIds: toStringArray(entry.roomIds),
         allowedRoleIds: toStringArray(entry.allowedRoleIds),
       };
@@ -446,6 +456,7 @@ export async function createRoom(
   payload: {
     id: string;
     name: string;
+    priorityLevel?: number;
     senderRoleIds?: string[];
     receiverRoleIds?: string[];
     forcedListenRoleIds?: string[];
@@ -459,6 +470,7 @@ export async function updateRoom(
   roomId: string,
   payload: {
     name: string;
+    priorityLevel?: number;
     senderRoleIds?: string[];
     receiverRoleIds?: string[];
     forcedListenRoleIds?: string[];
@@ -499,6 +511,7 @@ export async function createBroadcastGroup(
   payload: {
     id: string;
     name: string;
+    priorityLevel?: number;
     roomIds: string[];
     allowedRoleIds?: string[];
   },
@@ -516,7 +529,12 @@ export async function updateBroadcastGroup(
   token: string,
   adminPin: string,
   groupId: string,
-  payload: { name: string; roomIds: string[]; allowedRoleIds?: string[] },
+  payload: {
+    name: string;
+    priorityLevel?: number;
+    roomIds: string[];
+    allowedRoleIds?: string[];
+  },
 ): Promise<void> {
   await apiMutation(
     `/api/admin/broadcast-groups/${encodeURIComponent(groupId)}`,

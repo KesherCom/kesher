@@ -26,6 +26,19 @@ func hasWhitespace(value string) bool {
 
 const defaultAdminPIN = "123456"
 
+const (
+	MinPriorityLevel = 0
+	MaxPriorityLevel = 3
+	DefaultPriority  = 1
+)
+
+func normalizePriorityLevel(level int) (int, error) {
+	if level < MinPriorityLevel || level > MaxPriorityLevel {
+		return 0, ErrInvalidInput
+	}
+	return level, nil
+}
+
 type Store struct {
 	db *sql.DB
 
@@ -474,6 +487,12 @@ func (s *Store) migrate(ctx context.Context) error {
 		return err
 	}
 	if err := s.ensureColumn(ctx, "roles", "default_simple_view", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, "rooms", "priority_level", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, "broadcast_groups", "priority_level", "INTEGER NOT NULL DEFAULT 1"); err != nil {
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS telegram_mappings (
@@ -1143,7 +1162,7 @@ func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
 }
 
 func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name FROM rooms ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, priority_level FROM rooms ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -1151,7 +1170,7 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 	var rooms []Room
 	for rows.Next() {
 		var r Room
-		if err := rows.Scan(&r.ID, &r.Name); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.PriorityLevel); err != nil {
 			return nil, err
 		}
 		rooms = append(rooms, r)
@@ -1183,7 +1202,7 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 }
 
 func (s *Store) ListBroadcastGroups(ctx context.Context) ([]BroadcastGroup, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name FROM broadcast_groups ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, priority_level FROM broadcast_groups ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -1194,7 +1213,7 @@ func (s *Store) ListBroadcastGroups(ctx context.Context) ([]BroadcastGroup, erro
 			RoomIDs:        []string{},
 			AllowedRoleIDs: []string{},
 		}
-		if err := rows.Scan(&g.ID, &g.Name); err != nil {
+		if err := rows.Scan(&g.ID, &g.Name, &g.PriorityLevel); err != nil {
 			return nil, err
 		}
 		groups = append(groups, g)
@@ -1573,6 +1592,30 @@ func (s *Store) UpdateRoom(ctx context.Context, id, name string, senderRoleIDs, 
 	return nil
 }
 
+func (s *Store) SetRoomPriorityLevel(ctx context.Context, id string, priorityLevel int) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrInvalidInput
+	}
+	normalized, err := normalizePriorityLevel(priorityLevel)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE rooms SET priority_level = ? WHERE id = ?`, normalized, id)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	s.resetPolicyCaches()
+	return nil
+}
+
 // RoomPermissionEntry describes the sender/receiver/forced-listen role mapping for one room.
 type RoomPermissionEntry struct {
 	RoomID              string   `json:"roomId"`
@@ -1798,6 +1841,30 @@ func (s *Store) UpdateBroadcastGroup(ctx context.Context, id, name string, roomI
 	}
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	s.resetPolicyCaches()
+	return nil
+}
+
+func (s *Store) SetBroadcastGroupPriorityLevel(ctx context.Context, id string, priorityLevel int) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrInvalidInput
+	}
+	normalized, err := normalizePriorityLevel(priorityLevel)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE broadcast_groups SET priority_level = ? WHERE id = ?`, normalized, id)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
 	}
 	s.resetPolicyCaches()
 	return nil

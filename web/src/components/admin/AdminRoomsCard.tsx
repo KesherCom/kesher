@@ -17,6 +17,13 @@ export function AdminRoomsCard({
   appData,
   refreshBootstrapData,
 }: AdminRoomsCardProps) {
+  const priorityOptions = [
+    { value: 0, label: "Low" },
+    { value: 1, label: "Normal" },
+    { value: 2, label: "High" },
+    { value: 3, label: "Critical" },
+  ] as const;
+
   const [isOpen, setIsOpen] = useState(false);
   const {
     busy: adminBusy,
@@ -34,6 +41,7 @@ export function AdminRoomsCard({
   >([]);
   const [roomCreateForcedListenRoleIds, setRoomCreateForcedListenRoleIds] =
     useState<string[]>([]);
+  const [roomCreatePriorityLevel, setRoomCreatePriorityLevel] = useState(1);
   const [showRoomCreateForm, setShowRoomCreateForm] = useState(false);
   const [roomEditId, setRoomEditId] = useState<string | null>(null);
   const [roomEditName, setRoomEditName] = useState("");
@@ -45,6 +53,7 @@ export function AdminRoomsCard({
   >([]);
   const [roomEditForcedListenRoleIds, setRoomEditForcedListenRoleIds] =
     useState<string[]>([]);
+  const [roomEditPriorityLevel, setRoomEditPriorityLevel] = useState(1);
 
   function resetRoomCreateForm() {
     setRoomCreateId("");
@@ -52,6 +61,7 @@ export function AdminRoomsCard({
     setRoomCreateSenderRoleIds([]);
     setRoomCreateReceiverRoleIds([]);
     setRoomCreateForcedListenRoleIds([]);
+    setRoomCreatePriorityLevel(1);
   }
 
   function resetRoomEditForm() {
@@ -60,6 +70,7 @@ export function AdminRoomsCard({
     setRoomEditSenderRoleIds([]);
     setRoomEditReceiverRoleIds([]);
     setRoomEditForcedListenRoleIds([]);
+    setRoomEditPriorityLevel(1);
   }
 
   function createRoomConfig() {
@@ -70,6 +81,7 @@ export function AdminRoomsCard({
       await createRoom(token, adminPin, {
         id,
         name,
+        priorityLevel: roomCreatePriorityLevel,
         senderRoleIds: roomCreateSenderRoleIds,
         receiverRoleIds: roomCreateReceiverRoleIds,
         forcedListenRoleIds: roomCreateForcedListenRoleIds,
@@ -86,6 +98,7 @@ export function AdminRoomsCard({
     void runAdminAction(async () => {
       await updateRoom(token, adminPin, roomEditId, {
         name,
+        priorityLevel: roomEditPriorityLevel,
         senderRoleIds: roomEditSenderRoleIds,
         receiverRoleIds: roomEditReceiverRoleIds,
         forcedListenRoleIds: roomEditForcedListenRoleIds,
@@ -154,6 +167,21 @@ export function AdminRoomsCard({
                     onChange={(e) => setRoomCreateName(e.target.value)}
                     placeholder="Party line name"
                   />
+                  <label>
+                    Priority
+                    <select
+                      value={roomCreatePriorityLevel}
+                      onChange={(e) =>
+                        setRoomCreatePriorityLevel(Number(e.target.value))
+                      }
+                    >
+                      {priorityOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <button
                     onClick={createRoomConfig}
                     disabled={
@@ -213,6 +241,21 @@ export function AdminRoomsCard({
                     onChange={(e) => setRoomEditName(e.target.value)}
                     placeholder="Party line name"
                   />
+                  <label>
+                    Priority
+                    <select
+                      value={roomEditPriorityLevel}
+                      onChange={(e) =>
+                        setRoomEditPriorityLevel(Number(e.target.value))
+                      }
+                    >
+                      {priorityOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <button
                     onClick={saveRoomEdit}
                     disabled={adminBusy || !roomEditName.trim()}
@@ -270,6 +313,7 @@ export function AdminRoomsCard({
                       setRoomEditForcedListenRoleIds(
                         room.forcedListenRoleIds || [],
                       );
+                      setRoomEditPriorityLevel(room.priorityLevel ?? 1);
                     }}
                   >
                     Edit

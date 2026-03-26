@@ -75,6 +75,7 @@ type CompanionRoleUser struct {
 type Room struct {
 	ID                  string   `json:"id"`
 	Name                string   `json:"name"`
+	PriorityLevel       int      `json:"priorityLevel"`
 	SenderRoleIDs       []string `json:"senderRoleIds"`
 	ReceiverRoleIDs     []string `json:"receiverRoleIds"`
 	ForcedListenRoleIDs []string `json:"forcedListenRoleIds"`
@@ -83,6 +84,7 @@ type Room struct {
 type BroadcastGroup struct {
 	ID             string   `json:"id"`
 	Name           string   `json:"name"`
+	PriorityLevel  int      `json:"priorityLevel"`
 	RoomIDs        []string `json:"roomIds"`
 	AllowedRoleIDs []string `json:"allowedRoleIds"`
 }

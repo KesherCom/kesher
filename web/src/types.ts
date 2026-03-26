@@ -18,6 +18,7 @@ export type VersionInfo = {
 export type Room = {
   id: string;
   name: string;
+  priorityLevel?: number;
   senderRoleIds: string[];
   receiverRoleIds: string[];
   forcedListenRoleIds: string[];
@@ -25,6 +26,7 @@ export type Room = {
 export type BroadcastGroup = {
   id: string;
   name: string;
+  priorityLevel?: number;
   roomIds: string[];
   allowedRoleIds: string[];
 };

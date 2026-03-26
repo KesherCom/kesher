@@ -2806,6 +2806,7 @@ type upsertRoleRequest struct {
 type upsertRoomRequest struct {
 	ID                  string   `json:"id"`
 	Name                string   `json:"name"`
+	PriorityLevel       *int     `json:"priorityLevel,omitempty"`
 	SenderRoleIDs       []string `json:"senderRoleIds"`
 	ReceiverRoleIDs     []string `json:"receiverRoleIds"`
 	ForcedListenRoleIDs []string `json:"forcedListenRoleIds"`
@@ -2814,6 +2815,7 @@ type upsertRoomRequest struct {
 type upsertBroadcastGroupRequest struct {
 	ID             string   `json:"id"`
 	Name           string   `json:"name"`
+	PriorityLevel  *int     `json:"priorityLevel,omitempty"`
 	RoomIDs        []string `json:"roomIds"`
 	AllowedRoleIDs []string `json:"allowedRoleIds"`
 }
@@ -2973,6 +2975,31 @@ func (s *Server) handleAdminRooms(w http.ResponseWriter, r *http.Request, sessio
 			s.internalErr(w, err)
 			return
 		}
+		if req.PriorityLevel != nil {
+			if err := s.store.SetRoomPriorityLevel(r.Context(), req.ID, *req.PriorityLevel); err != nil {
+				if s.writeStoreErr(w, err) {
+					return
+				}
+				s.internalErr(w, err)
+				return
+			}
+		}
+		// Broadcast updated config to all clients
+		if s.hub != nil {
+			if roles, err := s.store.ListRoles(r.Context()); err == nil {
+				if rooms, err := s.store.ListRooms(r.Context()); err == nil {
+					if groups, err := s.store.ListBroadcastGroups(r.Context()); err == nil {
+						s.hub.BroadcastConfigUpdate(PublicBootstrapResponse{
+							Roles:           roles,
+							Rooms:           rooms,
+							BroadcastGroups: groups,
+							AckEnabled:      s.isAckEnabled(),
+							AppVersion:      GetVersionInfo(),
+						})
+					}
+				}
+			}
+		}
 		s.writeJSON(w, http.StatusCreated, map[string]bool{"ok": true})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -3001,6 +3028,31 @@ func (s *Server) handleAdminRoomByID(w http.ResponseWriter, r *http.Request, ses
 			}
 			s.internalErr(w, err)
 			return
+		}
+		if req.PriorityLevel != nil {
+			if err := s.store.SetRoomPriorityLevel(r.Context(), roomID, *req.PriorityLevel); err != nil {
+				if s.writeStoreErr(w, err) {
+					return
+				}
+				s.internalErr(w, err)
+				return
+			}
+		}
+		// Broadcast updated config to all clients
+		if s.hub != nil {
+			if roles, err := s.store.ListRoles(r.Context()); err == nil {
+				if rooms, err := s.store.ListRooms(r.Context()); err == nil {
+					if groups, err := s.store.ListBroadcastGroups(r.Context()); err == nil {
+						s.hub.BroadcastConfigUpdate(PublicBootstrapResponse{
+							Roles:           roles,
+							Rooms:           rooms,
+							BroadcastGroups: groups,
+							AckEnabled:      s.isAckEnabled(),
+							AppVersion:      GetVersionInfo(),
+						})
+					}
+				}
+			}
 		}
 		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	case http.MethodDelete:
@@ -3035,6 +3087,31 @@ func (s *Server) handleAdminBroadcastGroups(w http.ResponseWriter, r *http.Reque
 			s.internalErr(w, err)
 			return
 		}
+		if req.PriorityLevel != nil {
+			if err := s.store.SetBroadcastGroupPriorityLevel(r.Context(), req.ID, *req.PriorityLevel); err != nil {
+				if s.writeStoreErr(w, err) {
+					return
+				}
+				s.internalErr(w, err)
+				return
+			}
+		}
+		// Broadcast updated config to all clients
+		if s.hub != nil {
+			if roles, err := s.store.ListRoles(r.Context()); err == nil {
+				if rooms, err := s.store.ListRooms(r.Context()); err == nil {
+					if groups, err := s.store.ListBroadcastGroups(r.Context()); err == nil {
+						s.hub.BroadcastConfigUpdate(PublicBootstrapResponse{
+							Roles:           roles,
+							Rooms:           rooms,
+							BroadcastGroups: groups,
+							AckEnabled:      s.isAckEnabled(),
+							AppVersion:      GetVersionInfo(),
+						})
+					}
+				}
+			}
+		}
 		s.writeJSON(w, http.StatusCreated, map[string]bool{"ok": true})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -3063,6 +3140,31 @@ func (s *Server) handleAdminBroadcastGroupByID(w http.ResponseWriter, r *http.Re
 			}
 			s.internalErr(w, err)
 			return
+		}
+		if req.PriorityLevel != nil {
+			if err := s.store.SetBroadcastGroupPriorityLevel(r.Context(), groupID, *req.PriorityLevel); err != nil {
+				if s.writeStoreErr(w, err) {
+					return
+				}
+				s.internalErr(w, err)
+				return
+			}
+		}
+		// Broadcast updated config to all clients
+		if s.hub != nil {
+			if roles, err := s.store.ListRoles(r.Context()); err == nil {
+				if rooms, err := s.store.ListRooms(r.Context()); err == nil {
+					if groups, err := s.store.ListBroadcastGroups(r.Context()); err == nil {
+						s.hub.BroadcastConfigUpdate(PublicBootstrapResponse{
+							Roles:           roles,
+							Rooms:           rooms,
+							BroadcastGroups: groups,
+							AckEnabled:      s.isAckEnabled(),
+							AppVersion:      GetVersionInfo(),
+						})
+					}
+				}
+			}
 		}
 		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	case http.MethodDelete:

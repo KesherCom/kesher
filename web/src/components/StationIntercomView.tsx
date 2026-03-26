@@ -605,6 +605,35 @@ export function StationIntercomView({
     [appData.rooms, pinnedRoomIds, showPinnedOnly],
   );
 
+  // Helper: get max priority for a user based on their active talk rooms and broadcasts
+  const getMaxUserChannelPriority = (user: Presence): number | null => {
+    let maxPriority: number | null = null;
+
+    // Check talk rooms
+    for (const roomId of user.talkRooms) {
+      const room = appData.rooms.find((r) => r.id === roomId);
+      if (room) {
+        const p = room.priorityLevel ?? 1;
+        if (maxPriority === null || p > maxPriority) {
+          maxPriority = p;
+        }
+      }
+    }
+
+    // Check broadcast active
+    if (user.broadcastActive) {
+      for (const group of appData.broadcastGroups) {
+        // User is broadcast active if they're in the broadcast group or an admin
+        const p = group.priorityLevel ?? 1;
+        if (maxPriority === null || p > maxPriority) {
+          maxPriority = p;
+        }
+      }
+    }
+
+    return maxPriority;
+  };
+
   const streamDeckPageOrder = useMemo(
     () =>
       (streamDeckSettings?.pages || [])
@@ -1369,6 +1398,20 @@ export function StationIntercomView({
                       ) : null}
                       <small>Talk</small>
                       <strong>{room.name}</strong>
+                      {(() => {
+                        const p = room.priorityLevel ?? 1;
+                        if (p === 1) return null;
+                        const priorityLabels: Record<number, string> = {
+                          0: "L",
+                          2: "H",
+                          3: "C",
+                        };
+                        return (
+                          <span className={`priority-badge priority-${p}`}>
+                            {priorityLabels[p] || "?"}
+                          </span>
+                        );
+                      })()}
                     </button>
                     {showVolumeControls ? (
                       <div className="station-gain-control">
@@ -1495,6 +1538,20 @@ export function StationIntercomView({
                           ) : null}
                           <small>Direct</small>
                           <strong>{p.username}</strong>
+                          {(() => {
+                            const maxP = getMaxUserChannelPriority(p);
+                            if (maxP === null || maxP === 1) return null;
+                            const priorityLabels: Record<number, string> = {
+                              0: "L",
+                              2: "H",
+                              3: "C",
+                            };
+                            return (
+                              <span className={`priority-badge priority-${maxP}`}>
+                                {priorityLabels[maxP] || "?"}
+                              </span>
+                            );
+                          })()}
                           <em>
                             {roleNameById.get(p.roleId) ||
                               p.roleId ||
@@ -1682,7 +1739,23 @@ export function StationIntercomView({
                       {isReceivingBroadcast(group.id) ? (
                         <span className="station-broadcast-receiving">🔊</span>
                       ) : null}
-                      {group.name}
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "0.15rem" }}>
+                        <span>{group.name}</span>
+                        {(() => {
+                          const p = group.priorityLevel ?? 1;
+                          if (p === 1) return null;
+                          const priorityLabels: Record<number, string> = {
+                            0: "L",
+                            2: "H",
+                            3: "C",
+                          };
+                          return (
+                            <span className={`priority-badge priority-${p}`}>
+                              {priorityLabels[p] || "?"}
+                            </span>
+                          );
+                        })()}
+                      </div>
                     </button>
                   );
                 })}
