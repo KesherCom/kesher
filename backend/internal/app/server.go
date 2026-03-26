@@ -3690,6 +3690,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		sendPriority:    make(chan WSOutbound, 128),
 	}
 	s.hub.Add(c)
+	// Send current presence snapshot to newly connected client so they see all other users
+	s.hub.SendPresenceSnapshot(session.Token)
 	s.hub.SendChatHistorySnapshot(session.Token)
 	if err := s.media.EnsurePeer(session.Token, user); err != nil {
 		s.logger.Error("failed to initialize media peer", "error", err)
