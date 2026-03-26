@@ -1525,7 +1525,7 @@ func (s *Server) resolveReplyToCallerLabels(button StreamDeckButtonConfig, usern
 	if !ok || strings.TrimSpace(replyUsername) == "" {
 		return primary, "No active caller"
 	}
-	return primary, strings.TrimSpace(replyUsername)
+	return strings.TrimSpace(replyUsername), primary
 }
 
 // resolveButtonLabel resolves the display label and optional subtitle for a button,
