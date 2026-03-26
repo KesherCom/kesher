@@ -97,3 +97,37 @@ func TestLoadConfigFallsBackToEnvWhenNoConfigFile(t *testing.T) {
 		t.Fatalf("expected addr from env, got %q", cfg.Addr)
 	}
 }
+
+func TestLoadConfigReadsCompanionAllowedUsernamesFromEnv(t *testing.T) {
+	t.Setenv("APP_CONFIG_FILE", "")
+	t.Setenv("CONFIG_FILE", "")
+	t.Setenv("COMPANION_ALLOWED_USERNAMES", "alice,bob , carol")
+
+	cfg := loadConfigFromEnv()
+	want := []string{"alice", "bob", "carol"}
+	if !reflect.DeepEqual(cfg.CompanionAllowedUsernames, want) {
+		t.Fatalf("unexpected companion allowed usernames: got %v want %v", cfg.CompanionAllowedUsernames, want)
+	}
+}
+
+func TestLoadConfigReadsCompanionAllowedUsernamesFromYAML(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+	content := []byte(`
+companion_allowed_usernames:
+  - alice
+  - bob
+`)
+	if err := os.WriteFile(configPath, content, 0o644); err != nil {
+		t.Fatalf("failed to write temp config: %v", err)
+	}
+
+	cfg, err := loadConfigFromFile(configPath)
+	if err != nil {
+		t.Fatalf("expected config load to succeed, got: %v", err)
+	}
+	want := []string{"alice", "bob"}
+	if !reflect.DeepEqual(cfg.CompanionAllowedUsernames, want) {
+		t.Fatalf("unexpected companion allowed usernames: got %v want %v", cfg.CompanionAllowedUsernames, want)
+	}
+}

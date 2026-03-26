@@ -202,6 +202,8 @@ certmagic_dns_resolvers: []
 telegram_bot_token: ""
 telegram_webhook_secret: ""
 telegram_mode: "polling"
+companion_shared_secret: ""
+companion_allowed_usernames: []
 ```
 
 | Variable                        | Default       | Description                                                                          |
@@ -218,6 +220,8 @@ telegram_mode: "polling"
 | `PRODUCTION_MODE`               | `false`       | HTTPS on `:443` + HTTP redirect on `:80`                                             |
 | `PRODUCTION_HTTPS_ADDR`         | `:443`        | HTTPS listen address in production mode                                              |
 | `PRODUCTION_HTTP_REDIRECT_ADDR` | `:80`         | HTTP redirect address in production mode                                             |
+| `COMPANION_SHARED_SECRET`       | _(empty)_     | Optional shared secret required by Companion discovery and bridge endpoints           |
+| `COMPANION_ALLOWED_USERNAMES`   | _(empty)_     | Optional comma-separated allowlist of usernames that may be controlled by Companion   |
 
 ### CertMagic variables (when `TLS_MODE=certmagic`)
 

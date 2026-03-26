@@ -67,48 +67,12 @@ func (h *Hub) ReplyTargetForUsername(username string) (string, string, bool) {
 	return selected.lastDirectFrom, selected.lastDirectName, true
 }
 
-func (h *Hub) ReplyTargetForRoleID(roleID string) (string, string, bool) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	var selected *client
-	for _, c := range h.clients {
-		if c.session.RoleID != roleID {
-			continue
-		}
-		if selected == nil || c.connectedAt.After(selected.connectedAt) {
-			selected = c
-		}
-	}
-	if selected == nil || selected.lastDirectFrom == "" {
-		return "", "", false
-	}
-	return selected.lastDirectFrom, selected.lastDirectName, true
-}
-
 func (h *Hub) SignalStateForUsername(username string) (string, string, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	var selected *client
 	for _, c := range h.clients {
 		if c.user.Username != username {
-			continue
-		}
-		if selected == nil || c.connectedAt.After(selected.connectedAt) {
-			selected = c
-		}
-	}
-	if selected == nil || time.Now().After(selected.signalUntil) || selected.signalFrom == "" {
-		return "", "", false
-	}
-	return selected.signalFrom, selected.signalMessage, true
-}
-
-func (h *Hub) SignalStateForRoleID(roleID string) (string, string, bool) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	var selected *client
-	for _, c := range h.clients {
-		if c.session.RoleID != roleID {
 			continue
 		}
 		if selected == nil || c.connectedAt.After(selected.connectedAt) {
@@ -622,7 +586,8 @@ func (h *Hub) Add(c *client) {
 	}
 	h.clients[c.session.Token] = c
 	h.mu.Unlock()
-	h.broadcastPresence()
+	// Use forced broadcast for new connections to ensure all clients see the new user immediately
+	h.broadcastPresenceForced()
 }
 
 func (h *Hub) SetBroadcastActive(token, groupID string, enabled bool) {
@@ -1026,24 +991,16 @@ func (h *Hub) LatestTokenForUsername(username string) (string, bool) {
 	return selectedToken, true
 }
 
-func (h *Hub) LatestTokenForRoleID(roleID string) (string, bool) {
+func (h *Hub) SessionCountForUsername(username string) int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	var selectedToken string
-	var selectedAt time.Time
-	for token, c := range h.clients {
-		if c.session.RoleID != roleID {
-			continue
-		}
-		if selectedToken == "" || c.connectedAt.After(selectedAt) {
-			selectedToken = token
-			selectedAt = c.connectedAt
+	count := 0
+	for _, c := range h.clients {
+		if c.user.Username == username {
+			count++
 		}
 	}
-	if selectedToken == "" {
-		return "", false
-	}
-	return selectedToken, true
+	return count
 }
 
 func (h *Hub) PresenceForUsername(username string) (PresenceState, bool) {
@@ -1052,33 +1009,6 @@ func (h *Hub) PresenceForUsername(username string) (PresenceState, bool) {
 	var selected *client
 	for _, c := range h.clients {
 		if c.user.Username != username {
-			continue
-		}
-		if selected == nil || c.connectedAt.After(selected.connectedAt) {
-			selected = c
-		}
-	}
-	if selected == nil {
-		return PresenceState{}, false
-	}
-	return PresenceState{
-		UserID:          selected.user.ID,
-		Username:        selected.user.Username,
-		RoleID:          selected.user.RoleID,
-		ListenRooms:     roomSetToSortedSlice(selected.listenRooms),
-		TalkRooms:       roomSetToSortedSlice(selected.talkRooms),
-		VoiceMode:       selected.voiceMode,
-		MicEnabled:      selected.micEnabled,
-		BroadcastActive: len(selected.broadcastGroups) > 0,
-	}, true
-}
-
-func (h *Hub) PresenceForRoleID(roleID string) (PresenceState, bool) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	var selected *client
-	for _, c := range h.clients {
-		if c.session.RoleID != roleID {
 			continue
 		}
 		if selected == nil || c.connectedAt.After(selected.connectedAt) {
@@ -1172,6 +1102,85 @@ func (h *Hub) broadcastPresence() {
 		default:
 		}
 	}
+}
+
+// broadcastPresenceForced sends presence update to all clients without hash deduplication.
+// This ensures new clients are immediately visible to all other connected clients.
+func (h *Hub) broadcastPresenceForced() {
+	h.mu.RLock()
+	var list []PresenceState
+	for _, c := range h.clients {
+		list = append(list, PresenceState{
+			UserID:          c.user.ID,
+			Username:        c.user.Username,
+			RoleID:          c.user.RoleID,
+			ListenRooms:     roomSetToSortedSlice(c.listenRooms),
+			TalkRooms:       roomSetToSortedSlice(c.talkRooms),
+			VoiceMode:       c.voiceMode,
+			MicEnabled:      c.micEnabled,
+			BroadcastActive: len(c.broadcastGroups) > 0,
+		})
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].Username != list[j].Username {
+			return list[i].Username < list[j].Username
+		}
+		return list[i].UserID < list[j].UserID
+	})
+	// Update hash for next deduplication
+	snapshotHash := hashPresenceSnapshot(list)
+	h.presenceSnapshotMu.Lock()
+	h.hasLastPresenceHash = true
+	h.lastPresenceHash = snapshotHash
+	h.presenceSnapshotMu.Unlock()
+	h.presenceBroadcasts.Add(1)
+	msg := WSOutbound{Type: "presence", Data: list}
+	subscribers := make([]chan []PresenceState, 0, len(h.presenceSubscribers))
+	for ch := range h.presenceSubscribers {
+		subscribers = append(subscribers, ch)
+	}
+	for _, c := range h.clients {
+		h.enqueueOutbound(c, msg)
+	}
+	h.mu.RUnlock()
+	for _, ch := range subscribers {
+		select {
+		case ch <- list:
+		default:
+		}
+	}
+}
+
+// SendPresenceSnapshot sends the current presence state to a specific client.
+func (h *Hub) SendPresenceSnapshot(token string) {
+	h.mu.RLock()
+	targetClient, ok := h.clients[token]
+	if !ok {
+		h.mu.RUnlock()
+		return
+	}
+	var list []PresenceState
+	for _, c := range h.clients {
+		list = append(list, PresenceState{
+			UserID:          c.user.ID,
+			Username:        c.user.Username,
+			RoleID:          c.user.RoleID,
+			ListenRooms:     roomSetToSortedSlice(c.listenRooms),
+			TalkRooms:       roomSetToSortedSlice(c.talkRooms),
+			VoiceMode:       c.voiceMode,
+			MicEnabled:      c.micEnabled,
+			BroadcastActive: len(c.broadcastGroups) > 0,
+		})
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].Username != list[j].Username {
+			return list[i].Username < list[j].Username
+		}
+		return list[i].UserID < list[j].UserID
+	})
+	msg := WSOutbound{Type: "presence", Data: list}
+	h.enqueueOutbound(targetClient, msg)
+	h.mu.RUnlock()
 }
 
 func (h *Hub) BroadcastConfigUpdate(data PublicBootstrapResponse) {

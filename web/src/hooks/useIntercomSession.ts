@@ -9,6 +9,7 @@ import {
 } from "../lib/intercom";
 import { normalizePresenceList, samePresenceList } from "../lib/presence";
 import { clampGainValue } from "../app/settings";
+import { gainWithDbDelta } from "../lib/streamDeckBridge";
 import {
   sameStringArray,
   sameStringSet,
@@ -58,14 +59,18 @@ type WsMessage =
   | {
       type: "companion_command";
       data: {
+        commandId?: string;
         command: string;
         mode?: "always_on" | "ptt";
         scope?: "direct" | "room" | "broadcast";
         targetId?: string;
         state?: "ptt_start" | "ptt_stop";
         signal?: string;
+        volumeDelta?: number;
         listenRoomIds?: string[];
         talkRoomIds?: string[];
+        brightness?: number;
+        pageNumber?: number;
       };
     }
   | { type: "webrtc_offer"; data: { sdp: string } }
@@ -83,6 +88,17 @@ const opusSpeechFmtpParams = [
   ["usedtx", "1"],
   ["maxaveragebitrate", `${opusMaxBitrateBps}`],
 ] as const;
+
+const directRoutePriorityLevel = 3;
+const defaultRoutePriorityLevel = 1;
+const duckingGainLinear = 0.1;
+
+function clampPriorityLevel(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return defaultRoutePriorityLevel;
+  }
+  return Math.max(0, Math.min(3, Math.trunc(value)));
+}
 
 function upsertFmtpParams(existing: string): string {
   const desired = Object.fromEntries(opusSpeechFmtpParams) as Record<
@@ -204,6 +220,7 @@ export type UseIntercomSessionOptions = {
   isUserSettingsOpen: boolean;
   isUserSettingsOpenRef: React.MutableRefObject<boolean>;
   selectedInputGainFor: (deviceId: string) => number;
+  onInputGainChange: (deviceId: string, gain: number) => void;
 
   // Initial room matrix from session storage
   initialListenRoomIds: string[];
@@ -218,6 +235,10 @@ export type UseIntercomSessionOptions = {
   >;
   onRefreshAudioDevices: () => Promise<void>;
   onSessionRevoked: () => void;
+  onStreamDeckHardwareCommand?: (cmd: {
+    command: string;
+    brightness?: number;
+  }) => void;
 };
 
 export type UseIntercomSessionResult = {
@@ -245,6 +266,12 @@ export type UseIntercomSessionResult = {
   incomingAudioActive: boolean;
   activeVoiceRoutes: VoiceRoute[];
   incomingAttention: { title: string; detail: string } | null;
+  lastCompanionCommand: {
+    command: string;
+    status: "executing" | "executed" | "rejected" | "failed";
+    error?: string;
+    at: number;
+  } | null;
   attentionFlashKey: number;
   voiceMode: "always_on" | "ptt";
   voiceModeRef: React.RefObject<"always_on" | "ptt">;
@@ -313,6 +340,7 @@ export function useIntercomSession({
   isUserSettingsOpen,
   isUserSettingsOpenRef,
   selectedInputGainFor,
+  onInputGainChange,
   initialListenRoomIds,
   initialTalkRoomIds,
   hadStoredSessionSettings,
@@ -321,6 +349,7 @@ export function useIntercomSession({
   onUpdatePublicData,
   onRefreshAudioDevices,
   onSessionRevoked,
+  onStreamDeckHardwareCommand,
 }: UseIntercomSessionOptions): UseIntercomSessionResult {
   const forcePttOnMobile = isMobileClient();
   const resolveVoiceModeForClient = (
@@ -360,6 +389,12 @@ export function useIntercomSession({
   const [incomingAttention, setIncomingAttention] = useState<{
     title: string;
     detail: string;
+  } | null>(null);
+  const [lastCompanionCommand, setLastCompanionCommand] = useState<{
+    command: string;
+    status: "executing" | "executed" | "rejected" | "failed";
+    error?: string;
+    at: number;
   } | null>(null);
   const [attentionFlashKey, setAttentionFlashKey] = useState(0);
   const [voiceMode, setVoiceMode] = useState<"always_on" | "ptt">(
@@ -486,6 +521,97 @@ export function useIntercomSession({
     const ad = appDataRef.current;
     if (!ad) return 1;
     const routes = Array.from(activeVoiceRoutesRef.current.values());
+
+    const roomPriorityByID = (roomID: string): number => {
+      const room = ad.rooms.find((entry) => entry.id === roomID);
+      return clampPriorityLevel(room?.priorityLevel);
+    };
+
+    const broadcastPriorityByID = (groupID: string): number => {
+      const group = ad.broadcastGroups.find((entry) => entry.id === groupID);
+      return clampPriorityLevel(group?.priorityLevel);
+    };
+
+    const isRouteAudibleToSelf = (route: VoiceRoute): boolean => {
+      if (route.scope === "direct") {
+        return route.targetID === ad.self.id;
+      }
+      if (route.scope === "room") {
+        return listenRoomIdsRef.current.includes(route.targetID);
+      }
+      const group = ad.broadcastGroups.find((entry) => entry.id === route.targetID);
+      if (!group) return false;
+      return (group.roomIds || []).some((roomID) =>
+        listenRoomIdsRef.current.includes(roomID),
+      );
+    };
+
+    const routePriority = (route: VoiceRoute): number => {
+      if (route.scope === "direct" && route.targetID === ad.self.id) {
+        return directRoutePriorityLevel;
+      }
+      if (route.scope === "room") {
+        return roomPriorityByID(route.targetID);
+      }
+      if (route.scope === "broadcast") {
+        return broadcastPriorityByID(route.targetID);
+      }
+      return defaultRoutePriorityLevel;
+    };
+
+    const maxPresencePriorityForSender = (senderUserID: string): number => {
+      const senderPresence = presenceRef.current.find(
+        (entry) => entry.userId === senderUserID,
+      );
+      if (
+        !senderPresence ||
+        !senderPresence.micEnabled ||
+        !Array.isArray(senderPresence.talkRooms)
+      ) {
+        return -1;
+      }
+      let maxPriority = -1;
+      for (const roomID of senderPresence.talkRooms) {
+        if (!listenRoomIdsRef.current.includes(roomID)) continue;
+        maxPriority = Math.max(maxPriority, roomPriorityByID(roomID));
+      }
+      return maxPriority;
+    };
+
+    const maxAudiblePriority = (): number => {
+      let maxPriority = -1;
+      for (const route of routes) {
+        if (!isRouteAudibleToSelf(route)) continue;
+        maxPriority = Math.max(maxPriority, routePriority(route));
+      }
+      for (const p of presenceRef.current) {
+        if (p.userId === ad.self.id) continue;
+        if (p.voiceMode !== "always_on" || !p.micEnabled) continue;
+        const senderPriority = maxPresencePriorityForSender(p.userId);
+        if (senderPriority >= 0) {
+          maxPriority = Math.max(maxPriority, senderPriority);
+        }
+      }
+      return maxPriority >= 0 ? maxPriority : defaultRoutePriorityLevel;
+    };
+
+    const applyDuckingForSource = (senderUserID: string, baseGain: number): number => {
+      const maxPriority = maxAudiblePriority();
+      let senderPriority = -1;
+      for (const route of routes) {
+        if (route.senderUserID !== senderUserID) continue;
+        if (!isRouteAudibleToSelf(route)) continue;
+        senderPriority = Math.max(senderPriority, routePriority(route));
+      }
+      if (senderPriority < 0) {
+        senderPriority = maxPresencePriorityForSender(senderUserID);
+      }
+      if (senderPriority >= 0 && senderPriority < maxPriority) {
+        return clampGainValue(baseGain * duckingGainLinear);
+      }
+      return clampGainValue(baseGain);
+    };
+
     if (!sourceUserID) {
       const directToSelfRoutes = routes.filter(
         (route) => route.scope === "direct" && route.targetID === ad.self.id,
@@ -551,7 +677,10 @@ export function useIntercomSession({
         route.targetID === ad.self.id,
     );
     if (directToSelf) {
-      return clampGainValue(directGainByUserIdRef.current[sourceUserID] ?? 1);
+      return applyDuckingForSource(
+        sourceUserID,
+        clampGainValue(directGainByUserIdRef.current[sourceUserID] ?? 1),
+      );
     }
     const senderHasActiveRoute = routes.some(
       (route) => route.senderUserID === sourceUserID,
@@ -575,8 +704,9 @@ export function useIntercomSession({
         listenRoomIdsRef.current.includes(roomID),
       );
       if (listenedTalkRooms.length > 0) {
-        return clampGainValue(
-          roomGainByIdRef.current[listenedTalkRooms[0]] ?? 1,
+        return applyDuckingForSource(
+          sourceUserID,
+          clampGainValue(roomGainByIdRef.current[listenedTalkRooms[0]] ?? 1),
         );
       }
     }
@@ -587,9 +717,12 @@ export function useIntercomSession({
         listenRoomIdsRef.current.includes(route.targetID),
     );
     if (routedRoom) {
-      return clampGainValue(roomGainByIdRef.current[routedRoom.targetID] ?? 1);
+      return applyDuckingForSource(
+        sourceUserID,
+        clampGainValue(roomGainByIdRef.current[routedRoom.targetID] ?? 1),
+      );
     }
-    return 1;
+    return applyDuckingForSource(sourceUserID, 1);
   }
 
   // Keep a stable ref so sub-hooks always call the latest version
@@ -985,6 +1118,32 @@ export function useIntercomSession({
       JSON.stringify({
         type: "signal",
         data: { scope: scopeValue, targetId: scopedTargetId, signal },
+      }),
+    );
+  }
+
+  function sendCompanionCommandResult(
+    commandID: string,
+    command: string,
+    ok: boolean,
+    status: "executed" | "rejected" | "failed",
+    error?: string,
+  ) {
+    if (!commandID || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    wsRef.current.send(
+      JSON.stringify({
+        type: "companion_command_result",
+        data: {
+          commandId: commandID,
+          command,
+          ok,
+          status,
+          error,
+          source: "browser",
+          timestamp: Date.now(),
+        },
       }),
     );
   }
@@ -1431,6 +1590,7 @@ export function useIntercomSession({
           setPresence((prev) =>
             samePresenceList(prev, nextPresence) ? prev : nextPresence,
           );
+          remote.applyVolumeToAllRemoteAudio();
           return;
         }
         if (msg.type === "config_updated") {
@@ -1466,6 +1626,7 @@ export function useIntercomSession({
             });
             return sameStringArray(prev, next) ? prev : next;
           });
+          remote.applyVolumeToAllRemoteAudio();
           return;
         }
         if (msg.type === "session_revoked") {
@@ -1479,8 +1640,43 @@ export function useIntercomSession({
           return;
         }
         if (msg.type === "companion_command") {
+          const commandID = String(msg.data.commandId || "").trim();
+          const command = String(msg.data.command || "");
+          setLastCompanionCommand({
+            command,
+            status: "executing",
+            at: Date.now(),
+          });
+          const ackSuccess = () => {
+            setLastCompanionCommand({
+              command,
+              status: "executed",
+              at: Date.now(),
+            });
+            sendCompanionCommandResult(commandID, command, true, "executed");
+          };
+          const ackRejected = (error: string) => {
+            setLastCompanionCommand({
+              command,
+              status: "rejected",
+              error,
+              at: Date.now(),
+            });
+            sendCompanionCommandResult(commandID, command, false, "rejected", error);
+          };
+          const ackFailed = (error: string) => {
+            setLastCompanionCommand({
+              command,
+              status: "failed",
+              error,
+              at: Date.now(),
+            });
+            sendCompanionCommandResult(commandID, command, false, "failed", error);
+          };
+
           if (msg.data.command === "set_voice_mode" && msg.data.mode) {
             setAlwaysOn(msg.data.mode === "always_on");
+            ackSuccess();
             return;
           }
           if (msg.data.command === "ptt") {
@@ -1513,9 +1709,12 @@ export function useIntercomSession({
                 );
               }
             }
-            if (resolvedTargetId) {
-              sendScopedVoiceState(nextScope, resolvedTargetId, desiredState);
+            if (!resolvedTargetId) {
+              ackRejected("missing targetId");
+              return;
             }
+            sendScopedVoiceState(nextScope, resolvedTargetId, desiredState);
+            ackSuccess();
             return;
           }
           if (msg.data.command === "signal") {
@@ -1528,9 +1727,16 @@ export function useIntercomSession({
                     talkRoomIdsRef.current,
                   )
                 : "");
-            if (resolvedTargetId && msg.data.signal) {
-              sendScopedSignal(nextScope, resolvedTargetId, msg.data.signal);
+            if (!resolvedTargetId) {
+              ackRejected("missing targetId");
+              return;
             }
+            if (!msg.data.signal) {
+              ackRejected("missing signal");
+              return;
+            }
+            sendScopedSignal(nextScope, resolvedTargetId, msg.data.signal);
+            ackSuccess();
             return;
           }
           if (msg.data.command === "set_room_matrix") {
@@ -1554,8 +1760,38 @@ export function useIntercomSession({
                 }),
               );
             }
+            ackSuccess();
             return;
           }
+          if (msg.data.command === "input_gain_delta") {
+            const delta = Number(msg.data.volumeDelta || 0);
+            if (!Number.isFinite(delta) || delta === 0) {
+              ackRejected("missing volumeDelta");
+              return;
+            }
+            onInputGainChange(
+              selectedInputDeviceIdRef.current,
+              gainWithDbDelta(
+                selectedInputGainFor(selectedInputDeviceIdRef.current),
+                delta,
+              ),
+            );
+            ackSuccess();
+            return;
+          }
+          if (
+            msg.data.command === "set_streamdeck_brightness" ||
+            msg.data.command === "clear_streamdeck_panel" ||
+            msg.data.command === "reset_streamdeck"
+          ) {
+            onStreamDeckHardwareCommand?.({
+              command: msg.data.command,
+              brightness: msg.data.brightness,
+            });
+            ackSuccess();
+            return;
+          }
+          ackFailed("unsupported command");
           return;
         }
         if (msg.type === "webrtc_offer") {
@@ -2004,6 +2240,7 @@ export function useIntercomSession({
     incomingAudioActive: remote.incomingAudioActive,
     activeVoiceRoutes,
     incomingAttention,
+    lastCompanionCommand,
     attentionFlashKey,
     voiceMode,
     voiceModeRef,

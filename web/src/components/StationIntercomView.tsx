@@ -2,14 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Bootstrap,
   BroadcastGroup,
+  CompanionProfileResponse,
   Presence,
   StreamDeckActionType,
   StreamDeckButtonConfig,
   StreamDeckSettings,
 } from "../types";
 import type { KeyboardShortcutSettings } from "../app/settings";
+import { renderStreamDeckPreviewImages } from "../api";
 import { createHoldButtonProps } from "../lib/holdButton";
-import { createStreamDeckButtonPreviewDataUrl } from "../lib/streamDeckHardwareFeedback";
 import { withResolvedStreamDeckButtonLabel } from "../lib/streamDeckLabels";
 import { sortDirectUsersByRoleAndUsername } from "../lib/users";
 import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
@@ -83,6 +84,7 @@ function normalizeImportedStreamDeckSettings(input: unknown): StreamDeckSettings
     "none",
     "ptt_room",
     "select_talk_room",
+    "select_listen_room",
     "ptt_selected",
     "listen_room",
     "call_room",
@@ -237,6 +239,21 @@ function streamDeckPreviewSignature(
   ].join("|");
 }
 
+function splitStreamDeckLabel(label?: string): { primary: string; subtitle: string } {
+  const text = (label ?? "").trim();
+  if (!text) {
+    return { primary: "", subtitle: "" };
+  }
+  const parts = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return {
+    primary: parts[0] ?? "",
+    subtitle: parts[1] ?? "",
+  };
+}
+
 function meterDbFsToPercent(dbFs: number): number {
   const clamped = Math.max(METER_DBFS_MIN, Math.min(0, dbFs));
   return ((clamped - METER_DBFS_MIN) / (0 - METER_DBFS_MIN)) * 100;
@@ -249,6 +266,7 @@ function formatDbFs(dbFs: number): string {
 }
 
 type StationIntercomViewProps = {
+  token: string;
   connectionState: "connecting" | "connected" | "reconnecting" | "offline";
   appData: Bootstrap;
   doLogout: () => void;
@@ -340,6 +358,7 @@ type StationIntercomViewProps = {
   onStreamDeckSettingsChange: (next: StreamDeckSettings) => void;
   onSaveStreamDeckSettings: () => void;
   onResetStreamDeckSettings: () => void;
+  onPublishCompanionProfile: () => Promise<CompanionProfileResponse>;
   streamDeckWebHidSupported: boolean;
   streamDeckWebHidActive: boolean;
   streamDeckWebHidBusy: boolean;
@@ -347,6 +366,12 @@ type StationIntercomViewProps = {
   onDisconnectStreamDeckWebHid: () => void;
   streamDeckBridgeConnected: boolean;
   streamDeckBridgeLastEvent: string;
+  lastCompanionCommand: {
+    command: string;
+    status: "executing" | "executed" | "rejected" | "failed";
+    error?: string;
+    at: number;
+  } | null;
   onStreamDeckTestButtonEvent: (event: {
     page: number;
     buttonIndex: number;
@@ -355,6 +380,7 @@ type StationIntercomViewProps = {
 };
 
 export function StationIntercomView({
+  token,
   connectionState,
   appData,
   doLogout,
@@ -440,6 +466,7 @@ export function StationIntercomView({
   onStreamDeckSettingsChange,
   onSaveStreamDeckSettings,
   onResetStreamDeckSettings,
+  onPublishCompanionProfile,
   streamDeckWebHidSupported,
   streamDeckWebHidActive,
   streamDeckWebHidBusy,
@@ -447,6 +474,7 @@ export function StationIntercomView({
   onDisconnectStreamDeckWebHid,
   streamDeckBridgeConnected,
   streamDeckBridgeLastEvent,
+  lastCompanionCommand,
   onStreamDeckTestButtonEvent,
 }: StationIntercomViewProps) {
   const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
@@ -459,6 +487,7 @@ export function StationIntercomView({
   const streamDeckImportInputRef = useRef<HTMLInputElement>(null);
   const [streamDeckTransferMessage, setStreamDeckTransferMessage] = useState("");
   const [streamDeckTransferError, setStreamDeckTransferError] = useState("");
+  const [companionPublishBusy, setCompanionPublishBusy] = useState(false);
   const [streamDeckPreviewPressedIndexes, setStreamDeckPreviewPressedIndexes] =
     useState<number[]>([]);
   const [activeDirectTab, setActiveDirectTab] = useState<string>("all");
@@ -592,6 +621,35 @@ export function StationIntercomView({
     [appData.rooms, pinnedRoomIds, showPinnedOnly],
   );
 
+  // Helper: get max priority for a user based on their active talk rooms and broadcasts
+  const getMaxUserChannelPriority = (user: Presence): number | null => {
+    let maxPriority: number | null = null;
+
+    // Check talk rooms
+    for (const roomId of user.talkRooms) {
+      const room = appData.rooms.find((r) => r.id === roomId);
+      if (room) {
+        const p = room.priorityLevel ?? 1;
+        if (maxPriority === null || p > maxPriority) {
+          maxPriority = p;
+        }
+      }
+    }
+
+    // Check broadcast active
+    if (user.broadcastActive) {
+      for (const group of appData.broadcastGroups) {
+        // User is broadcast active if they're in the broadcast group or an admin
+        const p = group.priorityLevel ?? 1;
+        if (maxPriority === null || p > maxPriority) {
+          maxPriority = p;
+        }
+      }
+    }
+
+    return maxPriority;
+  };
+
   const streamDeckPageOrder = useMemo(
     () =>
       (streamDeckSettings?.pages || [])
@@ -647,7 +705,10 @@ export function StationIntercomView({
     [streamDeckPreviewPressedIndexes],
   );
 
-  const streamDeckPreviewImageByIndex = useMemo(() => {
+  const [streamDeckPreviewImageByIndex, setStreamDeckPreviewImageByIndex] =
+    useState<Map<number, string>>(new Map());
+
+  const streamDeckPreviewRenderInputs = useMemo(() => {
     const cache = streamDeckPreviewCacheRef.current;
     const listeningRoomIds = new Set(listenRoomIds);
     const visibleButtonIndices = new Set(
@@ -660,43 +721,135 @@ export function StationIntercomView({
       }
     }
 
-    return new Map(
-      streamDeckCurrentButtons.map((rawButton) => {
-        const resolvedButton = withResolvedStreamDeckButtonLabel(
-          rawButton,
-          streamDeckLabelLookup,
-        );
-        const button = {
-          ...resolvedButton,
-          isListening:
-            (rawButton.action?.type === "ptt_room" ||
-              rawButton.action?.type === "listen_room") &&
-            !!rawButton.action.roomId &&
-            listeningRoomIds.has(rawButton.action.roomId),
-        };
-        const pressed = streamDeckPreviewPressedSet.has(rawButton.index);
-        const signature = streamDeckPreviewSignature(button, pressed);
-        const cached = cache.get(rawButton.index);
+    return streamDeckCurrentButtons.map((rawButton) => {
+      const resolvedButton = withResolvedStreamDeckButtonLabel(
+        rawButton,
+        streamDeckLabelLookup,
+      );
+      const isListening =
+        (rawButton.action?.type === "ptt_room" ||
+          rawButton.action?.type === "select_talk_room" ||
+          rawButton.action?.type === "select_listen_room" ||
+          rawButton.action?.type === "listen_room") &&
+        !!rawButton.action.roomId &&
+        listeningRoomIds.has(rawButton.action.roomId);
+      const button = {
+        ...resolvedButton,
+        isListening,
+      };
+      const pressed = streamDeckPreviewPressedSet.has(rawButton.index);
+      const signature = streamDeckPreviewSignature(button, pressed);
+      const labels = splitStreamDeckLabel(resolvedButton.label);
+      const previewState: "IDLE" | "TALK" | "LISTEN" | "BROADCAST" = pressed
+        ? rawButton.action?.type === "broadcast_ptt"
+          ? "BROADCAST"
+          : "TALK"
+        : isListening
+          ? "LISTEN"
+          : "IDLE";
 
-        if (cached && cached.signature === signature) {
-          return [rawButton.index, cached.dataUrl] as const;
-        }
-
-        const dataUrl = createStreamDeckButtonPreviewDataUrl(button, {
-          pressed,
-          width: 112,
-          height: 112,
-        });
-        cache.set(rawButton.index, { signature, dataUrl });
-        return [rawButton.index, dataUrl] as const;
-      }),
-    );
+      return {
+        buttonIndex: rawButton.index,
+        signature,
+        payload: {
+          buttonIndex: rawButton.index,
+          label: labels.primary,
+          subtitle: labels.subtitle,
+          actionType: rawButton.action?.type,
+          color: rawButton.color,
+          state: previewState,
+          channel:
+            rawButton.action?.roomId ||
+            rawButton.action?.broadcastGroupId ||
+            rawButton.action?.roleId ||
+            rawButton.action?.userId ||
+            "",
+          isListening,
+          isActive: pressed,
+        },
+      };
+    });
   }, [
     listenRoomIds,
     streamDeckLabelLookup,
     streamDeckCurrentButtons,
     streamDeckPreviewPressedSet,
   ]);
+
+  useEffect(() => {
+    const cache = streamDeckPreviewCacheRef.current;
+    const initial = new Map<number, string>();
+    const missingPayload: Array<{
+      buttonIndex: number;
+      label?: string;
+      subtitle?: string;
+      actionType?: StreamDeckActionType;
+      color?: string;
+      state?: "IDLE" | "TALK" | "LISTEN" | "BROADCAST";
+      channel?: string;
+      isListening?: boolean;
+      isActive?: boolean;
+    }> = [];
+
+    for (const item of streamDeckPreviewRenderInputs) {
+      const cached = cache.get(item.buttonIndex);
+      if (cached && cached.signature === item.signature) {
+        initial.set(item.buttonIndex, cached.dataUrl);
+      } else {
+        missingPayload.push(item.payload);
+      }
+    }
+
+    setStreamDeckPreviewImageByIndex(initial);
+
+    if (missingPayload.length === 0) {
+      return;
+    }
+
+    const abortController = new AbortController();
+
+    void (async () => {
+      try {
+        const renderedByIndex = await renderStreamDeckPreviewImages(
+          token,
+          {
+            width: 112,
+            height: 112,
+            buttons: missingPayload,
+          },
+          abortController.signal,
+        );
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        for (const item of streamDeckPreviewRenderInputs) {
+          const image = renderedByIndex.get(item.buttonIndex);
+          if (!image) continue;
+          cache.set(item.buttonIndex, {
+            signature: item.signature,
+            dataUrl: image,
+          });
+        }
+
+        const nextMap = new Map<number, string>();
+        for (const item of streamDeckPreviewRenderInputs) {
+          const cached = cache.get(item.buttonIndex);
+          if (!cached || cached.signature !== item.signature) continue;
+          nextMap.set(item.buttonIndex, cached.dataUrl);
+        }
+        setStreamDeckPreviewImageByIndex(nextMap);
+      } catch {
+        if (abortController.signal.aborted) {
+          return;
+        }
+      }
+    })();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [streamDeckPreviewRenderInputs, token]);
 
   const startStreamDeckPreviewPress = (buttonIndex: number) => {
     if (!streamDeckSettings || !streamDeckTestMode) return;
@@ -920,6 +1073,7 @@ export function StationIntercomView({
       if (
         type === "ptt_room" ||
         type === "select_talk_room" ||
+        type === "select_listen_room" ||
         type === "listen_room" ||
         type === "call_room"
       ) {
@@ -930,6 +1084,7 @@ export function StationIntercomView({
             roomId:
               button.action?.type === "ptt_room" ||
               button.action?.type === "select_talk_room" ||
+              button.action?.type === "select_listen_room" ||
               button.action?.type === "listen_room" ||
               button.action?.type === "call_room"
                 ? button.action.roomId
@@ -1104,6 +1259,24 @@ export function StationIntercomView({
       );
     } finally {
       event.target.value = "";
+    }
+  };
+
+  const publishCompanionProfile = async () => {
+    setCompanionPublishBusy(true);
+    try {
+      const published = await onPublishCompanionProfile();
+      setStreamDeckTransferError("");
+      setStreamDeckTransferMessage(
+        `Companion profile published as v${published.profileVersion} for role ${published.roleId}.`,
+      );
+    } catch (error) {
+      setStreamDeckTransferMessage("");
+      setStreamDeckTransferError(
+        error instanceof Error ? error.message : "Companion publish failed.",
+      );
+    } finally {
+      setCompanionPublishBusy(false);
     }
   };
 
@@ -1338,6 +1511,20 @@ export function StationIntercomView({
                       ) : null}
                       <small>Talk</small>
                       <strong>{room.name}</strong>
+                      {(() => {
+                        const p = room.priorityLevel ?? 1;
+                        if (p === 1) return null;
+                        const priorityLabels: Record<number, string> = {
+                          0: "L",
+                          2: "H",
+                          3: "C",
+                        };
+                        return (
+                          <span className={`priority-badge priority-${p}`}>
+                            {priorityLabels[p] || "?"}
+                          </span>
+                        );
+                      })()}
                     </button>
                     {showVolumeControls ? (
                       <div className="station-gain-control">
@@ -1464,6 +1651,20 @@ export function StationIntercomView({
                           ) : null}
                           <small>Direct</small>
                           <strong>{p.username}</strong>
+                          {(() => {
+                            const maxP = getMaxUserChannelPriority(p);
+                            if (maxP === null || maxP === 1) return null;
+                            const priorityLabels: Record<number, string> = {
+                              0: "L",
+                              2: "H",
+                              3: "C",
+                            };
+                            return (
+                              <span className={`priority-badge priority-${maxP}`}>
+                                {priorityLabels[maxP] || "?"}
+                              </span>
+                            );
+                          })()}
                           <em>
                             {roleNameById.get(p.roleId) ||
                               p.roleId ||
@@ -1651,7 +1852,23 @@ export function StationIntercomView({
                       {isReceivingBroadcast(group.id) ? (
                         <span className="station-broadcast-receiving">🔊</span>
                       ) : null}
-                      {group.name}
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "0.15rem" }}>
+                        <span>{group.name}</span>
+                        {(() => {
+                          const p = group.priorityLevel ?? 1;
+                          if (p === 1) return null;
+                          const priorityLabels: Record<number, string> = {
+                            0: "L",
+                            2: "H",
+                            3: "C",
+                          };
+                          return (
+                            <span className={`priority-badge priority-${p}`}>
+                              {priorityLabels[p] || "?"}
+                            </span>
+                          );
+                        })()}
+                      </div>
                     </button>
                   );
                 })}
@@ -1856,7 +2073,7 @@ export function StationIntercomView({
                             type="button"
                             className="shortcut-btn"
                             onClick={openStreamDeckImportPicker}
-                            disabled={streamDeckBusy}
+                            disabled={streamDeckBusy || !streamDeckSettings}
                           >
                             Import
                           </button>
@@ -1866,18 +2083,39 @@ export function StationIntercomView({
                             onClick={onSaveStreamDeckSettings}
                             disabled={streamDeckBusy || !streamDeckSettings}
                           >
-                            {streamDeckBusy ? "Saving..." : "Save"}
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            className="shortcut-btn"
+                            onClick={() => void publishCompanionProfile()}
+                            disabled={
+                              streamDeckBusy ||
+                              companionPublishBusy ||
+                              !streamDeckSettings
+                            }
+                          >
+                            {companionPublishBusy
+                              ? "Publishing..."
+                              : "Publish to Companion"}
                           </button>
                           <button
                             type="button"
                             className="shortcut-btn shortcut-btn-clear"
                             onClick={onResetStreamDeckSettings}
-                            disabled={streamDeckBusy}
+                            disabled={streamDeckBusy || !streamDeckSettings}
                           >
                             Reset
                           </button>
                         </div>
                       </div>
+                    <div className="streamdeck-settings-actions" style={{ marginBottom: "0.6rem" }}>
+                      <small className="station-settings-meta">
+                        Configure your Stream Deck layout here and click Save.
+                        Companion sync is triggered automatically. Use Publish to
+                        Companion only as a manual retry.
+                      </small>
+                    </div>
                     {streamDeckError ? (
                       <small className="streamdeck-error">{streamDeckError}</small>
                     ) : null}
@@ -1901,6 +2139,16 @@ export function StationIntercomView({
                         ? ` · Last event: ${streamDeckBridgeLastEvent}`
                         : ""}
                     </small>
+                    {lastCompanionCommand ? (
+                      <small className="station-settings-meta">
+                        Companion: {lastCompanionCommand.command || "unknown"}
+                        {` · ${lastCompanionCommand.status}`}
+                        {lastCompanionCommand.error
+                          ? ` · ${lastCompanionCommand.error}`
+                          : ""}
+                        {` · ${new Date(lastCompanionCommand.at).toLocaleTimeString()}`}
+                      </small>
+                    ) : null}
                     {showDebug ? (
                       <small className="station-settings-meta">
                         Debug: use window.__kesherStreamDeckDev.buttonTap(0, 0)
@@ -1916,7 +2164,8 @@ export function StationIntercomView({
                         Loading Stream Deck settings...
                       </small>
                     ) : (
-                      <>
+                      <div className="streamdeck-editor-shell">
+                        <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
                         <div className="streamdeck-toolbar">
                           <label className="streamdeck-control">
                             <span>Profile</span>
@@ -2002,7 +2251,8 @@ export function StationIntercomView({
                                 streamDeckPreviewPressedIndexes.includes(button.index);
                               const showPressedRing =
                                 isPressedInPreview &&
-                                button.action?.type !== "listen_room";
+                                button.action?.type !== "listen_room" &&
+                                button.action?.type !== "select_listen_room";
                               return (
                                 <button
                                   type="button"
@@ -2151,6 +2401,7 @@ export function StationIntercomView({
                             <option value="none">None</option>
                             <optgroup label="Talk channels">
                               <option value="select_talk_room">Select talk channel</option>
+                              <option value="select_listen_room">Select + listen channel (hold)</option>
                               <option value="ptt_selected">PTT selected channels</option>
                               <option value="ptt_room">PTT fixed channel</option>
                               <option value="listen_room">Listen channel</option>
@@ -2163,17 +2414,13 @@ export function StationIntercomView({
                             </optgroup>
                             <optgroup label="Broadcast and audio">
                               <option value="broadcast_ptt">Broadcast PTT</option>
-                              <option value="volume_delta">Volume +/-</option>
-                            </optgroup>
-                            <optgroup label="Navigation">
-                              <option value="page_up">Page up</option>
-                              <option value="page_down">Page down</option>
                             </optgroup>
                           </select>
                         </label>
 
                         {streamDeckSelectedButton?.action?.type === "ptt_room" ||
                         streamDeckSelectedButton?.action?.type === "select_talk_room" ||
+                        streamDeckSelectedButton?.action?.type === "select_listen_room" ||
                         streamDeckSelectedButton?.action?.type === "listen_room" ||
                         streamDeckSelectedButton?.action?.type === "call_room" ? (
                           <label className="streamdeck-control">
@@ -2311,7 +2558,8 @@ export function StationIntercomView({
                         ) : null}
                           </div>
                         </div>
-                      </>
+                        </fieldset>
+                      </div>
                     )}
                     </div>
                   ) : null}

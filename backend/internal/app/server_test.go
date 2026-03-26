@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -45,106 +44,6 @@ func TestEmbeddedStaticHandlerRootDoesNotRedirect(t *testing.T) {
 	}
 	if rec.Body.Len() == 0 {
 		t.Fatal("expected embedded root response body to be non-empty")
-	}
-}
-
-func TestResolveCompanionBindingWithRoleID(t *testing.T) {
-	store, err := NewStore(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-
-	s := &Server{store: store}
-	roleID, username, err := s.resolveCompanionBinding(context.Background(), "audio", "")
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-	if roleID != "audio" {
-		t.Fatalf("expected roleID audio, got %q", roleID)
-	}
-	if username != "" {
-		t.Fatalf("expected empty username for pure role binding, got %q", username)
-	}
-}
-
-func TestResolveCompanionBindingWithUsernameFallback(t *testing.T) {
-	store, err := NewStore(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-
-	s := &Server{store: store}
-	roleID, username, err := s.resolveCompanionBinding(context.Background(), "", "tim")
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-	if roleID != "audio" {
-		t.Fatalf("expected roleID audio, got %q", roleID)
-	}
-	if username != "tim" {
-		t.Fatalf("expected resolved username tim, got %q", username)
-	}
-}
-
-func TestResolveCompanionBindingRequiresRoleOrUsername(t *testing.T) {
-	store, err := NewStore(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-
-	s := &Server{store: store}
-	_, _, err = s.resolveCompanionBinding(context.Background(), "", "")
-	if err == nil {
-		t.Fatal("expected an error when both roleId and username are missing")
-	}
-	if !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("expected ErrInvalidInput, got %v", err)
-	}
-}
-
-func TestResolveCompanionBindingUnknownRoleID(t *testing.T) {
-	store, err := NewStore(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-
-	s := &Server{store: store}
-	_, _, err = s.resolveCompanionBinding(context.Background(), "unknown", "")
-	if err == nil {
-		t.Fatal("expected error for unknown roleId")
-	}
-	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("expected ErrNotFound, got %v", err)
-	}
-}
-
-func TestHandleCompanionDiscoveryWithRoleID(t *testing.T) {
-	store, err := NewStore(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-
-	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	s := &Server{store: store, hub: hub}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/companion/discovery?roleId=audio", nil)
-	rec := httptest.NewRecorder()
-	s.handleCompanionDiscovery(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-	var resp CompanionDiscoveryResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-	if resp.RoleID != "audio" {
-		t.Fatalf("expected roleId audio, got %q", resp.RoleID)
 	}
 }
 

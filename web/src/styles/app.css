@@ -1375,6 +1375,35 @@ button {
 .admin-list button.delete:active {
   background: var(--delete-bg-active);
 }
+
+.priority-badge {
+  display: block;
+  font-size: 0.55rem;
+  font-weight: 700;
+  padding: 0.15rem 0.35rem;
+  border-radius: 3px;
+  margin-top: 0.25rem;
+  width: fit-content;
+  text-align: center;
+  color: white;
+}
+
+.priority-0 {
+  background: #5a7e99;
+}
+
+.priority-1 {
+  background: #7a9cc1;
+}
+
+.priority-2 {
+  background: #d4941e;
+}
+
+.priority-3 {
+  background: #d63d3d;
+}
+
 .admin-edit-panel {
   margin: 0.5rem 0 0.85rem;
   display: grid;

@@ -97,6 +97,10 @@ func TestImportConfigurationReplacesSelectedSectionsAndPreservesOthers(t *testin
 			Roles: []Role{
 				{ID: "audio", Name: "A1", DefaultRoomID: "foh", DefaultVoiceMode: "ptt"},
 				{ID: "video", Name: "Video", DefaultRoomID: "stage", DefaultVoiceMode: "always_on"},
+				{ID: "broadcast", Name: "Broadcast", DefaultRoomID: "stage", DefaultVoiceMode: "ptt"},
+				{ID: "camera", Name: "Camera", DefaultRoomID: "stage", DefaultVoiceMode: "ptt", DefaultSimpleView: true},
+				{ID: "pastor", Name: "Pastor", DefaultRoomID: "stage", DefaultVoiceMode: "ptt"},
+				{ID: "producer", Name: "Producer", DefaultRoomID: "foh", DefaultVoiceMode: "ptt"},
 				{ID: "lighting", Name: "Lighting", DefaultRoomID: "stage", DefaultVoiceMode: "ptt"},
 				{ID: "qa", Name: "Quality", DefaultRoomID: "foh", DefaultVoiceMode: "ptt"},
 			},

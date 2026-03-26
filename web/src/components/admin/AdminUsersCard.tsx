@@ -3,10 +3,18 @@ import type { Bootstrap } from "../../types";
 import { UsersPanel } from "./UsersPanel";
 
 type AdminUsersCardProps = {
+  token: string;
+  adminPin: string;
   appData: Bootstrap;
+  refreshBootstrapData: () => Promise<void>;
 };
 
-export function AdminUsersCard({ appData }: AdminUsersCardProps) {
+export function AdminUsersCard({
+  token,
+  adminPin,
+  appData,
+  refreshBootstrapData,
+}: AdminUsersCardProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -25,7 +33,12 @@ export function AdminUsersCard({ appData }: AdminUsersCardProps) {
       </div>
       {isOpen ? (
         <div className="admin-card-body">
-          <UsersPanel appData={appData} />
+          <UsersPanel
+            token={token}
+            adminPin={adminPin}
+            appData={appData}
+            refreshBootstrapData={refreshBootstrapData}
+          />
         </div>
       ) : null}
     </div>

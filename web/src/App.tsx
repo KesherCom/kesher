@@ -12,6 +12,9 @@ import {
   getStatus,
   login,
   loginTakeover,
+  publishUserCompanionProfile,
+  renderStreamDeckPreviewImages,
+  type StreamDeckPreviewButton,
   resetStreamDeckSettings,
   logout,
   updateStreamDeckSettings,
@@ -45,8 +48,6 @@ import {
 import { createStreamDeckDevTools } from "./lib/streamDeckDevTools";
 import {
   getStreamDeckPageButtons,
-  renderStreamDeckButton,
-  type StreamDeckRenderableButton,
 } from "./lib/streamDeckHardwareFeedback";
 import { withResolvedStreamDeckButtonLabel } from "./lib/streamDeckLabels";
 import { sortDirectUsersByRoleAndUsername } from "./lib/users";
@@ -65,6 +66,7 @@ import { useIntercomSession } from "./hooks/useIntercomSession";
 const adminPathname = "/admin";
 const loginPathname = "/login";
 const statusPollIntervalMs = 3000;
+const streamDeckSelectListenHoldMs = 2000;
 
 function isAdminPathname(pathname: string): boolean {
   return pathname === adminPathname;
@@ -100,6 +102,17 @@ type StreamDeckRenderRequest = {
   force?: boolean;
 };
 
+type StreamDeckRenderButtonState = StreamDeckButtonConfig & {
+  isListening?: boolean;
+  attentionActive?: boolean;
+  attentionPulseOn?: boolean;
+};
+
+type StreamDeckSelectListenHoldState = {
+  timerId: number;
+  listenTriggered: boolean;
+};
+
 function mergeStreamDeckRenderRequests(
   current: StreamDeckRenderRequest | null,
   next: StreamDeckRenderRequest,
@@ -120,7 +133,7 @@ function mergeStreamDeckRenderRequests(
 
 function streamDeckButtonRenderSignature(
   page: number,
-  button: StreamDeckRenderableButton,
+  button: StreamDeckRenderButtonState,
   pressed: boolean,
 ): string {
   const action = button.action;
@@ -140,6 +153,51 @@ function streamDeckButtonRenderSignature(
     button.attentionPulseOn ? "1" : "0",
     pressed ? "1" : "0",
   ].join("|");
+}
+
+function splitStreamDeckLabel(label?: string): { primary: string; subtitle: string } {
+  const lines = (label || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return {
+    primary: lines[0] || "",
+    subtitle: lines[1] || "",
+  };
+}
+
+async function fillStreamDeckControlFromDataUrl(
+  deck: StreamDeckWeb,
+  control: StreamDeckButtonControlDefinition,
+  imageDataUrl: string,
+): Promise<void> {
+  if (control.feedbackType === "none") {
+    return;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = control.feedbackType === "lcd" ? control.pixelSize.width : 1;
+  canvas.height = control.feedbackType === "lcd" ? control.pixelSize.height : 1;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Failed to decode Stream Deck button image."));
+    img.src = imageDataUrl;
+  });
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+  if (control.feedbackType === "rgb") {
+    const pixel = ctx.getImageData(0, 0, 1, 1).data;
+    await deck.fillKeyColor(control.index, pixel[0] ?? 0, pixel[1] ?? 0, pixel[2] ?? 0);
+    return;
+  }
+
+  await deck.fillKeyCanvas(control.index, canvas);
 }
 
 export function App() {
@@ -216,6 +274,37 @@ export function App() {
   }, []);
 
   // ── Intercom session (WS + WebRTC + audio + voice) ──
+  const streamDeckHidSessionRef = useRef<{
+    deck: StreamDeckWeb;
+    pressedButtons: Set<number>;
+    onDown: (
+      control:
+        | StreamDeckButtonControlDefinition
+        | StreamDeckEncoderControlDefinition,
+    ) => void;
+    onUp: (
+      control:
+        | StreamDeckButtonControlDefinition
+        | StreamDeckEncoderControlDefinition,
+    ) => void;
+    onError: (error: unknown) => void;
+  } | null>(null);
+  const handleStreamDeckHardwareCommand = useCallback(
+    (cmd: { command: string; brightness?: number }) => {
+      const hidSession = streamDeckHidSessionRef.current;
+      if (!hidSession) return;
+      if (cmd.command === "set_streamdeck_brightness") {
+        void hidSession.deck.setBrightness(
+          Math.max(0, Math.min(100, cmd.brightness ?? 70)),
+        );
+      } else if (cmd.command === "clear_streamdeck_panel") {
+        void hidSession.deck.clearPanel();
+      } else if (cmd.command === "reset_streamdeck") {
+        void hidSession.deck.resetToLogo();
+      }
+    },
+    [],
+  );
   const session = useIntercomSession({
     token,
     appData,
@@ -237,6 +326,7 @@ export function App() {
     isUserSettingsOpen,
     isUserSettingsOpenRef,
     selectedInputGainFor: settings.selectedInputGainFor,
+    onInputGainChange: settings.onInputGainChange,
     initialListenRoomIds: storedSession.listenRoomIds ?? [],
     initialTalkRoomIds: storedSession.talkRoomIds ?? [],
     hadStoredSessionSettings: settings.hadStoredSessionSettings,
@@ -250,6 +340,7 @@ export function App() {
       setToken(null);
       setAppData(null);
     },
+    onStreamDeckHardwareCommand: handleStreamDeckHardwareCommand,
   });
 
   // ── Computed values ──
@@ -291,6 +382,7 @@ export function App() {
   }, [appData]);
 
   const streamDeckSettingsRef = useRef<StreamDeckSettings | null>(null);
+  const tokenRef = useRef<string | null>(null);
   const appDataRef = useRef<Bootstrap | null>(null);
   const listenRoomIdsRef = useRef<string[]>([]);
   const presenceRef = useRef<Presence[]>([]);
@@ -298,21 +390,9 @@ export function App() {
   const incomingAttentionRef = useRef(false);
   const streamDeckAttentionPulseOnRef = useRef(false);
   const streamDeckPressedRoleTargetsRef = useRef<Map<string, string>>(new Map());
-  const streamDeckHidSessionRef = useRef<{
-    deck: StreamDeckWeb;
-    pressedButtons: Set<number>;
-    onDown: (
-      control:
-        | StreamDeckButtonControlDefinition
-        | StreamDeckEncoderControlDefinition,
-    ) => void;
-    onUp: (
-      control:
-        | StreamDeckButtonControlDefinition
-        | StreamDeckEncoderControlDefinition,
-    ) => void;
-    onError: (error: unknown) => void;
-  } | null>(null);
+  const streamDeckSelectListenHoldsRef = useRef<
+    Map<string, StreamDeckSelectListenHoldState>
+  >(new Map());
   const streamDeckRenderInFlightRef = useRef(false);
   const streamDeckPendingRenderRef = useRef<StreamDeckRenderRequest | null>(
     null,
@@ -323,6 +403,10 @@ export function App() {
   useEffect(() => {
     streamDeckSettingsRef.current = streamDeckSettings;
   }, [streamDeckSettings]);
+
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
 
   useEffect(() => {
     appDataRef.current = appData;
@@ -358,6 +442,7 @@ export function App() {
           streamDeckPendingRenderRef.current = null;
 
           const session = streamDeckHidSessionRef.current;
+          const authToken = tokenRef.current;
           const lastDirectCallerUserId = lastDirectCallerUserIdRef.current;
           const settings = streamDeckSettingsRef.current;
           const currentAppData = appDataRef.current;
@@ -365,12 +450,12 @@ export function App() {
           const activePresence = presenceRef.current;
           const attentionActive = incomingAttentionRef.current;
           const attentionPulseOn = streamDeckAttentionPulseOnRef.current;
-          if (!session || !settings || !currentAppData) {
+          if (!session || !settings || !currentAppData || !authToken) {
             break;
           }
 
           const listeningRoomIds = new Set(listenRoomIds);
-          const buttonMap = new Map<number, StreamDeckRenderableButton>(
+          const buttonMap = new Map<number, StreamDeckRenderButtonState>(
             getStreamDeckPageButtons(settings).map((rawButton) => [
               rawButton.index,
               {
@@ -388,6 +473,8 @@ export function App() {
                 }),
                 isListening:
                   (rawButton.action?.type === "ptt_room" ||
+                    rawButton.action?.type === "select_talk_room" ||
+                    rawButton.action?.type === "select_listen_room" ||
                     rawButton.action?.type === "listen_room") &&
                   !!rawButton.action.roomId &&
                   listeningRoomIds.has(rawButton.action.roomId),
@@ -407,9 +494,12 @@ export function App() {
                 )
               : controls;
 
+          const previewPayloadButtons: StreamDeckPreviewButton[] = [];
+          const renderTargets: Array<{ control: StreamDeckButtonControlDefinition; signature: string }> = [];
+
           for (const control of targetControls) {
             const button =
-              buttonMap.get(control.index) ?? ({ index: control.index } as StreamDeckRenderableButton);
+              buttonMap.get(control.index) ?? ({ index: control.index } as StreamDeckRenderButtonState);
             const pressed = session.pressedButtons.has(control.index);
             const signature = streamDeckButtonRenderSignature(
               settings.selectedPage,
@@ -425,10 +515,52 @@ export function App() {
               }
             }
 
-            await renderStreamDeckButton(session.deck, control, button, pressed);
+            renderTargets.push({ control, signature });
+            const labels = splitStreamDeckLabel(button.label);
+            const state: "IDLE" | "TALK" | "LISTEN" | "BROADCAST" = pressed
+              ? button.action?.type === "broadcast_ptt"
+                ? "BROADCAST"
+                : "TALK"
+              : button.isListening
+                ? "LISTEN"
+                : "IDLE";
+            previewPayloadButtons.push({
+              buttonIndex: control.index,
+              label: labels.primary,
+              subtitle: labels.subtitle,
+              actionType: button.action?.type,
+              color: button.color,
+              state,
+              channel:
+                button.action?.roomId ||
+                button.action?.broadcastGroupId ||
+                button.action?.roleId ||
+                button.action?.userId ||
+                "",
+              isListening: button.isListening,
+              isActive: pressed,
+            });
+          }
+
+          const renderedImagesByIndex = await renderStreamDeckPreviewImages(
+            authToken,
+            {
+              buttons: previewPayloadButtons,
+            },
+          );
+
+          for (const target of renderTargets) {
+            const dataUrl = renderedImagesByIndex.get(target.control.index);
+            if (dataUrl) {
+              await fillStreamDeckControlFromDataUrl(
+                session.deck,
+                target.control,
+                dataUrl,
+              );
+            }
             streamDeckRenderedSignatureByIndexRef.current.set(
-              control.index,
-              signature,
+              target.control.index,
+              target.signature,
             );
           }
         }
@@ -464,6 +596,13 @@ export function App() {
     [emitStreamDeckBridgeEvent],
   );
 
+  const clearStreamDeckSelectListenHolds = useCallback(() => {
+    for (const hold of streamDeckSelectListenHoldsRef.current.values()) {
+      window.clearTimeout(hold.timerId);
+    }
+    streamDeckSelectListenHoldsRef.current.clear();
+  }, []);
+
   const disconnectStreamDeckWebHid = useCallback(
     async (options?: { announce?: boolean }) => {
       const session = streamDeckHidSessionRef.current;
@@ -472,6 +611,7 @@ export function App() {
       streamDeckHidSessionRef.current = null;
       streamDeckPendingRenderRef.current = null;
       streamDeckRenderedSignatureByIndexRef.current.clear();
+      clearStreamDeckSelectListenHolds();
 
       try {
         session.deck.off("down", session.onDown);
@@ -505,7 +645,7 @@ export function App() {
         });
       }
     },
-    [emitStreamDeckBridgeEvent],
+    [clearStreamDeckSelectListenHolds, emitStreamDeckBridgeEvent],
   );
 
   const connectStreamDeckWebHid = useCallback(async () => {
@@ -1191,6 +1331,61 @@ export function App() {
         session.toggleTalkRoom(action.roomId);
         return;
       }
+      if (action.type === "select_listen_room" && action.roomId) {
+        const buttonKey = `${effectivePage}:${payload.buttonIndex}`;
+        const roomId = action.roomId;
+        if (payload.state === "down") {
+          const previousHold =
+            streamDeckSelectListenHoldsRef.current.get(buttonKey);
+          if (previousHold) {
+            window.clearTimeout(previousHold.timerId);
+          }
+
+          const holdState: StreamDeckSelectListenHoldState = {
+            timerId: window.setTimeout(() => {
+              const activeHold =
+                streamDeckSelectListenHoldsRef.current.get(buttonKey);
+              if (!activeHold) {
+                return;
+              }
+              activeHold.listenTriggered = true;
+              streamDeckSelectListenHoldsRef.current.set(buttonKey, activeHold);
+              if (!isRoomListenAllowed(roomId)) {
+                setStreamDeckLastEvent(
+                  `P${effectivePage + 1}/B${payload.buttonIndex + 1} NOT ALLOW`,
+                );
+                return;
+              }
+              session.toggleListenRoom(roomId);
+              setStreamDeckLastEvent(
+                `P${effectivePage + 1}/B${payload.buttonIndex + 1} HOLD LISTEN`,
+              );
+            }, streamDeckSelectListenHoldMs),
+            listenTriggered: false,
+          };
+          streamDeckSelectListenHoldsRef.current.set(buttonKey, holdState);
+          return;
+        }
+
+        const holdState = streamDeckSelectListenHoldsRef.current.get(buttonKey);
+        if (!holdState) {
+          return;
+        }
+        window.clearTimeout(holdState.timerId);
+        streamDeckSelectListenHoldsRef.current.delete(buttonKey);
+
+        if (holdState.listenTriggered) {
+          return;
+        }
+        if (!isRoomTalkAllowed(roomId)) {
+          setStreamDeckLastEvent(
+            `P${effectivePage + 1}/B${payload.buttonIndex + 1} NOT ALLOW`,
+          );
+          return;
+        }
+        session.toggleTalkRoom(roomId);
+        return;
+      }
       if (action.type === "ptt_selected") {
         const selectedTalkRooms = session.talkRoomIds;
         const hasAllowedSelection = selectedTalkRooms.some((roomId) =>
@@ -1341,6 +1536,7 @@ export function App() {
     window.addEventListener(streamDeckButtonEventName, onBridgeButtonEvent);
 
     return () => {
+      clearStreamDeckSelectListenHolds();
       streamDeckPressedRoleTargetsRef.current.clear();
       window.removeEventListener("message", onMessage);
       window.removeEventListener(
@@ -1348,7 +1544,15 @@ export function App() {
         onBridgeButtonEvent,
       );
     };
-  }, [appData, authMode, disconnectStreamDeckWebHid, session, settings, token]);
+  }, [
+    appData,
+    authMode,
+    clearStreamDeckSelectListenHolds,
+    disconnectStreamDeckWebHid,
+    session,
+    settings,
+    token,
+  ]);
 
   useEffect(() => {
     if (!showDebug) {
@@ -1399,6 +1603,13 @@ export function App() {
     } finally {
       setStreamDeckBusy(false);
     }
+  }, [token]);
+
+  const handlePublishUserCompanionProfile = useCallback(async () => {
+    if (!token) {
+      throw new Error("Not authenticated.");
+    }
+    return publishUserCompanionProfile(token);
   }, [token]);
 
   // ── Early returns ──
@@ -1634,6 +1845,7 @@ export function App() {
   return (
     <>
       <StationIntercomView
+        token={token}
         connectionState={session.connectionState}
         appData={appData}
         doLogout={() => void doLogout()}
@@ -1669,6 +1881,7 @@ export function App() {
         stopPtt={session.stopPtt}
         voiceMode={session.voiceMode}
         setAlwaysOn={session.setAlwaysOn}
+        lastCompanionCommand={session.lastCompanionCommand}
         chatAndSignalPanel={chatAndSignalBlock}
         showDebug={showDebug}
         realtimeDebugBlock={realtimeDebugBlock}
@@ -1730,6 +1943,7 @@ export function App() {
         onStreamDeckSettingsChange={handleStreamDeckSettingsChange}
         onSaveStreamDeckSettings={() => void handleSaveStreamDeckSettings()}
         onResetStreamDeckSettings={() => void handleResetStreamDeckSettings()}
+        onPublishCompanionProfile={handlePublishUserCompanionProfile}
         streamDeckWebHidSupported={streamDeckWebHidSupported}
         streamDeckWebHidActive={streamDeckWebHidActive}
         streamDeckWebHidBusy={streamDeckWebHidBusy}

@@ -156,9 +156,9 @@ func (s *Store) currentConfigurationState(ctx context.Context) (configurationSta
 }
 
 func (s *Store) ListUserStreamDeckSettingsByUsername(ctx context.Context) ([]ConfigurationUserStreamDeckSettings, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT users.username, user_stream_deck_settings.settings_json
-		FROM user_stream_deck_settings
-		JOIN users ON users.id = user_stream_deck_settings.user_id
+	rows, err := s.db.QueryContext(ctx, `SELECT users.username, role_stream_deck_settings.settings_json
+		FROM role_stream_deck_settings
+		JOIN users ON users.role_id = role_stream_deck_settings.role_id
 		ORDER BY users.username`)
 	if err != nil {
 		return nil, err
@@ -384,6 +384,9 @@ func validateConfigurationState(state configurationState) error {
 		if roomID == "" || roomName == "" {
 			return invalidInputf("room id and name are required")
 		}
+		if _, err := normalizePriorityLevel(room.PriorityLevel); err != nil {
+			return invalidInputf("room %q has invalid priorityLevel %d", roomID, room.PriorityLevel)
+		}
 		if _, exists := roomByID[roomID]; exists {
 			return conflictf("duplicate room id %q", roomID)
 		}
@@ -425,6 +428,9 @@ func validateConfigurationState(state configurationState) error {
 		groupName := strings.TrimSpace(group.Name)
 		if groupID == "" || groupName == "" {
 			return invalidInputf("broadcast group id and name are required")
+		}
+		if _, err := normalizePriorityLevel(group.PriorityLevel); err != nil {
+			return invalidInputf("broadcast group %q has invalid priorityLevel %d", groupID, group.PriorityLevel)
 		}
 		if _, exists := groupIDs[groupID]; exists {
 			return conflictf("duplicate broadcast group id %q", groupID)
@@ -554,7 +560,7 @@ func (s *Store) ReplaceConfiguration(ctx context.Context, state configurationSta
 
 	for _, room := range state.Rooms {
 		roomID := strings.TrimSpace(room.ID)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO rooms (id, name) VALUES (?, ?)`, roomID, strings.TrimSpace(room.Name)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO rooms (id, name, priority_level) VALUES (?, ?, ?)`, roomID, strings.TrimSpace(room.Name), room.PriorityLevel); err != nil {
 			return err
 		}
 		if err := s.replaceRoomRoleMappingsWithTx(ctx, tx, "room_sender_roles", roomID, normalizeIDs(room.SenderRoleIDs)); err != nil {
@@ -571,7 +577,7 @@ func (s *Store) ReplaceConfiguration(ctx context.Context, state configurationSta
 
 	for _, group := range state.BroadcastGroups {
 		groupID := strings.TrimSpace(group.ID)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO broadcast_groups (id, name) VALUES (?, ?)`, groupID, strings.TrimSpace(group.Name)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO broadcast_groups (id, name, priority_level) VALUES (?, ?, ?)`, groupID, strings.TrimSpace(group.Name), group.PriorityLevel); err != nil {
 			return err
 		}
 		for _, roomID := range normalizeIDs(group.RoomIDs) {
@@ -624,7 +630,7 @@ func (s *Store) ReplaceConfiguration(ctx context.Context, state configurationSta
 	}
 
 	if rewriteStreamDeck {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM user_stream_deck_settings`); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM role_stream_deck_settings`); err != nil {
 			return err
 		}
 		now := time.Now().Unix()
@@ -633,8 +639,9 @@ func (s *Store) ReplaceConfiguration(ctx context.Context, state configurationSta
 			if err != nil {
 				return err
 			}
-			result, err := tx.ExecContext(ctx, `INSERT INTO user_stream_deck_settings (user_id, settings_json, created_at, updated_at)
-				SELECT users.id, ?, ?, ? FROM users WHERE users.username = ?`,
+			result, err := tx.ExecContext(ctx, `INSERT INTO role_stream_deck_settings (role_id, settings_json, created_at, updated_at)
+				SELECT users.role_id, ?, ?, ? FROM users WHERE users.username = ?
+				ON CONFLICT(role_id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at`,
 				string(settingsJSON),
 				now,
 				now,

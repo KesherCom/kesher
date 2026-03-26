@@ -26,16 +26,56 @@ type CompanionRoomDiscovery struct {
 }
 
 type CompanionDiscoveryResponse struct {
-	Username        string                   `json:"username"`
-	RoleID          string                   `json:"roleId"`
-	Rooms           []CompanionRoomDiscovery `json:"rooms"`
-	Users           []User                   `json:"users"`
-	BroadcastGroups []BroadcastGroup         `json:"broadcastGroups"`
+	Username          string                   `json:"username"`
+	RoleID            string                   `json:"roleId"`
+	Rooms             []CompanionRoomDiscovery `json:"rooms"`
+	Users             []User                   `json:"users"`
+	ActiveRoleUsers   []CompanionRoleUser      `json:"activeRoleUsers,omitempty"`
+	BroadcastGroups   []BroadcastGroup         `json:"broadcastGroups"`
+	CurrentPageNumber int                      `json:"currentPageNumber,omitempty"`
+	ProfileVersion    int                      `json:"profileVersion,omitempty"`
+	ProfileStatus     string                   `json:"profileStatus,omitempty"`
+	ProfileUpdatedAt  int64                    `json:"profileUpdatedAt,omitempty"`
+}
+
+type CompanionProfileResponse struct {
+	RoleID            string                   `json:"roleId"`
+	Username          string                   `json:"username"`
+	PageNumber        int                      `json:"pageNumber,omitempty"`
+	CurrentPageNumber int                      `json:"currentPageNumber,omitempty"`
+	Rooms             []CompanionRoomDiscovery `json:"rooms"`
+	Users             []User                   `json:"users"`
+	ActiveRoleUsers   []CompanionRoleUser      `json:"activeRoleUsers,omitempty"`
+	BroadcastGroups   []BroadcastGroup         `json:"broadcastGroups"`
+	StreamDeck        StreamDeckSettings       `json:"streamDeckSettings"`
+	ProfileVersion    int                      `json:"profileVersion"`
+	ProfileStatus     string                   `json:"profileStatus"`
+	ProfileUpdatedAt  int64                    `json:"profileUpdatedAt,omitempty"`
+}
+
+type CompanionPublishedProfileSummary struct {
+	RoleID           string `json:"roleId"`
+	Username         string `json:"username"`
+	ProfileVersion   int    `json:"profileVersion"`
+	ProfileStatus    string `json:"profileStatus"`
+	ProfileUpdatedAt int64  `json:"profileUpdatedAt,omitempty"`
+}
+
+type CompanionAdminSummaryResponse struct {
+	SharedSecret      string                             `json:"sharedSecret"`
+	PublishedProfiles []CompanionPublishedProfileSummary `json:"publishedProfiles"`
+}
+
+type CompanionRoleUser struct {
+	RoleID   string `json:"roleId"`
+	Username string `json:"username"`
+	UserID   string `json:"userId"`
 }
 
 type Room struct {
 	ID                  string   `json:"id"`
 	Name                string   `json:"name"`
+	PriorityLevel       int      `json:"priorityLevel"`
 	SenderRoleIDs       []string `json:"senderRoleIds"`
 	ReceiverRoleIDs     []string `json:"receiverRoleIds"`
 	ForcedListenRoleIDs []string `json:"forcedListenRoleIds"`
@@ -44,6 +84,7 @@ type Room struct {
 type BroadcastGroup struct {
 	ID             string   `json:"id"`
 	Name           string   `json:"name"`
+	PriorityLevel  int      `json:"priorityLevel"`
 	RoomIDs        []string `json:"roomIds"`
 	AllowedRoleIDs []string `json:"allowedRoleIds"`
 }
@@ -52,6 +93,13 @@ type User struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
 	RoleID   string `json:"roleId"`
+}
+
+type AdminUserView struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	RoleID   string `json:"roleId"`
+	Online   bool   `json:"online"`
 }
 
 type Session struct {
@@ -68,6 +116,7 @@ const (
 	StreamDeckActionTypeNone           StreamDeckActionType = "none"
 	StreamDeckActionTypePTTRoom        StreamDeckActionType = "ptt_room"
 	StreamDeckActionTypeSelectTalkRoom StreamDeckActionType = "select_talk_room"
+	StreamDeckActionTypeSelectListen   StreamDeckActionType = "select_listen_room"
 	StreamDeckActionTypePTTSelected    StreamDeckActionType = "ptt_selected"
 	StreamDeckActionTypeListenRoom     StreamDeckActionType = "listen_room"
 	StreamDeckActionTypeCallRoom       StreamDeckActionType = "call_room"
@@ -264,20 +313,39 @@ type CompanionCommand struct {
 	TargetID      string   `json:"targetId,omitempty"`
 	State         string   `json:"state,omitempty"`
 	Signal        string   `json:"signal,omitempty"`
-	ListenRoomIDs []string `json:"listenRoomIds,omitempty"`
-	TalkRoomIDs   []string `json:"talkRoomIds,omitempty"`
+	ButtonIndex   int      `json:"buttonIndex,omitempty"`
+	VolumeDelta   int      `json:"volumeDelta,omitempty"`
+	ListenRoomIDs []string `json:"listenRoomIds"`
+	TalkRoomIDs   []string `json:"talkRoomIds"`
+	Brightness    int      `json:"brightness,omitempty"`
+	PageNumber    int      `json:"pageNumber,omitempty"`
+}
+
+type CompanionCommandResult struct {
+	CommandID string `json:"commandId,omitempty"`
+	Command   string `json:"command,omitempty"`
+	OK        bool   `json:"ok"`
+	Status    string `json:"status,omitempty"`
+	Error     string `json:"error,omitempty"`
+	Source    string `json:"source,omitempty"`
+	Timestamp int64  `json:"timestamp,omitempty"`
 }
 
 type CompanionBridgeState struct {
-	RoleID              string         `json:"roleId"`
 	Username            string         `json:"username"`
 	Bound               bool           `json:"bound"`
 	Presence            *PresenceState `json:"presence,omitempty"`
+	SessionCount        int            `json:"sessionCount,omitempty"`
+	MultiSessionWarning bool           `json:"multiSessionWarning,omitempty"`
 	ReplyDirectUserID   string         `json:"replyDirectUserId,omitempty"`
 	ReplyDirectUsername string         `json:"replyDirectUsername,omitempty"`
 	SignalActive        bool           `json:"signalActive"`
 	SignalFrom          string         `json:"signalFrom,omitempty"`
 	SignalMessage       string         `json:"signalMessage,omitempty"`
+	CurrentPageNumber   int            `json:"currentPageNumber,omitempty"`
+	ProfileVersion      int            `json:"profileVersion,omitempty"`
+	ProfileStatus       string         `json:"profileStatus,omitempty"`
+	ProfileUpdatedAt    int64          `json:"profileUpdatedAt,omitempty"`
 }
 
 type StatusResponse struct {

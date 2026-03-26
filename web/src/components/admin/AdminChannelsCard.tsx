@@ -22,6 +22,13 @@ export function AdminChannelsCard({
   appData,
   refreshBootstrapData,
 }: AdminChannelsCardProps) {
+  const priorityOptions = [
+    { value: 0, label: "Low" },
+    { value: 1, label: "Normal" },
+    { value: 2, label: "High" },
+    { value: 3, label: "Critical" },
+  ] as const;
+
   const [isOpen, setIsOpen] = useState(false);
   const {
     busy: adminBusy,
@@ -35,6 +42,7 @@ export function AdminChannelsCard({
   const [groupCreateAllowedRoleIds, setGroupCreateAllowedRoleIds] = useState<
     string[]
   >([]);
+  const [groupCreatePriorityLevel, setGroupCreatePriorityLevel] = useState(1);
   const [showGroupCreateForm, setShowGroupCreateForm] = useState(false);
   const [groupEditId, setGroupEditId] = useState<string | null>(null);
   const [groupEditName, setGroupEditName] = useState("");
@@ -42,12 +50,14 @@ export function AdminChannelsCard({
   const [groupEditAllowedRoleIds, setGroupEditAllowedRoleIds] = useState<
     string[]
   >([]);
+  const [groupEditPriorityLevel, setGroupEditPriorityLevel] = useState(1);
 
   function resetGroupCreateForm() {
     setGroupCreateId("");
     setGroupCreateName("");
     setGroupCreateRoomIds([]);
     setGroupCreateAllowedRoleIds([]);
+    setGroupCreatePriorityLevel(1);
   }
 
   function resetGroupEditForm() {
@@ -55,6 +65,7 @@ export function AdminChannelsCard({
     setGroupEditName("");
     setGroupEditRoomIds([]);
     setGroupEditAllowedRoleIds([]);
+    setGroupEditPriorityLevel(1);
   }
 
   function createBroadcastGroupConfig() {
@@ -65,6 +76,7 @@ export function AdminChannelsCard({
       await createBroadcastGroup(token, adminPin, {
         id,
         name,
+        priorityLevel: groupCreatePriorityLevel,
         roomIds: groupCreateRoomIds,
         allowedRoleIds: groupCreateAllowedRoleIds,
       });
@@ -80,6 +92,7 @@ export function AdminChannelsCard({
     void runAdminAction(async () => {
       await updateBroadcastGroup(token, adminPin, groupEditId, {
         name,
+        priorityLevel: groupEditPriorityLevel,
         roomIds: groupEditRoomIds,
         allowedRoleIds: groupEditAllowedRoleIds,
       });
@@ -149,6 +162,21 @@ export function AdminChannelsCard({
                     onChange={(e) => setGroupCreateName(e.target.value)}
                     placeholder="Broadcast channel name"
                   />
+                  <label>
+                    Priority
+                    <select
+                      value={groupCreatePriorityLevel}
+                      onChange={(e) =>
+                        setGroupCreatePriorityLevel(Number(e.target.value))
+                      }
+                    >
+                      {priorityOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <button
                     onClick={createBroadcastGroupConfig}
                     disabled={
@@ -202,6 +230,21 @@ export function AdminChannelsCard({
                     onChange={(e) => setGroupEditName(e.target.value)}
                     placeholder="Channel name"
                   />
+                  <label>
+                    Priority
+                    <select
+                      value={groupEditPriorityLevel}
+                      onChange={(e) =>
+                        setGroupEditPriorityLevel(Number(e.target.value))
+                      }
+                    >
+                      {priorityOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <button
                     onClick={saveGroupEdit}
                     disabled={
@@ -251,6 +294,7 @@ export function AdminChannelsCard({
                       setShowGroupCreateForm(false);
                       setGroupEditId(group.id);
                       setGroupEditName(group.name);
+                      setGroupEditPriorityLevel(group.priorityLevel ?? 1);
                       setGroupEditRoomIds(group.roomIds);
                       setGroupEditAllowedRoleIds(group.allowedRoleIds || []);
                     }}

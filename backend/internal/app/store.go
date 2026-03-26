@@ -26,6 +26,19 @@ func hasWhitespace(value string) bool {
 
 const defaultAdminPIN = "123456"
 
+const (
+	MinPriorityLevel = 0
+	MaxPriorityLevel = 3
+	DefaultPriority  = 1
+)
+
+func normalizePriorityLevel(level int) (int, error) {
+	if level < MinPriorityLevel || level > MaxPriorityLevel {
+		return 0, ErrInvalidInput
+	}
+	return level, nil
+}
+
 type Store struct {
 	db *sql.DB
 
@@ -476,6 +489,12 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "roles", "default_simple_view", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn(ctx, "rooms", "priority_level", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, "broadcast_groups", "priority_level", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS telegram_mappings (
 		id TEXT PRIMARY KEY,
 		chat_id TEXT NOT NULL UNIQUE,
@@ -513,10 +532,27 @@ func (s *Store) migrate(ctx context.Context) error {
 	)`); err != nil {
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS user_stream_deck_settings (
-		user_id TEXT PRIMARY KEY,
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS role_stream_deck_settings (
+		role_id TEXT PRIMARY KEY,
 		settings_json TEXT NOT NULL,
 		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS companion_profiles (
+		role_id TEXT PRIMARY KEY,
+		profile_version INTEGER NOT NULL,
+		profile_json TEXT NOT NULL,
+		published_by_user_id TEXT,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS companion_role_pages (
+		role_id TEXT PRIMARY KEY,
+		page_number INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL
 	)`); err != nil {
 		return err
@@ -672,6 +708,25 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	return users, nil
 }
 
+func (s *Store) DeleteUser(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrInvalidInput
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, error) {
 	if in.Version <= 0 {
 		in.Version = 1
@@ -727,6 +782,10 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 					if action.RoomID == "" {
 						return StreamDeckSettings{}, ErrInvalidInput
 					}
+				case StreamDeckActionTypeSelectListen:
+					if action.RoomID == "" {
+						return StreamDeckSettings{}, ErrInvalidInput
+					}
 				case StreamDeckActionTypeListenRoom:
 					if action.RoomID == "" {
 						return StreamDeckSettings{}, ErrInvalidInput
@@ -767,13 +826,13 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 	return in, nil
 }
 
-func (s *Store) GetUserStreamDeckSettings(ctx context.Context, userID string) (StreamDeckSettings, error) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
+func (s *Store) GetRoleStreamDeckSettings(ctx context.Context, roleID string) (StreamDeckSettings, error) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
 		return StreamDeckSettings{}, ErrInvalidInput
 	}
 	var raw string
-	err := s.db.QueryRowContext(ctx, `SELECT settings_json FROM user_stream_deck_settings WHERE user_id = ?`, userID).Scan(&raw)
+	err := s.db.QueryRowContext(ctx, `SELECT settings_json FROM role_stream_deck_settings WHERE role_id = ?`, roleID).Scan(&raw)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return StreamDeckSettings{}, ErrNotFound
@@ -787,20 +846,20 @@ func (s *Store) GetUserStreamDeckSettings(ctx context.Context, userID string) (S
 	return validateStreamDeckSettings(settings)
 }
 
-func (s *Store) UpsertUserStreamDeckSettings(ctx context.Context, userID string, settings StreamDeckSettings) (StreamDeckSettings, error) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
+func (s *Store) UpsertRoleStreamDeckSettings(ctx context.Context, roleID string, settings StreamDeckSettings) (StreamDeckSettings, error) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
 		return StreamDeckSettings{}, ErrInvalidInput
 	}
 	normalized, err := validateStreamDeckSettings(settings)
 	if err != nil {
 		return StreamDeckSettings{}, err
 	}
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM users WHERE id = ?`, userID).Scan(&count); err != nil {
+	exists, err := s.RoleExists(ctx, roleID)
+	if err != nil {
 		return StreamDeckSettings{}, err
 	}
-	if count == 0 {
+	if !exists {
 		return StreamDeckSettings{}, ErrNotFound
 	}
 	body, err := json.Marshal(normalized)
@@ -808,22 +867,22 @@ func (s *Store) UpsertUserStreamDeckSettings(ctx context.Context, userID string,
 		return StreamDeckSettings{}, err
 	}
 	now := time.Now().Unix()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO user_stream_deck_settings (user_id, settings_json, created_at, updated_at)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO role_stream_deck_settings (role_id, settings_json, created_at, updated_at)
 		VALUES (?, ?, ?, ?)
-		ON CONFLICT(user_id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at`,
-		userID, string(body), now, now)
+		ON CONFLICT(role_id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at`,
+		roleID, string(body), now, now)
 	if err != nil {
 		return StreamDeckSettings{}, err
 	}
 	return normalized, nil
 }
 
-func (s *Store) DeleteUserStreamDeckSettings(ctx context.Context, userID string) error {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
+func (s *Store) DeleteRoleStreamDeckSettings(ctx context.Context, roleID string) error {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
 		return ErrInvalidInput
 	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM user_stream_deck_settings WHERE user_id = ?`, userID)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM role_stream_deck_settings WHERE role_id = ?`, roleID)
 	if err != nil {
 		return err
 	}
@@ -835,6 +894,248 @@ func (s *Store) DeleteUserStreamDeckSettings(ctx context.Context, userID string)
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (s *Store) ListRoleStreamDeckSettings(ctx context.Context) (map[string]StreamDeckSettings, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT role_id, settings_json FROM role_stream_deck_settings ORDER BY role_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]StreamDeckSettings)
+	for rows.Next() {
+		var roleID string
+		var raw string
+		if err := rows.Scan(&roleID, &raw); err != nil {
+			return nil, err
+		}
+		var settings StreamDeckSettings
+		if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+			return nil, ErrInvalidInput
+		}
+		normalized, err := validateStreamDeckSettings(settings)
+		if err != nil {
+			return nil, err
+		}
+		result[strings.TrimSpace(roleID)] = normalized
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *Store) GetUserStreamDeckSettings(ctx context.Context, userID string) (StreamDeckSettings, error) {
+	user, err := s.FindUserByID(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return StreamDeckSettings{}, ErrNotFound
+		}
+		return StreamDeckSettings{}, err
+	}
+	return s.GetRoleStreamDeckSettings(ctx, user.RoleID)
+}
+
+func (s *Store) UpsertUserStreamDeckSettings(ctx context.Context, userID string, settings StreamDeckSettings) (StreamDeckSettings, error) {
+	user, err := s.FindUserByID(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return StreamDeckSettings{}, ErrNotFound
+		}
+		return StreamDeckSettings{}, err
+	}
+	return s.UpsertRoleStreamDeckSettings(ctx, user.RoleID, settings)
+}
+
+func (s *Store) DeleteUserStreamDeckSettings(ctx context.Context, userID string) error {
+	user, err := s.FindUserByID(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return s.DeleteRoleStreamDeckSettings(ctx, user.RoleID)
+}
+
+func (s *Store) ResolveSinglePublishedCompanionRole(ctx context.Context) (string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT role_id FROM companion_profiles ORDER BY updated_at DESC LIMIT 2`)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	roles := make([]string, 0, 2)
+	for rows.Next() {
+		var roleID string
+		if err := rows.Scan(&roleID); err != nil {
+			return "", err
+		}
+		roleID = strings.TrimSpace(roleID)
+		if roleID != "" {
+			roles = append(roles, roleID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if len(roles) == 0 {
+		return "", ErrNotFound
+	}
+	if len(roles) > 1 {
+		return "", ErrConflict
+	}
+	return roles[0], nil
+}
+
+func (s *Store) GetCompanionProfileByRole(ctx context.Context, roleID string) (CompanionProfileResponse, error) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return CompanionProfileResponse{}, ErrInvalidInput
+	}
+	var (
+		version     int
+		profileJSON string
+		updatedAt   int64
+	)
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT profile_version, profile_json, updated_at FROM companion_profiles WHERE role_id = ?`,
+		roleID,
+	).Scan(&version, &profileJSON, &updatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return CompanionProfileResponse{}, ErrNotFound
+		}
+		return CompanionProfileResponse{}, err
+	}
+	var profile CompanionProfileResponse
+	if err := json.Unmarshal([]byte(profileJSON), &profile); err != nil {
+		return CompanionProfileResponse{}, ErrInvalidInput
+	}
+	profile.ProfileVersion = version
+	profile.ProfileUpdatedAt = updatedAt
+	if strings.TrimSpace(profile.ProfileStatus) == "" {
+		profile.ProfileStatus = "published"
+	}
+	return profile, nil
+}
+
+func (s *Store) PublishCompanionProfile(ctx context.Context, roleID string, publishedByUserID string, profile CompanionProfileResponse) (CompanionProfileResponse, error) {
+	roleID = strings.TrimSpace(roleID)
+	publishedByUserID = strings.TrimSpace(publishedByUserID)
+	if roleID == "" || publishedByUserID == "" {
+		return CompanionProfileResponse{}, ErrInvalidInput
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return CompanionProfileResponse{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	version := 1
+	if errScan := tx.QueryRowContext(ctx, `SELECT profile_version FROM companion_profiles WHERE role_id = ?`, roleID).Scan(&version); errScan == nil {
+		version++
+	} else if !errors.Is(errScan, sql.ErrNoRows) {
+		err = errScan
+		return CompanionProfileResponse{}, err
+	}
+
+	now := time.Now().UnixMilli()
+	profile.RoleID = roleID
+	profile.ProfileVersion = version
+	profile.ProfileUpdatedAt = now
+	profile.ProfileStatus = "published"
+	body, errMarshal := json.Marshal(profile)
+	if errMarshal != nil {
+		err = errMarshal
+		return CompanionProfileResponse{}, err
+	}
+
+	_, err = tx.ExecContext(
+		ctx,
+		`INSERT INTO companion_profiles (role_id, profile_version, profile_json, published_by_user_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(role_id) DO UPDATE SET
+			profile_version = excluded.profile_version,
+			profile_json = excluded.profile_json,
+			published_by_user_id = excluded.published_by_user_id,
+			updated_at = excluded.updated_at`,
+		roleID,
+		version,
+		string(body),
+		publishedByUserID,
+		now,
+		now,
+	)
+	if err != nil {
+		return CompanionProfileResponse{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return CompanionProfileResponse{}, err
+	}
+	return profile, nil
+}
+
+func (s *Store) SaveCompanionRolePage(ctx context.Context, roleID string, pageNumber int) error {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return ErrInvalidInput
+	}
+	if pageNumber < 0 || pageNumber > 14 {
+		return ErrInvalidInput
+	}
+	now := time.Now().UnixMilli()
+	_, err := s.db.ExecContext(
+		ctx,
+		`INSERT INTO companion_role_pages (role_id, page_number, updated_at)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(role_id) DO UPDATE SET
+			page_number = excluded.page_number,
+			updated_at = excluded.updated_at`,
+		roleID,
+		pageNumber,
+		now,
+	)
+	return err
+}
+
+func (s *Store) GetCompanionRolePage(ctx context.Context, roleID string) (int, error) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return 0, ErrInvalidInput
+	}
+	var pageNumber int
+	err := s.db.QueryRowContext(ctx, `SELECT page_number FROM companion_role_pages WHERE role_id = ?`, roleID).Scan(&pageNumber)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil // default to page 0
+		}
+		return 0, err
+	}
+	return pageNumber, nil
+}
+
+func (s *Store) GetAllCompanionRolePages(ctx context.Context) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT role_id, page_number FROM companion_role_pages`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]int)
+	for rows.Next() {
+		var roleID string
+		var pageNumber int
+		if err := rows.Scan(&roleID, &pageNumber); err != nil {
+			return nil, err
+		}
+		result[roleID] = pageNumber
+	}
+	return result, rows.Err()
 }
 
 func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
@@ -865,7 +1166,7 @@ func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
 }
 
 func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name FROM rooms ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, priority_level FROM rooms ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -873,31 +1174,39 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 	var rooms []Room
 	for rows.Next() {
 		var r Room
-		if err := rows.Scan(&r.ID, &r.Name); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.PriorityLevel); err != nil {
 			return nil, err
 		}
-		senderRoleIDs, err := s.roomRoleIDs(ctx, "room_sender_roles", r.ID)
-		if err != nil {
-			return nil, err
-		}
-		receiverRoleIDs, err := s.roomRoleIDs(ctx, "room_receiver_roles", r.ID)
-		if err != nil {
-			return nil, err
-		}
-		forcedListenRoleIDs, err := s.roomRoleIDs(ctx, "room_forced_listen_roles", r.ID)
-		if err != nil {
-			return nil, err
-		}
-		r.SenderRoleIDs = senderRoleIDs
-		r.ReceiverRoleIDs = receiverRoleIDs
-		r.ForcedListenRoleIDs = forcedListenRoleIDs
 		rooms = append(rooms, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range rooms {
+		senderRoleIDs, err := s.roomRoleIDs(ctx, "room_sender_roles", rooms[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		receiverRoleIDs, err := s.roomRoleIDs(ctx, "room_receiver_roles", rooms[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		forcedListenRoleIDs, err := s.roomRoleIDs(ctx, "room_forced_listen_roles", rooms[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		rooms[i].SenderRoleIDs = senderRoleIDs
+		rooms[i].ReceiverRoleIDs = receiverRoleIDs
+		rooms[i].ForcedListenRoleIDs = forcedListenRoleIDs
 	}
 	return rooms, nil
 }
 
 func (s *Store) ListBroadcastGroups(ctx context.Context) ([]BroadcastGroup, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name FROM broadcast_groups ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, priority_level FROM broadcast_groups ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -908,10 +1217,19 @@ func (s *Store) ListBroadcastGroups(ctx context.Context) ([]BroadcastGroup, erro
 			RoomIDs:        []string{},
 			AllowedRoleIDs: []string{},
 		}
-		if err := rows.Scan(&g.ID, &g.Name); err != nil {
+		if err := rows.Scan(&g.ID, &g.Name, &g.PriorityLevel); err != nil {
 			return nil, err
 		}
-		roomRows, err := s.db.QueryContext(ctx, `SELECT room_id FROM broadcast_group_rooms WHERE broadcast_group_id = ?`, g.ID)
+		groups = append(groups, g)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range groups {
+		roomRows, err := s.db.QueryContext(ctx, `SELECT room_id FROM broadcast_group_rooms WHERE broadcast_group_id = ?`, groups[i].ID)
 		if err != nil {
 			return nil, err
 		}
@@ -921,10 +1239,17 @@ func (s *Store) ListBroadcastGroups(ctx context.Context) ([]BroadcastGroup, erro
 				roomRows.Close()
 				return nil, err
 			}
-			g.RoomIDs = append(g.RoomIDs, rid)
+			groups[i].RoomIDs = append(groups[i].RoomIDs, rid)
 		}
-		roomRows.Close()
-		roleRows, err := s.db.QueryContext(ctx, `SELECT role_id FROM broadcast_group_roles WHERE broadcast_group_id = ? ORDER BY role_id`, g.ID)
+		if err := roomRows.Err(); err != nil {
+			roomRows.Close()
+			return nil, err
+		}
+		if err := roomRows.Close(); err != nil {
+			return nil, err
+		}
+
+		roleRows, err := s.db.QueryContext(ctx, `SELECT role_id FROM broadcast_group_roles WHERE broadcast_group_id = ? ORDER BY role_id`, groups[i].ID)
 		if err != nil {
 			return nil, err
 		}
@@ -934,10 +1259,15 @@ func (s *Store) ListBroadcastGroups(ctx context.Context) ([]BroadcastGroup, erro
 				roleRows.Close()
 				return nil, err
 			}
-			g.AllowedRoleIDs = append(g.AllowedRoleIDs, roleID)
+			groups[i].AllowedRoleIDs = append(groups[i].AllowedRoleIDs, roleID)
 		}
-		roleRows.Close()
-		groups = append(groups, g)
+		if err := roleRows.Err(); err != nil {
+			roleRows.Close()
+			return nil, err
+		}
+		if err := roleRows.Close(); err != nil {
+			return nil, err
+		}
 	}
 	return groups, nil
 }
@@ -1266,6 +1596,30 @@ func (s *Store) UpdateRoom(ctx context.Context, id, name string, senderRoleIDs, 
 	return nil
 }
 
+func (s *Store) SetRoomPriorityLevel(ctx context.Context, id string, priorityLevel int) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrInvalidInput
+	}
+	normalized, err := normalizePriorityLevel(priorityLevel)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE rooms SET priority_level = ? WHERE id = ?`, normalized, id)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	s.resetPolicyCaches()
+	return nil
+}
+
 // RoomPermissionEntry describes the sender/receiver/forced-listen role mapping for one room.
 type RoomPermissionEntry struct {
 	RoomID              string   `json:"roomId"`
@@ -1491,6 +1845,30 @@ func (s *Store) UpdateBroadcastGroup(ctx context.Context, id, name string, roomI
 	}
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	s.resetPolicyCaches()
+	return nil
+}
+
+func (s *Store) SetBroadcastGroupPriorityLevel(ctx context.Context, id string, priorityLevel int) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrInvalidInput
+	}
+	normalized, err := normalizePriorityLevel(priorityLevel)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE broadcast_groups SET priority_level = ? WHERE id = ?`, normalized, id)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
 	}
 	s.resetPolicyCaches()
 	return nil

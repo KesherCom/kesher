@@ -4,6 +4,8 @@ db_path: "intercom.db"
 allow_cors: true
 admin_pin: "123456"
 session_ttl_minutes: 720
+companion_shared_secret: ""
+companion_allowed_usernames: []
 trusted_lan_http: true
 tls_mode: "internal"
 tls_cert_file: ""
