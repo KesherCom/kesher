@@ -82,6 +82,29 @@ describe("streamDeckBridge", () => {
     expect(action).toEqual({ type: "direct_role", roleId: "audio" });
   });
 
+  it("resolves combined select-listen action from settings", () => {
+    const action = resolveStreamDeckButtonAction(
+      {
+        version: 1,
+        gridColumns: 5,
+        gridRows: 3,
+        selectedPage: 0,
+        pages: [
+          {
+            page: 0,
+            buttons: [
+              { index: 0, action: { type: "select_listen_room", roomId: "r1" } },
+              ...Array.from({ length: 14 }, (_, idx) => ({ index: idx + 1 })),
+            ],
+          },
+        ],
+      },
+      0,
+      0,
+    );
+    expect(action).toEqual({ type: "select_listen_room", roomId: "r1" });
+  });
+
   it("applies db deltas with clamp", () => {
     const boosted = gainWithDbDelta(1, 6);
     expect(boosted).toBeGreaterThan(1);

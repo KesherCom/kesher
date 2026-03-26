@@ -116,6 +116,7 @@ const (
 	StreamDeckActionTypeNone           StreamDeckActionType = "none"
 	StreamDeckActionTypePTTRoom        StreamDeckActionType = "ptt_room"
 	StreamDeckActionTypeSelectTalkRoom StreamDeckActionType = "select_talk_room"
+	StreamDeckActionTypeSelectListen   StreamDeckActionType = "select_listen_room"
 	StreamDeckActionTypePTTSelected    StreamDeckActionType = "ptt_selected"
 	StreamDeckActionTypeListenRoom     StreamDeckActionType = "listen_room"
 	StreamDeckActionTypeCallRoom       StreamDeckActionType = "call_room"

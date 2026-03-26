@@ -84,6 +84,7 @@ function normalizeImportedStreamDeckSettings(input: unknown): StreamDeckSettings
     "none",
     "ptt_room",
     "select_talk_room",
+    "select_listen_room",
     "ptt_selected",
     "listen_room",
     "call_room",
@@ -728,6 +729,7 @@ export function StationIntercomView({
       const isListening =
         (rawButton.action?.type === "ptt_room" ||
           rawButton.action?.type === "select_talk_room" ||
+          rawButton.action?.type === "select_listen_room" ||
           rawButton.action?.type === "listen_room") &&
         !!rawButton.action.roomId &&
         listeningRoomIds.has(rawButton.action.roomId);
@@ -1071,6 +1073,7 @@ export function StationIntercomView({
       if (
         type === "ptt_room" ||
         type === "select_talk_room" ||
+        type === "select_listen_room" ||
         type === "listen_room" ||
         type === "call_room"
       ) {
@@ -1081,6 +1084,7 @@ export function StationIntercomView({
             roomId:
               button.action?.type === "ptt_room" ||
               button.action?.type === "select_talk_room" ||
+              button.action?.type === "select_listen_room" ||
               button.action?.type === "listen_room" ||
               button.action?.type === "call_room"
                 ? button.action.roomId
@@ -2247,7 +2251,8 @@ export function StationIntercomView({
                                 streamDeckPreviewPressedIndexes.includes(button.index);
                               const showPressedRing =
                                 isPressedInPreview &&
-                                button.action?.type !== "listen_room";
+                                button.action?.type !== "listen_room" &&
+                                button.action?.type !== "select_listen_room";
                               return (
                                 <button
                                   type="button"
@@ -2396,6 +2401,7 @@ export function StationIntercomView({
                             <option value="none">None</option>
                             <optgroup label="Talk channels">
                               <option value="select_talk_room">Select talk channel</option>
+                              <option value="select_listen_room">Select + listen channel (hold)</option>
                               <option value="ptt_selected">PTT selected channels</option>
                               <option value="ptt_room">PTT fixed channel</option>
                               <option value="listen_room">Listen channel</option>
@@ -2414,6 +2420,7 @@ export function StationIntercomView({
 
                         {streamDeckSelectedButton?.action?.type === "ptt_room" ||
                         streamDeckSelectedButton?.action?.type === "select_talk_room" ||
+                        streamDeckSelectedButton?.action?.type === "select_listen_room" ||
                         streamDeckSelectedButton?.action?.type === "listen_room" ||
                         streamDeckSelectedButton?.action?.type === "call_room" ? (
                           <label className="streamdeck-control">

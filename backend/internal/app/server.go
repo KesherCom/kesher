@@ -30,27 +30,28 @@ type AckSettings struct {
 var errCompanionUserNotAllowed = errors.New("companion target user is not allowed")
 
 type Server struct {
-	cfg                  Config
-	logger               *slog.Logger
-	store                *Store
-	sessions             *SessionManager
-	sessionMu            sync.Mutex
-	hub                  *Hub
-	media                *MediaManager
-	telegram             *TelegramBot
-	certMagic            tlsProvider
-	httpSrv              *http.Server
-	redirectSrv          *http.Server
-	upgrader             websocket.Upgrader
-	ackMu                sync.RWMutex
-	ackEnabled           bool
-	ackSet               bool
-	companionMu          sync.RWMutex
-	companionWS          map[string]map[chan CompanionCommandResult]struct{}
-	companionState       map[string]map[chan struct{}]struct{}
-	companionPageByRole  map[string]int
-	companionHeldTargets map[string]string
-	imageStreamCoord     *ImageStreamCoordinator
+	cfg                            Config
+	logger                         *slog.Logger
+	store                          *Store
+	sessions                       *SessionManager
+	sessionMu                      sync.Mutex
+	hub                            *Hub
+	media                          *MediaManager
+	telegram                       *TelegramBot
+	certMagic                      tlsProvider
+	httpSrv                        *http.Server
+	redirectSrv                    *http.Server
+	upgrader                       websocket.Upgrader
+	ackMu                          sync.RWMutex
+	ackEnabled                     bool
+	ackSet                         bool
+	companionMu                    sync.RWMutex
+	companionWS                    map[string]map[chan CompanionCommandResult]struct{}
+	companionState                 map[string]map[chan struct{}]struct{}
+	companionPageByRole            map[string]int
+	companionHeldTargets           map[string]string
+	companionSelectListenHoldDelay time.Duration
+	imageStreamCoord               *ImageStreamCoordinator
 }
 
 type tlsProvider interface {
@@ -98,9 +99,10 @@ type companionInbound struct {
 }
 
 const (
-	websocketPingInterval    = 30 * time.Second
-	websocketReadTimeout     = 60 * time.Second
-	websocketPingWriteWindow = 5 * time.Second
+	websocketPingInterval                 = 30 * time.Second
+	websocketReadTimeout                  = 60 * time.Second
+	websocketPingWriteWindow              = 5 * time.Second
+	companionSelectListenHoldDelayDefault = 2 * time.Second
 )
 
 func refreshWebSocketReadDeadline(conn *websocket.Conn) {
@@ -273,6 +275,11 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				writeState()
+				// Refresh button images when presence changes (e.g. listen state from browser)
+				resolvedRoleID := strings.TrimSpace(roleID)
+				if resolvedRoleID != "" {
+					s.emitCompanionCurrentPageImages(r.Context(), resolvedRoleID)
+				}
 			case result, ok := <-resultCh:
 				if !ok {
 					return
@@ -863,6 +870,12 @@ func (s *Server) setCompanionCurrentPage(roleID string, page int) {
 	s.publishCompanionState(roleID)
 }
 
+func (s *Server) publishCompanionPresenceUpdate(ctx context.Context, roleID string) {
+	// Signal Companion clients that presence has updated (listen state changed)
+	// so they refresh their listen-related button images
+	s.publishCompanionState(roleID)
+}
+
 func (s *Server) rememberCompanionHeldTarget(key, targetID string) {
 	if key == "" || targetID == "" {
 		return
@@ -894,6 +907,13 @@ func (s *Server) companionHeldTarget(key string) (string, bool) {
 		return "", false
 	}
 	return targetID, true
+}
+
+func (s *Server) selectListenCompanionHoldDelay() time.Duration {
+	if s.companionSelectListenHoldDelay > 0 {
+		return s.companionSelectListenHoldDelay
+	}
+	return companionSelectListenHoldDelayDefault
 }
 
 func (s *Server) companionButtonSnapshotState(ctx context.Context, roleID string, pageNumber int, username string, presence PresenceState, button StreamDeckButtonConfig) ButtonState {
@@ -939,24 +959,13 @@ func (s *Server) companionButtonSnapshotState(ctx context.Context, roleID string
 		}
 	case StreamDeckActionTypeListenRoom:
 		listening := contains(presence.ListenRooms, roomID)
-		stateKey := fmt.Sprintf("listen-toggle:%s", holdKey)
-		if expected, ok := s.companionHeldTarget(stateKey); ok {
-			if expected == "on" {
-				listening = true
-			} else if expected == "off" {
-				listening = false
-			}
-		}
 		if listening {
 			state.State = "LISTEN"
 			state.IsListening = true
 		}
-	case StreamDeckActionTypeSelectTalkRoom:
-		if contains(presence.ListenRooms, roomID) {
+	case StreamDeckActionTypeSelectTalkRoom, StreamDeckActionTypeSelectListen:
+		if roomID != "" && contains(presence.ListenRooms, roomID) {
 			state.IsListening = true
-		}
-		if contains(presence.TalkRooms, roomID) {
-			state.State = "LISTEN"
 		}
 	case StreamDeckActionTypeMuteToggle:
 		if strings.TrimSpace(presence.VoiceMode) == "always_on" {
@@ -1230,6 +1239,110 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		res := queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: append([]string(nil), presence.ListenRooms...), TalkRoomIDs: []string{roomID}})
 		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: "LISTEN", Channel: roomID, IsListening: isListening})
 		return res
+	case StreamDeckActionTypeSelectListen:
+		roomID := strings.TrimSpace(button.Action.RoomID)
+		if roomID == "" {
+			return rejectUnauthorized("roomId is required")
+		}
+		canTalk, err := isRoomTalkAllowed(roomID)
+		if err != nil {
+			result.Error = err.Error()
+			return result
+		}
+		canListen, err := isRoomListenAllowed(roomID)
+		if err != nil {
+			result.Error = err.Error()
+			return result
+		}
+		if !canTalk && !canListen {
+			return rejectUnauthorized("not allowed to talk or listen to room")
+		}
+		isListening := false
+		for _, entry := range presence.ListenRooms {
+			if entry == roomID {
+				isListening = true
+				break
+			}
+		}
+		triggerKey := fmt.Sprintf("select-listen-triggered:%s", holdKey)
+		if phase != "down" {
+			triggered := false
+			if _, ok := s.companionHeldTarget(triggerKey); ok {
+				triggered = true
+				_ = s.consumeCompanionHeldTarget(triggerKey)
+			}
+			_ = s.consumeCompanionHeldTarget(holdKey)
+			state := "IDLE"
+			for _, entry := range presence.TalkRooms {
+				if entry == roomID {
+					state = "LISTEN"
+					break
+				}
+			}
+			if triggered {
+				stillListening := false
+				for _, entry := range presence.ListenRooms {
+					if entry == roomID {
+						stillListening = true
+						break
+					}
+				}
+				s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: state}[stillListening], Channel: roomID, IsListening: stillListening})
+				result.OK = true
+				result.Status = "executed"
+				return result
+			}
+			if !canTalk {
+				return rejectUnauthorized("not allowed to talk to room")
+			}
+			s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: state, Channel: roomID, IsListening: isListening})
+			res := queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: append([]string(nil), presence.ListenRooms...), TalkRoomIDs: []string{roomID}})
+			return res
+		}
+		s.rememberCompanionHeldTarget(holdKey, roomID)
+		go func(roleID, username, roomID, holdKey, triggerKey string) {
+			time.Sleep(s.selectListenCompanionHoldDelay())
+			heldTargetID, ok := s.companionHeldTarget(holdKey)
+			if !ok || heldTargetID != roomID {
+				return
+			}
+			s.rememberCompanionHeldTarget(triggerKey, "1")
+			if allowed, err := s.store.RoomAllowsReceiverRole(context.Background(), roomID, roleID); err != nil || !allowed {
+				if err != nil {
+					s.publishCompanionResult(roleID, CompanionCommandResult{Command: "press_button", OK: false, Status: "failed", Error: err.Error(), Source: "server", Timestamp: time.Now().UnixMilli()})
+				}
+				return
+			}
+			presence, _ := s.hub.PresenceForUsername(username)
+			currentListening := false
+			for _, entry := range presence.ListenRooms {
+				if entry == roomID {
+					currentListening = true
+					break
+				}
+			}
+			nextListening := !currentListening
+
+			filtered := make([]string, 0, len(presence.ListenRooms)+1)
+			for _, entry := range presence.ListenRooms {
+				if entry != roomID {
+					filtered = append(filtered, entry)
+				}
+			}
+			if nextListening {
+				filtered = append(filtered, roomID)
+			}
+			res, err := s.queueCompanionBrowserCommand(username, CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: filtered, TalkRoomIDs: append([]string(nil), presence.TalkRooms...)})
+			if err != nil {
+				s.publishCompanionResult(roleID, CompanionCommandResult{Command: "press_button", OK: false, Status: "failed", Error: err.Error(), Source: "server", Timestamp: time.Now().UnixMilli()})
+				return
+			}
+			s.publishCompanionResult(roleID, res)
+		}(roleID, username, roomID, holdKey, triggerKey)
+		result.OK = true
+		result.Status = "executed"
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[isListening], Channel: roomID, IsListening: isListening})
+		return result
 	case StreamDeckActionTypePTTSelected:
 		targetID := ""
 		if phase == "down" {
@@ -1293,7 +1406,6 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		}
 
 		s.rememberCompanionHeldTarget(holdKey, roomID)
-		stateKey := fmt.Sprintf("listen-toggle:%s", holdKey)
 		currentListening := false
 		for _, entry := range presence.ListenRooms {
 			if entry == roomID {
@@ -1301,23 +1413,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 				break
 			}
 		}
-		s.companionMu.RLock()
-		if expected, ok := s.companionHeldTargets[stateKey]; ok {
-			if expected == "on" {
-				currentListening = true
-			} else if expected == "off" {
-				currentListening = false
-			}
-		}
-		s.companionMu.RUnlock()
 		nextListening := !currentListening
-		s.companionMu.Lock()
-		if nextListening {
-			s.companionHeldTargets[stateKey] = "on"
-		} else {
-			s.companionHeldTargets[stateKey] = "off"
-		}
-		s.companionMu.Unlock()
 
 		filtered := make([]string, 0, len(presence.ListenRooms)+1)
 		for _, entry := range presence.ListenRooms {
@@ -1329,7 +1425,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			filtered = append(filtered, roomID)
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: filtered, TalkRoomIDs: append([]string(nil), presence.TalkRooms...)})
-		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[nextListening], Channel: roomID})
+		s.emitCompanionButtonImage(ctx, page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[currentListening], Channel: roomID, IsListening: currentListening})
 		return res
 	case StreamDeckActionTypeCallRoom:
 		roomID := strings.TrimSpace(button.Action.RoomID)
@@ -1572,6 +1668,7 @@ func (s *Server) resolveButtonLabel(ctx context.Context, button StreamDeckButton
 	action := button.Action
 	switch action.Type {
 	case StreamDeckActionTypePTTRoom, StreamDeckActionTypeSelectTalkRoom,
+		StreamDeckActionTypeSelectListen,
 		StreamDeckActionTypeListenRoom, StreamDeckActionTypeCallRoom:
 		if rooms, err := s.store.ListRooms(ctx); err == nil {
 			for _, r := range rooms {
@@ -3792,6 +3889,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if mediaReady {
 				s.media.SyncRouting()
 			}
+			// Notify Companion clients of listen-state changes so button images update immediately
+			s.publishCompanionPresenceUpdate(r.Context(), session.RoleID)
 		case "chat":
 			s.routeInbound(r.Context(), session, in, "chat")
 		case "chat_ack":

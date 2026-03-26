@@ -66,6 +66,7 @@ import { useIntercomSession } from "./hooks/useIntercomSession";
 const adminPathname = "/admin";
 const loginPathname = "/login";
 const statusPollIntervalMs = 3000;
+const streamDeckSelectListenHoldMs = 2000;
 
 function isAdminPathname(pathname: string): boolean {
   return pathname === adminPathname;
@@ -105,6 +106,11 @@ type StreamDeckRenderButtonState = StreamDeckButtonConfig & {
   isListening?: boolean;
   attentionActive?: boolean;
   attentionPulseOn?: boolean;
+};
+
+type StreamDeckSelectListenHoldState = {
+  timerId: number;
+  listenTriggered: boolean;
 };
 
 function mergeStreamDeckRenderRequests(
@@ -384,6 +390,9 @@ export function App() {
   const incomingAttentionRef = useRef(false);
   const streamDeckAttentionPulseOnRef = useRef(false);
   const streamDeckPressedRoleTargetsRef = useRef<Map<string, string>>(new Map());
+  const streamDeckSelectListenHoldsRef = useRef<
+    Map<string, StreamDeckSelectListenHoldState>
+  >(new Map());
   const streamDeckRenderInFlightRef = useRef(false);
   const streamDeckPendingRenderRef = useRef<StreamDeckRenderRequest | null>(
     null,
@@ -465,6 +474,7 @@ export function App() {
                 isListening:
                   (rawButton.action?.type === "ptt_room" ||
                     rawButton.action?.type === "select_talk_room" ||
+                    rawButton.action?.type === "select_listen_room" ||
                     rawButton.action?.type === "listen_room") &&
                   !!rawButton.action.roomId &&
                   listeningRoomIds.has(rawButton.action.roomId),
@@ -586,6 +596,13 @@ export function App() {
     [emitStreamDeckBridgeEvent],
   );
 
+  const clearStreamDeckSelectListenHolds = useCallback(() => {
+    for (const hold of streamDeckSelectListenHoldsRef.current.values()) {
+      window.clearTimeout(hold.timerId);
+    }
+    streamDeckSelectListenHoldsRef.current.clear();
+  }, []);
+
   const disconnectStreamDeckWebHid = useCallback(
     async (options?: { announce?: boolean }) => {
       const session = streamDeckHidSessionRef.current;
@@ -594,6 +611,7 @@ export function App() {
       streamDeckHidSessionRef.current = null;
       streamDeckPendingRenderRef.current = null;
       streamDeckRenderedSignatureByIndexRef.current.clear();
+      clearStreamDeckSelectListenHolds();
 
       try {
         session.deck.off("down", session.onDown);
@@ -627,7 +645,7 @@ export function App() {
         });
       }
     },
-    [emitStreamDeckBridgeEvent],
+    [clearStreamDeckSelectListenHolds, emitStreamDeckBridgeEvent],
   );
 
   const connectStreamDeckWebHid = useCallback(async () => {
@@ -1313,6 +1331,61 @@ export function App() {
         session.toggleTalkRoom(action.roomId);
         return;
       }
+      if (action.type === "select_listen_room" && action.roomId) {
+        const buttonKey = `${effectivePage}:${payload.buttonIndex}`;
+        const roomId = action.roomId;
+        if (payload.state === "down") {
+          const previousHold =
+            streamDeckSelectListenHoldsRef.current.get(buttonKey);
+          if (previousHold) {
+            window.clearTimeout(previousHold.timerId);
+          }
+
+          const holdState: StreamDeckSelectListenHoldState = {
+            timerId: window.setTimeout(() => {
+              const activeHold =
+                streamDeckSelectListenHoldsRef.current.get(buttonKey);
+              if (!activeHold) {
+                return;
+              }
+              activeHold.listenTriggered = true;
+              streamDeckSelectListenHoldsRef.current.set(buttonKey, activeHold);
+              if (!isRoomListenAllowed(roomId)) {
+                setStreamDeckLastEvent(
+                  `P${effectivePage + 1}/B${payload.buttonIndex + 1} NOT ALLOW`,
+                );
+                return;
+              }
+              session.toggleListenRoom(roomId);
+              setStreamDeckLastEvent(
+                `P${effectivePage + 1}/B${payload.buttonIndex + 1} HOLD LISTEN`,
+              );
+            }, streamDeckSelectListenHoldMs),
+            listenTriggered: false,
+          };
+          streamDeckSelectListenHoldsRef.current.set(buttonKey, holdState);
+          return;
+        }
+
+        const holdState = streamDeckSelectListenHoldsRef.current.get(buttonKey);
+        if (!holdState) {
+          return;
+        }
+        window.clearTimeout(holdState.timerId);
+        streamDeckSelectListenHoldsRef.current.delete(buttonKey);
+
+        if (holdState.listenTriggered) {
+          return;
+        }
+        if (!isRoomTalkAllowed(roomId)) {
+          setStreamDeckLastEvent(
+            `P${effectivePage + 1}/B${payload.buttonIndex + 1} NOT ALLOW`,
+          );
+          return;
+        }
+        session.toggleTalkRoom(roomId);
+        return;
+      }
       if (action.type === "ptt_selected") {
         const selectedTalkRooms = session.talkRoomIds;
         const hasAllowedSelection = selectedTalkRooms.some((roomId) =>
@@ -1463,6 +1536,7 @@ export function App() {
     window.addEventListener(streamDeckButtonEventName, onBridgeButtonEvent);
 
     return () => {
+      clearStreamDeckSelectListenHolds();
       streamDeckPressedRoleTargetsRef.current.clear();
       window.removeEventListener("message", onMessage);
       window.removeEventListener(
@@ -1470,7 +1544,15 @@ export function App() {
         onBridgeButtonEvent,
       );
     };
-  }, [appData, authMode, disconnectStreamDeckWebHid, session, settings, token]);
+  }, [
+    appData,
+    authMode,
+    clearStreamDeckSelectListenHolds,
+    disconnectStreamDeckWebHid,
+    session,
+    settings,
+    token,
+  ]);
 
   useEffect(() => {
     if (!showDebug) {

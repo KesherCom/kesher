@@ -328,6 +328,32 @@ describe("StationIntercomView", () => {
     );
   });
 
+  it("allows assigning select+listen channel action in stream deck settings", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    await user.selectOptions(
+      screen.getByLabelText("Stream Deck function"),
+      "select_listen_room",
+    );
+
+    expect(onStreamDeckSettingsChange).toHaveBeenCalled();
+    const calls = onStreamDeckSettingsChange.mock.calls;
+    const lastCallArg = calls[calls.length - 1]?.[0];
+    expect(lastCallArg?.pages?.[0]?.buttons?.[0]?.action?.type).toBe(
+      "select_listen_room",
+    );
+  });
+
   it("does not offer unsupported stream deck functions in user settings", async () => {
     const user = userEvent.setup();
     render(

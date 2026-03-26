@@ -782,6 +782,10 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 					if action.RoomID == "" {
 						return StreamDeckSettings{}, ErrInvalidInput
 					}
+				case StreamDeckActionTypeSelectListen:
+					if action.RoomID == "" {
+						return StreamDeckSettings{}, ErrInvalidInput
+					}
 				case StreamDeckActionTypeListenRoom:
 					if action.RoomID == "" {
 						return StreamDeckSettings{}, ErrInvalidInput

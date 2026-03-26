@@ -21,14 +21,15 @@ func newCompanionTestServer(t *testing.T) *Server {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	hub := NewHub(store, logger)
 	return &Server{
-		cfg:                  Config{},
-		store:                store,
-		sessions:             NewSessionManager(time.Minute),
-		hub:                  hub,
-		companionWS:          make(map[string]map[chan CompanionCommandResult]struct{}),
-		companionState:       make(map[string]map[chan struct{}]struct{}),
-		companionPageByRole:  make(map[string]int),
-		companionHeldTargets: make(map[string]string),
+		cfg:                            Config{},
+		store:                          store,
+		sessions:                       NewSessionManager(time.Minute),
+		hub:                            hub,
+		companionWS:                    make(map[string]map[chan CompanionCommandResult]struct{}),
+		companionState:                 make(map[string]map[chan struct{}]struct{}),
+		companionPageByRole:            make(map[string]int),
+		companionHeldTargets:           make(map[string]string),
+		companionSelectListenHoldDelay: 10 * time.Millisecond,
 	}
 }
 
@@ -461,6 +462,134 @@ func TestExecuteCompanionButtonPressSelectTalkRoomSetsExclusiveSelection(t *test
 	}
 	if len(secondCommand.TalkRoomIDs) != 1 || secondCommand.TalkRoomIDs[0] != "room-b" {
 		t.Fatalf("expected repeat press to keep [room-b] selected, got %+v", secondCommand.TalkRoomIDs)
+	}
+}
+
+func TestExecuteCompanionButtonPressSelectListenSetsExclusiveSelection(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if err := s.store.CreateRoom(ctx, "room-a", "Room A", []string{"source"}, []string{"source"}, nil); err != nil {
+		t.Fatalf("CreateRoom room-a failed: %v", err)
+	}
+	if err := s.store.CreateRoom(ctx, "room-b", "Room B", []string{"source"}, []string{"source"}, nil); err != nil {
+		t.Fatalf("CreateRoom room-b failed: %v", err)
+	}
+	user, err := s.store.UpsertUser(ctx, "operator", "source")
+	if err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+	session := s.sessions.Create(user)
+
+	client := &client{
+		session:      session,
+		user:         user,
+		send:         make(chan WSOutbound, 8),
+		sendPriority: make(chan WSOutbound, 8),
+		listenRooms:  map[string]struct{}{},
+		talkRooms:    map[string]struct{}{},
+	}
+	s.hub.Add(client)
+	s.hub.SetRoomMatrix(session.Token, []string{"room-a"}, []string{"room-a"})
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeSelectListen, RoomID: "room-b"}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	down := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{Command: "press_button", ButtonIndex: 0, State: "down"})
+	if !down.OK || down.Status != "executed" {
+		t.Fatalf("expected down press to arm hold logic, got %+v", down)
+	}
+
+	up := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{Command: "press_button", ButtonIndex: 0, State: "up"})
+	if !up.OK || up.Status != "queued" {
+		t.Fatalf("expected short press release to queue selection, got %+v", up)
+	}
+
+	firstOutbound := <-client.sendPriority
+	firstCommand, ok := firstOutbound.Data.(CompanionCommand)
+	if !ok {
+		t.Fatalf("expected CompanionCommand payload, got %T", firstOutbound.Data)
+	}
+	if firstCommand.Command != "set_room_matrix" {
+		t.Fatalf("expected set_room_matrix command, got %+v", firstCommand)
+	}
+	if len(firstCommand.ListenRoomIDs) != 1 || firstCommand.ListenRoomIDs[0] != "room-a" {
+		t.Fatalf("expected listen rooms to be preserved, got %+v", firstCommand.ListenRoomIDs)
+	}
+	if len(firstCommand.TalkRoomIDs) != 1 || firstCommand.TalkRoomIDs[0] != "room-b" {
+		t.Fatalf("expected exclusive talk room selection [room-b], got %+v", firstCommand.TalkRoomIDs)
+	}
+}
+
+func TestExecuteCompanionButtonPressSelectListenLongHoldTogglesListen(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if err := s.store.CreateRoom(ctx, "room-a", "Room A", []string{"source"}, []string{"source"}, nil); err != nil {
+		t.Fatalf("CreateRoom room-a failed: %v", err)
+	}
+	if err := s.store.CreateRoom(ctx, "room-b", "Room B", []string{"source"}, []string{"source"}, nil); err != nil {
+		t.Fatalf("CreateRoom room-b failed: %v", err)
+	}
+	user, err := s.store.UpsertUser(ctx, "operator", "source")
+	if err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+	session := s.sessions.Create(user)
+
+	client := &client{
+		session:      session,
+		user:         user,
+		send:         make(chan WSOutbound, 8),
+		sendPriority: make(chan WSOutbound, 8),
+		listenRooms:  map[string]struct{}{},
+		talkRooms:    map[string]struct{}{},
+	}
+	s.hub.Add(client)
+	s.hub.SetRoomMatrix(session.Token, []string{"room-a"}, []string{"room-a"})
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeSelectListen, RoomID: "room-b"}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	down := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{Command: "press_button", ButtonIndex: 0, State: "down"})
+	if !down.OK || down.Status != "executed" {
+		t.Fatalf("expected down press to arm hold logic, got %+v", down)
+	}
+
+	select {
+	case outbound := <-client.sendPriority:
+		command, ok := outbound.Data.(CompanionCommand)
+		if !ok {
+			t.Fatalf("expected CompanionCommand payload, got %T", outbound.Data)
+		}
+		if command.Command != "set_room_matrix" {
+			t.Fatalf("expected set_room_matrix command, got %+v", command)
+		}
+		if len(command.ListenRoomIDs) != 2 {
+			t.Fatalf("expected long hold to toggle room-b listen on, got %+v", command.ListenRoomIDs)
+		}
+		if len(command.TalkRoomIDs) != 1 || command.TalkRoomIDs[0] != "room-a" {
+			t.Fatalf("expected talk rooms to remain unchanged on long hold, got %+v", command.TalkRoomIDs)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for long-hold listen toggle command")
+	}
+
+	up := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{Command: "press_button", ButtonIndex: 0, State: "up"})
+	if !up.OK || up.Status != "executed" {
+		t.Fatalf("expected release after long hold to avoid extra select, got %+v", up)
 	}
 }
 

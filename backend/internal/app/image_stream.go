@@ -170,7 +170,7 @@ func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, erro
 		dc.Stroke()
 	}
 
-	if (actionType == string(StreamDeckActionTypePTTRoom) || actionType == string(StreamDeckActionTypeListenRoom) || actionType == string(StreamDeckActionTypeSelectTalkRoom)) && state.IsListening {
+	if (actionType == string(StreamDeckActionTypePTTRoom) || actionType == string(StreamDeckActionTypeListenRoom) || actionType == string(StreamDeckActionTypeSelectTalkRoom) || actionType == string(StreamDeckActionTypeSelectListen)) && state.IsListening {
 		stripeHeight := math.Max(6, math.Round(h*0.075))
 		dc.SetHexColor("#14c64b")
 		dc.DrawRoundedRectangle(
@@ -272,6 +272,8 @@ func getButtonPalette(actionType, color string, pressed bool) keyPalette {
 		return keyPalette{background: "#000000", border: "#ffc067", label: "#f6f0e8"}
 	case string(StreamDeckActionTypeSelectTalkRoom):
 		return keyPalette{background: "#000000", border: "#2da8ff", label: "#ecf7ff"}
+	case string(StreamDeckActionTypeSelectListen):
+		return keyPalette{background: "#000000", border: "#2db8a3", label: "#ecf9f6"}
 	case string(StreamDeckActionTypePTTSelected):
 		return keyPalette{background: "#000000", border: "#ff4d4d", label: "#fff1f1"}
 	case string(StreamDeckActionTypeListenRoom):
@@ -618,7 +620,7 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 		if !state.IsListening && button.Action != nil {
 			actionType := button.Action.Type
 			roomID := strings.TrimSpace(button.Action.RoomID)
-			if roomID != "" && (actionType == StreamDeckActionTypePTTRoom || actionType == StreamDeckActionTypeListenRoom) {
+			if roomID != "" && (actionType == StreamDeckActionTypePTTRoom || actionType == StreamDeckActionTypeListenRoom || actionType == StreamDeckActionTypeSelectListen) {
 				_, state.IsListening = listeningRooms[roomID]
 			}
 		}

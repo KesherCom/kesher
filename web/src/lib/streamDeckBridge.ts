@@ -23,6 +23,7 @@ const streamDeckActionTypes: StreamDeckActionType[] = [
   "none",
   "ptt_room",
   "select_talk_room",
+  "select_listen_room",
   "ptt_selected",
   "listen_room",
   "call_room",
