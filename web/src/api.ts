@@ -866,6 +866,54 @@ export async function resetStreamDeckSettings(
   return normalizeStreamDeckSettings(raw);
 }
 
+export type StreamDeckPreviewButton = {
+  buttonIndex: number;
+  label?: string;
+  subtitle?: string;
+  actionType?: StreamDeckActionType;
+  color?: string;
+  state?: "IDLE" | "TALK" | "LISTEN" | "BROADCAST";
+  channel?: string;
+  isListening?: boolean;
+  isActive?: boolean;
+};
+
+export async function renderStreamDeckPreviewImages(
+  token: string,
+  payload: {
+    width?: number;
+    height?: number;
+    buttons: StreamDeckPreviewButton[];
+  },
+  signal?: AbortSignal,
+): Promise<Map<number, string>> {
+  if (!payload.buttons.length) {
+    return new Map();
+  }
+
+  const res = await fetch("/api/user/stream-deck/preview", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const raw = (await res.json()) as {
+    images?: Array<{ buttonIndex: number; imageBuffer: string }>;
+  };
+  const images = Array.isArray(raw.images) ? raw.images : [];
+  const byIndex = new Map<number, string>();
+  for (const entry of images) {
+    if (typeof entry?.buttonIndex !== "number") continue;
+    if (typeof entry?.imageBuffer !== "string" || !entry.imageBuffer) continue;
+    byIndex.set(entry.buttonIndex, `data:image/png;base64,${entry.imageBuffer}`);
+  }
+  return byIndex;
+}
+
 export async function getAdminRoleStreamDeckSettings(
   token: string,
   adminPin: string,

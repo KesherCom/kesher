@@ -12,6 +12,7 @@ import {
   login,
   loginTakeover,
   logout,
+  renderStreamDeckPreviewImages,
   resetStreamDeckSettings,
   updateStreamDeckSettings,
 } from "./api";
@@ -155,6 +156,20 @@ const server = setupServer(
       gridRows: 3,
       selectedPage: 0,
       pages: [{ page: 0, buttons: [{ index: 0 }] }],
+    });
+  }),
+  http.post("http://localhost/api/user/stream-deck/preview", async ({ request }) => {
+    const body = (await request.json()) as {
+      buttons?: Array<{ buttonIndex: number }>;
+    };
+    const buttons = Array.isArray(body.buttons) ? body.buttons : [];
+    return HttpResponse.json({
+      width: 112,
+      height: 112,
+      images: buttons.map((entry) => ({
+        buttonIndex: entry.buttonIndex,
+        imageBuffer: "iVBORw0KGgo=",
+      })),
     });
   }),
 );
@@ -349,5 +364,23 @@ describe("api helpers", () => {
 
     const settings = await getStreamDeckSettings("token-123");
     expect(settings.pages[0]?.buttons[0]?.action?.type).toBe("page_up");
+  });
+
+  it("renders stream deck preview images", async () => {
+    const images = await renderStreamDeckPreviewImages("token-123", {
+      width: 112,
+      height: 112,
+      buttons: [
+        {
+          buttonIndex: 0,
+          label: "Reply",
+          subtitle: "Caller",
+          actionType: "reply_to_caller",
+          state: "TALK",
+          isActive: true,
+        },
+      ],
+    });
+    expect(images.get(0)).toBe("data:image/png;base64,iVBORw0KGgo=");
   });
 });

@@ -1867,6 +1867,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/bootstrap", s.withAuth(s.handleBootstrap))
 	mux.HandleFunc("/api/status", s.withAuth(s.handleStatus))
 	mux.HandleFunc("/api/user/stream-deck/settings", s.withAuth(s.handleUserStreamDeckSettings))
+	mux.HandleFunc("/api/user/stream-deck/preview", s.withAuth(s.handleUserStreamDeckPreview))
 	mux.HandleFunc("/api/admin/stream-deck/settings", s.withAuth(s.handleAdminRoleStreamDeckSettings))
 	mux.HandleFunc("/api/admin/companion/config", s.withAuth(s.handleAdminCompanionConfig))
 	mux.HandleFunc("/api/companion/profile", s.handleCompanionProfile)

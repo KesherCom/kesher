@@ -9,8 +9,8 @@ import type {
   StreamDeckSettings,
 } from "../types";
 import type { KeyboardShortcutSettings } from "../app/settings";
+import { renderStreamDeckPreviewImages } from "../api";
 import { createHoldButtonProps } from "../lib/holdButton";
-import { createStreamDeckButtonPreviewDataUrl } from "../lib/streamDeckHardwareFeedback";
 import { withResolvedStreamDeckButtonLabel } from "../lib/streamDeckLabels";
 import { sortDirectUsersByRoleAndUsername } from "../lib/users";
 import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
@@ -236,6 +236,21 @@ function streamDeckPreviewSignature(
     button.isListening ? "1" : "0",
     pressed ? "1" : "0",
   ].join("|");
+}
+
+function splitStreamDeckLabel(label?: string): { primary: string; subtitle: string } {
+  const text = (label ?? "").trim();
+  if (!text) {
+    return { primary: "", subtitle: "" };
+  }
+  const parts = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return {
+    primary: parts[0] ?? "",
+    subtitle: parts[1] ?? "",
+  };
 }
 
 function meterDbFsToPercent(dbFs: number): number {
@@ -689,7 +704,10 @@ export function StationIntercomView({
     [streamDeckPreviewPressedIndexes],
   );
 
-  const streamDeckPreviewImageByIndex = useMemo(() => {
+  const [streamDeckPreviewImageByIndex, setStreamDeckPreviewImageByIndex] =
+    useState<Map<number, string>>(new Map());
+
+  const streamDeckPreviewRenderInputs = useMemo(() => {
     const cache = streamDeckPreviewCacheRef.current;
     const listeningRoomIds = new Set(listenRoomIds);
     const visibleButtonIndices = new Set(
@@ -702,43 +720,134 @@ export function StationIntercomView({
       }
     }
 
-    return new Map(
-      streamDeckCurrentButtons.map((rawButton) => {
-        const resolvedButton = withResolvedStreamDeckButtonLabel(
-          rawButton,
-          streamDeckLabelLookup,
-        );
-        const button = {
-          ...resolvedButton,
-          isListening:
-            (rawButton.action?.type === "ptt_room" ||
-              rawButton.action?.type === "listen_room") &&
-            !!rawButton.action.roomId &&
-            listeningRoomIds.has(rawButton.action.roomId),
-        };
-        const pressed = streamDeckPreviewPressedSet.has(rawButton.index);
-        const signature = streamDeckPreviewSignature(button, pressed);
-        const cached = cache.get(rawButton.index);
+    return streamDeckCurrentButtons.map((rawButton) => {
+      const resolvedButton = withResolvedStreamDeckButtonLabel(
+        rawButton,
+        streamDeckLabelLookup,
+      );
+      const isListening =
+        (rawButton.action?.type === "ptt_room" ||
+          rawButton.action?.type === "select_talk_room" ||
+          rawButton.action?.type === "listen_room") &&
+        !!rawButton.action.roomId &&
+        listeningRoomIds.has(rawButton.action.roomId);
+      const button = {
+        ...resolvedButton,
+        isListening,
+      };
+      const pressed = streamDeckPreviewPressedSet.has(rawButton.index);
+      const signature = streamDeckPreviewSignature(button, pressed);
+      const labels = splitStreamDeckLabel(resolvedButton.label);
+      const previewState: "IDLE" | "TALK" | "LISTEN" | "BROADCAST" = pressed
+        ? rawButton.action?.type === "broadcast_ptt"
+          ? "BROADCAST"
+          : "TALK"
+        : isListening
+          ? "LISTEN"
+          : "IDLE";
 
-        if (cached && cached.signature === signature) {
-          return [rawButton.index, cached.dataUrl] as const;
-        }
-
-        const dataUrl = createStreamDeckButtonPreviewDataUrl(button, {
-          pressed,
-          width: 112,
-          height: 112,
-        });
-        cache.set(rawButton.index, { signature, dataUrl });
-        return [rawButton.index, dataUrl] as const;
-      }),
-    );
+      return {
+        buttonIndex: rawButton.index,
+        signature,
+        payload: {
+          buttonIndex: rawButton.index,
+          label: labels.primary,
+          subtitle: labels.subtitle,
+          actionType: rawButton.action?.type,
+          color: rawButton.color,
+          state: previewState,
+          channel:
+            rawButton.action?.roomId ||
+            rawButton.action?.broadcastGroupId ||
+            rawButton.action?.roleId ||
+            rawButton.action?.userId ||
+            "",
+          isListening,
+          isActive: pressed,
+        },
+      };
+    });
   }, [
     listenRoomIds,
     streamDeckLabelLookup,
     streamDeckCurrentButtons,
     streamDeckPreviewPressedSet,
   ]);
+
+  useEffect(() => {
+    const cache = streamDeckPreviewCacheRef.current;
+    const initial = new Map<number, string>();
+    const missingPayload: Array<{
+      buttonIndex: number;
+      label?: string;
+      subtitle?: string;
+      actionType?: StreamDeckActionType;
+      color?: string;
+      state?: "IDLE" | "TALK" | "LISTEN" | "BROADCAST";
+      channel?: string;
+      isListening?: boolean;
+      isActive?: boolean;
+    }> = [];
+
+    for (const item of streamDeckPreviewRenderInputs) {
+      const cached = cache.get(item.buttonIndex);
+      if (cached && cached.signature === item.signature) {
+        initial.set(item.buttonIndex, cached.dataUrl);
+      } else {
+        missingPayload.push(item.payload);
+      }
+    }
+
+    setStreamDeckPreviewImageByIndex(initial);
+
+    if (missingPayload.length === 0) {
+      return;
+    }
+
+    const abortController = new AbortController();
+
+    void (async () => {
+      try {
+        const renderedByIndex = await renderStreamDeckPreviewImages(
+          token,
+          {
+            width: 112,
+            height: 112,
+            buttons: missingPayload,
+          },
+          abortController.signal,
+        );
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        for (const item of streamDeckPreviewRenderInputs) {
+          const image = renderedByIndex.get(item.buttonIndex);
+          if (!image) continue;
+          cache.set(item.buttonIndex, {
+            signature: item.signature,
+            dataUrl: image,
+          });
+        }
+
+        const nextMap = new Map<number, string>();
+        for (const item of streamDeckPreviewRenderInputs) {
+          const cached = cache.get(item.buttonIndex);
+          if (!cached || cached.signature !== item.signature) continue;
+          nextMap.set(item.buttonIndex, cached.dataUrl);
+        }
+        setStreamDeckPreviewImageByIndex(nextMap);
+      } catch {
+        if (abortController.signal.aborted) {
+          return;
+        }
+      }
+    })();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [streamDeckPreviewRenderInputs, token]);
 
   const startStreamDeckPreviewPress = (buttonIndex: number) => {
     if (!streamDeckSettings || !streamDeckTestMode) return;

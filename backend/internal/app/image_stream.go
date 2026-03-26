@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -73,6 +74,35 @@ type ButtonState struct {
 	TalkCount   int
 	IsListening bool
 	IsActive    bool
+}
+
+type streamDeckPreviewButtonRequest struct {
+	ButtonIndex int    `json:"buttonIndex"`
+	Label       string `json:"label,omitempty"`
+	Subtitle    string `json:"subtitle,omitempty"`
+	ActionType  string `json:"actionType,omitempty"`
+	Color       string `json:"color,omitempty"`
+	State       string `json:"state,omitempty"`
+	Channel     string `json:"channel,omitempty"`
+	IsListening bool   `json:"isListening,omitempty"`
+	IsActive    bool   `json:"isActive,omitempty"`
+}
+
+type streamDeckPreviewRequest struct {
+	Width   int                              `json:"width,omitempty"`
+	Height  int                              `json:"height,omitempty"`
+	Buttons []streamDeckPreviewButtonRequest `json:"buttons"`
+}
+
+type streamDeckPreviewImage struct {
+	ButtonIndex int    `json:"buttonIndex"`
+	ImageBuffer string `json:"imageBuffer"`
+}
+
+type streamDeckPreviewResponse struct {
+	Width  int                      `json:"width"`
+	Height int                      `json:"height"`
+	Images []streamDeckPreviewImage `json:"images"`
 }
 
 type keyPalette struct {
@@ -733,4 +763,83 @@ func parseDebugInt(raw string, fallback int) int {
 		return 512
 	}
 	return v
+}
+
+func parsePreviewDimension(raw int, fallback int) int {
+	v := raw
+	if v == 0 {
+		v = fallback
+	}
+	if v < 16 {
+		return 16
+	}
+	if v > 512 {
+		return 512
+	}
+	return v
+}
+
+func normalizeButtonRenderState(raw string) string {
+	state := strings.ToUpper(strings.TrimSpace(raw))
+	switch state {
+	case "IDLE", "TALK", "LISTEN", "BROADCAST":
+		return state
+	default:
+		return "IDLE"
+	}
+}
+
+func (s *Server) handleUserStreamDeckPreview(w http.ResponseWriter, r *http.Request, _ Session) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req streamDeckPreviewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Buttons) == 0 {
+		s.writeJSON(w, http.StatusOK, streamDeckPreviewResponse{Width: 112, Height: 112, Images: []streamDeckPreviewImage{}})
+		return
+	}
+
+	width := parsePreviewDimension(req.Width, 112)
+	height := parsePreviewDimension(req.Height, 112)
+
+	renderer, err := NewButtonImageRenderer(&ButtonImageRenderConfig{Width: width, Height: height})
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+
+	images := make([]streamDeckPreviewImage, 0, len(req.Buttons))
+	for _, button := range req.Buttons {
+		img, renderErr := renderer.RenderButtonImage(ButtonState{
+			Channel:     strings.TrimSpace(button.Channel),
+			State:       normalizeButtonRenderState(button.State),
+			Label:       strings.TrimSpace(button.Label),
+			Subtitle:    strings.TrimSpace(button.Subtitle),
+			ActionType:  strings.TrimSpace(button.ActionType),
+			Color:       strings.TrimSpace(button.Color),
+			IsListening: button.IsListening,
+			IsActive:    button.IsActive,
+		})
+		if renderErr != nil {
+			http.Error(w, "failed to render preview image", http.StatusInternalServerError)
+			return
+		}
+		images = append(images, streamDeckPreviewImage{
+			ButtonIndex: button.ButtonIndex,
+			ImageBuffer: base64.StdEncoding.EncodeToString(img),
+		})
+	}
+
+	s.writeJSON(w, http.StatusOK, streamDeckPreviewResponse{
+		Width:  width,
+		Height: height,
+		Images: images,
+	})
 }
