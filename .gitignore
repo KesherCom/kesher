@@ -18,5 +18,6 @@ backend/internal/app/embedded_web/*
 !backend/internal/app/embedded_web/_placeholder.txt
 *.pem
 .vscode/*
+.VSCodeCounter/*
 certs/*
 backend/app
