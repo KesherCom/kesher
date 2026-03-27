@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -280,6 +281,65 @@ func TestNewStoreMigratesLegacyTelegramUserMappingsSchema(t *testing.T) {
 	}
 	if created.ID != "telegram_user_67890" {
 		t.Fatalf("unexpected created mapping id: %q", created.ID)
+	}
+}
+
+func TestNewStoreDoesNotReseedDeletedDefaultsOnReopen(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "persisted.sqlite")
+	ctx := context.Background()
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteRole(ctx, "audio"); err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	if err := store.DeleteRoom(ctx, "stage"); err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+
+	roles, err := reopened.ListRoles(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roleIDs := make([]string, 0, len(roles))
+	for _, role := range roles {
+		roleIDs = append(roleIDs, role.ID)
+	}
+	if slices.Contains(roleIDs, "audio") {
+		t.Fatalf("expected deleted role to stay deleted after reopen, roles=%v", roleIDs)
+	}
+
+	rooms, err := reopened.ListRooms(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roomIDs := make([]string, 0, len(rooms))
+	for _, room := range rooms {
+		roomIDs = append(roomIDs, room.ID)
+	}
+	if slices.Contains(roomIDs, "stage") {
+		t.Fatalf("expected deleted room to stay deleted after reopen, rooms=%v", roomIDs)
+	}
+
+	adminPIN, err := reopened.GetAdminPIN(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adminPIN != defaultAdminPIN {
+		t.Fatalf("expected admin pin to remain available, got %q", adminPIN)
 	}
 }
 

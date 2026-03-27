@@ -673,11 +673,6 @@ func (s *Server) resolveImageStreamTarget(ctx context.Context, r *http.Request) 
 			roleID = strings.TrimSpace(autoRoleID)
 		}
 	}
-	if username == "" && s.sessions != nil && roleID != "" {
-		if session, ok := s.sessions.LatestForRole(roleID); ok {
-			username = strings.TrimSpace(session.Username)
-		}
-	}
 	return roleID, username
 }
 

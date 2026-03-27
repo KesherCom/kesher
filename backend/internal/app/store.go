@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -403,7 +404,35 @@ func nullableString(value string) sql.NullString {
 	return sql.NullString{String: value, Valid: true}
 }
 
+func shouldSeedDefaults(dbPath string) (bool, error) {
+	if dbPath == ":memory:" || strings.Contains(dbPath, "mode=memory") {
+		return true, nil
+	}
+	filePath := strings.TrimSpace(dbPath)
+	if strings.HasPrefix(filePath, "file:") {
+		filePath = strings.TrimPrefix(filePath, "file:")
+		if idx := strings.Index(filePath, "?"); idx >= 0 {
+			filePath = filePath[:idx]
+		}
+	}
+	if filePath == "" {
+		return true, nil
+	}
+	_, err := os.Stat(filePath)
+	if err == nil {
+		return false, nil
+	}
+	if os.IsNotExist(err) {
+		return true, nil
+	}
+	return false, err
+}
+
 func NewStore(dbPath string) (*Store, error) {
+	seedDefaults, err := shouldSeedDefaults(dbPath)
+	if err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
@@ -418,10 +447,22 @@ func NewStore(dbPath string) (*Store, error) {
 	if err := s.migrate(context.Background()); err != nil {
 		return nil, err
 	}
-	if err := s.seed(context.Background()); err != nil {
+	if err := s.ensureBootstrapSettings(context.Background()); err != nil {
 		return nil, err
 	}
+	if seedDefaults {
+		if err := s.seed(context.Background()); err != nil {
+			return nil, err
+		}
+	}
 	return s, nil
+}
+
+func (s *Store) ensureBootstrapSettings(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO app_settings (key, value) VALUES ('admin_pin', ?)`, defaultAdminPIN); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -639,9 +680,6 @@ func (s *Store) seed(ctx context.Context) error {
 				return err
 			}
 		}
-	}
-	if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO app_settings (key, value) VALUES ('admin_pin', ?)`, defaultAdminPIN); err != nil {
-		return err
 	}
 	// Seed broadcast group role mappings: grant all roles access to all-tech.
 	var allTechRoles int
