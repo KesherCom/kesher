@@ -955,6 +955,48 @@ button {
   align-items: center;
 }
 
+.admin-logs-filters {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.admin-logs-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+}
+
+.admin-logs-table-wrap {
+  overflow-x: auto;
+}
+
+.admin-logs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.admin-logs-table th,
+.admin-logs-table td {
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0.48rem 0.45rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.admin-logs-table th {
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.admin-logs-empty {
+  color: var(--text-secondary);
+  text-align: center;
+}
+
 /* ============ Routing Matrix ============ */
 .routing-matrix-hint {
   color: var(--text-muted);

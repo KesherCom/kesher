@@ -11,6 +11,7 @@ import { AdminShowfileCard } from "./AdminShowfileCard";
 import { AdminCompanionCard } from "./AdminCompanionCard";
 import { AdminCompanionPageConfigCard } from "./AdminCompanionPageConfigCard";
 import { AdminStreamDeckCard } from "./AdminStreamDeckCard";
+import { AdminLogsCard } from "./AdminLogsCard";
 
 type AdminConfigCardProps = {
   token: string;
@@ -104,6 +105,8 @@ export function AdminConfigCard({
           <h3>Runtime</h3>
           <p>Communication housekeeping and operational cleanup.</p>
         </div>
+
+        <AdminLogsCard token={token} adminPin={adminPin} />
 
         <AdminChatHistoryCard
           token={token}

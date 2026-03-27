@@ -32,6 +32,7 @@ var errCompanionUserNotAllowed = errors.New("companion target user is not allowe
 type Server struct {
 	cfg                            Config
 	logger                         *slog.Logger
+	adminLogs                      *adminLogStore
 	store                          *Store
 	sessions                       *SessionManager
 	sessionMu                      sync.Mutex
@@ -1931,6 +1932,10 @@ func NewServer(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	adminLogs, err := newAdminLogStore(cfg)
+	if err != nil {
+		return nil, err
+	}
 	if cfg.AdminPINFromEnv {
 		if err := store.SetAdminPIN(context.Background(), cfg.AdminPIN); err != nil {
 			return nil, err
@@ -1939,6 +1944,7 @@ func NewServer(cfg Config) (*Server, error) {
 	s := &Server{
 		cfg:                  cfg,
 		logger:               logger,
+		adminLogs:            adminLogs,
 		store:                store,
 		sessions:             NewSessionManager(cfg.SessionTTL),
 		hub:                  NewHub(store, logger),
@@ -2001,6 +2007,8 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/broadcast-groups", s.withAuth(s.handleAdminBroadcastGroups))
 	mux.HandleFunc("/api/admin/broadcast-groups/", s.withAuth(s.handleAdminBroadcastGroupByID))
 	mux.HandleFunc("/api/admin/pin", s.withAuth(s.handleAdminPin))
+	mux.HandleFunc("/api/admin/logs", s.withAuth(s.handleAdminLogs))
+	mux.HandleFunc("/api/admin/logs/export", s.withAuth(s.handleAdminLogsExport))
 	mux.HandleFunc("/api/admin/chat-history/clear", s.withAuth(s.handleAdminClearChatHistory))
 	mux.HandleFunc("/api/admin/ack-settings", s.withAuth(s.handleAdminAckSettings))
 	mux.HandleFunc("/api/admin/configuration-export", s.withAuth(s.handleAdminConfigurationExport))
@@ -2027,7 +2035,7 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 	s.httpSrv = &http.Server{
 		Addr:              serveAddr,
-		Handler:           s.withCORS(mux),
+		Handler:           s.withRequestLogging(s.withCORS(mux)),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	if cfg.ProductionMode {
@@ -3364,6 +3372,7 @@ func (s *Server) handleAdminPin(w http.ResponseWriter, r *http.Request, session 
 		s.internalErr(w, err)
 		return
 	}
+	s.logAdminAction(session, r.Method, r.URL.Path, "admin pin updated", http.StatusOK)
 	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -3379,6 +3388,7 @@ func (s *Server) handleAdminClearChatHistory(w http.ResponseWriter, r *http.Requ
 		s.hub.ClearChatHistory()
 		s.hub.BroadcastChatHistoryCleared()
 	}
+	s.logAdminAction(session, r.Method, r.URL.Path, "chat history cleared", http.StatusOK)
 	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -3441,6 +3451,7 @@ func (s *Server) handleAdminConfigurationExport(w http.ResponseWriter, r *http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", "attachment; filename=kesher-showfile.json")
+	s.logAdminAction(session, r.Method, r.URL.Path, "configuration exported", http.StatusOK)
 	s.writeJSON(w, http.StatusOK, doc)
 }
 
@@ -3479,6 +3490,7 @@ func (s *Server) handleAdminConfigurationImport(w http.ResponseWriter, r *http.R
 	}
 	s.revokeSessionsForUsernames(revokedUsernames)
 	s.broadcastImportedConfiguration(state)
+	s.logAdminAction(session, r.Method, r.URL.Path, "configuration imported", http.StatusOK)
 	s.writeJSON(w, http.StatusOK, ConfigurationImportResponse{ImportedSections: sections})
 }
 
@@ -3723,12 +3735,33 @@ func (s *Server) handleAdminRoutingMatrix(w http.ResponseWriter, r *http.Request
 func (s *Server) writeStoreErr(w http.ResponseWriter, err error) bool {
 	switch {
 	case errors.Is(err, ErrInvalidInput):
+		s.appendAdminLog(AdminLogEntry{
+			TimestampUnixMs: time.Now().UnixMilli(),
+			Level:           "WARN",
+			Category:        "error",
+			Message:         "store error",
+			Error:           err.Error(),
+		})
 		http.Error(w, "invalid input", http.StatusBadRequest)
 		return true
 	case errors.Is(err, ErrConflict):
+		s.appendAdminLog(AdminLogEntry{
+			TimestampUnixMs: time.Now().UnixMilli(),
+			Level:           "WARN",
+			Category:        "error",
+			Message:         "store conflict",
+			Error:           err.Error(),
+		})
 		http.Error(w, "conflict", http.StatusConflict)
 		return true
 	case errors.Is(err, ErrNotFound):
+		s.appendAdminLog(AdminLogEntry{
+			TimestampUnixMs: time.Now().UnixMilli(),
+			Level:           "WARN",
+			Category:        "error",
+			Message:         "store not found",
+			Error:           err.Error(),
+		})
 		http.Error(w, "not found", http.StatusNotFound)
 		return true
 	default:
@@ -4286,6 +4319,13 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func (s *Server) internalErr(w http.ResponseWriter, err error) {
+	s.appendAdminLog(AdminLogEntry{
+		TimestampUnixMs: time.Now().UnixMilli(),
+		Level:           "ERROR",
+		Category:        "error",
+		Message:         "internal request error",
+		Error:           err.Error(),
+	})
 	s.logger.Error("request failed", "error", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
@@ -4305,4 +4345,3 @@ func defaultRoomForSession(session Session, roles []Role, rooms []Room) string {
 func newID() string {
 	return uuid.NewString()
 }
-

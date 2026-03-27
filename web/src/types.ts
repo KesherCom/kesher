@@ -204,6 +204,29 @@ export type RealtimeStatsResponse = {
   timestampUnixMs: number;
 };
 
+export type AdminLogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR";
+
+export type AdminLogEntry = {
+  timestampUnixMs: number;
+  level: AdminLogLevel | string;
+  category: string;
+  message: string;
+  method?: string;
+  path?: string;
+  status?: number;
+  durationMs?: number;
+  username?: string;
+  roleId?: string;
+  remoteAddr?: string;
+  error?: string;
+};
+
+export type AdminLogsResponse = {
+  entries: AdminLogEntry[];
+  total: number;
+  timestampUnixMs: number;
+};
+
 export type StatusResponse = {
   roomListenerCounts: Record<string, number>;
   timestampUnixMs: number;

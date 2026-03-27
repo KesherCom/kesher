@@ -1,4 +1,5 @@
 import type {
+  AdminLogsResponse,
   Bootstrap,
   CompanionAdminSummary,
   CompanionProfileResponse,
@@ -772,6 +773,62 @@ export async function updateAdminPin(
   await apiMutation("/api/admin/pin", token, "PUT", currentAdminPin, {
     newPin,
   });
+}
+
+type AdminLogQuery = {
+  level?: string;
+  category?: string;
+  q?: string;
+  from?: number;
+  to?: number;
+  limit?: number;
+  offset?: number;
+};
+
+function buildAdminLogQueryString(query: AdminLogQuery = {}): string {
+  const params = new URLSearchParams();
+  if (query.level) params.set("level", query.level);
+  if (query.category) params.set("category", query.category);
+  if (query.q) params.set("q", query.q);
+  if (typeof query.from === "number") params.set("from", String(query.from));
+  if (typeof query.to === "number") params.set("to", String(query.to));
+  if (typeof query.limit === "number") params.set("limit", String(query.limit));
+  if (typeof query.offset === "number") params.set("offset", String(query.offset));
+  const built = params.toString();
+  return built ? `?${built}` : "";
+}
+
+export async function getAdminLogs(
+  token: string,
+  adminPin: string,
+  query: AdminLogQuery = {},
+): Promise<AdminLogsResponse> {
+  const res = await fetch(`/api/admin/logs${buildAdminLogQueryString(query)}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+    },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<AdminLogsResponse>;
+}
+
+export async function exportAdminLogsText(
+  token: string,
+  adminPin: string,
+  query: AdminLogQuery = {},
+): Promise<string> {
+  const res = await fetch(
+    `/api/admin/logs/export${buildAdminLogQueryString(query)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        [adminPinHeaderName]: adminPin,
+      },
+    },
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.text();
 }
 
 export type RoutingMatrixEntry = {
