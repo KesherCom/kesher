@@ -3632,18 +3632,8 @@ func (s *Server) handleAdminTelegramUsers(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		// Get all available roles to pick a default one
-		roles, err := s.store.ListRoles(r.Context())
-		if err != nil || len(roles) == 0 {
-			s.internalErr(w, fmt.Errorf("no roles available for new user"))
-			return
-		}
-
-		// Use the first available role (usually "producer" or similar)
-		defaultRoleID := roles[0].ID
-
-		// Automatically create or upsert the Kesher user with the default role
-		_, err = s.store.UpsertUser(r.Context(), req.KesherUsername, defaultRoleID)
+		// Automatically create or upsert the Kesher user with the internal telegram role.
+		_, err := s.store.UpsertUser(r.Context(), req.KesherUsername, telegramVirtualRoleID)
 		if err != nil {
 			if s.writeStoreErr(w, err) {
 				return

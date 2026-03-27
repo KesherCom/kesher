@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -156,6 +157,50 @@ func TestTelegramAdminByIDInvalidID(t *testing.T) {
 	}
 }
 
+func TestAdminTelegramUserCreationAssignsTelegramRole(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	s := &Server{
+		store:    store,
+		cfg:      Config{AdminPIN: "123456"},
+		sessions: NewSessionManager(time.Minute),
+	}
+	s.hub = NewHub(store, logger)
+
+	body := bytes.NewBufferString(`{"username":"admin","roleId":"audio"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/login", body)
+	rec := httptest.NewRecorder()
+	s.handleLogin(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var loginResp LoginResponse
+	_ = json.NewDecoder(rec.Body).Decode(&loginResp)
+	session, _ := s.sessions.Get(loginResp.Token)
+
+	payload := `{"telegramUsername":"tg_new","kesherUsername":"tguser"}`
+	req = httptest.NewRequest(http.MethodPost, "/api/admin/telegram-users", bytes.NewBufferString(payload))
+	req.Header.Set("X-Admin-Pin", "123456")
+	rec = httptest.NewRecorder()
+	s.handleAdminTelegramUsers(rec, req, session)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	createdUser, err := store.FindUserByUsername(context.Background(), "tguser")
+	if err != nil {
+		t.Fatalf("expected created kesher user, got error: %v", err)
+	}
+	if createdUser.RoleID != telegramVirtualRoleID {
+		t.Fatalf("expected role %q, got %q", telegramVirtualRoleID, createdUser.RoleID)
+	}
+}
+
 func TestTelegramProcessUpdate(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
@@ -185,6 +230,111 @@ func TestTelegramProcessUpdate(t *testing.T) {
 
 	if bot.Mode() != "polling" {
 		t.Fatalf("expected mode polling, got %s", bot.Mode())
+	}
+}
+
+func TestTelegramProcessUpdate_BlocksNonAllowlistedSender(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	bot := NewTelegramBot("fake-token", "", "polling", store, hub, logger)
+
+	ctx := context.Background()
+	if err := store.CreateRoom(ctx, "testroom", "Test Room", nil, nil, nil); err != nil {
+		t.Fatalf("failed to create room: %v", err)
+	}
+	if err := store.CreateTelegramMapping(ctx, "m1", "-100999", "TestLabel", "testroom"); err != nil {
+		t.Fatalf("failed to create telegram mapping: %v", err)
+	}
+
+	var mu sync.Mutex
+	var forwarded []RoutedEvent
+	hub.SetChatHook(func(eventType string, e RoutedEvent) {
+		if eventType != "chat" {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		forwarded = append(forwarded, e)
+	})
+
+	update := TelegramUpdate{
+		UpdateID: 1,
+		Message: &TelegramMessage{
+			MessageID: 10,
+			From:      &TelegramUser{ID: 42, FirstName: "Alice", Username: "alice"},
+			Chat:      TelegramChat{ID: -100999, Type: "group"},
+			Text:      "hello from telegram",
+		},
+	}
+	bot.processUpdate(update)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(forwarded) != 0 {
+		t.Fatalf("expected no forwarded events for non-allowlisted sender, got %d", len(forwarded))
+	}
+}
+
+func TestTelegramProcessUpdate_AllowsAllowlistedSender(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	hub := NewHub(store, logger)
+	bot := NewTelegramBot("fake-token", "", "polling", store, hub, logger)
+
+	ctx := context.Background()
+	if err := store.CreateRoom(ctx, "testroom", "Test Room", nil, nil, nil); err != nil {
+		t.Fatalf("failed to create room: %v", err)
+	}
+	if err := store.CreateTelegramMapping(ctx, "m1", "-100999", "TestLabel", "testroom"); err != nil {
+		t.Fatalf("failed to create telegram mapping: %v", err)
+	}
+	if err := store.CreateTelegramAllowlistEntry(ctx, "allow1", "alice", "alice"); err != nil {
+		t.Fatalf("failed to create allowlist entry: %v", err)
+	}
+	if _, err := store.UpsertUser(ctx, "alice", "audio"); err != nil {
+		t.Fatalf("failed to create kesher user: %v", err)
+	}
+
+	var mu sync.Mutex
+	var forwarded []RoutedEvent
+	hub.SetChatHook(func(eventType string, e RoutedEvent) {
+		if eventType != "chat" {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		forwarded = append(forwarded, e)
+	})
+
+	update := TelegramUpdate{
+		UpdateID: 1,
+		Message: &TelegramMessage{
+			MessageID: 10,
+			From:      &TelegramUser{ID: 42, FirstName: "Alice", Username: "alice"},
+			Chat:      TelegramChat{ID: -100999, Type: "group"},
+			Text:      "hello from telegram",
+		},
+	}
+	bot.processUpdate(update)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(forwarded) != 1 {
+		t.Fatalf("expected exactly one forwarded event for allowlisted sender, got %d", len(forwarded))
+	}
+	if forwarded[0].FromUser.RoleID != telegramVirtualRoleID {
+		t.Fatalf("expected telegram virtual role %q, got %q", telegramVirtualRoleID, forwarded[0].FromUser.RoleID)
 	}
 }
 
@@ -324,7 +474,7 @@ func TestTelegramStatusIncludesMode(t *testing.T) {
 	}
 }
 
-func TestInlineTargetsForUsersAndRoles_FilteredByAllowlist(t *testing.T) {
+func TestInlineTargetsForUsersAndRoles_IncludeAllKesherUsers(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -347,35 +497,27 @@ func TestInlineTargetsForUsersAndRoles_FilteredByAllowlist(t *testing.T) {
 		user:    User{ID: "u-bob", Username: "bob", RoleID: "audio"},
 	})
 
-	// Only alice is allowlisted for Telegram usage.
-	if err := store.CreateTelegramAllowlistEntry(ctx, "allow-1", "tg_alice", "alice"); err != nil {
-		t.Fatalf("failed to create allowlist entry: %v", err)
-	}
-
 	targets := bot.inlineTargetsForUsersAndRoles(ctx, "")
 	if len(targets) == 0 {
 		t.Fatal("expected at least one inline target")
 	}
 
-	for _, target := range targets {
-		if target.Kind == "user" && target.ID == "u-bob" {
-			t.Fatalf("unexpected non-allowlisted user in inline targets: %+v", target)
-		}
-	}
-
 	var hasAlice bool
+	var hasBob bool
 	for _, target := range targets {
 		if target.Kind == "user" && target.ID == "u-alice" {
 			hasAlice = true
-			break
+		}
+		if target.Kind == "user" && target.ID == "u-bob" {
+			hasBob = true
 		}
 	}
-	if !hasAlice {
-		t.Fatal("expected allowlisted user alice in inline targets")
+	if !hasAlice || !hasBob {
+		t.Fatalf("expected both active users in inline targets (alice=%v, bob=%v)", hasAlice, hasBob)
 	}
 }
 
-func TestInlineTargetsForUsersAndRoles_IncludeAllowlistedOfflineUsers(t *testing.T) {
+func TestInlineTargetsForUsersAndRoles_ExcludeOfflineKesherUsers(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -388,32 +530,35 @@ func TestInlineTargetsForUsersAndRoles_IncludeAllowlistedOfflineUsers(t *testing
 
 	ctx := context.Background()
 
-	if _, err := store.UpsertUser(ctx, "offline-allowed", "audio"); err != nil {
+	if _, err := store.UpsertUser(ctx, "offline-user", "audio"); err != nil {
 		t.Fatalf("failed to persist offline user: %v", err)
 	}
-	if _, err := store.UpsertUser(ctx, "offline-blocked", "video"); err != nil {
-		t.Fatalf("failed to persist blocked user: %v", err)
-	}
-	if err := store.CreateTelegramAllowlistEntry(ctx, "allow-offline", "tg_offline", "offline-allowed"); err != nil {
-		t.Fatalf("failed to create allowlist entry: %v", err)
+
+	hub.Add(&client{
+		session: Session{Token: "tok-online", UserID: "u-online", Username: "online-user", RoleID: "audio"},
+		user:    User{ID: "u-online", Username: "online-user", RoleID: "audio"},
+	})
+
+	if _, err := store.UpsertUser(ctx, "online-user", "audio"); err != nil {
+		t.Fatalf("failed to persist online user: %v", err)
 	}
 
 	targets := bot.inlineTargetsForUsersAndRoles(ctx, "")
 	if len(targets) == 0 {
-		t.Fatal("expected inline targets for allowlisted offline user")
+		t.Fatal("expected inline targets for logged-in users")
 	}
 
-	var hasOfflineAllowed bool
+	var hasOnline bool
 	for _, target := range targets {
-		if target.Kind == "user" && strings.Contains(target.Title, "offline-allowed") {
-			hasOfflineAllowed = true
+		if target.Kind == "user" && strings.Contains(target.Title, "offline-user") {
+			t.Fatalf("unexpected offline user in inline targets: %+v", target)
 		}
-		if target.Kind == "user" && strings.Contains(target.Title, "offline-blocked") {
-			t.Fatalf("unexpected non-allowlisted offline user in inline targets: %+v", target)
+		if target.Kind == "user" && strings.Contains(target.Title, "online-user") {
+			hasOnline = true
 		}
 	}
-	if !hasOfflineAllowed {
-		t.Fatal("expected allowlisted offline user in inline targets")
+	if !hasOnline {
+		t.Fatal("expected logged-in user in inline targets")
 	}
 }
 
@@ -435,12 +580,15 @@ func TestInlineTargetsForUsersAndRoles_ExcludeCurrentUser(t *testing.T) {
 	if _, err := store.UpsertUser(ctx, "bob", "video"); err != nil {
 		t.Fatalf("failed to persist bob: %v", err)
 	}
-	if err := store.CreateTelegramAllowlistEntry(ctx, "allow-alice", "tg_alice", "alice"); err != nil {
-		t.Fatalf("failed to create alice allowlist entry: %v", err)
-	}
-	if err := store.CreateTelegramAllowlistEntry(ctx, "allow-bob", "tg_bob", "bob"); err != nil {
-		t.Fatalf("failed to create bob allowlist entry: %v", err)
-	}
+
+	hub.Add(&client{
+		session: Session{Token: "tok-alice", UserID: "u-alice", Username: "alice", RoleID: "audio"},
+		user:    User{ID: "u-alice", Username: "alice", RoleID: "audio"},
+	})
+	hub.Add(&client{
+		session: Session{Token: "tok-bob", UserID: "u-bob", Username: "bob", RoleID: "video"},
+		user:    User{ID: "u-bob", Username: "bob", RoleID: "video"},
+	})
 
 	targets := bot.inlineTargetsForUsersAndRoles(ctx, "alice")
 	for _, target := range targets {
@@ -457,7 +605,7 @@ func TestInlineTargetsForUsersAndRoles_ExcludeCurrentUser(t *testing.T) {
 		}
 	}
 	if !hasBob {
-		t.Fatal("expected other allowlisted user in inline targets")
+		t.Fatal("expected other Kesher user in inline targets")
 	}
 }
 
@@ -476,9 +624,11 @@ func TestInlineTargetsForUsersAndRoles_ExcludeCurrentUserButKeepRoleTargets(t *t
 	if _, err := store.UpsertUser(ctx, "alice", "audio"); err != nil {
 		t.Fatalf("failed to persist alice: %v", err)
 	}
-	if err := store.CreateTelegramAllowlistEntry(ctx, "allow-alice", "tg_alice", "alice"); err != nil {
-		t.Fatalf("failed to create alice allowlist entry: %v", err)
-	}
+
+	hub.Add(&client{
+		session: Session{Token: "tok-alice", UserID: "u-alice", Username: "alice", RoleID: "audio"},
+		user:    User{ID: "u-alice", Username: "alice", RoleID: "audio"},
+	})
 
 	targets := bot.inlineTargetsForUsersAndRoles(ctx, "alice")
 	if len(targets) == 0 {
