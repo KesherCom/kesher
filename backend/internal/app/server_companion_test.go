@@ -289,12 +289,12 @@ func TestCompanionButtonSnapshotStateKeepsHeldPTTRoomActive(t *testing.T) {
 		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
 	}
 
-	client := &ImageStreamClient{send: make(chan ImageStreamMessage, 32), done: make(chan struct{}), logger: logger}
+	client := &ImageStreamClient{RoleID: "source", Username: "operator", send: make(chan ImageStreamMessage, 32), done: make(chan struct{}), logger: logger}
 	s.imageStreamCoord.RegisterClient(client)
 	defer s.imageStreamCoord.UnregisterClient(client)
 
 	s.rememberCompanionHeldTarget("source:0:0", "room-a")
-	s.emitCompanionCurrentPageImages(ctx, "source")
+	s.emitCompanionCurrentPageImages(ctx, "source", "operator")
 
 	for i := 0; i < len(settings.Pages[0].Buttons); i++ {
 		msg := <-client.send

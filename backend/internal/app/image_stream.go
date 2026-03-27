@@ -423,9 +423,11 @@ type ImageStreamCoordinator struct {
 
 // ImageStreamClient represents a connected image stream client
 type ImageStreamClient struct {
-	send   chan ImageStreamMessage
-	done   chan struct{}
-	logger *slog.Logger
+	RoleID   string
+	Username string
+	send     chan ImageStreamMessage
+	done     chan struct{}
+	logger   *slog.Logger
 }
 
 // NewImageStreamCoordinator creates a new image stream coordinator
@@ -442,10 +444,18 @@ func NewImageStreamCoordinator(logger *slog.Logger) (*ImageStreamCoordinator, er
 	}, nil
 }
 
-// BroadcastImageUpdate sends an image update to all connected clients
+// BroadcastImageUpdate sends an image update to all connected clients.
 func (c *ImageStreamCoordinator) BroadcastImageUpdate(state ButtonState, bank, buttonIndex int) {
+	c.BroadcastImageUpdateForTarget("", "", state, bank, buttonIndex)
+}
+
+// BroadcastImageUpdateForTarget sends an image update only to clients bound to the same role.
+// If username is provided and the client also declared one, both usernames must match.
+func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID, username string, state ButtonState, bank, buttonIndex int) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	targetRoleID := strings.TrimSpace(roleID)
+	targetUsername := strings.TrimSpace(username)
 
 	// Render the image
 	imageBuf, err := c.renderer.RenderButtonImage(state)
@@ -470,8 +480,18 @@ func (c *ImageStreamCoordinator) BroadcastImageUpdate(state ButtonState, bank, b
 		IsListening: state.IsListening,
 	}
 
-	// Send to all clients
+	// Send only to matching clients.
 	for client := range c.clients {
+		clientRoleID := strings.TrimSpace(client.RoleID)
+		if targetRoleID != "" && clientRoleID != targetRoleID {
+			continue
+		}
+		if targetUsername != "" {
+			clientUsername := strings.TrimSpace(client.Username)
+			if clientUsername != "" && clientUsername != targetUsername {
+				continue
+			}
+		}
 		select {
 		case client.send <- msg:
 		case <-client.done:
@@ -504,12 +524,14 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	defer conn.Close()
-	targetRoleID := s.resolveImageStreamRoleID(r.Context(), r)
+	targetRoleID, targetUsername := s.resolveImageStreamTarget(r.Context(), r)
 
 	client := &ImageStreamClient{
-		send:   make(chan ImageStreamMessage, 16),
-		done:   make(chan struct{}),
-		logger: s.logger,
+		RoleID:   targetRoleID,
+		Username: targetUsername,
+		send:     make(chan ImageStreamMessage, 16),
+		done:     make(chan struct{}),
+		logger:   s.logger,
 	}
 
 	// Register client
@@ -542,7 +564,9 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 
 		case <-refreshTicker.C:
 			if strings.TrimSpace(targetRoleID) == "" {
-				targetRoleID = s.resolveImageStreamRoleID(context.Background(), r)
+				targetRoleID, targetUsername = s.resolveImageStreamTarget(context.Background(), r)
+				client.RoleID = targetRoleID
+				client.Username = targetUsername
 			}
 			s.enqueueInitialImageSnapshot(context.Background(), client, targetRoleID)
 
@@ -552,25 +576,29 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func (s *Server) resolveImageStreamRoleID(ctx context.Context, r *http.Request) string {
+func (s *Server) resolveImageStreamTarget(ctx context.Context, r *http.Request) (string, string) {
 	if s.store == nil {
-		return ""
+		return "", ""
 	}
 	roleID := strings.TrimSpace(r.URL.Query().Get("roleId"))
-	if roleID != "" {
-		return roleID
-	}
 	username := strings.TrimSpace(r.URL.Query().Get("username"))
-	if username != "" {
+	if roleID == "" && username != "" {
 		if u, err := s.store.FindUserByUsername(ctx, username); err == nil {
-			return strings.TrimSpace(u.RoleID)
+			roleID = strings.TrimSpace(u.RoleID)
 		}
 	}
-	autoRoleID, err := s.store.ResolveSinglePublishedCompanionRole(ctx)
-	if err != nil {
-		return ""
+	if roleID == "" {
+		autoRoleID, err := s.store.ResolveSinglePublishedCompanionRole(ctx)
+		if err == nil {
+			roleID = strings.TrimSpace(autoRoleID)
+		}
 	}
-	return strings.TrimSpace(autoRoleID)
+	if username == "" && s.sessions != nil && roleID != "" {
+		if session, ok := s.sessions.LatestForRole(roleID); ok {
+			username = strings.TrimSpace(session.Username)
+		}
+	}
+	return roleID, username
 }
 
 func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageStreamClient, roleID string) {
