@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"image"
 	"image/png"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestButtonImageRendererRenderButtonImageProducesValidPNG(t *testing.T) {
@@ -52,6 +56,52 @@ func TestGetButtonPaletteUsesYellowPressedPaletteForCallRoom(t *testing.T) {
 	}
 	if palette.label != "#2a2110" {
 		t.Fatalf("unexpected pressed call label: got %q", palette.label)
+	}
+}
+
+func TestButtonImageRendererRenderButtonImageRendersTopAndBottomStatusStripes(t *testing.T) {
+	renderer, err := NewButtonImageRenderer(&ButtonImageRenderConfig{Width: 112, Height: 112})
+	if err != nil {
+		t.Fatalf("NewButtonImageRenderer failed: %v", err)
+	}
+
+	buf, err := renderer.RenderButtonImage(ButtonState{
+		State:         "IDLE",
+		Label:         "PL A",
+		ActionType:    string(StreamDeckActionTypeSelectTalkRoom),
+		IsListening:   true,
+		IsPTTSelected: true,
+	})
+	if err != nil {
+		t.Fatalf("RenderButtonImage failed: %v", err)
+	}
+
+	img, err := png.Decode(bytes.NewReader(buf))
+	if err != nil {
+		t.Fatalf("png.Decode failed: %v", err)
+	}
+
+	assertPixelNearRGB(t, img, 56, 8, 255, 45, 38)
+	assertPixelNearRGB(t, img, 56, 103, 20, 198, 75)
+}
+
+func assertPixelNearRGB(t *testing.T, img image.Image, x, y int, wantR, wantG, wantB uint8) {
+	t.Helper()
+	r, g, b, _ := img.At(x, y).RGBA()
+	gotR := uint8(r >> 8)
+	gotG := uint8(g >> 8)
+	gotB := uint8(b >> 8)
+
+	within := func(got, want uint8) bool {
+		const tolerance = 8
+		if got > want {
+			return got-want <= tolerance
+		}
+		return want-got <= tolerance
+	}
+
+	if !within(gotR, wantR) || !within(gotG, wantG) || !within(gotB, wantB) {
+		t.Fatalf("unexpected pixel at (%d,%d): got rgb(%d,%d,%d), want near rgb(%d,%d,%d)", x, y, gotR, gotG, gotB, wantR, wantG, wantB)
 	}
 }
 
@@ -105,5 +155,56 @@ func TestHandleUserStreamDeckPreviewRendersPNGImages(t *testing.T) {
 	}
 	if gotW, gotH := decoded.Bounds().Dx(), decoded.Bounds().Dy(); gotW != 112 || gotH != 112 {
 		t.Fatalf("unexpected image size: got %dx%d want 112x112", gotW, gotH)
+	}
+}
+
+func TestImageStreamCoordinatorSkipsUnchangedButtonState(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	coord, err := NewImageStreamCoordinator(logger)
+	if err != nil {
+		t.Fatalf("NewImageStreamCoordinator failed: %v", err)
+	}
+
+	client := &ImageStreamClient{
+		RoleID:   "role-a",
+		Username: "operator",
+		send:     make(chan ImageStreamMessage, 4),
+		done:     make(chan struct{}),
+		logger:   logger,
+	}
+	coord.RegisterClient(client)
+	defer coord.UnregisterClient(client)
+
+	state := ButtonState{
+		Channel:    "room-a",
+		State:      "IDLE",
+		Label:      "Room A",
+		ActionType: string(StreamDeckActionTypePTTRoom),
+	}
+
+	coord.BroadcastImageUpdateForTarget("role-a", "operator", state, 0, 2)
+	select {
+	case <-client.send:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected first update to be delivered")
+	}
+
+	coord.BroadcastImageUpdateForTarget("role-a", "operator", state, 0, 2)
+	select {
+	case msg := <-client.send:
+		t.Fatalf("expected unchanged update to be skipped, got %+v", msg)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	changed := state
+	changed.State = "TALK"
+	coord.BroadcastImageUpdateForTarget("role-a", "operator", changed, 0, 2)
+	select {
+	case msg := <-client.send:
+		if msg.State != "TALK" {
+			t.Fatalf("expected changed state TALK, got %q", msg.State)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected changed update to be delivered")
 	}
 }

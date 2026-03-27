@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -157,6 +159,117 @@ func TestServerHandleRealtimeStatsSuccess(t *testing.T) {
 	}
 	if resp.TimestampUnixMs <= 0 {
 		t.Fatalf("expected timestamp to be set, got %d", resp.TimestampUnixMs)
+	}
+}
+
+func TestServerHandleAdminLogsSuccess(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	logsDirCfg := Config{DBPath: filepath.Join(t.TempDir(), "intercom.db")}
+	logStore, err := newAdminLogStore(logsDirCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{
+		store:     store,
+		sessions:  NewSessionManager(time.Minute),
+		adminLogs: logStore,
+	}
+	session := s.sessions.Create(User{ID: "u1", Username: "tim", RoleID: "audio"})
+
+	s.appendAdminLog(AdminLogEntry{
+		TimestampUnixMs: time.Now().Add(-time.Second).UnixMilli(),
+		Level:           "INFO",
+		Category:        "request",
+		Message:         "http request",
+		Method:          http.MethodGet,
+		Path:            "/api/status",
+		Status:          http.StatusOK,
+		Username:        "tim",
+		RoleID:          "audio",
+	})
+	s.appendAdminLog(AdminLogEntry{
+		TimestampUnixMs: time.Now().UnixMilli(),
+		Level:           "ERROR",
+		Category:        "error",
+		Message:         "internal request error",
+		Error:           "boom",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/logs?category=error&limit=5", nil)
+	req.Header.Set("X-Admin-Pin", "123456")
+	rec := httptest.NewRecorder()
+	s.handleAdminLogs(rec, req, session)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp AdminLogsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Total != 1 {
+		t.Fatalf("expected total=1, got %d", resp.Total)
+	}
+	if len(resp.Entries) != 1 {
+		t.Fatalf("expected one entry, got %d", len(resp.Entries))
+	}
+	if resp.Entries[0].Category != "error" {
+		t.Fatalf("expected error category, got %q", resp.Entries[0].Category)
+	}
+}
+
+func TestServerHandleAdminLogsExportSuccess(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	logsDirCfg := Config{DBPath: filepath.Join(t.TempDir(), "intercom.db")}
+	logStore, err := newAdminLogStore(logsDirCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{
+		store:     store,
+		sessions:  NewSessionManager(time.Minute),
+		adminLogs: logStore,
+	}
+	session := s.sessions.Create(User{ID: "u1", Username: "tim", RoleID: "audio"})
+
+	s.appendAdminLog(AdminLogEntry{
+		TimestampUnixMs: time.Now().UnixMilli(),
+		Level:           "WARN",
+		Category:        "audit",
+		Message:         "admin request",
+		Method:          http.MethodPut,
+		Path:            "/api/admin/pin",
+		Status:          http.StatusOK,
+		Username:        "tim",
+		RoleID:          "audio",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/logs/export?category=audit", nil)
+	req.Header.Set("X-Admin-Pin", "123456")
+	rec := httptest.NewRecorder()
+	s.handleAdminLogsExport(rec, req, session)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "text/plain") {
+		t.Fatalf("expected text/plain content type, got %q", got)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "admin request") {
+		t.Fatalf("expected exported text to include message, got %q", body)
 	}
 }
 

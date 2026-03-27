@@ -36,6 +36,7 @@ type ImageStreamMessage struct {
 	ActionType  string `json:"actionType,omitempty"`
 	Color       string `json:"color,omitempty"`
 	IsListening bool   `json:"isListening,omitempty"`
+	IsPTTSelected bool `json:"isPttSelected,omitempty"`
 }
 
 // ButtonImageRenderConfig holds rendering configuration
@@ -73,6 +74,7 @@ type ButtonState struct {
 	Color       string
 	TalkCount   int
 	IsListening bool
+	IsPTTSelected bool
 	IsActive    bool
 }
 
@@ -85,6 +87,7 @@ type streamDeckPreviewButtonRequest struct {
 	State       string `json:"state,omitempty"`
 	Channel     string `json:"channel,omitempty"`
 	IsListening bool   `json:"isListening,omitempty"`
+	IsPTTSelected bool `json:"isPttSelected,omitempty"`
 	IsActive    bool   `json:"isActive,omitempty"`
 }
 
@@ -168,6 +171,19 @@ func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, erro
 		dc.SetLineWidth(2)
 		dc.DrawRoundedRectangle(cardInset-1, cardInset-1, w-(cardInset-1)*2, h-(cardInset-1)*2, radius+1)
 		dc.Stroke()
+	}
+
+	if (actionType == string(StreamDeckActionTypeSelectTalkRoom) || actionType == string(StreamDeckActionTypeSelectListen)) && state.IsPTTSelected {
+		stripeHeight := math.Max(6, math.Round(h*0.075))
+		dc.SetHexColor("#ff2d26")
+		dc.DrawRoundedRectangle(
+			cardInset+3,
+			cardInset+2,
+			(w-cardInset*2)-6,
+			stripeHeight,
+			math.Max(3, math.Round(stripeHeight/2)),
+		)
+		dc.Fill()
 	}
 
 	if (actionType == string(StreamDeckActionTypePTTRoom) || actionType == string(StreamDeckActionTypeListenRoom) || actionType == string(StreamDeckActionTypeSelectTalkRoom) || actionType == string(StreamDeckActionTypeSelectListen)) && state.IsListening {
@@ -423,9 +439,60 @@ type ImageStreamCoordinator struct {
 
 // ImageStreamClient represents a connected image stream client
 type ImageStreamClient struct {
-	send   chan ImageStreamMessage
-	done   chan struct{}
-	logger *slog.Logger
+	RoleID   string
+	Username string
+	send     chan ImageStreamMessage
+	done     chan struct{}
+	logger   *slog.Logger
+	mu       sync.Mutex
+	lastSent map[string]string
+}
+
+func streamButtonKey(bank, buttonIndex int) string {
+	return strconv.Itoa(bank) + ":" + strconv.Itoa(buttonIndex)
+}
+
+func buttonStateSignature(state ButtonState) string {
+	return strings.Join(
+		[]string{
+			strings.TrimSpace(state.Channel),
+			strings.TrimSpace(state.State),
+			strings.TrimSpace(state.Label),
+			strings.TrimSpace(state.Subtitle),
+			strings.TrimSpace(state.ActionType),
+			strings.TrimSpace(state.Color),
+			strconv.Itoa(state.TalkCount),
+			strconv.FormatBool(state.IsListening),
+			strconv.FormatBool(state.IsPTTSelected),
+			strconv.FormatBool(state.IsActive),
+		},
+		"\x1f",
+	)
+}
+
+func (c *ImageStreamClient) needsButtonUpdate(bank, buttonIndex int, signature string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.lastSent == nil {
+		c.lastSent = make(map[string]string)
+		return true
+	}
+	return c.lastSent[streamButtonKey(bank, buttonIndex)] != signature
+}
+
+func (c *ImageStreamClient) markButtonUpdateSent(bank, buttonIndex int, signature string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.lastSent == nil {
+		c.lastSent = make(map[string]string)
+	}
+	c.lastSent[streamButtonKey(bank, buttonIndex)] = signature
+	c.mu.Unlock()
 }
 
 // NewImageStreamCoordinator creates a new image stream coordinator
@@ -442,10 +509,41 @@ func NewImageStreamCoordinator(logger *slog.Logger) (*ImageStreamCoordinator, er
 	}, nil
 }
 
-// BroadcastImageUpdate sends an image update to all connected clients
+// BroadcastImageUpdate sends an image update to all connected clients.
 func (c *ImageStreamCoordinator) BroadcastImageUpdate(state ButtonState, bank, buttonIndex int) {
+	c.BroadcastImageUpdateForTarget("", "", state, bank, buttonIndex)
+}
+
+// BroadcastImageUpdateForTarget sends an image update only to clients bound to the same role.
+// If username is provided and the client also declared one, both usernames must match.
+func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID, username string, state ButtonState, bank, buttonIndex int) {
+	targetRoleID := strings.TrimSpace(roleID)
+	targetUsername := strings.TrimSpace(username)
+	signature := buttonStateSignature(state)
+
 	c.mu.RLock()
-	defer c.mu.RUnlock()
+	recipients := make([]*ImageStreamClient, 0, len(c.clients))
+	for client := range c.clients {
+		clientRoleID := strings.TrimSpace(client.RoleID)
+		if targetRoleID != "" && clientRoleID != targetRoleID {
+			continue
+		}
+		if targetUsername != "" {
+			clientUsername := strings.TrimSpace(client.Username)
+			if clientUsername != "" && clientUsername != targetUsername {
+				continue
+			}
+		}
+		if !client.needsButtonUpdate(bank, buttonIndex, signature) {
+			continue
+		}
+		recipients = append(recipients, client)
+	}
+	c.mu.RUnlock()
+
+	if len(recipients) == 0 {
+		return
+	}
 
 	// Render the image
 	imageBuf, err := c.renderer.RenderButtonImage(state)
@@ -468,14 +566,15 @@ func (c *ImageStreamCoordinator) BroadcastImageUpdate(state ButtonState, bank, b
 		ActionType:  state.ActionType,
 		Color:       state.Color,
 		IsListening: state.IsListening,
+		IsPTTSelected: state.IsPTTSelected,
 	}
 
-	// Send to all clients
-	for client := range c.clients {
+	// Send only to matching clients.
+	for _, client := range recipients {
 		select {
 		case client.send <- msg:
+			client.markButtonUpdateSent(bank, buttonIndex, signature)
 		case <-client.done:
-			delete(c.clients, client)
 		default:
 			// Client queue full, drop message
 		}
@@ -504,12 +603,15 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	defer conn.Close()
-	targetRoleID := s.resolveImageStreamRoleID(r.Context(), r)
+	targetRoleID, targetUsername := s.resolveImageStreamTarget(r.Context(), r)
 
 	client := &ImageStreamClient{
-		send:   make(chan ImageStreamMessage, 16),
-		done:   make(chan struct{}),
-		logger: s.logger,
+		RoleID:   targetRoleID,
+		Username: targetUsername,
+		send:     make(chan ImageStreamMessage, 16),
+		done:     make(chan struct{}),
+		logger:   s.logger,
+		lastSent: make(map[string]string),
 	}
 
 	// Register client
@@ -542,7 +644,9 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 
 		case <-refreshTicker.C:
 			if strings.TrimSpace(targetRoleID) == "" {
-				targetRoleID = s.resolveImageStreamRoleID(context.Background(), r)
+				targetRoleID, targetUsername = s.resolveImageStreamTarget(context.Background(), r)
+				client.RoleID = targetRoleID
+				client.Username = targetUsername
 			}
 			s.enqueueInitialImageSnapshot(context.Background(), client, targetRoleID)
 
@@ -552,25 +656,29 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func (s *Server) resolveImageStreamRoleID(ctx context.Context, r *http.Request) string {
+func (s *Server) resolveImageStreamTarget(ctx context.Context, r *http.Request) (string, string) {
 	if s.store == nil {
-		return ""
+		return "", ""
 	}
 	roleID := strings.TrimSpace(r.URL.Query().Get("roleId"))
-	if roleID != "" {
-		return roleID
-	}
 	username := strings.TrimSpace(r.URL.Query().Get("username"))
-	if username != "" {
+	if roleID == "" && username != "" {
 		if u, err := s.store.FindUserByUsername(ctx, username); err == nil {
-			return strings.TrimSpace(u.RoleID)
+			roleID = strings.TrimSpace(u.RoleID)
 		}
 	}
-	autoRoleID, err := s.store.ResolveSinglePublishedCompanionRole(ctx)
-	if err != nil {
-		return ""
+	if roleID == "" {
+		autoRoleID, err := s.store.ResolveSinglePublishedCompanionRole(ctx)
+		if err == nil {
+			roleID = strings.TrimSpace(autoRoleID)
+		}
 	}
-	return strings.TrimSpace(autoRoleID)
+	if username == "" && s.sessions != nil && roleID != "" {
+		if session, ok := s.sessions.LatestForRole(roleID); ok {
+			username = strings.TrimSpace(session.Username)
+		}
+	}
+	return roleID, username
 }
 
 func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageStreamClient, roleID string) {
@@ -579,12 +687,18 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 	}
 
 	listeningRooms := make(map[string]struct{})
+	selectedTalkRooms := make(map[string]struct{})
 	renderUsername := ""
 	presence := PresenceState{}
 	if s.hub != nil {
 		if session, ok := s.hub.LatestRoleSession(roleID); ok {
 			renderUsername = strings.TrimSpace(session.Username)
 			presence, _ = s.hub.PresenceForUsername(renderUsername)
+			for _, roomID := range presence.TalkRooms {
+				if trimmed := strings.TrimSpace(roomID); trimmed != "" {
+					selectedTalkRooms[trimmed] = struct{}{}
+				}
+			}
 			for _, roomID := range s.hub.ListenRoomsForToken(session.Token) {
 				if trimmed := strings.TrimSpace(roomID); trimmed != "" {
 					listeningRooms[trimmed] = struct{}{}
@@ -624,6 +738,13 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 				_, state.IsListening = listeningRooms[roomID]
 			}
 		}
+		if !state.IsPTTSelected && button.Action != nil {
+			actionType := button.Action.Type
+			roomID := strings.TrimSpace(button.Action.RoomID)
+			if roomID != "" && (actionType == StreamDeckActionTypeSelectTalkRoom || actionType == StreamDeckActionTypeSelectListen) {
+				_, state.IsPTTSelected = selectedTalkRooms[roomID]
+			}
+		}
 		if strings.TrimSpace(state.Label) == "" {
 			state.Label, state.Subtitle = s.resolveButtonLabel(ctx, button)
 		}
@@ -635,6 +756,10 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 		}
 		if strings.TrimSpace(state.Color) == "" {
 			state.Color = strings.TrimSpace(button.Color)
+		}
+		signature := buttonStateSignature(state)
+		if !client.needsButtonUpdate(page.Page, button.Index, signature) {
+			continue
 		}
 		img, renderErr := s.imageStreamCoord.renderer.RenderButtonImage(state)
 		if renderErr != nil {
@@ -653,10 +778,12 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 			ActionType:  state.ActionType,
 			Color:       state.Color,
 			IsListening: state.IsListening,
+			IsPTTSelected: state.IsPTTSelected,
 		}
 
 		select {
 		case client.send <- msg:
+			client.markButtonUpdateSent(page.Page, button.Index, signature)
 		default:
 			s.logger.Warn("image snapshot queue full", "roleId", roleID)
 			return
@@ -827,6 +954,7 @@ func (s *Server) handleUserStreamDeckPreview(w http.ResponseWriter, r *http.Requ
 			ActionType:  strings.TrimSpace(button.ActionType),
 			Color:       strings.TrimSpace(button.Color),
 			IsListening: button.IsListening,
+			IsPTTSelected: button.IsPTTSelected,
 			IsActive:    button.IsActive,
 		})
 		if renderErr != nil {

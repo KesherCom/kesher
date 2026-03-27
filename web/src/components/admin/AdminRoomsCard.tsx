@@ -55,6 +55,13 @@ export function AdminRoomsCard({
     useState<string[]>([]);
   const [roomEditPriorityLevel, setRoomEditPriorityLevel] = useState(1);
 
+  function getPriorityLabel(priorityLevel: number | undefined) {
+    return (
+      priorityOptions.find((option) => option.value === priorityLevel)?.label ||
+      "Normal"
+    );
+  }
+
   function resetRoomCreateForm() {
     setRoomCreateId("");
     setRoomCreateName("");
@@ -154,144 +161,190 @@ export function AdminRoomsCard({
             {adminError ? <p className="admin-error">{adminError}</p> : null}
 
             {showRoomCreateForm && !roomEditId ? (
-              <div className="admin-edit-panel">
-                <div className="admin-edit-title">New party line</div>
-                <div className="admin-grid">
-                  <input
-                    value={roomCreateId}
-                    onChange={(e) => setRoomCreateId(e.target.value)}
-                    placeholder="party-line-id"
-                  />
-                  <input
-                    value={roomCreateName}
-                    onChange={(e) => setRoomCreateName(e.target.value)}
-                    placeholder="Party line name"
-                  />
-                  <label>
-                    Priority
-                    <select
-                      value={roomCreatePriorityLevel}
-                      onChange={(e) =>
-                        setRoomCreatePriorityLevel(Number(e.target.value))
-                      }
-                    >
-                      {priorityOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    onClick={createRoomConfig}
-                    disabled={
-                      adminBusy ||
-                      !roomCreateId.trim() ||
-                      !roomCreateName.trim()
-                    }
-                  >
-                    Create party line
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      resetRoomCreateForm();
-                      setShowRoomCreateForm(false);
-                    }}
-                    disabled={adminBusy}
-                    className="secondary"
-                  >
-                    Cancel
-                  </button>
+              <div className="admin-edit-panel admin-room-form">
+                <div className="admin-room-form-header">
+                  <div className="admin-edit-title">New party line</div>
+                  <p className="admin-room-form-subtitle">
+                    Set basic details and define who can send, receive, or must
+                    listen.
+                  </p>
                 </div>
-                <div className="admin-grid admin-grid-roles">
-                  <RoleMultiSelect
-                    label="Allowed senders"
-                    selectedRoleIds={roomCreateSenderRoleIds}
-                    setState={setRoomCreateSenderRoleIds}
-                    keyPrefix="room-create-sender"
-                    roles={appData.roles}
-                  />
-                  <RoleMultiSelect
-                    label="Allowed receivers"
-                    selectedRoleIds={roomCreateReceiverRoleIds}
-                    setState={setRoomCreateReceiverRoleIds}
-                    keyPrefix="room-create-receiver"
-                    roles={appData.roles}
-                  />
-                  <RoleMultiSelect
-                    label="Forced listeners"
-                    selectedRoleIds={roomCreateForcedListenRoleIds}
-                    setState={setRoomCreateForcedListenRoleIds}
-                    keyPrefix="room-create-forced-listen"
-                    roles={appData.roles}
-                  />
+                <div className="admin-room-form-layout">
+                  <div className="admin-room-form-main">
+                    <div className="admin-room-form-section-title">
+                      Basic settings
+                    </div>
+                    <div className="admin-room-fields">
+                      <input
+                        value={roomCreateId}
+                        onChange={(e) => setRoomCreateId(e.target.value)}
+                        placeholder="party-line-id"
+                      />
+                      <input
+                        value={roomCreateName}
+                        onChange={(e) => setRoomCreateName(e.target.value)}
+                        placeholder="Party line name"
+                      />
+                      <label className="admin-room-field">
+                        Priority
+                        <select
+                          value={roomCreatePriorityLevel}
+                          onChange={(e) =>
+                            setRoomCreatePriorityLevel(Number(e.target.value))
+                          }
+                        >
+                          {priorityOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="admin-room-form-side">
+                    <div className="admin-room-form-section-title">Actions</div>
+                    <div className="admin-room-action-buttons">
+                      <button
+                        onClick={createRoomConfig}
+                        disabled={
+                          adminBusy ||
+                          !roomCreateId.trim() ||
+                          !roomCreateName.trim()
+                        }
+                      >
+                        Create party line
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          resetRoomCreateForm();
+                          setShowRoomCreateForm(false);
+                        }}
+                        disabled={adminBusy}
+                        className="secondary"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="admin-room-form-roles">
+                  <div className="admin-room-form-section-title">Role access</div>
+                  <div className="admin-room-role-grid">
+                    <RoleMultiSelect
+                      label="Allowed senders"
+                      selectedRoleIds={roomCreateSenderRoleIds}
+                      setState={setRoomCreateSenderRoleIds}
+                      keyPrefix="room-create-sender"
+                      roles={appData.roles}
+                    />
+                    <RoleMultiSelect
+                      label="Allowed receivers"
+                      selectedRoleIds={roomCreateReceiverRoleIds}
+                      setState={setRoomCreateReceiverRoleIds}
+                      keyPrefix="room-create-receiver"
+                      roles={appData.roles}
+                    />
+                    <RoleMultiSelect
+                      label="Forced listeners"
+                      selectedRoleIds={roomCreateForcedListenRoleIds}
+                      setState={setRoomCreateForcedListenRoleIds}
+                      keyPrefix="room-create-forced-listen"
+                      roles={appData.roles}
+                    />
+                  </div>
                 </div>
               </div>
             ) : null}
 
             {roomEditId ? (
-              <div className="admin-edit-panel">
-                <div className="admin-edit-title">
-                  Editing party line: {roomEditId}
+              <div className="admin-edit-panel admin-room-form">
+                <div className="admin-room-form-header">
+                  <div className="admin-edit-title">
+                    Editing party line: {roomEditId}
+                  </div>
+                  <p className="admin-room-form-subtitle">
+                    Update routing permissions and keep this party line easy to
+                    scan.
+                  </p>
                 </div>
-                <div className="admin-grid">
-                  <input
-                    value={roomEditName}
-                    onChange={(e) => setRoomEditName(e.target.value)}
-                    placeholder="Party line name"
-                  />
-                  <label>
-                    Priority
-                    <select
-                      value={roomEditPriorityLevel}
-                      onChange={(e) =>
-                        setRoomEditPriorityLevel(Number(e.target.value))
-                      }
-                    >
-                      {priorityOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    onClick={saveRoomEdit}
-                    disabled={adminBusy || !roomEditName.trim()}
-                  >
-                    Save changes
-                  </button>
-                  <button
-                    onClick={resetRoomEditForm}
-                    disabled={adminBusy}
-                    className="secondary"
-                  >
-                    Cancel
-                  </button>
+                <div className="admin-room-form-layout">
+                  <div className="admin-room-form-main">
+                    <div className="admin-room-form-section-title">
+                      Basic settings
+                    </div>
+                    <div className="admin-room-fields admin-room-fields-edit">
+                      <input
+                        value={roomEditName}
+                        onChange={(e) => setRoomEditName(e.target.value)}
+                        placeholder="Party line name"
+                      />
+                      <label className="admin-room-field">
+                        Priority
+                        <select
+                          value={roomEditPriorityLevel}
+                          onChange={(e) =>
+                            setRoomEditPriorityLevel(Number(e.target.value))
+                          }
+                        >
+                          {priorityOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="admin-room-form-side">
+                    <div className="admin-room-form-section-title">Actions</div>
+                    <div className="admin-room-action-buttons">
+                      <button
+                        onClick={saveRoomEdit}
+                        disabled={adminBusy || !roomEditName.trim()}
+                      >
+                        Save changes
+                      </button>
+                      <button
+                        onClick={resetRoomEditForm}
+                        disabled={adminBusy}
+                        className="secondary"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div className="admin-grid admin-grid-roles">
-                  <RoleMultiSelect
-                    label="Allowed senders"
-                    selectedRoleIds={roomEditSenderRoleIds}
-                    setState={setRoomEditSenderRoleIds}
-                    keyPrefix="room-edit-sender"
-                    roles={appData.roles}
-                  />
-                  <RoleMultiSelect
-                    label="Allowed receivers"
-                    selectedRoleIds={roomEditReceiverRoleIds}
-                    setState={setRoomEditReceiverRoleIds}
-                    keyPrefix="room-edit-receiver"
-                    roles={appData.roles}
-                  />
-                  <RoleMultiSelect
-                    label="Forced listeners"
-                    selectedRoleIds={roomEditForcedListenRoleIds}
-                    setState={setRoomEditForcedListenRoleIds}
-                    keyPrefix="room-edit-forced-listen"
-                    roles={appData.roles}
-                  />
+
+                <div className="admin-room-form-roles">
+                  <div className="admin-room-form-section-title">Role access</div>
+                  <div className="admin-room-role-grid">
+                    <RoleMultiSelect
+                      label="Allowed senders"
+                      selectedRoleIds={roomEditSenderRoleIds}
+                      setState={setRoomEditSenderRoleIds}
+                      keyPrefix="room-edit-sender"
+                      roles={appData.roles}
+                    />
+                    <RoleMultiSelect
+                      label="Allowed receivers"
+                      selectedRoleIds={roomEditReceiverRoleIds}
+                      setState={setRoomEditReceiverRoleIds}
+                      keyPrefix="room-edit-receiver"
+                      roles={appData.roles}
+                    />
+                    <RoleMultiSelect
+                      label="Forced listeners"
+                      selectedRoleIds={roomEditForcedListenRoleIds}
+                      setState={setRoomEditForcedListenRoleIds}
+                      keyPrefix="room-edit-forced-listen"
+                      roles={appData.roles}
+                    />
+                  </div>
                 </div>
               </div>
             ) : null}
@@ -299,8 +352,16 @@ export function AdminRoomsCard({
             <ul className="admin-list">
               {appData.rooms.map((room) => (
                 <li key={room.id}>
-                  <span>
-                    {room.name} <small>({room.id})</small>
+                  <span className="admin-room-list-entry">
+                    <span className="admin-room-list-name">{room.name}</span>
+                    <span className="admin-room-list-meta">
+                      <small>({room.id})</small>
+                      <span
+                        className={`priority-badge priority-${room.priorityLevel ?? 1}`}
+                      >
+                        {getPriorityLabel(room.priorityLevel ?? 1)}
+                      </span>
+                    </span>
                   </span>
                   <button
                     disabled={adminBusy}

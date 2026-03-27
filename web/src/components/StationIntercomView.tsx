@@ -220,7 +220,10 @@ function cloneStreamDeckSettings(settings: StreamDeckSettings): StreamDeckSettin
 }
 
 function streamDeckPreviewSignature(
-  button: StreamDeckButtonConfig & { isListening?: boolean },
+  button: StreamDeckButtonConfig & {
+    isListening?: boolean;
+    isPttSelected?: boolean;
+  },
   pressed: boolean,
 ): string {
   const action = button.action;
@@ -235,6 +238,7 @@ function streamDeckPreviewSignature(
     action?.broadcastGroupId || "",
     action?.volumeDelta ?? "",
     button.isListening ? "1" : "0",
+    button.isPttSelected ? "1" : "0",
     pressed ? "1" : "0",
   ].join("|");
 }
@@ -711,6 +715,7 @@ export function StationIntercomView({
   const streamDeckPreviewRenderInputs = useMemo(() => {
     const cache = streamDeckPreviewCacheRef.current;
     const listeningRoomIds = new Set(listenRoomIds);
+    const selectedTalkRoomIds = new Set(talkRoomIds);
     const visibleButtonIndices = new Set(
       streamDeckCurrentButtons.map((button) => button.index),
     );
@@ -733,9 +738,15 @@ export function StationIntercomView({
           rawButton.action?.type === "listen_room") &&
         !!rawButton.action.roomId &&
         listeningRoomIds.has(rawButton.action.roomId);
+      const isPttSelected =
+        (rawButton.action?.type === "select_talk_room" ||
+          rawButton.action?.type === "select_listen_room") &&
+        !!rawButton.action.roomId &&
+        selectedTalkRoomIds.has(rawButton.action.roomId);
       const button = {
         ...resolvedButton,
         isListening,
+        isPttSelected,
       };
       const pressed = streamDeckPreviewPressedSet.has(rawButton.index);
       const signature = streamDeckPreviewSignature(button, pressed);
@@ -765,12 +776,14 @@ export function StationIntercomView({
             rawButton.action?.userId ||
             "",
           isListening,
+          isPttSelected,
           isActive: pressed,
         },
       };
     });
   }, [
     listenRoomIds,
+    talkRoomIds,
     streamDeckLabelLookup,
     streamDeckCurrentButtons,
     streamDeckPreviewPressedSet,
@@ -788,6 +801,7 @@ export function StationIntercomView({
       state?: "IDLE" | "TALK" | "LISTEN" | "BROADCAST";
       channel?: string;
       isListening?: boolean;
+      isPttSelected?: boolean;
       isActive?: boolean;
     }> = [];
 
@@ -1358,12 +1372,17 @@ export function StationIntercomView({
       <div className="station-header">
         <div className="station-topbar">
           <div className="station-live">
-            <span
-              className={`station-live-dot ${
-                connectionState === "connected" ? "connected" : "disconnected"
-              }`}
-            />
-            Live: {appData.self.username.toUpperCase()}
+            <div className="station-live-name">
+              <span
+                className={`station-live-dot ${
+                  connectionState === "connected" ? "connected" : "disconnected"
+                }`}
+              />
+              Live: {appData.self.username.toUpperCase()}
+            </div>
+            <div className="station-live-role">
+              {roleNameById.get(appData.self.roleId) || appData.self.roleId}
+            </div>
           </div>
           <div className="station-top-actions">
             <button

@@ -30,6 +30,8 @@ type TelegramBot struct {
 	pollWg     sync.WaitGroup
 }
 
+const telegramVirtualRoleID = "telegram"
+
 func NewTelegramBot(token, webhookSecret, mode string, store *Store, hub *Hub, logger *slog.Logger) *TelegramBot {
 	if mode == "" {
 		mode = "polling"
@@ -636,23 +638,7 @@ func parseInlineQueryMode(queryText string) (mode string, targetQuery string, me
 }
 
 func (t *TelegramBot) inlineTargetsForUsersAndRoles(ctx context.Context, excludeUsername string) []inlineTarget {
-	entries, err := t.store.ListTelegramAllowlistEntries(ctx)
-	if err != nil {
-		t.logger.Warn("failed to load telegram allowlist for inline targets", "error", err)
-		return nil
-	}
 	excludeUsername = strings.ToLower(strings.TrimSpace(excludeUsername))
-
-	allowedUsernames := make(map[string]struct{}, len(entries))
-	for _, entry := range entries {
-		username := strings.ToLower(strings.TrimSpace(entry.KesherUsername))
-		if username != "" {
-			allowedUsernames[username] = struct{}{}
-		}
-	}
-	if len(allowedUsernames) == 0 {
-		return nil
-	}
 
 	roleNameByID := make(map[string]string)
 	roles, err := t.store.ListRoles(ctx)
@@ -664,76 +650,14 @@ func (t *TelegramBot) inlineTargetsForUsersAndRoles(ctx context.Context, exclude
 		}
 	}
 
-	persistedUsers, err := t.store.ListUsers(ctx)
-	if err != nil {
-		t.logger.Warn("failed to load users for telegram inline targets", "error", err)
-		return nil
-	}
-
 	activeClients := t.hub.GetActiveClients(ctx)
-	activeUsersByUsername := make(map[string]ActiveClient, len(activeClients))
-	for _, client := range activeClients {
-		username := strings.ToLower(strings.TrimSpace(client.Username))
-		if username == "" {
-			continue
-		}
-		if _, ok := allowedUsernames[username]; !ok {
-			continue
-		}
-		activeUsersByUsername[username] = client
-		if client.RoleName != "" {
-			roleNameByID[client.RoleID] = client.RoleName
-		}
-	}
-
-	targets := make([]inlineTarget, 0, len(persistedUsers)+len(activeClients))
+	targets := make([]inlineTarget, 0, len(activeClients)*2)
 	seenUsers := make(map[string]struct{})
 	seenRoles := make(map[string]struct{})
 
-	for _, user := range persistedUsers {
-		usernameKey := strings.ToLower(strings.TrimSpace(user.Username))
-		if _, ok := allowedUsernames[usernameKey]; !ok {
-			continue
-		}
-		roleName := roleNameByID[user.RoleID]
-		if activeUser, ok := activeUsersByUsername[usernameKey]; ok {
-			if activeUser.UserID != "" {
-				user.ID = activeUser.UserID
-			}
-			if activeUser.RoleID != "" {
-				user.RoleID = activeUser.RoleID
-			}
-			if activeUser.RoleName != "" {
-				roleName = activeUser.RoleName
-			}
-		}
-		if user.ID != "" && usernameKey != excludeUsername {
-			if _, ok := seenUsers[user.ID]; !ok {
-				title := user.Username
-				searchValue := user.Username
-				if roleName != "" {
-					title = fmt.Sprintf("%s [%s]", user.Username, roleName)
-					searchValue += " " + roleName
-				}
-				targets = append(targets, inlineTarget{Kind: "user", ID: user.ID, Title: title, SearchValue: searchValue})
-				seenUsers[user.ID] = struct{}{}
-			}
-		}
-		if user.RoleID != "" {
-			if _, ok := seenRoles[user.RoleID]; !ok {
-				roleTitle := roleName
-				if roleTitle == "" {
-					roleTitle = user.RoleID
-				}
-				targets = append(targets, inlineTarget{Kind: "role", ID: user.RoleID, Title: "Role: " + roleTitle, SearchValue: roleTitle + " " + user.Username})
-				seenRoles[user.RoleID] = struct{}{}
-			}
-		}
-	}
-
 	for _, client := range activeClients {
 		usernameKey := strings.ToLower(strings.TrimSpace(client.Username))
-		if _, ok := allowedUsernames[usernameKey]; !ok {
+		if usernameKey == "" {
 			continue
 		}
 		if client.UserID != "" && usernameKey != excludeUsername {
@@ -751,6 +675,9 @@ func (t *TelegramBot) inlineTargetsForUsersAndRoles(ctx context.Context, exclude
 		if client.RoleID != "" {
 			if _, ok := seenRoles[client.RoleID]; !ok {
 				roleTitle := client.RoleName
+				if roleTitle == "" {
+					roleTitle = roleNameByID[client.RoleID]
+				}
 				if roleTitle == "" {
 					roleTitle = client.RoleID
 				}
@@ -986,6 +913,7 @@ func (t *TelegramBot) handleDirectMessage(ctx context.Context, msg *TelegramMess
 			FromUser:  senderUser,
 			Timestamp: time.Now().UnixMilli(),
 		}
+		e.FromUser.RoleID = telegramVirtualRoleID
 
 		switch targetType {
 		case "user":
@@ -1051,6 +979,7 @@ func (t *TelegramBot) handleDirectMessage(ctx context.Context, msg *TelegramMess
 			FromUser:   senderUser,
 			Timestamp:  time.Now().UnixMilli(),
 		}
+		routedEvent.FromUser.RoleID = telegramVirtualRoleID
 
 		// Send via hub to all clients of the target user
 		t.hub.SendChatToUser(targetUser.ID, routedEvent)
@@ -1079,7 +1008,7 @@ func (t *TelegramBot) forwardMessageToRoom(ctx context.Context, msg *TelegramMes
 	fromUser := User{
 		ID:       "telegram:" + chatID,
 		Username: senderName,
-		RoleID:   "",
+		RoleID:   telegramVirtualRoleID,
 	}
 	e := RoutedEvent{
 		Scope:     "room",

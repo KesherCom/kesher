@@ -51,6 +51,65 @@ func TestResolveCompanionTargetUserRejectsDisallowedUser(t *testing.T) {
 	}
 }
 
+func TestResolveCompanionTargetUserAllowsRoleWithoutUser(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "role_a", "Role A", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole failed: %v", err)
+	}
+
+	target, err := s.resolveCompanionTargetUser(ctx, "role_a")
+	if err != nil {
+		t.Fatalf("resolveCompanionTargetUser failed: %v", err)
+	}
+	if target.RoleID != "role_a" {
+		t.Fatalf("expected role_a, got %q", target.RoleID)
+	}
+	if strings.TrimSpace(target.Username) == "" {
+		t.Fatalf("expected fallback username, got empty")
+	}
+}
+
+func TestCompanionButtonSnapshotStateMarksPTTSelectedForSelectActions(t *testing.T) {
+	s := &Server{}
+	presence := PresenceState{
+		ListenRooms: []string{"room-a"},
+		TalkRooms:   []string{"room-a"},
+	}
+
+	selectTalk := StreamDeckButtonConfig{
+		Index: 0,
+		Action: &StreamDeckButtonAction{
+			Type:   StreamDeckActionTypeSelectTalkRoom,
+			RoomID: "room-a",
+		},
+	}
+	selectListen := StreamDeckButtonConfig{
+		Index: 1,
+		Action: &StreamDeckButtonAction{
+			Type:   StreamDeckActionTypeSelectListen,
+			RoomID: "room-a",
+		},
+	}
+
+	talkState := s.companionButtonSnapshotState(context.Background(), "role-a", 0, "operator", presence, selectTalk)
+	if !talkState.IsPTTSelected {
+		t.Fatal("expected select_talk_room button to be marked as PTT-selected")
+	}
+	if !talkState.IsListening {
+		t.Fatal("expected select_talk_room button to keep listen marker")
+	}
+
+	listenState := s.companionButtonSnapshotState(context.Background(), "role-a", 0, "operator", presence, selectListen)
+	if !listenState.IsPTTSelected {
+		t.Fatal("expected select_listen_room button to be marked as PTT-selected")
+	}
+	if !listenState.IsListening {
+		t.Fatal("expected select_listen_room button to keep listen marker")
+	}
+}
+
 func TestExecuteCompanionButtonPressRejectsUnauthorizedPTTRoom(t *testing.T) {
 	s := newCompanionTestServer(t)
 	ctx := context.Background()
@@ -289,12 +348,12 @@ func TestCompanionButtonSnapshotStateKeepsHeldPTTRoomActive(t *testing.T) {
 		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
 	}
 
-	client := &ImageStreamClient{send: make(chan ImageStreamMessage, 32), done: make(chan struct{}), logger: logger}
+	client := &ImageStreamClient{RoleID: "source", Username: "operator", send: make(chan ImageStreamMessage, 32), done: make(chan struct{}), logger: logger}
 	s.imageStreamCoord.RegisterClient(client)
 	defer s.imageStreamCoord.UnregisterClient(client)
 
 	s.rememberCompanionHeldTarget("source:0:0", "room-a")
-	s.emitCompanionCurrentPageImages(ctx, "source")
+	s.emitCompanionCurrentPageImages(ctx, "source", "operator")
 
 	for i := 0; i < len(settings.Pages[0].Buttons); i++ {
 		msg := <-client.send
@@ -307,6 +366,55 @@ func TestCompanionButtonSnapshotStateKeepsHeldPTTRoomActive(t *testing.T) {
 		return
 	}
 	t.Fatal("did not receive snapshot image for target button")
+}
+
+func TestEmitCompanionCurrentPageImagesSkipsUnchangedButtonsOnRepeat(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	coord, err := NewImageStreamCoordinator(logger)
+	if err != nil {
+		t.Fatalf("NewImageStreamCoordinator failed: %v", err)
+	}
+	s.imageStreamCoord = coord
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole failed: %v", err)
+	}
+	user, err := s.store.UpsertUser(ctx, "operator", "source")
+	if err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+	s.sessions.Create(user)
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePTTRoom, RoomID: "room-a"}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	client := &ImageStreamClient{RoleID: "source", Username: "operator", send: make(chan ImageStreamMessage, 64), done: make(chan struct{}), logger: logger}
+	s.imageStreamCoord.RegisterClient(client)
+	defer s.imageStreamCoord.UnregisterClient(client)
+
+	s.emitCompanionCurrentPageImages(ctx, "source", "operator")
+	firstCount := 0
+	for firstCount < len(settings.Pages[0].Buttons) {
+		select {
+		case <-client.send:
+			firstCount++
+		case <-time.After(250 * time.Millisecond):
+			t.Fatalf("expected %d initial button updates, got %d", len(settings.Pages[0].Buttons), firstCount)
+		}
+	}
+
+	s.emitCompanionCurrentPageImages(ctx, "source", "operator")
+	select {
+	case msg := <-client.send:
+		t.Fatalf("expected no redundant updates on unchanged repeat snapshot, got button %d", msg.ButtonIndex)
+	case <-time.After(50 * time.Millisecond):
+	}
 }
 
 func TestExecuteCompanionButtonPressPTTRoomSelectsFixedChannelBeforePTT(t *testing.T) {
@@ -701,7 +809,7 @@ func TestExecuteCompanionButtonPressCallRoomKeepsVisibleFeedbackUntilRefresh(t *
 		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
 	}
 
-	imageClient := &ImageStreamClient{send: make(chan ImageStreamMessage, 32), done: make(chan struct{}), logger: logger}
+	imageClient := &ImageStreamClient{RoleID: "source", Username: "operator", send: make(chan ImageStreamMessage, 32), done: make(chan struct{}), logger: logger}
 	s.imageStreamCoord.RegisterClient(imageClient)
 	defer s.imageStreamCoord.UnregisterClient(imageClient)
 

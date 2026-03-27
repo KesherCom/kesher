@@ -158,6 +158,12 @@ You can create, edit, and delete mappings at any time. Changes take effect immed
 
 ## How It Works
 
+### Sender authorization and target scope
+
+- Only Telegram users on the Telegram allowlist are allowed to send messages into Kesher.
+- Once allowlisted and logged in, those Telegram users can target all Kesher users, roles, and party-lines.
+- The allowlist controls who may send from Telegram, not which Kesher targets are visible.
+
 ### Telegram → Intercom
 
 1. A user sends a message in the mapped Telegram group.
@@ -252,6 +258,13 @@ Or use the webhook URL shown in the Kesher admin panel.
 3. **Check the Chat ID** — Verify the Chat ID is correct by calling `https://api.telegram.org/bot<TOKEN>/getUpdates` after sending a message.
 4. **Check server logs** — Look for `telegram message from unmapped chat` log entries, which indicate messages are arriving but not mapped to a party‑line.
 5. **Check internet access** — The server needs outbound HTTPS access to `api.telegram.org` on port 443.
+
+### Telegram user cannot send messages to Kesher users/roles/party-lines
+
+1. **Check allowlist entry** — The Telegram sender must be present in the Telegram allowlist.
+2. **Check `/login` status** — The user must run `/login` in a private chat with the bot first.
+3. **Check message format for direct routing** — Use inline routing so the message is emitted as `/ksh_user:*`, `/ksh_role:*`, or `/ksh_room:*`.
+4. **Check target existence** — If a user/role/party-line was removed in Kesher, delivery can fail.
 
 ### Messages appear in the intercom but not in Telegram
 
