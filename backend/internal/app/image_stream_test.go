@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"image"
@@ -206,5 +207,61 @@ func TestImageStreamCoordinatorSkipsUnchangedButtonState(t *testing.T) {
 		}
 	case <-time.After(250 * time.Millisecond):
 		t.Fatal("expected changed update to be delivered")
+	}
+}
+
+func TestImageStreamCoordinatorRoleOnlyClientReceivesTargetedRoleUpdates(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	coord, err := NewImageStreamCoordinator(logger)
+	if err != nil {
+		t.Fatalf("NewImageStreamCoordinator failed: %v", err)
+	}
+
+	client := &ImageStreamClient{
+		RoleID: "role-a",
+		send:   make(chan ImageStreamMessage, 2),
+		done:   make(chan struct{}),
+		logger: logger,
+	}
+	coord.RegisterClient(client)
+	defer coord.UnregisterClient(client)
+
+	coord.BroadcastImageUpdateForTarget("role-a", "operator", ButtonState{
+		Channel:    "room-a",
+		State:      "TALK",
+		Label:      "Room A",
+		ActionType: string(StreamDeckActionTypePTTRoom),
+	}, 0, 0)
+
+	select {
+	case msg := <-client.send:
+		if msg.State != "TALK" {
+			t.Fatalf("expected TALK state, got %q", msg.State)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected role-only client to receive targeted update")
+	}
+}
+
+func TestResolveImageStreamTargetKeepsRoleOnlyBindingWithoutUsername(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole failed: %v", err)
+	}
+	user, err := s.store.UpsertUser(ctx, "operator", "source")
+	if err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+	s.sessions.Create(user)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/companion/image-stream?roleId=source", nil)
+	roleID, username := s.resolveImageStreamTarget(ctx, req)
+	if roleID != "source" {
+		t.Fatalf("expected roleID source, got %q", roleID)
+	}
+	if username != "" {
+		t.Fatalf("expected empty username for role-only binding, got %q", username)
 	}
 }
