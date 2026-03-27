@@ -1360,6 +1360,22 @@ button {
   color: var(--text-muted);
 }
 
+.admin-room-list-entry {
+  display: grid;
+  gap: 0.32rem;
+}
+
+.admin-room-list-name {
+  font-weight: 700;
+  color: var(--text-bright-alt2);
+}
+
+.admin-room-list-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 .admin-list button {
   min-width: 88px;
 }
@@ -1377,12 +1393,12 @@ button {
 }
 
 .priority-badge {
-  display: block;
+  display: inline-flex;
+  align-items: center;
   font-size: 0.55rem;
   font-weight: 700;
   padding: 0.15rem 0.35rem;
   border-radius: 3px;
-  margin-top: 0.25rem;
   width: fit-content;
   text-align: center;
   color: white;
@@ -1412,6 +1428,82 @@ button {
   border-radius: 12px;
   padding: 1rem;
   background: rgba(16, 26, 36, 0.4);
+}
+
+.admin-room-form {
+  gap: 0.95rem;
+}
+
+.admin-room-form-header {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.admin-room-form-subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.admin-room-form-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.36fr);
+  gap: 0.85rem;
+}
+
+.admin-room-form-main,
+.admin-room-form-side,
+.admin-room-form-roles {
+  border: 1px solid rgba(72, 97, 136, 0.35);
+  border-radius: 11px;
+  background: rgba(12, 22, 34, 0.42);
+  padding: 0.8rem;
+}
+
+.admin-room-form-side {
+  align-content: start;
+}
+
+.admin-room-form-section-title {
+  margin: 0 0 0.65rem;
+  color: var(--text-bright);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.71rem;
+  font-weight: 800;
+}
+
+.admin-room-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.admin-room-fields-edit {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-room-field {
+  display: grid;
+  gap: 0.36rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.admin-room-action-buttons {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.admin-room-action-buttons button {
+  width: 100%;
+}
+
+.admin-room-role-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.68rem;
 }
 
 .admin-edit-title {
@@ -1578,6 +1670,16 @@ button {
 
   .admin-form-actions button {
     width: 100%;
+  }
+
+  .admin-room-form-layout,
+  .admin-room-fields,
+  .admin-room-fields-edit {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-room-role-grid {
+    grid-template-columns: 1fr;
   }
 }
 .role-multiselect {
