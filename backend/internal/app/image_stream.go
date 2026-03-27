@@ -36,6 +36,7 @@ type ImageStreamMessage struct {
 	ActionType  string `json:"actionType,omitempty"`
 	Color       string `json:"color,omitempty"`
 	IsListening bool   `json:"isListening,omitempty"`
+	IsPTTSelected bool `json:"isPttSelected,omitempty"`
 }
 
 // ButtonImageRenderConfig holds rendering configuration
@@ -73,6 +74,7 @@ type ButtonState struct {
 	Color       string
 	TalkCount   int
 	IsListening bool
+	IsPTTSelected bool
 	IsActive    bool
 }
 
@@ -85,6 +87,7 @@ type streamDeckPreviewButtonRequest struct {
 	State       string `json:"state,omitempty"`
 	Channel     string `json:"channel,omitempty"`
 	IsListening bool   `json:"isListening,omitempty"`
+	IsPTTSelected bool `json:"isPttSelected,omitempty"`
 	IsActive    bool   `json:"isActive,omitempty"`
 }
 
@@ -168,6 +171,19 @@ func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, erro
 		dc.SetLineWidth(2)
 		dc.DrawRoundedRectangle(cardInset-1, cardInset-1, w-(cardInset-1)*2, h-(cardInset-1)*2, radius+1)
 		dc.Stroke()
+	}
+
+	if (actionType == string(StreamDeckActionTypeSelectTalkRoom) || actionType == string(StreamDeckActionTypeSelectListen)) && state.IsPTTSelected {
+		stripeHeight := math.Max(6, math.Round(h*0.075))
+		dc.SetHexColor("#ff2d26")
+		dc.DrawRoundedRectangle(
+			cardInset+3,
+			cardInset+2,
+			(w-cardInset*2)-6,
+			stripeHeight,
+			math.Max(3, math.Round(stripeHeight/2)),
+		)
+		dc.Fill()
 	}
 
 	if (actionType == string(StreamDeckActionTypePTTRoom) || actionType == string(StreamDeckActionTypeListenRoom) || actionType == string(StreamDeckActionTypeSelectTalkRoom) || actionType == string(StreamDeckActionTypeSelectListen)) && state.IsListening {
@@ -447,6 +463,7 @@ func buttonStateSignature(state ButtonState) string {
 			strings.TrimSpace(state.Color),
 			strconv.Itoa(state.TalkCount),
 			strconv.FormatBool(state.IsListening),
+			strconv.FormatBool(state.IsPTTSelected),
 			strconv.FormatBool(state.IsActive),
 		},
 		"\x1f",
@@ -549,6 +566,7 @@ func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID, username 
 		ActionType:  state.ActionType,
 		Color:       state.Color,
 		IsListening: state.IsListening,
+		IsPTTSelected: state.IsPTTSelected,
 	}
 
 	// Send only to matching clients.
@@ -669,12 +687,18 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 	}
 
 	listeningRooms := make(map[string]struct{})
+	selectedTalkRooms := make(map[string]struct{})
 	renderUsername := ""
 	presence := PresenceState{}
 	if s.hub != nil {
 		if session, ok := s.hub.LatestRoleSession(roleID); ok {
 			renderUsername = strings.TrimSpace(session.Username)
 			presence, _ = s.hub.PresenceForUsername(renderUsername)
+			for _, roomID := range presence.TalkRooms {
+				if trimmed := strings.TrimSpace(roomID); trimmed != "" {
+					selectedTalkRooms[trimmed] = struct{}{}
+				}
+			}
 			for _, roomID := range s.hub.ListenRoomsForToken(session.Token) {
 				if trimmed := strings.TrimSpace(roomID); trimmed != "" {
 					listeningRooms[trimmed] = struct{}{}
@@ -714,6 +738,13 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 				_, state.IsListening = listeningRooms[roomID]
 			}
 		}
+		if !state.IsPTTSelected && button.Action != nil {
+			actionType := button.Action.Type
+			roomID := strings.TrimSpace(button.Action.RoomID)
+			if roomID != "" && (actionType == StreamDeckActionTypeSelectTalkRoom || actionType == StreamDeckActionTypeSelectListen) {
+				_, state.IsPTTSelected = selectedTalkRooms[roomID]
+			}
+		}
 		if strings.TrimSpace(state.Label) == "" {
 			state.Label, state.Subtitle = s.resolveButtonLabel(ctx, button)
 		}
@@ -747,6 +778,7 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 			ActionType:  state.ActionType,
 			Color:       state.Color,
 			IsListening: state.IsListening,
+			IsPTTSelected: state.IsPTTSelected,
 		}
 
 		select {
@@ -922,6 +954,7 @@ func (s *Server) handleUserStreamDeckPreview(w http.ResponseWriter, r *http.Requ
 			ActionType:  strings.TrimSpace(button.ActionType),
 			Color:       strings.TrimSpace(button.Color),
 			IsListening: button.IsListening,
+			IsPTTSelected: button.IsPTTSelected,
 			IsActive:    button.IsActive,
 		})
 		if renderErr != nil {

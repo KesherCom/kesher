@@ -104,6 +104,7 @@ type StreamDeckRenderRequest = {
 
 type StreamDeckRenderButtonState = StreamDeckButtonConfig & {
   isListening?: boolean;
+  isPttSelected?: boolean;
   attentionActive?: boolean;
   attentionPulseOn?: boolean;
 };
@@ -149,6 +150,7 @@ function streamDeckButtonRenderSignature(
     action?.broadcastGroupId || "",
     action?.volumeDelta ?? "",
     button.isListening ? "1" : "0",
+    button.isPttSelected ? "1" : "0",
     button.attentionActive ? "1" : "0",
     button.attentionPulseOn ? "1" : "0",
     pressed ? "1" : "0",
@@ -385,6 +387,7 @@ export function App() {
   const tokenRef = useRef<string | null>(null);
   const appDataRef = useRef<Bootstrap | null>(null);
   const listenRoomIdsRef = useRef<string[]>([]);
+  const talkRoomIdsRef = useRef<string[]>([]);
   const presenceRef = useRef<Presence[]>([]);
   const lastDirectCallerUserIdRef = useRef<string | null>(null);
   const incomingAttentionRef = useRef(false);
@@ -417,6 +420,10 @@ export function App() {
   }, [session.listenRoomIds]);
 
   useEffect(() => {
+    talkRoomIdsRef.current = session.talkRoomIds;
+  }, [session.talkRoomIds]);
+
+  useEffect(() => {
     presenceRef.current = session.presence;
   }, [session.presence]);
 
@@ -447,6 +454,7 @@ export function App() {
           const settings = streamDeckSettingsRef.current;
           const currentAppData = appDataRef.current;
           const listenRoomIds = listenRoomIdsRef.current;
+          const talkRoomIds = talkRoomIdsRef.current;
           const activePresence = presenceRef.current;
           const attentionActive = incomingAttentionRef.current;
           const attentionPulseOn = streamDeckAttentionPulseOnRef.current;
@@ -455,6 +463,7 @@ export function App() {
           }
 
           const listeningRoomIds = new Set(listenRoomIds);
+          const selectedTalkRoomIds = new Set(talkRoomIds);
           const buttonMap = new Map<number, StreamDeckRenderButtonState>(
             getStreamDeckPageButtons(settings).map((rawButton) => [
               rawButton.index,
@@ -478,6 +487,11 @@ export function App() {
                     rawButton.action?.type === "listen_room") &&
                   !!rawButton.action.roomId &&
                   listeningRoomIds.has(rawButton.action.roomId),
+                isPttSelected:
+                  (rawButton.action?.type === "select_talk_room" ||
+                    rawButton.action?.type === "select_listen_room") &&
+                  !!rawButton.action.roomId &&
+                  selectedTalkRoomIds.has(rawButton.action.roomId),
                 attentionActive,
                 attentionPulseOn,
               },
@@ -538,6 +552,7 @@ export function App() {
                 button.action?.userId ||
                 "",
               isListening: button.isListening,
+              isPttSelected: button.isPttSelected,
               isActive: pressed,
             });
           }

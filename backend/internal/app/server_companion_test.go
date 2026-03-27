@@ -51,6 +51,65 @@ func TestResolveCompanionTargetUserRejectsDisallowedUser(t *testing.T) {
 	}
 }
 
+func TestResolveCompanionTargetUserAllowsRoleWithoutUser(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "role_a", "Role A", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole failed: %v", err)
+	}
+
+	target, err := s.resolveCompanionTargetUser(ctx, "role_a")
+	if err != nil {
+		t.Fatalf("resolveCompanionTargetUser failed: %v", err)
+	}
+	if target.RoleID != "role_a" {
+		t.Fatalf("expected role_a, got %q", target.RoleID)
+	}
+	if strings.TrimSpace(target.Username) == "" {
+		t.Fatalf("expected fallback username, got empty")
+	}
+}
+
+func TestCompanionButtonSnapshotStateMarksPTTSelectedForSelectActions(t *testing.T) {
+	s := &Server{}
+	presence := PresenceState{
+		ListenRooms: []string{"room-a"},
+		TalkRooms:   []string{"room-a"},
+	}
+
+	selectTalk := StreamDeckButtonConfig{
+		Index: 0,
+		Action: &StreamDeckButtonAction{
+			Type:   StreamDeckActionTypeSelectTalkRoom,
+			RoomID: "room-a",
+		},
+	}
+	selectListen := StreamDeckButtonConfig{
+		Index: 1,
+		Action: &StreamDeckButtonAction{
+			Type:   StreamDeckActionTypeSelectListen,
+			RoomID: "room-a",
+		},
+	}
+
+	talkState := s.companionButtonSnapshotState(context.Background(), "role-a", 0, "operator", presence, selectTalk)
+	if !talkState.IsPTTSelected {
+		t.Fatal("expected select_talk_room button to be marked as PTT-selected")
+	}
+	if !talkState.IsListening {
+		t.Fatal("expected select_talk_room button to keep listen marker")
+	}
+
+	listenState := s.companionButtonSnapshotState(context.Background(), "role-a", 0, "operator", presence, selectListen)
+	if !listenState.IsPTTSelected {
+		t.Fatal("expected select_listen_room button to be marked as PTT-selected")
+	}
+	if !listenState.IsListening {
+		t.Fatal("expected select_listen_room button to keep listen marker")
+	}
+}
+
 func TestExecuteCompanionButtonPressRejectsUnauthorizedPTTRoom(t *testing.T) {
 	s := newCompanionTestServer(t)
 	ctx := context.Background()

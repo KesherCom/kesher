@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"image"
 	"image/png"
 	"io"
 	"log/slog"
@@ -55,6 +56,52 @@ func TestGetButtonPaletteUsesYellowPressedPaletteForCallRoom(t *testing.T) {
 	}
 	if palette.label != "#2a2110" {
 		t.Fatalf("unexpected pressed call label: got %q", palette.label)
+	}
+}
+
+func TestButtonImageRendererRenderButtonImageRendersTopAndBottomStatusStripes(t *testing.T) {
+	renderer, err := NewButtonImageRenderer(&ButtonImageRenderConfig{Width: 112, Height: 112})
+	if err != nil {
+		t.Fatalf("NewButtonImageRenderer failed: %v", err)
+	}
+
+	buf, err := renderer.RenderButtonImage(ButtonState{
+		State:         "IDLE",
+		Label:         "PL A",
+		ActionType:    string(StreamDeckActionTypeSelectTalkRoom),
+		IsListening:   true,
+		IsPTTSelected: true,
+	})
+	if err != nil {
+		t.Fatalf("RenderButtonImage failed: %v", err)
+	}
+
+	img, err := png.Decode(bytes.NewReader(buf))
+	if err != nil {
+		t.Fatalf("png.Decode failed: %v", err)
+	}
+
+	assertPixelNearRGB(t, img, 56, 8, 255, 45, 38)
+	assertPixelNearRGB(t, img, 56, 103, 20, 198, 75)
+}
+
+func assertPixelNearRGB(t *testing.T, img image.Image, x, y int, wantR, wantG, wantB uint8) {
+	t.Helper()
+	r, g, b, _ := img.At(x, y).RGBA()
+	gotR := uint8(r >> 8)
+	gotG := uint8(g >> 8)
+	gotB := uint8(b >> 8)
+
+	within := func(got, want uint8) bool {
+		const tolerance = 8
+		if got > want {
+			return got-want <= tolerance
+		}
+		return want-got <= tolerance
+	}
+
+	if !within(gotR, wantR) || !within(gotG, wantG) || !within(gotB, wantB) {
+		t.Fatalf("unexpected pixel at (%d,%d): got rgb(%d,%d,%d), want near rgb(%d,%d,%d)", x, y, gotR, gotG, gotB, wantR, wantG, wantB)
 	}
 }
 

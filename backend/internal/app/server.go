@@ -163,17 +163,10 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 		roleID = autoRoleID
 	}
 	if roleID != "" {
-		users, err := s.store.ListUsers(r.Context())
+		knownRole, err := s.store.RoleExists(r.Context(), roleID)
 		if err != nil {
 			s.internalErr(w, err)
 			return
-		}
-		knownRole := false
-		for i := range users {
-			if strings.TrimSpace(users[i].RoleID) == roleID {
-				knownRole = true
-				break
-			}
 		}
 		if !knownRole {
 			http.Error(w, "unknown roleId", http.StatusNotFound)
@@ -967,6 +960,9 @@ func (s *Server) companionButtonSnapshotState(ctx context.Context, roleID string
 		if roomID != "" && contains(presence.ListenRooms, roomID) {
 			state.IsListening = true
 		}
+		if roomID != "" && contains(presence.TalkRooms, roomID) {
+			state.IsPTTSelected = true
+		}
 	case StreamDeckActionTypeMuteToggle:
 		if strings.TrimSpace(presence.VoiceMode) == "always_on" {
 			state.State = "TALK"
@@ -1229,6 +1225,13 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 				break
 			}
 		}
+		isPTTSelected := false
+		for _, entry := range presence.TalkRooms {
+			if entry == roomID {
+				isPTTSelected = true
+				break
+			}
+		}
 		if phase != "down" {
 			state := "IDLE"
 			for _, entry := range presence.TalkRooms {
@@ -1237,13 +1240,13 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 					break
 				}
 			}
-			emitCompanionButtonImage( page.Page, button, ButtonState{State: state, Channel: roomID, IsListening: isListening})
+			emitCompanionButtonImage( page.Page, button, ButtonState{State: state, Channel: roomID, IsListening: isListening, IsPTTSelected: isPTTSelected})
 			result.OK = true
 			result.Status = "executed"
 			return result
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: append([]string(nil), presence.ListenRooms...), TalkRoomIDs: []string{roomID}})
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: "LISTEN", Channel: roomID, IsListening: isListening})
+		emitCompanionButtonImage( page.Page, button, ButtonState{State: "LISTEN", Channel: roomID, IsListening: isListening, IsPTTSelected: true})
 		return res
 	case StreamDeckActionTypeSelectListen:
 		roomID := strings.TrimSpace(button.Action.RoomID)
@@ -1270,6 +1273,13 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 				break
 			}
 		}
+		isPTTSelected := false
+		for _, entry := range presence.TalkRooms {
+			if entry == roomID {
+				isPTTSelected = true
+				break
+			}
+		}
 		triggerKey := fmt.Sprintf("select-listen-triggered:%s", holdKey)
 		if phase != "down" {
 			triggered := false
@@ -1293,7 +1303,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 						break
 					}
 				}
-				emitCompanionButtonImage( page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: state}[stillListening], Channel: roomID, IsListening: stillListening})
+				emitCompanionButtonImage( page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: state}[stillListening], Channel: roomID, IsListening: stillListening, IsPTTSelected: isPTTSelected})
 				result.OK = true
 				result.Status = "executed"
 				return result
@@ -1301,7 +1311,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			if !canTalk {
 				return rejectUnauthorized("not allowed to talk to room")
 			}
-			emitCompanionButtonImage( page.Page, button, ButtonState{State: state, Channel: roomID, IsListening: isListening})
+			emitCompanionButtonImage( page.Page, button, ButtonState{State: state, Channel: roomID, IsListening: isListening, IsPTTSelected: true})
 			res := queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: append([]string(nil), presence.ListenRooms...), TalkRoomIDs: []string{roomID}})
 			return res
 		}
@@ -1347,7 +1357,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		}(roleID, username, roomID, holdKey, triggerKey)
 		result.OK = true
 		result.Status = "executed"
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[isListening], Channel: roomID, IsListening: isListening})
+		emitCompanionButtonImage( page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[isListening], Channel: roomID, IsListening: isListening, IsPTTSelected: isPTTSelected})
 		return result
 	case StreamDeckActionTypePTTSelected:
 		targetID := ""
@@ -2813,7 +2823,16 @@ func (s *Server) resolveCompanionTargetUser(ctx context.Context, roleID string) 
 			return allUsers[i], nil
 		}
 	}
-	return User{}, ErrNotFound
+
+	knownRole, err := s.store.RoleExists(ctx, strings.TrimSpace(roleID))
+	if err != nil {
+		return User{}, err
+	}
+	if !knownRole {
+		return User{}, ErrNotFound
+	}
+
+	return User{RoleID: strings.TrimSpace(roleID), Username: strings.TrimSpace(roleID)}, nil
 }
 
 func (s *Server) buildCompanionProfileResponse(ctx context.Context, targetUser User) (CompanionProfileResponse, error) {

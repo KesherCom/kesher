@@ -876,6 +876,7 @@ export type StreamDeckPreviewButton = {
   state?: "IDLE" | "TALK" | "LISTEN" | "BROADCAST";
   channel?: string;
   isListening?: boolean;
+  isPttSelected?: boolean;
   isActive?: boolean;
 };
 
