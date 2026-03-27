@@ -1979,10 +1979,24 @@ button.secondary {
 }
 .station-live {
   display: inline-flex;
-  gap: 0.45rem;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
   font-weight: 700;
   letter-spacing: 0.02em;
+}
+.station-live-name {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+}
+.station-live-role {
+  margin-left: calc(7px + 0.45rem);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.72);
 }
 .station-live-dot {
   width: 7px;

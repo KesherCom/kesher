@@ -1372,12 +1372,17 @@ export function StationIntercomView({
       <div className="station-header">
         <div className="station-topbar">
           <div className="station-live">
-            <span
-              className={`station-live-dot ${
-                connectionState === "connected" ? "connected" : "disconnected"
-              }`}
-            />
-            Live: {appData.self.username.toUpperCase()}
+            <div className="station-live-name">
+              <span
+                className={`station-live-dot ${
+                  connectionState === "connected" ? "connected" : "disconnected"
+                }`}
+              />
+              Live: {appData.self.username.toUpperCase()}
+            </div>
+            <div className="station-live-role">
+              {roleNameById.get(appData.self.roleId) || appData.self.roleId}
+            </div>
           </div>
           <div className="station-top-actions">
             <button
