@@ -21,3 +21,4 @@ backend/internal/app/embedded_web/*
 .VSCodeCounter/*
 certs/*
 backend/app
+backend/logs/
