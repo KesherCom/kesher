@@ -5,9 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"image/png"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestButtonImageRendererRenderButtonImageProducesValidPNG(t *testing.T) {
@@ -105,5 +108,56 @@ func TestHandleUserStreamDeckPreviewRendersPNGImages(t *testing.T) {
 	}
 	if gotW, gotH := decoded.Bounds().Dx(), decoded.Bounds().Dy(); gotW != 112 || gotH != 112 {
 		t.Fatalf("unexpected image size: got %dx%d want 112x112", gotW, gotH)
+	}
+}
+
+func TestImageStreamCoordinatorSkipsUnchangedButtonState(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	coord, err := NewImageStreamCoordinator(logger)
+	if err != nil {
+		t.Fatalf("NewImageStreamCoordinator failed: %v", err)
+	}
+
+	client := &ImageStreamClient{
+		RoleID:   "role-a",
+		Username: "operator",
+		send:     make(chan ImageStreamMessage, 4),
+		done:     make(chan struct{}),
+		logger:   logger,
+	}
+	coord.RegisterClient(client)
+	defer coord.UnregisterClient(client)
+
+	state := ButtonState{
+		Channel:    "room-a",
+		State:      "IDLE",
+		Label:      "Room A",
+		ActionType: string(StreamDeckActionTypePTTRoom),
+	}
+
+	coord.BroadcastImageUpdateForTarget("role-a", "operator", state, 0, 2)
+	select {
+	case <-client.send:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected first update to be delivered")
+	}
+
+	coord.BroadcastImageUpdateForTarget("role-a", "operator", state, 0, 2)
+	select {
+	case msg := <-client.send:
+		t.Fatalf("expected unchanged update to be skipped, got %+v", msg)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	changed := state
+	changed.State = "TALK"
+	coord.BroadcastImageUpdateForTarget("role-a", "operator", changed, 0, 2)
+	select {
+	case msg := <-client.send:
+		if msg.State != "TALK" {
+			t.Fatalf("expected changed state TALK, got %q", msg.State)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected changed update to be delivered")
 	}
 }

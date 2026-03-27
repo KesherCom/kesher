@@ -428,6 +428,54 @@ type ImageStreamClient struct {
 	send     chan ImageStreamMessage
 	done     chan struct{}
 	logger   *slog.Logger
+	mu       sync.Mutex
+	lastSent map[string]string
+}
+
+func streamButtonKey(bank, buttonIndex int) string {
+	return strconv.Itoa(bank) + ":" + strconv.Itoa(buttonIndex)
+}
+
+func buttonStateSignature(state ButtonState) string {
+	return strings.Join(
+		[]string{
+			strings.TrimSpace(state.Channel),
+			strings.TrimSpace(state.State),
+			strings.TrimSpace(state.Label),
+			strings.TrimSpace(state.Subtitle),
+			strings.TrimSpace(state.ActionType),
+			strings.TrimSpace(state.Color),
+			strconv.Itoa(state.TalkCount),
+			strconv.FormatBool(state.IsListening),
+			strconv.FormatBool(state.IsActive),
+		},
+		"\x1f",
+	)
+}
+
+func (c *ImageStreamClient) needsButtonUpdate(bank, buttonIndex int, signature string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.lastSent == nil {
+		c.lastSent = make(map[string]string)
+		return true
+	}
+	return c.lastSent[streamButtonKey(bank, buttonIndex)] != signature
+}
+
+func (c *ImageStreamClient) markButtonUpdateSent(bank, buttonIndex int, signature string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.lastSent == nil {
+		c.lastSent = make(map[string]string)
+	}
+	c.lastSent[streamButtonKey(bank, buttonIndex)] = signature
+	c.mu.Unlock()
 }
 
 // NewImageStreamCoordinator creates a new image stream coordinator
@@ -452,10 +500,33 @@ func (c *ImageStreamCoordinator) BroadcastImageUpdate(state ButtonState, bank, b
 // BroadcastImageUpdateForTarget sends an image update only to clients bound to the same role.
 // If username is provided and the client also declared one, both usernames must match.
 func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID, username string, state ButtonState, bank, buttonIndex int) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
 	targetRoleID := strings.TrimSpace(roleID)
 	targetUsername := strings.TrimSpace(username)
+	signature := buttonStateSignature(state)
+
+	c.mu.RLock()
+	recipients := make([]*ImageStreamClient, 0, len(c.clients))
+	for client := range c.clients {
+		clientRoleID := strings.TrimSpace(client.RoleID)
+		if targetRoleID != "" && clientRoleID != targetRoleID {
+			continue
+		}
+		if targetUsername != "" {
+			clientUsername := strings.TrimSpace(client.Username)
+			if clientUsername != "" && clientUsername != targetUsername {
+				continue
+			}
+		}
+		if !client.needsButtonUpdate(bank, buttonIndex, signature) {
+			continue
+		}
+		recipients = append(recipients, client)
+	}
+	c.mu.RUnlock()
+
+	if len(recipients) == 0 {
+		return
+	}
 
 	// Render the image
 	imageBuf, err := c.renderer.RenderButtonImage(state)
@@ -481,21 +552,11 @@ func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID, username 
 	}
 
 	// Send only to matching clients.
-	for client := range c.clients {
-		clientRoleID := strings.TrimSpace(client.RoleID)
-		if targetRoleID != "" && clientRoleID != targetRoleID {
-			continue
-		}
-		if targetUsername != "" {
-			clientUsername := strings.TrimSpace(client.Username)
-			if clientUsername != "" && clientUsername != targetUsername {
-				continue
-			}
-		}
+	for _, client := range recipients {
 		select {
 		case client.send <- msg:
+			client.markButtonUpdateSent(bank, buttonIndex, signature)
 		case <-client.done:
-			delete(c.clients, client)
 		default:
 			// Client queue full, drop message
 		}
@@ -532,6 +593,7 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 		send:     make(chan ImageStreamMessage, 16),
 		done:     make(chan struct{}),
 		logger:   s.logger,
+		lastSent: make(map[string]string),
 	}
 
 	// Register client
@@ -664,6 +726,10 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 		if strings.TrimSpace(state.Color) == "" {
 			state.Color = strings.TrimSpace(button.Color)
 		}
+		signature := buttonStateSignature(state)
+		if !client.needsButtonUpdate(page.Page, button.Index, signature) {
+			continue
+		}
 		img, renderErr := s.imageStreamCoord.renderer.RenderButtonImage(state)
 		if renderErr != nil {
 			s.logger.Warn("image snapshot render failed", "roleId", roleID, "index", button.Index, "error", renderErr)
@@ -685,6 +751,7 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 
 		select {
 		case client.send <- msg:
+			client.markButtonUpdateSent(page.Page, button.Index, signature)
 		default:
 			s.logger.Warn("image snapshot queue full", "roleId", roleID)
 			return

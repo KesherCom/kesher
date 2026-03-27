@@ -309,6 +309,55 @@ func TestCompanionButtonSnapshotStateKeepsHeldPTTRoomActive(t *testing.T) {
 	t.Fatal("did not receive snapshot image for target button")
 }
 
+func TestEmitCompanionCurrentPageImagesSkipsUnchangedButtonsOnRepeat(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	coord, err := NewImageStreamCoordinator(logger)
+	if err != nil {
+		t.Fatalf("NewImageStreamCoordinator failed: %v", err)
+	}
+	s.imageStreamCoord = coord
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole failed: %v", err)
+	}
+	user, err := s.store.UpsertUser(ctx, "operator", "source")
+	if err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+	s.sessions.Create(user)
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePTTRoom, RoomID: "room-a"}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	client := &ImageStreamClient{RoleID: "source", Username: "operator", send: make(chan ImageStreamMessage, 64), done: make(chan struct{}), logger: logger}
+	s.imageStreamCoord.RegisterClient(client)
+	defer s.imageStreamCoord.UnregisterClient(client)
+
+	s.emitCompanionCurrentPageImages(ctx, "source", "operator")
+	firstCount := 0
+	for firstCount < len(settings.Pages[0].Buttons) {
+		select {
+		case <-client.send:
+			firstCount++
+		case <-time.After(250 * time.Millisecond):
+			t.Fatalf("expected %d initial button updates, got %d", len(settings.Pages[0].Buttons), firstCount)
+		}
+	}
+
+	s.emitCompanionCurrentPageImages(ctx, "source", "operator")
+	select {
+	case msg := <-client.send:
+		t.Fatalf("expected no redundant updates on unchanged repeat snapshot, got button %d", msg.ButtonIndex)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestExecuteCompanionButtonPressPTTRoomSelectsFixedChannelBeforePTT(t *testing.T) {
 	s := newCompanionTestServer(t)
 	ctx := context.Background()
@@ -701,7 +750,7 @@ func TestExecuteCompanionButtonPressCallRoomKeepsVisibleFeedbackUntilRefresh(t *
 		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
 	}
 
-	imageClient := &ImageStreamClient{send: make(chan ImageStreamMessage, 32), done: make(chan struct{}), logger: logger}
+	imageClient := &ImageStreamClient{RoleID: "source", Username: "operator", send: make(chan ImageStreamMessage, 32), done: make(chan struct{}), logger: logger}
 	s.imageStreamCoord.RegisterClient(imageClient)
 	defer s.imageStreamCoord.UnregisterClient(imageClient)
 
