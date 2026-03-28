@@ -6,6 +6,7 @@ admin_pin: "123456"
 session_ttl_minutes: 720
 companion_shared_secret: ""
 companion_allowed_usernames: []
+companion_image_effect_map_file: "image-effect-map.json"
 trusted_lan_http: true
 tls_mode: "internal"
 tls_cert_file: ""

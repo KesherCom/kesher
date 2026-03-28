@@ -499,3 +499,33 @@ func TestUserStreamDeckSettingsAcceptsSelectListenAction(t *testing.T) {
 		t.Fatalf("unexpected room id: %q", stored.Pages[0].Buttons[0].Action.RoomID)
 	}
 }
+
+func TestUserStreamDeckSettingsAcceptsIncomingCallIndicatorAction(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	user, err := store.UpsertUser(ctx, "deckincoming", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{
+		Type: StreamDeckActionTypeIncomingCall,
+	}
+
+	stored, err := store.UpsertUserStreamDeckSettings(ctx, user.ID, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Pages[0].Buttons[0].Action == nil {
+		t.Fatal("expected action to be stored")
+	}
+	if stored.Pages[0].Buttons[0].Action.Type != StreamDeckActionTypeIncomingCall {
+		t.Fatalf("unexpected action type: %s", stored.Pages[0].Buttons[0].Action.Type)
+	}
+}

@@ -14,22 +14,25 @@ import (
 )
 
 type client struct {
-	session         Session
-	user            User
-	connectedAt     time.Time
-	closeNow        func() error
-	lastDirectFrom  string
-	lastDirectName  string
-	signalFrom      string
-	signalMessage   string
-	signalUntil     time.Time
-	listenRooms     map[string]struct{}
-	talkRooms       map[string]struct{}
-	voiceMode       string
-	micEnabled      bool
-	broadcastGroups map[string]struct{}
-	send            chan WSOutbound
-	sendPriority    chan WSOutbound
+	session          Session
+	user             User
+	connectedAt      time.Time
+	closeNow         func() error
+	lastDirectFrom   string
+	lastDirectName   string
+	signalFrom       string
+	signalMessage    string
+	signalScope      string
+	signalSourceType string
+	signalSourceID   string
+	signalUntil      time.Time
+	listenRooms      map[string]struct{}
+	talkRooms        map[string]struct{}
+	voiceMode        string
+	micEnabled       bool
+	broadcastGroups  map[string]struct{}
+	send             chan WSOutbound
+	sendPriority     chan WSOutbound
 }
 
 const incomingSignalAttentionWindow = 2200 * time.Millisecond
@@ -68,6 +71,16 @@ func (h *Hub) ReplyTargetForUsername(username string) (string, string, bool) {
 }
 
 func (h *Hub) SignalStateForUsername(username string) (string, string, bool) {
+	from, message, _, _, _, active := h.SignalStateWithMetadataForUsername(username)
+	return from, message, active
+}
+
+func (h *Hub) SignalStateWithScopeForUsername(username string) (string, string, string, bool) {
+	from, message, scope, _, _, active := h.SignalStateWithMetadataForUsername(username)
+	return from, message, scope, active
+}
+
+func (h *Hub) SignalStateWithMetadataForUsername(username string) (string, string, string, string, string, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	var selected *client
@@ -80,9 +93,9 @@ func (h *Hub) SignalStateForUsername(username string) (string, string, bool) {
 		}
 	}
 	if selected == nil || time.Now().After(selected.signalUntil) || selected.signalFrom == "" {
-		return "", "", false
+		return "", "", "", "", "", false
 	}
-	return selected.signalFrom, selected.signalMessage, true
+	return selected.signalFrom, selected.signalMessage, selected.signalScope, selected.signalSourceType, selected.signalSourceID, true
 }
 
 type ActiveClient struct {
@@ -426,6 +439,9 @@ func (h *Hub) markDirectSignalIncoming(targetUserID string, fromUser User, signa
 		}
 		c.signalFrom = fromUser.Username
 		c.signalMessage = signal
+		c.signalScope = "direct"
+		c.signalSourceType = "role"
+		c.signalSourceID = fromUser.RoleID
 		c.signalUntil = time.Now().Add(incomingSignalAttentionWindow)
 	}
 }
@@ -476,6 +492,9 @@ func (h *Hub) markRoomSignalIncoming(roomID string, fromUser User, signal string
 		}
 		c.signalFrom = signalFrom
 		c.signalMessage = signal
+		c.signalScope = "room"
+		c.signalSourceType = "room"
+		c.signalSourceID = roomID
 		c.signalUntil = time.Now().Add(incomingSignalAttentionWindow)
 	}
 }

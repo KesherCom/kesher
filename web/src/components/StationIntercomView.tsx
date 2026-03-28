@@ -91,6 +91,7 @@ function normalizeImportedStreamDeckSettings(input: unknown): StreamDeckSettings
     "direct_user",
     "direct_role",
     "reply_to_caller",
+    "incoming_call_indicator",
     "broadcast_ptt",
     "mute_toggle",
     "volume_delta",
@@ -2430,6 +2431,7 @@ export function StationIntercomView({
                               <option value="direct_user">Direct user</option>
                               <option value="direct_role">Direct role</option>
                               <option value="reply_to_caller">Reply to caller</option>
+                              <option value="incoming_call_indicator">Incoming calls indicator</option>
                             </optgroup>
                             <optgroup label="Broadcast and audio">
                               <option value="broadcast_ptt">Broadcast PTT</option>

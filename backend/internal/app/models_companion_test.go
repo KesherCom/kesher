@@ -23,3 +23,15 @@ func TestCompanionCommandMarshalIncludesEmptyRoomMatrixArrays(t *testing.T) {
 		t.Fatalf("expected talkRoomIds to be serialized as empty array, got %s", jsonText)
 	}
 }
+
+func TestDefaultStreamDeckSettingsStartsWithUnassignedButtons(t *testing.T) {
+	settings := DefaultStreamDeckSettings()
+	if len(settings.Pages) == 0 {
+		t.Fatal("expected at least one page")
+	}
+	for _, button := range settings.Pages[0].Buttons {
+		if button.Action != nil {
+			t.Fatalf("expected default button index %d to be unassigned", button.Index)
+		}
+	}
+}

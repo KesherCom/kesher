@@ -30,29 +30,39 @@ type AckSettings struct {
 var errCompanionUserNotAllowed = errors.New("companion target user is not allowed")
 
 type Server struct {
-	cfg                            Config
-	logger                         *slog.Logger
-	adminLogs                      *adminLogStore
-	store                          *Store
-	sessions                       *SessionManager
-	sessionMu                      sync.Mutex
-	hub                            *Hub
-	media                          *MediaManager
-	telegram                       *TelegramBot
-	certMagic                      tlsProvider
-	httpSrv                        *http.Server
-	redirectSrv                    *http.Server
-	upgrader                       websocket.Upgrader
-	ackMu                          sync.RWMutex
-	ackEnabled                     bool
-	ackSet                         bool
-	companionMu                    sync.RWMutex
-	companionWS                    map[string]map[chan CompanionCommandResult]struct{}
-	companionState                 map[string]map[chan struct{}]struct{}
-	companionPageByRole            map[string]int
-	companionHeldTargets           map[string]string
-	companionSelectListenHoldDelay time.Duration
-	imageStreamCoord               *ImageStreamCoordinator
+	cfg                              Config
+	logger                           *slog.Logger
+	adminLogs                        *adminLogStore
+	store                            *Store
+	sessions                         *SessionManager
+	sessionMu                        sync.Mutex
+	hub                              *Hub
+	media                            *MediaManager
+	telegram                         *TelegramBot
+	certMagic                        tlsProvider
+	httpSrv                          *http.Server
+	redirectSrv                      *http.Server
+	upgrader                         websocket.Upgrader
+	ackMu                            sync.RWMutex
+	ackEnabled                       bool
+	ackSet                           bool
+	companionMu                      sync.RWMutex
+	companionWS                      map[string]map[chan CompanionCommandResult]struct{}
+	companionState                   map[string]map[chan struct{}]struct{}
+	companionPageByRole              map[string]int
+	companionHeldTargets             map[string]string
+	companionPendingCallByUser       map[string]bool
+	companionPendingCallerByUser     map[string]string
+	companionPendingCallScopeByUser  map[string]string
+	companionPendingCallSourceByUser map[string]string
+	companionAckedSignalByUser       map[string]string
+	companionSelectListenHoldDelay   time.Duration
+	imageStreamCoord                 *ImageStreamCoordinator
+	companionImageEffectMapMu        sync.Mutex
+	companionImageEffectMapCached    string
+	companionImageEffectMapModTime   time.Time
+	companionImageEffectMapChecked   time.Time
+	companionImageEffectMapErr       string
 }
 
 type tlsProvider interface {
@@ -104,6 +114,8 @@ const (
 	websocketReadTimeout                  = 60 * time.Second
 	websocketPingWriteWindow              = 5 * time.Second
 	companionSelectListenHoldDelayDefault = 2 * time.Second
+	companionIncomingCallBlinkInterval    = 300 * time.Millisecond
+	companionIncomingCallEffectValue      = 3
 )
 
 func refreshWebSocketReadDeadline(conn *websocket.Conn) {
@@ -116,6 +128,73 @@ func writeWebSocketPing(conn *websocket.Conn, connMu *sync.Mutex) {
 		defer connMu.Unlock()
 	}
 	_ = conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(websocketPingWriteWindow))
+}
+
+func (s *Server) loadCompanionImageEffectMapJSON() string {
+	path := strings.TrimSpace(s.cfg.CompanionImageEffectMapFile)
+	if path == "" {
+		return ""
+	}
+
+	now := time.Now()
+	s.companionImageEffectMapMu.Lock()
+	defer s.companionImageEffectMapMu.Unlock()
+
+	if now.Sub(s.companionImageEffectMapChecked) < time.Second {
+		return s.companionImageEffectMapCached
+	}
+	s.companionImageEffectMapChecked = now
+
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.companionImageEffectMapCached = ""
+			s.companionImageEffectMapModTime = time.Time{}
+			s.companionImageEffectMapErr = ""
+			return ""
+		}
+		errMsg := err.Error()
+		if errMsg != s.companionImageEffectMapErr {
+			s.logger.Warn("failed to stat companion image effect map", "path", path, "error", err)
+			s.companionImageEffectMapErr = errMsg
+		}
+		return s.companionImageEffectMapCached
+	}
+
+	if !info.ModTime().After(s.companionImageEffectMapModTime) {
+		return s.companionImageEffectMapCached
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg != s.companionImageEffectMapErr {
+			s.logger.Warn("failed to read companion image effect map", "path", path, "error", err)
+			s.companionImageEffectMapErr = errMsg
+		}
+		return s.companionImageEffectMapCached
+	}
+
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		s.companionImageEffectMapCached = ""
+		s.companionImageEffectMapModTime = info.ModTime()
+		s.companionImageEffectMapErr = ""
+		return ""
+	}
+	if !json.Valid([]byte(trimmed)) {
+		errMsg := "invalid JSON"
+		if errMsg != s.companionImageEffectMapErr {
+			s.logger.Warn("invalid companion image effect map JSON", "path", path)
+			s.companionImageEffectMapErr = errMsg
+		}
+		return s.companionImageEffectMapCached
+	}
+
+	s.companionImageEffectMapCached = trimmed
+	s.companionImageEffectMapModTime = info.ModTime()
+	s.companionImageEffectMapErr = ""
+	return s.companionImageEffectMapCached
 }
 
 func startWebSocketKeepalive(conn *websocket.Conn, connMu *sync.Mutex) func() {
@@ -219,6 +298,7 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			Username: resolvedUsername,
 			Bound:    false,
 		}
+		state.ImageEffectMapJSON = s.loadCompanionImageEffectMapJSON()
 		profileRoleID := strings.TrimSpace(roleID)
 		if profileRoleID != "" {
 			state.CurrentPageNumber = s.currentCompanionPage(r.Context(), profileRoleID)
@@ -241,10 +321,19 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 				state.ReplyDirectUserID = replyUserID
 				state.ReplyDirectUsername = replyUsername
 			}
-			if signalFrom, signalMessage, signalActive := s.hub.SignalStateForUsername(resolvedUsername); signalActive {
+			if signalFrom, signalMessage, signalScope, signalSourceType, signalSourceID, signalActive := s.companionIncomingSignal(resolvedUsername); signalActive {
+				s.setCompanionPendingIncomingCall(resolvedUsername, true)
+				s.setCompanionPendingIncomingCaller(resolvedUsername, signalFrom)
+				s.setCompanionPendingIncomingCallScope(resolvedUsername, signalScope)
+				s.setCompanionPendingIncomingCallSource(resolvedUsername, signalSourceType, signalSourceID)
 				state.SignalActive = true
 				state.SignalFrom = signalFrom
 				state.SignalMessage = signalMessage
+			} else if s.hasCompanionPendingIncomingCall(resolvedUsername) {
+				state.SignalActive = true
+				if caller, ok := s.companionPendingIncomingCaller(resolvedUsername); ok {
+					state.SignalFrom = caller
+				}
 			}
 		}
 		writeJSON(WSOutbound{
@@ -259,6 +348,8 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 
 	done := make(chan struct{})
 	defer close(done)
+	blinkTicker := time.NewTicker(companionIncomingCallBlinkInterval)
+	defer blinkTicker.Stop()
 	go func() {
 		for {
 			select {
@@ -284,6 +375,29 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				writeState()
+				resolvedRoleID := strings.TrimSpace(roleID)
+				if resolvedRoleID != "" {
+					s.emitCompanionCurrentPageImages(r.Context(), resolvedRoleID, resolveUsername())
+				}
+			case <-blinkTicker.C:
+				resolvedRoleID := strings.TrimSpace(roleID)
+				if resolvedRoleID == "" {
+					continue
+				}
+				resolvedUsername := strings.TrimSpace(resolveUsername())
+				if resolvedUsername == "" {
+					continue
+				}
+				if signalFrom, _, signalScope, signalSourceType, signalSourceID, signalActive := s.companionIncomingSignal(resolvedUsername); signalActive {
+					s.setCompanionPendingIncomingCall(resolvedUsername, true)
+					s.setCompanionPendingIncomingCaller(resolvedUsername, signalFrom)
+					s.setCompanionPendingIncomingCallScope(resolvedUsername, signalScope)
+					s.setCompanionPendingIncomingCallSource(resolvedUsername, signalSourceType, signalSourceID)
+				}
+				if !s.hasCompanionPendingIncomingCall(resolvedUsername) {
+					continue
+				}
+				s.emitCompanionCurrentPageImages(r.Context(), resolvedRoleID, resolvedUsername)
 			}
 		}
 	}()
@@ -870,6 +984,177 @@ func (s *Server) publishCompanionPresenceUpdate(ctx context.Context, roleID stri
 	s.publishCompanionState(roleID)
 }
 
+func (s *Server) setCompanionPendingIncomingCall(username string, pending bool) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return
+	}
+	s.companionMu.Lock()
+	if s.companionPendingCallByUser == nil {
+		s.companionPendingCallByUser = make(map[string]bool)
+	}
+	if pending {
+		s.companionPendingCallByUser[username] = true
+	} else {
+		delete(s.companionPendingCallByUser, username)
+		delete(s.companionPendingCallerByUser, username)
+		delete(s.companionPendingCallScopeByUser, username)
+		delete(s.companionPendingCallSourceByUser, username)
+	}
+	s.companionMu.Unlock()
+}
+
+func (s *Server) setCompanionPendingIncomingCallScope(username, scope string) {
+	username = strings.TrimSpace(username)
+	scope = strings.TrimSpace(scope)
+	if username == "" || scope == "" {
+		return
+	}
+	s.companionMu.Lock()
+	if s.companionPendingCallScopeByUser == nil {
+		s.companionPendingCallScopeByUser = make(map[string]string)
+	}
+	s.companionPendingCallScopeByUser[username] = scope
+	s.companionMu.Unlock()
+}
+
+func (s *Server) companionPendingIncomingCallScope(username string) string {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return ""
+	}
+	s.companionMu.RLock()
+	scope := s.companionPendingCallScopeByUser[username]
+	s.companionMu.RUnlock()
+	return strings.TrimSpace(scope)
+}
+
+func (s *Server) setCompanionPendingIncomingCallSource(username, sourceType, sourceID string) {
+	username = strings.TrimSpace(username)
+	sourceType = strings.TrimSpace(sourceType)
+	sourceID = strings.TrimSpace(sourceID)
+	if username == "" || sourceType == "" || sourceID == "" {
+		return
+	}
+	s.companionMu.Lock()
+	if s.companionPendingCallSourceByUser == nil {
+		s.companionPendingCallSourceByUser = make(map[string]string)
+	}
+	s.companionPendingCallSourceByUser[username] = sourceType + "|" + sourceID
+	s.companionMu.Unlock()
+}
+
+func (s *Server) companionPendingIncomingCallSource(username string) (string, string, bool) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return "", "", false
+	}
+	s.companionMu.RLock()
+	value := s.companionPendingCallSourceByUser[username]
+	s.companionMu.RUnlock()
+	parts := strings.SplitN(strings.TrimSpace(value), "|", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", "", false
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), true
+}
+
+func (s *Server) setCompanionPendingIncomingCaller(username, caller string) {
+	username = strings.TrimSpace(username)
+	caller = strings.TrimSpace(caller)
+	if username == "" || caller == "" {
+		return
+	}
+	s.companionMu.Lock()
+	if s.companionPendingCallerByUser == nil {
+		s.companionPendingCallerByUser = make(map[string]string)
+	}
+	s.companionPendingCallerByUser[username] = caller
+	s.companionMu.Unlock()
+}
+
+func companionSignalFingerprint(signalFrom, signalMessage, signalScope, sourceType, sourceID string) string {
+	return strings.TrimSpace(signalFrom) + "|" + strings.TrimSpace(signalMessage) + "|" + strings.TrimSpace(signalScope) + "|" + strings.TrimSpace(sourceType) + "|" + strings.TrimSpace(sourceID)
+}
+
+func (s *Server) clearCompanionIncomingSignalAck(username string) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return
+	}
+	s.companionMu.Lock()
+	if s.companionAckedSignalByUser != nil {
+		delete(s.companionAckedSignalByUser, username)
+	}
+	s.companionMu.Unlock()
+}
+
+func (s *Server) companionIncomingSignal(username string) (string, string, string, string, string, bool) {
+	username = strings.TrimSpace(username)
+	if username == "" || s.hub == nil {
+		return "", "", "", "", "", false
+	}
+	signalFrom, signalMessage, signalScope, signalSourceType, signalSourceID, signalActive := s.hub.SignalStateWithMetadataForUsername(username)
+	if !signalActive {
+		s.clearCompanionIncomingSignalAck(username)
+		return "", "", "", "", "", false
+	}
+	fingerprint := companionSignalFingerprint(signalFrom, signalMessage, signalScope, signalSourceType, signalSourceID)
+	s.companionMu.RLock()
+	ackedFingerprint := ""
+	if s.companionAckedSignalByUser != nil {
+		ackedFingerprint = s.companionAckedSignalByUser[username]
+	}
+	s.companionMu.RUnlock()
+	if ackedFingerprint != "" && ackedFingerprint == fingerprint {
+		return "", "", "", "", "", false
+	}
+	return signalFrom, signalMessage, signalScope, signalSourceType, signalSourceID, true
+}
+
+func (s *Server) acknowledgeCompanionIncomingCall(username string) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return
+	}
+	if signalFrom, signalMessage, signalScope, signalSourceType, signalSourceID, signalActive := s.companionIncomingSignal(username); signalActive {
+		fingerprint := companionSignalFingerprint(signalFrom, signalMessage, signalScope, signalSourceType, signalSourceID)
+		s.companionMu.Lock()
+		if s.companionAckedSignalByUser == nil {
+			s.companionAckedSignalByUser = make(map[string]string)
+		}
+		s.companionAckedSignalByUser[username] = fingerprint
+		s.companionMu.Unlock()
+	}
+	s.setCompanionPendingIncomingCall(username, false)
+}
+
+func (s *Server) companionPendingIncomingCaller(username string) (string, bool) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return "", false
+	}
+	s.companionMu.RLock()
+	caller, ok := s.companionPendingCallerByUser[username]
+	s.companionMu.RUnlock()
+	caller = strings.TrimSpace(caller)
+	if !ok || caller == "" {
+		return "", false
+	}
+	return caller, true
+}
+
+func (s *Server) hasCompanionPendingIncomingCall(username string) bool {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return false
+	}
+	s.companionMu.RLock()
+	pending := s.companionPendingCallByUser[username]
+	s.companionMu.RUnlock()
+	return pending
+}
+
 func (s *Server) rememberCompanionHeldTarget(key, targetID string) {
 	if key == "" || targetID == "" {
 		return
@@ -903,6 +1188,33 @@ func (s *Server) companionHeldTarget(key string) (string, bool) {
 	return targetID, true
 }
 
+func companionIncomingSourceMatchesButton(action *StreamDeckButtonAction, sourceType, sourceID string) bool {
+	if action == nil {
+		return false
+	}
+	sourceType = strings.TrimSpace(sourceType)
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceType == "" || sourceID == "" {
+		return false
+	}
+	switch sourceType {
+	case "role":
+		return action.Type == StreamDeckActionTypeDirectRole && strings.TrimSpace(action.RoleID) == sourceID
+	case "room":
+		if strings.TrimSpace(action.RoomID) != sourceID {
+			return false
+		}
+		switch action.Type {
+		case StreamDeckActionTypePTTRoom, StreamDeckActionTypeSelectTalkRoom, StreamDeckActionTypeSelectListen, StreamDeckActionTypeListenRoom, StreamDeckActionTypeCallRoom:
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
+	}
+}
+
 func (s *Server) selectListenCompanionHoldDelay() time.Duration {
 	if s.companionSelectListenHoldDelay > 0 {
 		return s.companionSelectListenHoldDelay
@@ -917,6 +1229,8 @@ func (s *Server) companionButtonSnapshotState(ctx context.Context, roleID string
 	}
 	if button.Action.Type == StreamDeckActionTypeReplyToCaller {
 		state.Label, state.Subtitle = s.resolveReplyToCallerLabels(button, username)
+	} else if button.Action.Type == StreamDeckActionTypeIncomingCall {
+		state.Label, state.Subtitle = s.resolveIncomingCallIndicatorLabels(button, username)
 	}
 
 	action := button.Action
@@ -966,6 +1280,74 @@ func (s *Server) companionButtonSnapshotState(ctx context.Context, roleID string
 		}
 	case StreamDeckActionTypeMuteToggle:
 		if strings.TrimSpace(presence.VoiceMode) == "always_on" {
+			state.State = "TALK"
+		}
+	}
+
+	if action.Type == StreamDeckActionTypeReplyToCaller {
+		hasPendingDirectCall := s.hasCompanionPendingIncomingCall(strings.TrimSpace(username)) && s.companionPendingIncomingCallScope(strings.TrimSpace(username)) == "direct"
+		if signalFrom, _, signalScope, signalSourceType, signalSourceID, signalActive := s.companionIncomingSignal(strings.TrimSpace(username)); signalActive {
+			s.setCompanionPendingIncomingCall(strings.TrimSpace(username), true)
+			s.setCompanionPendingIncomingCaller(strings.TrimSpace(username), signalFrom)
+			s.setCompanionPendingIncomingCallScope(strings.TrimSpace(username), signalScope)
+			s.setCompanionPendingIncomingCallSource(strings.TrimSpace(username), signalSourceType, signalSourceID)
+			hasPendingDirectCall = signalScope == "direct"
+		}
+		if hasPendingDirectCall {
+			state.EffectValue = companionIncomingCallEffectValue
+			if state.State != "TALK" {
+				blinkOn := (time.Now().UnixMilli()/companionIncomingCallBlinkInterval.Milliseconds())%2 == 0
+				if blinkOn {
+					state.State = "TALK"
+				} else {
+					state.State = "IDLE"
+				}
+			}
+		}
+	}
+
+	if action.Type == StreamDeckActionTypeIncomingCall {
+		hasPendingCall := s.hasCompanionPendingIncomingCall(strings.TrimSpace(username))
+		if signalFrom, _, signalScope, signalSourceType, signalSourceID, signalActive := s.companionIncomingSignal(strings.TrimSpace(username)); signalActive {
+			hasPendingCall = true
+			s.setCompanionPendingIncomingCall(strings.TrimSpace(username), true)
+			s.setCompanionPendingIncomingCaller(strings.TrimSpace(username), signalFrom)
+			s.setCompanionPendingIncomingCallScope(strings.TrimSpace(username), signalScope)
+			s.setCompanionPendingIncomingCallSource(strings.TrimSpace(username), signalSourceType, signalSourceID)
+			state.Subtitle = strings.TrimSpace(signalFrom)
+		}
+		if strings.TrimSpace(state.Subtitle) == "" {
+			if caller, ok := s.companionPendingIncomingCaller(strings.TrimSpace(username)); ok {
+				state.Subtitle = caller
+			}
+		}
+		if hasPendingCall {
+			state.EffectValue = companionIncomingCallEffectValue
+			blinkOn := (time.Now().UnixMilli()/companionIncomingCallBlinkInterval.Milliseconds())%2 == 0
+			if blinkOn {
+				state.State = "TALK"
+			} else {
+				state.State = "IDLE"
+			}
+		}
+	}
+
+	hasPendingSourceCall := s.hasCompanionPendingIncomingCall(strings.TrimSpace(username))
+	pendingSourceType, pendingSourceID, hasPendingSource := s.companionPendingIncomingCallSource(strings.TrimSpace(username))
+	if signalFrom, _, signalScope, signalSourceType, signalSourceID, signalActive := s.companionIncomingSignal(strings.TrimSpace(username)); signalActive {
+		s.setCompanionPendingIncomingCall(strings.TrimSpace(username), true)
+		s.setCompanionPendingIncomingCaller(strings.TrimSpace(username), signalFrom)
+		s.setCompanionPendingIncomingCallScope(strings.TrimSpace(username), signalScope)
+		s.setCompanionPendingIncomingCallSource(strings.TrimSpace(username), signalSourceType, signalSourceID)
+		hasPendingSourceCall = true
+		pendingSourceType = signalSourceType
+		pendingSourceID = signalSourceID
+		hasPendingSource = signalSourceType != "" && signalSourceID != ""
+	}
+	if hasPendingSourceCall && hasPendingSource && companionIncomingSourceMatchesButton(action, pendingSourceType, pendingSourceID) {
+		state.EffectValue = companionIncomingCallEffectValue
+		blinkOn := (time.Now().UnixMilli()/companionIncomingCallBlinkInterval.Milliseconds())%2 == 0
+		if blinkOn {
 			state.State = "TALK"
 		}
 	}
@@ -1021,6 +1403,22 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 	phase := strings.TrimSpace(command.State)
 	if phase == "" {
 		phase = "down"
+	}
+	if phase == "down" && button.Action != nil && s.hasCompanionPendingIncomingCall(strings.TrimSpace(username)) {
+		sourceType, sourceID, hasSource := s.companionPendingIncomingCallSource(strings.TrimSpace(username))
+		if !hasSource {
+			if _, _, _, signalSourceType, signalSourceID, signalActive := s.companionIncomingSignal(strings.TrimSpace(username)); signalActive {
+				if strings.TrimSpace(signalSourceType) != "" && strings.TrimSpace(signalSourceID) != "" {
+					sourceType = signalSourceType
+					sourceID = signalSourceID
+					hasSource = true
+					s.setCompanionPendingIncomingCallSource(strings.TrimSpace(username), signalSourceType, signalSourceID)
+				}
+			}
+		}
+		if hasSource && companionIncomingSourceMatchesButton(button.Action, sourceType, sourceID) {
+			s.acknowledgeCompanionIncomingCall(username)
+		}
 	}
 	holdKey := fmt.Sprintf("%s:%d:%d", roleID, currentPage, command.ButtonIndex)
 	emitCompanionCurrentPageImages := func() {
@@ -1152,7 +1550,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			s.setCompanionCurrentPage(roleID, pageOrder[nextIndex])
 			emitCompanionCurrentPageImages()
 		}
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: "IDLE"})
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE"})
 		result.OK = true
 		result.Status = "executed"
 		return result
@@ -1166,7 +1564,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			state = "TALK"
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "set_voice_mode", Mode: mode})
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: state})
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: state})
 		return res
 	case StreamDeckActionTypePTTRoom:
 		roomID := strings.TrimSpace(button.Action.RoomID)
@@ -1197,14 +1595,14 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 					State:    "ptt_start",
 				},
 			)
-			emitCompanionButtonImage( page.Page, button, ButtonState{State: "TALK", Channel: strings.TrimSpace(button.Action.RoomID)})
+			emitCompanionButtonImage(page.Page, button, ButtonState{State: "TALK", Channel: strings.TrimSpace(button.Action.RoomID)})
 			return res
 		} else if heldTargetID, ok := s.companionHeldTarget(holdKey); ok {
 			targetID = heldTargetID
 			_ = s.consumeCompanionHeldTarget(holdKey)
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "room", TargetID: targetID, State: map[bool]string{true: "ptt_start", false: "ptt_stop"}[phase == "down"]})
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: map[bool]string{true: "TALK", false: "IDLE"}[phase == "down"], Channel: strings.TrimSpace(button.Action.RoomID)})
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "TALK", false: "IDLE"}[phase == "down"], Channel: strings.TrimSpace(button.Action.RoomID)})
 		return res
 	case StreamDeckActionTypeSelectTalkRoom:
 		roomID := strings.TrimSpace(button.Action.RoomID)
@@ -1241,13 +1639,13 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 					break
 				}
 			}
-			emitCompanionButtonImage( page.Page, button, ButtonState{State: state, Channel: roomID, IsListening: isListening, IsPTTSelected: isPTTSelected})
+			emitCompanionButtonImage(page.Page, button, ButtonState{State: state, Channel: roomID, IsListening: isListening, IsPTTSelected: isPTTSelected})
 			result.OK = true
 			result.Status = "executed"
 			return result
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: append([]string(nil), presence.ListenRooms...), TalkRoomIDs: []string{roomID}})
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: "LISTEN", Channel: roomID, IsListening: isListening, IsPTTSelected: true})
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: "LISTEN", Channel: roomID, IsListening: isListening, IsPTTSelected: true})
 		return res
 	case StreamDeckActionTypeSelectListen:
 		roomID := strings.TrimSpace(button.Action.RoomID)
@@ -1304,7 +1702,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 						break
 					}
 				}
-				emitCompanionButtonImage( page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: state}[stillListening], Channel: roomID, IsListening: stillListening, IsPTTSelected: isPTTSelected})
+				emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: state}[stillListening], Channel: roomID, IsListening: stillListening, IsPTTSelected: isPTTSelected})
 				result.OK = true
 				result.Status = "executed"
 				return result
@@ -1312,7 +1710,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			if !canTalk {
 				return rejectUnauthorized("not allowed to talk to room")
 			}
-			emitCompanionButtonImage( page.Page, button, ButtonState{State: state, Channel: roomID, IsListening: isListening, IsPTTSelected: true})
+			emitCompanionButtonImage(page.Page, button, ButtonState{State: state, Channel: roomID, IsListening: isListening, IsPTTSelected: true})
 			res := queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: append([]string(nil), presence.ListenRooms...), TalkRoomIDs: []string{roomID}})
 			return res
 		}
@@ -1358,7 +1756,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		}(roleID, username, roomID, holdKey, triggerKey)
 		result.OK = true
 		result.Status = "executed"
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[isListening], Channel: roomID, IsListening: isListening, IsPTTSelected: isPTTSelected})
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[isListening], Channel: roomID, IsListening: isListening, IsPTTSelected: isPTTSelected})
 		return result
 	case StreamDeckActionTypePTTSelected:
 		targetID := ""
@@ -1386,13 +1784,13 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			}
 		}
 		if targetID == "" {
-			emitCompanionButtonImage( page.Page, button, ButtonState{State: "IDLE"})
+			emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE"})
 			result.OK = true
 			result.Status = "executed"
 			return result
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "room", TargetID: targetID, State: map[bool]string{true: "ptt_start", false: "ptt_stop"}[phase == "down"]})
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: map[bool]string{true: "TALK", false: "IDLE"}[phase == "down"], Channel: targetID})
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "TALK", false: "IDLE"}[phase == "down"], Channel: targetID})
 		return res
 	case StreamDeckActionTypeListenRoom:
 		roomID := strings.TrimSpace(button.Action.RoomID)
@@ -1416,7 +1814,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 					break
 				}
 			}
-			emitCompanionButtonImage( page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[stillListening], Channel: roomID})
+			emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[stillListening], Channel: roomID})
 			result.OK = true
 			result.Status = "executed"
 			return result
@@ -1442,7 +1840,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			filtered = append(filtered, roomID)
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: filtered, TalkRoomIDs: append([]string(nil), presence.TalkRooms...)})
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[currentListening], Channel: roomID, IsListening: currentListening})
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[currentListening], Channel: roomID, IsListening: currentListening})
 		return res
 	case StreamDeckActionTypeCallRoom:
 		roomID := strings.TrimSpace(button.Action.RoomID)
@@ -1463,7 +1861,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			return result
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "signal", Scope: "room", TargetID: roomID, Signal: "call"})
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: "TALK", Channel: roomID})
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: "TALK", Channel: roomID})
 		return res
 	case StreamDeckActionTypeDirectUser:
 		targetUserID := strings.TrimSpace(button.Action.UserID)
@@ -1482,7 +1880,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			_ = s.consumeCompanionHeldTarget(holdKey)
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: targetUserID, State: map[bool]string{true: "ptt_start", false: "ptt_stop"}[phase == "down"]})
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: map[bool]string{true: "TALK", false: "IDLE"}[phase == "down"], Channel: strings.TrimSpace(button.Action.UserID)})
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "TALK", false: "IDLE"}[phase == "down"], Channel: strings.TrimSpace(button.Action.UserID)})
 		return res
 	case StreamDeckActionTypeDirectRole:
 		targetRoleID := strings.TrimSpace(button.Action.RoleID)
@@ -1502,22 +1900,23 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			}
 			s.rememberCompanionHeldTarget(holdKey, session.UserID)
 			res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: session.UserID, State: "ptt_start"})
-			emitCompanionButtonImage( page.Page, button, ButtonState{State: "TALK", Channel: strings.TrimSpace(button.Action.RoleID)})
+			emitCompanionButtonImage(page.Page, button, ButtonState{State: "TALK", Channel: strings.TrimSpace(button.Action.RoleID)})
 			return res
 		}
 		targetID := s.consumeCompanionHeldTarget(holdKey)
 		if targetID == "" {
-			emitCompanionButtonImage( page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoleID)})
+			emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoleID)})
 			result.OK = true
 			result.Status = "executed"
 			return result
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: targetID, State: "ptt_stop"})
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoleID)})
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE", Channel: strings.TrimSpace(button.Action.RoleID)})
 		return res
 	case StreamDeckActionTypeReplyToCaller:
 		replyLabel, replySubtitle := s.resolveReplyToCallerLabels(*button, username)
 		if phase == "down" {
+			s.acknowledgeCompanionIncomingCall(username)
 			replyUserID, _, ok := s.hub.ReplyTargetForUsername(username)
 			if !ok || strings.TrimSpace(replyUserID) == "" {
 				result.Error = "no reply target available"
@@ -1533,19 +1932,28 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			}
 			s.rememberCompanionHeldTarget(holdKey, replyUserID)
 			res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: replyUserID, State: "ptt_start"})
-			emitCompanionButtonImage( page.Page, button, ButtonState{State: "TALK", Channel: "reply", Label: replyLabel, Subtitle: replySubtitle})
+			emitCompanionButtonImage(page.Page, button, ButtonState{State: "TALK", Channel: "reply", Label: replyLabel, Subtitle: replySubtitle})
 			return res
 		}
 		targetID := s.consumeCompanionHeldTarget(holdKey)
 		if targetID == "" {
-			emitCompanionButtonImage( page.Page, button, ButtonState{State: "IDLE", Channel: "reply", Label: replyLabel, Subtitle: replySubtitle})
+			emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE", Channel: "reply", Label: replyLabel, Subtitle: replySubtitle})
 			result.OK = true
 			result.Status = "executed"
 			return result
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: targetID, State: "ptt_stop"})
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: "IDLE", Channel: "reply", Label: replyLabel, Subtitle: replySubtitle})
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE", Channel: "reply", Label: replyLabel, Subtitle: replySubtitle})
 		return res
+	case StreamDeckActionTypeIncomingCall:
+		if phase == "down" {
+			s.acknowledgeCompanionIncomingCall(username)
+		}
+		label, subtitle := s.resolveIncomingCallIndicatorLabels(*button, username)
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE", Channel: "incoming_call", Label: label, Subtitle: subtitle})
+		result.OK = true
+		result.Status = "executed"
+		return result
 	case StreamDeckActionTypeBroadcastPTT:
 		groupID := strings.TrimSpace(button.Action.BroadcastGroupID)
 		allowed, err := isBroadcastAllowed(groupID)
@@ -1563,17 +1971,17 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			_ = s.consumeCompanionHeldTarget(holdKey)
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "broadcast", TargetID: groupID, State: map[bool]string{true: "ptt_start", false: "ptt_stop"}[phase == "down"]})
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: map[bool]string{true: "BROADCAST", false: "IDLE"}[phase == "down"], Channel: strings.TrimSpace(button.Action.BroadcastGroupID)})
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "BROADCAST", false: "IDLE"}[phase == "down"], Channel: strings.TrimSpace(button.Action.BroadcastGroupID)})
 		return res
 	case StreamDeckActionTypeVolumeDelta:
 		if phase != "down" {
-			emitCompanionButtonImage( page.Page, button, ButtonState{State: "IDLE"})
+			emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE"})
 			result.OK = true
 			result.Status = "executed"
 			return result
 		}
 		res := queueBrowserCommand(CompanionCommand{Command: "input_gain_delta", VolumeDelta: button.Action.VolumeDelta})
-		emitCompanionButtonImage( page.Page, button, ButtonState{State: "LISTEN"})
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: "LISTEN"})
 		return res
 	default:
 		result.Error = "unsupported button action"
@@ -1663,6 +2071,29 @@ func (s *Server) resolveReplyToCallerLabels(button StreamDeckButtonConfig, usern
 	return strings.TrimSpace(replyUsername), primary
 }
 
+func (s *Server) resolveIncomingCallIndicatorLabels(button StreamDeckButtonConfig, username string) (primary, subtitle string) {
+	primary = "Incoming"
+	if raw := strings.TrimSpace(button.Label); raw != "" {
+		parts := strings.SplitN(raw, "\n", 2)
+		if line := strings.TrimSpace(parts[0]); line != "" {
+			primary = line
+		}
+	}
+	if strings.TrimSpace(username) == "" {
+		return primary, ""
+	}
+	if signalFrom, _, _, _, _, signalActive := s.companionIncomingSignal(strings.TrimSpace(username)); signalActive {
+		s.setCompanionPendingIncomingCaller(strings.TrimSpace(username), signalFrom)
+		if strings.TrimSpace(signalFrom) != "" {
+			return primary, strings.TrimSpace(signalFrom)
+		}
+	}
+	if caller, ok := s.companionPendingIncomingCaller(strings.TrimSpace(username)); ok {
+		return primary, caller
+	}
+	return primary, ""
+}
+
 // resolveButtonLabel resolves the display label and optional subtitle for a button,
 // mirroring the logic in web/src/lib/streamDeckLabels.ts.
 func (s *Server) resolveButtonLabel(ctx context.Context, button StreamDeckButtonConfig) (primary, subtitle string) {
@@ -1749,6 +2180,9 @@ func (s *Server) resolveButtonLabel(ctx context.Context, button StreamDeckButton
 	case StreamDeckActionTypeReplyToCaller:
 		return s.resolveReplyToCallerLabels(button, "")
 
+	case StreamDeckActionTypeIncomingCall:
+		return "Incoming", ""
+
 	case StreamDeckActionTypePTTSelected:
 		return "PTT", ""
 	case StreamDeckActionTypeMuteToggle:
@@ -1783,6 +2217,9 @@ func companionButtonChannel(button StreamDeckButtonConfig) string {
 	}
 	if strings.TrimSpace(action.RoleID) != "" {
 		return strings.TrimSpace(action.RoleID)
+	}
+	if action.Type == StreamDeckActionTypeIncomingCall {
+		return "incoming_call"
 	}
 	return string(action.Type)
 }
@@ -1942,18 +2379,23 @@ func NewServer(cfg Config) (*Server, error) {
 		}
 	}
 	s := &Server{
-		cfg:                  cfg,
-		logger:               logger,
-		adminLogs:            adminLogs,
-		store:                store,
-		sessions:             NewSessionManager(cfg.SessionTTL),
-		hub:                  NewHub(store, logger),
-		companionWS:          make(map[string]map[chan CompanionCommandResult]struct{}),
-		companionState:       make(map[string]map[chan struct{}]struct{}),
-		companionPageByRole:  make(map[string]int),
-		companionHeldTargets: make(map[string]string),
-		ackEnabled:           true,
-		ackSet:               true,
+		cfg:                              cfg,
+		logger:                           logger,
+		adminLogs:                        adminLogs,
+		store:                            store,
+		sessions:                         NewSessionManager(cfg.SessionTTL),
+		hub:                              NewHub(store, logger),
+		companionWS:                      make(map[string]map[chan CompanionCommandResult]struct{}),
+		companionState:                   make(map[string]map[chan struct{}]struct{}),
+		companionPageByRole:              make(map[string]int),
+		companionHeldTargets:             make(map[string]string),
+		companionPendingCallByUser:       make(map[string]bool),
+		companionPendingCallerByUser:     make(map[string]string),
+		companionPendingCallScopeByUser:  make(map[string]string),
+		companionPendingCallSourceByUser: make(map[string]string),
+		companionAckedSignalByUser:       make(map[string]string),
+		ackEnabled:                       true,
+		ackSet:                           true,
 		upgrader: websocket.Upgrader{
 			CheckOrigin:      func(r *http.Request) bool { return true },
 			HandshakeTimeout: 10 * time.Second,
