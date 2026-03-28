@@ -97,6 +97,8 @@ function normalizeImportedStreamDeckSettings(input: unknown): StreamDeckSettings
     "volume_delta",
     "page_up",
     "page_down",
+    "page_jump",
+    "page_home",
   ]);
 
   const normalizedPages = pagesRaw.map((pageEntry) => {
@@ -145,6 +147,10 @@ function normalizeImportedStreamDeckSettings(input: unknown): StreamDeckSettings
           volumeDelta:
             typeof actionRaw.volumeDelta === "number" && Number.isFinite(actionRaw.volumeDelta)
               ? actionRaw.volumeDelta
+              : undefined,
+          targetPage:
+            typeof actionRaw.targetPage === "number" && Number.isFinite(actionRaw.targetPage)
+              ? actionRaw.targetPage
               : undefined,
         },
       };
@@ -952,6 +958,7 @@ export function StationIntercomView({
         roleId?: string;
         broadcastGroupId?: string;
         volumeDelta?: number;
+        targetPage?: number;
       };
     },
   ) => {
@@ -1085,6 +1092,23 @@ export function StationIntercomView({
       if (type === "none") {
         return { ...button, action: undefined };
       }
+        if (type === "page_home" || type === "page_jump") {
+          const pageOrder = (streamDeckSettings?.pages ?? [])
+            .map((page) => page.page)
+            .sort((a, b) => a - b);
+          const homePage = pageOrder[0] ?? 0;
+          const defaultTargetPage =
+            button.action?.type === "page_jump" && button.action.targetPage !== undefined
+              ? button.action.targetPage
+              : homePage;
+          return {
+            ...button,
+            action: {
+              type,
+              targetPage: type === "page_home" ? homePage : defaultTargetPage,
+            },
+          };
+        }
       if (
         type === "ptt_room" ||
         type === "select_talk_room" ||
@@ -2439,6 +2463,8 @@ export function StationIntercomView({
                             <optgroup label="Stream Deck navigation">
                               <option value="page_up">Page up</option>
                               <option value="page_down">Page down</option>
+                              <option value="page_home">Home (page 1)</option>
+                              <option value="page_jump">Jump to page</option>
                             </optgroup>
                           </select>
                         </label>
@@ -2578,6 +2604,36 @@ export function StationIntercomView({
                               <option value="-1">-1</option>
                               <option value="1">+1</option>
                               <option value="2">+2</option>
+                            </select>
+                          </label>
+                        ) : null}
+
+                        {streamDeckSelectedButton?.action?.type === "page_jump" ? (
+                          <label className="streamdeck-control">
+                            <span>Target page</span>
+                            <select
+                              aria-label="Stream Deck jump target page"
+                              value={String(
+                                streamDeckSelectedButton.action.targetPage ?? 0,
+                              )}
+                              onChange={(event) =>
+                                updateStreamDeckSelectedButton((button) => ({
+                                  ...button,
+                                  action: {
+                                    type: "page_jump",
+                                    targetPage: Number(event.target.value),
+                                  },
+                                }))
+                              }
+                            >
+                              {(streamDeckSettings?.pages ?? [])
+                                .map((p) => p.page)
+                                .sort((a, b) => a - b)
+                                .map((pageNo, idx) => (
+                                  <option key={`sd-jump-page-${pageNo}`} value={String(pageNo)}>
+                                    Page {idx + 1}
+                                  </option>
+                                ))}
                             </select>
                           </label>
                         ) : null}

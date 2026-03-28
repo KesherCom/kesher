@@ -129,6 +129,8 @@ const (
 	StreamDeckActionTypeVolumeDelta    StreamDeckActionType = "volume_delta"
 	StreamDeckActionTypePageUp         StreamDeckActionType = "page_up"
 	StreamDeckActionTypePageDown       StreamDeckActionType = "page_down"
+	StreamDeckActionTypePageJump       StreamDeckActionType = "page_jump"
+	StreamDeckActionTypePageHome       StreamDeckActionType = "page_home"
 )
 
 const (
@@ -144,6 +146,7 @@ type StreamDeckButtonAction struct {
 	RoleID           string               `json:"roleId,omitempty"`
 	BroadcastGroupID string               `json:"broadcastGroupId,omitempty"`
 	VolumeDelta      int                  `json:"volumeDelta,omitempty"`
+	TargetPage       int                  `json:"targetPage,omitempty"`
 }
 
 type StreamDeckButtonConfig struct {

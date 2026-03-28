@@ -811,7 +811,7 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 				action.RoleID = strings.TrimSpace(action.RoleID)
 				action.BroadcastGroupID = strings.TrimSpace(action.BroadcastGroupID)
 				switch action.Type {
-				case StreamDeckActionTypeNone, StreamDeckActionTypeMuteToggle, StreamDeckActionTypeReplyToCaller, StreamDeckActionTypeIncomingCall, StreamDeckActionTypePageUp, StreamDeckActionTypePageDown, StreamDeckActionTypePTTSelected:
+				case StreamDeckActionTypeNone, StreamDeckActionTypeMuteToggle, StreamDeckActionTypeReplyToCaller, StreamDeckActionTypeIncomingCall, StreamDeckActionTypePageUp, StreamDeckActionTypePageDown, StreamDeckActionTypePTTSelected, StreamDeckActionTypePageHome:
 				case StreamDeckActionTypePTTRoom:
 					if action.RoomID == "" {
 						return StreamDeckSettings{}, ErrInvalidInput
@@ -846,6 +846,10 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 					}
 				case StreamDeckActionTypeVolumeDelta:
 					if action.VolumeDelta == 0 {
+						return StreamDeckSettings{}, ErrInvalidInput
+					}
+				case StreamDeckActionTypePageJump:
+					if action.TargetPage < 0 {
 						return StreamDeckSettings{}, ErrInvalidInput
 					}
 				default:

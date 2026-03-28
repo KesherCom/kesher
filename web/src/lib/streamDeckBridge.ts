@@ -36,6 +36,8 @@ const streamDeckActionTypes: StreamDeckActionType[] = [
   "volume_delta",
   "page_up",
   "page_down",
+  "page_jump",
+  "page_home",
 ];
 
 export function parseStreamDeckBridgeEvent(
@@ -97,6 +99,7 @@ export function resolveStreamDeckButtonAction(
   roleId?: string;
   broadcastGroupId?: string;
   volumeDelta?: number;
+  targetPage?: number;
 } | null {
   const selectedPage = settings.pages.find((entry) => entry.page === page);
   if (!selectedPage) return null;

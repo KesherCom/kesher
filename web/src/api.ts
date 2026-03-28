@@ -210,6 +210,8 @@ export function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
     "volume_delta",
     "page_up",
     "page_down",
+    "page_jump",
+    "page_home",
   ];
   const raw = (data ?? {}) as Record<string, unknown>;
   const version =
@@ -273,6 +275,10 @@ export function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
                 volumeDelta:
                   typeof actionRaw.volumeDelta === "number"
                     ? actionRaw.volumeDelta
+                    : undefined,
+                targetPage:
+                  typeof actionRaw.targetPage === "number"
+                    ? actionRaw.targetPage
                     : undefined,
               }
             : undefined;

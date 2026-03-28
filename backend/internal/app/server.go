@@ -615,6 +615,17 @@ func companionPageOrder(settings StreamDeckSettings) []int {
 	return ordered
 }
 
+func companionHomePage(settings StreamDeckSettings, dynamic bool) int {
+	if dynamic {
+		return 0
+	}
+	order := companionPageOrder(settings)
+	if len(order) > 0 {
+		return order[0]
+	}
+	return 0
+}
+
 type companionRuntimePage struct {
 	Page       StreamDeckPageConfig
 	Dynamic    bool
@@ -628,7 +639,8 @@ func companionSettingsHasExplicitDataActions(settings StreamDeckSettings) bool {
 				continue
 			}
 			switch button.Action.Type {
-			case StreamDeckActionTypeNone, StreamDeckActionTypePageUp, StreamDeckActionTypePageDown:
+			case StreamDeckActionTypeNone, StreamDeckActionTypePageUp, StreamDeckActionTypePageDown,
+				StreamDeckActionTypePageJump, StreamDeckActionTypePageHome:
 				continue
 			default:
 				return true
@@ -802,7 +814,8 @@ func companionCollectSlidingDataButtons(settings StreamDeckSettings) []StreamDec
 				continue
 			}
 			switch button.Action.Type {
-			case StreamDeckActionTypeNone, StreamDeckActionTypePageUp, StreamDeckActionTypePageDown:
+			case StreamDeckActionTypeNone, StreamDeckActionTypePageUp, StreamDeckActionTypePageDown,
+				StreamDeckActionTypePageJump, StreamDeckActionTypePageHome:
 				continue
 			default:
 				data = append(data, button)
@@ -914,7 +927,7 @@ func companionResolvePageConfig(settings StreamDeckSettings, currentPage int) St
 
 func (s *Server) executeCompanionPageCommand(ctx context.Context, roleID, username string, command CompanionCommand) (CompanionCommandResult, bool) {
 	cmd := strings.TrimSpace(command.Command)
-	if cmd != "navigate_to_page" && cmd != "page_up" && cmd != "page_down" {
+	if cmd != "navigate_to_page" && cmd != "page_up" && cmd != "page_down" && cmd != "page_jump" && cmd != "page_home" {
 		return CompanionCommandResult{}, false
 	}
 	result := CompanionCommandResult{
@@ -941,11 +954,14 @@ func (s *Server) executeCompanionPageCommand(ctx context.Context, roleID, userna
 		if maxPage < 0 {
 			maxPage = 0
 		}
-		if cmd == "navigate_to_page" {
+		switch cmd {
+		case "navigate_to_page", "page_jump":
 			targetPage = command.PageNumber
-		} else if cmd == "page_up" {
+		case "page_home":
+			targetPage = companionHomePage(settings, true)
+		case "page_up":
 			targetPage = targetPage + 1
-		} else {
+		default:
 			targetPage = targetPage - 1
 		}
 		if targetPage < 0 {
@@ -956,7 +972,8 @@ func (s *Server) executeCompanionPageCommand(ctx context.Context, roleID, userna
 		}
 	} else {
 		pageOrder := companionPageOrder(settings)
-		if cmd == "navigate_to_page" {
+		switch cmd {
+		case "navigate_to_page", "page_jump":
 			targetPage = command.PageNumber
 			found := false
 			for _, pageNo := range pageOrder {
@@ -968,7 +985,9 @@ func (s *Server) executeCompanionPageCommand(ctx context.Context, roleID, userna
 			if !found && len(pageOrder) > 0 {
 				targetPage = pageOrder[0]
 			}
-		} else {
+		case "page_home":
+			targetPage = companionHomePage(settings, false)
+		default:
 			currentIndex := 0
 			for i, pageNo := range pageOrder {
 				if pageNo == targetPage {
@@ -1402,7 +1421,8 @@ func companionResolveUniqueNavigationAction(buttons []StreamDeckButtonConfig) *S
 		if candidate.Action == nil {
 			continue
 		}
-		if candidate.Action.Type != StreamDeckActionTypePageUp && candidate.Action.Type != StreamDeckActionTypePageDown {
+		if candidate.Action.Type != StreamDeckActionTypePageUp && candidate.Action.Type != StreamDeckActionTypePageDown &&
+			candidate.Action.Type != StreamDeckActionTypePageJump && candidate.Action.Type != StreamDeckActionTypePageHome {
 			continue
 		}
 		if resolved != nil {
@@ -2079,6 +2099,60 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		result.OK = true
 		result.Status = "executed"
 		return result
+	case StreamDeckActionTypePageJump, StreamDeckActionTypePageHome:
+		if phase != "down" {
+			result.OK = true
+			result.Status = "executed"
+			return result
+		}
+		jumpTarget := button.Action.TargetPage
+		if button.Action.Type == StreamDeckActionTypePageHome {
+			jumpTarget = companionHomePage(settings, runtimePage.Dynamic)
+		}
+		if runtimePage.Dynamic {
+			maxPage := runtimePage.TotalPages - 1
+			if maxPage < 0 {
+				maxPage = 0
+			}
+			if jumpTarget < 0 {
+				jumpTarget = 0
+			}
+			if jumpTarget > maxPage {
+				jumpTarget = maxPage
+			}
+		} else {
+			pageOrder := companionPageOrder(settings)
+			found := false
+			for _, pageNo := range pageOrder {
+				if pageNo == jumpTarget {
+					found = true
+					break
+				}
+			}
+			if !found && len(pageOrder) > 0 {
+				jumpTarget = pageOrder[0]
+			}
+		}
+		if s.logger != nil {
+			s.logger.Info("companion page navigation",
+				"roleId", roleID,
+				"username", username,
+				"buttonIndex", command.ButtonIndex,
+				"phase", phase,
+				"actionType", button.Action.Type,
+				"fromPage", currentPage,
+				"toPage", jumpTarget,
+			)
+		}
+		s.setCompanionCurrentPage(roleID, jumpTarget)
+		if s.imageStreamCoord != nil {
+			s.imageStreamCoord.ResetTargetCache(roleID, username)
+		}
+		emitCompanionCurrentPageImages()
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE"})
+		result.OK = true
+		result.Status = "executed"
+		return result
 	case StreamDeckActionTypeMuteToggle:
 		mode := "always_on"
 		if strings.TrimSpace(presence.VoiceMode) == "always_on" {
@@ -2713,6 +2787,13 @@ func (s *Server) resolveButtonLabel(ctx context.Context, button StreamDeckButton
 		return "Page +", ""
 	case StreamDeckActionTypePageDown:
 		return "Page -", ""
+	case StreamDeckActionTypePageHome:
+		return "Home", ""
+	case StreamDeckActionTypePageJump:
+		if action.TargetPage >= 0 {
+			return fmt.Sprintf("Page %d", action.TargetPage+1), ""
+		}
+		return "Jump", ""
 	}
 	return fallbackButtonLabel(action.Type), ""
 }
