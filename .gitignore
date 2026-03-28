@@ -22,4 +22,4 @@ backend/internal/app/embedded_web/*
 certs/*
 backend/app
 backend/logs/
-.exe
+*.exe
