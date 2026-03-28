@@ -23,17 +23,18 @@ func newCompanionTestServer(t *testing.T) *Server {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	hub := NewHub(store, logger)
 	return &Server{
-		cfg:                             Config{},
-		store:                           store,
-		sessions:                        NewSessionManager(time.Minute),
-		hub:                             hub,
-		companionWS:                     make(map[string]map[chan CompanionCommandResult]struct{}),
-		companionState:                  make(map[string]map[chan struct{}]struct{}),
-		companionPageByRole:             make(map[string]int),
-		companionHeldTargets:            make(map[string]string),
-		companionPendingCallScopeByUser: make(map[string]string),
-		companionAckedSignalByUser:      make(map[string]string),
-		companionSelectListenHoldDelay:  10 * time.Millisecond,
+		cfg:                              Config{},
+		store:                            store,
+		sessions:                         NewSessionManager(time.Minute),
+		hub:                              hub,
+		companionWS:                      make(map[string]map[chan CompanionCommandResult]struct{}),
+		companionState:                   make(map[string]map[chan struct{}]struct{}),
+		companionPageByRole:              make(map[string]int),
+		companionHeldTargets:             make(map[string]string),
+		companionPendingCallScopeByUser:  make(map[string]string),
+		companionPendingCallSourceByUser: make(map[string]string),
+		companionAckedSignalByUser:       make(map[string]string),
+		companionSelectListenHoldDelay:   10 * time.Millisecond,
 	}
 }
 
@@ -228,6 +229,72 @@ func TestCompanionButtonSnapshotStateIncomingCallIndicatorShowsCallerAndBlink(t 
 	}
 }
 
+func TestCompanionButtonSnapshotStateDirectRoleButtonBlinksForDirectCallSource(t *testing.T) {
+	s := newCompanionTestServer(t)
+	now := time.Now()
+	s.hub.Add(&client{
+		session:          Session{Token: "token-1", UserID: "u1", Username: "operator", RoleID: "role_a", ExpiresAt: now.Add(time.Hour)},
+		user:             User{ID: "u1", Username: "operator", RoleID: "role_a"},
+		connectedAt:      now,
+		signalFrom:       "caller",
+		signalMessage:    "call",
+		signalScope:      "direct",
+		signalSourceType: "role",
+		signalSourceID:   "director",
+		signalUntil:      now.Add(time.Second),
+		send:             make(chan WSOutbound, 1),
+		sendPriority:     make(chan WSOutbound, 1),
+		listenRooms:      map[string]struct{}{},
+		talkRooms:        map[string]struct{}{},
+	})
+
+	button := StreamDeckButtonConfig{
+		Index: 2,
+		Action: &StreamDeckButtonAction{
+			Type:   StreamDeckActionTypeDirectRole,
+			RoleID: "director",
+		},
+	}
+
+	state := s.companionButtonSnapshotState(context.Background(), "role_a", 0, "operator", PresenceState{}, button)
+	if state.EffectValue != companionIncomingCallEffectValue {
+		t.Fatalf("expected matching direct-role button to blink, got effectValue=%d", state.EffectValue)
+	}
+}
+
+func TestCompanionButtonSnapshotStateRoomButtonBlinksForRoomCallSource(t *testing.T) {
+	s := newCompanionTestServer(t)
+	now := time.Now()
+	s.hub.Add(&client{
+		session:          Session{Token: "token-1", UserID: "u1", Username: "operator", RoleID: "role_a", ExpiresAt: now.Add(time.Hour)},
+		user:             User{ID: "u1", Username: "operator", RoleID: "role_a"},
+		connectedAt:      now,
+		signalFrom:       "alice (PL Main)",
+		signalMessage:    "call",
+		signalScope:      "room",
+		signalSourceType: "room",
+		signalSourceID:   "pl-main",
+		signalUntil:      now.Add(time.Second),
+		send:             make(chan WSOutbound, 1),
+		sendPriority:     make(chan WSOutbound, 1),
+		listenRooms:      map[string]struct{}{},
+		talkRooms:        map[string]struct{}{},
+	})
+
+	button := StreamDeckButtonConfig{
+		Index: 3,
+		Action: &StreamDeckButtonAction{
+			Type:   StreamDeckActionTypeListenRoom,
+			RoomID: "pl-main",
+		},
+	}
+
+	state := s.companionButtonSnapshotState(context.Background(), "role_a", 0, "operator", PresenceState{}, button)
+	if state.EffectValue != companionIncomingCallEffectValue {
+		t.Fatalf("expected matching room button to blink, got effectValue=%d", state.EffectValue)
+	}
+}
+
 func TestExecuteCompanionButtonPressReplyToCallerClearsPendingCall(t *testing.T) {
 	s := newCompanionTestServer(t)
 	ctx := context.Background()
@@ -307,6 +374,109 @@ func TestExecuteCompanionButtonPressIncomingCallIndicatorNoOp(t *testing.T) {
 	state := s.companionButtonSnapshotState(context.Background(), "source", 0, "operator", PresenceState{}, settings.Pages[0].Buttons[0])
 	if state.EffectValue != 0 {
 		t.Fatalf("expected blinking to stay suppressed after acknowledgement, got effectValue=%d", state.EffectValue)
+	}
+}
+
+func TestExecuteCompanionButtonPressMatchingDirectRoleAcknowledgesIncomingCall(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if _, err := s.store.UpsertUser(ctx, "operator", "source"); err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+
+	s.hub.Add(&client{
+		session:          Session{Token: "token-1", UserID: "u1", Username: "operator", RoleID: "source", ExpiresAt: now.Add(time.Hour)},
+		user:             User{ID: "u1", Username: "operator", RoleID: "source"},
+		connectedAt:      now,
+		signalFrom:       "caller",
+		signalMessage:    "call",
+		signalScope:      "direct",
+		signalSourceType: "role",
+		signalSourceID:   "director",
+		signalUntil:      now.Add(time.Second),
+		send:             make(chan WSOutbound, 1),
+		sendPriority:     make(chan WSOutbound, 1),
+		listenRooms:      map[string]struct{}{},
+		talkRooms:        map[string]struct{}{},
+	})
+	s.setCompanionPendingIncomingCall("operator", true)
+	s.setCompanionPendingIncomingCallScope("operator", "direct")
+	s.setCompanionPendingIncomingCallSource("operator", "role", "director")
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeDirectRole, RoleID: "director"}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	result := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{Command: "press_button", ButtonIndex: 0, State: "down"})
+	if result.OK {
+		t.Fatalf("expected direct role press without active user to not execute cleanly, got %+v", result)
+	}
+	if s.hasCompanionPendingIncomingCall("operator") {
+		t.Fatal("expected pending incoming call to be cleared after matching direct-role press")
+	}
+	state := s.companionButtonSnapshotState(context.Background(), "source", 0, "operator", PresenceState{}, settings.Pages[0].Buttons[0])
+	if state.EffectValue != 0 {
+		t.Fatalf("expected direct-role blink to stop after acknowledgement, got effectValue=%d", state.EffectValue)
+	}
+}
+
+func TestExecuteCompanionButtonPressMatchingRoomAcknowledgesIncomingCall(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if err := s.store.CreateRoom(ctx, "pl-main", "PL Main", []string{"source"}, []string{"source"}, nil); err != nil {
+		t.Fatalf("CreateRoom failed: %v", err)
+	}
+	if _, err := s.store.UpsertUser(ctx, "operator", "source"); err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+
+	s.hub.Add(&client{
+		session:          Session{Token: "token-1", UserID: "u1", Username: "operator", RoleID: "source", ExpiresAt: now.Add(time.Hour)},
+		user:             User{ID: "u1", Username: "operator", RoleID: "source"},
+		connectedAt:      now,
+		signalFrom:       "alice (PL Main)",
+		signalMessage:    "call",
+		signalScope:      "room",
+		signalSourceType: "room",
+		signalSourceID:   "pl-main",
+		signalUntil:      now.Add(time.Second),
+		send:             make(chan WSOutbound, 1),
+		sendPriority:     make(chan WSOutbound, 1),
+		listenRooms:      map[string]struct{}{},
+		talkRooms:        map[string]struct{}{},
+	})
+	s.setCompanionPendingIncomingCall("operator", true)
+	s.setCompanionPendingIncomingCallScope("operator", "room")
+	s.setCompanionPendingIncomingCallSource("operator", "room", "pl-main")
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeListenRoom, RoomID: "pl-main"}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	result := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{Command: "press_button", ButtonIndex: 0, State: "down"})
+	if !result.OK {
+		t.Fatalf("expected matching room press to execute, got %+v", result)
+	}
+	if s.hasCompanionPendingIncomingCall("operator") {
+		t.Fatal("expected pending incoming call to be cleared after matching room press")
+	}
+	state := s.companionButtonSnapshotState(context.Background(), "source", 0, "operator", PresenceState{}, settings.Pages[0].Buttons[0])
+	if state.EffectValue != 0 {
+		t.Fatalf("expected room blink to stop after acknowledgement, got effectValue=%d", state.EffectValue)
 	}
 }
 
