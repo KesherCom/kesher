@@ -31,6 +31,7 @@ func newCompanionTestServer(t *testing.T) *Server {
 		companionState:                 make(map[string]map[chan struct{}]struct{}),
 		companionPageByRole:            make(map[string]int),
 		companionHeldTargets:           make(map[string]string),
+		companionAckedSignalByUser:     make(map[string]string),
 		companionSelectListenHoldDelay: 10 * time.Millisecond,
 	}
 }
@@ -158,6 +159,41 @@ func TestCompanionButtonSnapshotStateReplyToCallerKeepsBlinkWhenCallPending(t *t
 	}
 }
 
+func TestCompanionButtonSnapshotStateIncomingCallIndicatorShowsCallerAndBlink(t *testing.T) {
+	s := newCompanionTestServer(t)
+	now := time.Now()
+	s.hub.Add(&client{
+		session:       Session{Token: "token-1", UserID: "u1", Username: "operator", RoleID: "role_a", ExpiresAt: now.Add(time.Hour)},
+		user:          User{ID: "u1", Username: "operator", RoleID: "role_a"},
+		connectedAt:   now,
+		signalFrom:    "alice (PL Main)",
+		signalMessage: "call",
+		signalUntil:   now.Add(time.Second),
+		send:          make(chan WSOutbound, 1),
+		sendPriority:  make(chan WSOutbound, 1),
+		listenRooms:   map[string]struct{}{},
+		talkRooms:     map[string]struct{}{},
+	})
+
+	button := StreamDeckButtonConfig{
+		Index: 7,
+		Action: &StreamDeckButtonAction{
+			Type: StreamDeckActionTypeIncomingCall,
+		},
+	}
+
+	state := s.companionButtonSnapshotState(context.Background(), "role_a", 0, "operator", PresenceState{}, button)
+	if state.EffectValue != companionIncomingCallEffectValue {
+		t.Fatalf("expected blink effect value %d while signal is active, got %d", companionIncomingCallEffectValue, state.EffectValue)
+	}
+	if state.Label != "Incoming" {
+		t.Fatalf("expected incoming indicator label, got %q", state.Label)
+	}
+	if state.Subtitle != "alice (PL Main)" {
+		t.Fatalf("expected caller subtitle, got %q", state.Subtitle)
+	}
+}
+
 func TestExecuteCompanionButtonPressReplyToCallerClearsPendingCall(t *testing.T) {
 	s := newCompanionTestServer(t)
 	ctx := context.Background()
@@ -184,6 +220,58 @@ func TestExecuteCompanionButtonPressReplyToCallerClearsPendingCall(t *testing.T)
 
 	if s.hasCompanionPendingIncomingCall("operator") {
 		t.Fatal("expected pending incoming call to be cleared after reply button press")
+	}
+}
+
+func TestExecuteCompanionButtonPressIncomingCallIndicatorNoOp(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if _, err := s.store.UpsertUser(ctx, "operator", "source"); err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+
+	s.hub.Add(&client{
+		session:       Session{Token: "token-1", UserID: "u1", Username: "operator", RoleID: "source", ExpiresAt: now.Add(time.Hour)},
+		user:          User{ID: "u1", Username: "operator", RoleID: "source"},
+		connectedAt:   now,
+		signalFrom:    "alice (PL Main)",
+		signalMessage: "call",
+		signalUntil:   now.Add(time.Second),
+		send:          make(chan WSOutbound, 1),
+		sendPriority:  make(chan WSOutbound, 1),
+		listenRooms:   map[string]struct{}{},
+		talkRooms:     map[string]struct{}{},
+	})
+	s.setCompanionPendingIncomingCall("operator", true)
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeIncomingCall}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	result := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{
+		Command:     "press_button",
+		ButtonIndex: 0,
+		State:       "down",
+	})
+	if !result.OK {
+		t.Fatalf("expected no-op indicator press to succeed, got %+v", result)
+	}
+	if result.Status != "executed" {
+		t.Fatalf("expected status executed, got %q", result.Status)
+	}
+	if s.hasCompanionPendingIncomingCall("operator") {
+		t.Fatal("expected pending incoming call to be cleared after incoming indicator press")
+	}
+	state := s.companionButtonSnapshotState(context.Background(), "source", 0, "operator", PresenceState{}, settings.Pages[0].Buttons[0])
+	if state.EffectValue != 0 {
+		t.Fatalf("expected blinking to stay suppressed after acknowledgement, got effectValue=%d", state.EffectValue)
 	}
 }
 

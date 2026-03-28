@@ -811,7 +811,7 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 				action.RoleID = strings.TrimSpace(action.RoleID)
 				action.BroadcastGroupID = strings.TrimSpace(action.BroadcastGroupID)
 				switch action.Type {
-				case StreamDeckActionTypeNone, StreamDeckActionTypeMuteToggle, StreamDeckActionTypeReplyToCaller, StreamDeckActionTypePageUp, StreamDeckActionTypePageDown, StreamDeckActionTypePTTSelected:
+				case StreamDeckActionTypeNone, StreamDeckActionTypeMuteToggle, StreamDeckActionTypeReplyToCaller, StreamDeckActionTypeIncomingCall, StreamDeckActionTypePageUp, StreamDeckActionTypePageDown, StreamDeckActionTypePTTSelected:
 				case StreamDeckActionTypePTTRoom:
 					if action.RoomID == "" {
 						return StreamDeckSettings{}, ErrInvalidInput

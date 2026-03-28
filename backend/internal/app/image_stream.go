@@ -132,8 +132,8 @@ func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, erro
 	h := float64(r.config.Height)
 	actionType := strings.TrimSpace(state.ActionType)
 	pressed := state.IsActive || state.State == "TALK" || state.State == "BROADCAST"
-	useCallPressedColor := pressed && actionType == string(StreamDeckActionTypeCallRoom)
-	useEmergencyPressedColor := pressed && actionType != string(StreamDeckActionTypeListenRoom) && actionType != string(StreamDeckActionTypeCallRoom)
+	useCallPressedColor := pressed && (actionType == string(StreamDeckActionTypeCallRoom) || actionType == string(StreamDeckActionTypeReplyToCaller) || actionType == string(StreamDeckActionTypeIncomingCall))
+	useEmergencyPressedColor := pressed && actionType != string(StreamDeckActionTypeListenRoom) && actionType != string(StreamDeckActionTypeCallRoom) && actionType != string(StreamDeckActionTypeReplyToCaller) && actionType != string(StreamDeckActionTypeIncomingCall)
 	palette := getButtonPalette(actionType, state.Color, pressed)
 	strokeColor := palette.border
 	if pressed {
@@ -301,6 +301,8 @@ func getButtonPalette(actionType, color string, pressed bool) keyPalette {
 	case string(StreamDeckActionTypePTTRoom):
 		return keyPalette{background: "#000000", border: "#1b2026", label: "#f1f4f8"}
 	case string(StreamDeckActionTypeReplyToCaller):
+		return keyPalette{background: "#000000", border: "#ffc067", label: "#f6f0e8"}
+	case string(StreamDeckActionTypeIncomingCall):
 		return keyPalette{background: "#000000", border: "#ffc067", label: "#f6f0e8"}
 	case string(StreamDeckActionTypeMuteToggle):
 		return keyPalette{background: "#000000", border: "#f84e4e", label: "#fff1f1"}
