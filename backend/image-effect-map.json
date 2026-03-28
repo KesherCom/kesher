@@ -1,0 +1,6 @@
+{
+  "0": { "mode": 0, "color": "#000000" },
+  "1": { "mode": "blink", "color": "#ff2d26" },
+  "2": { "mode": "static", "color": "#26d07c" },
+  "3": { "mode": "blink", "color": "#ffff00" }
+}

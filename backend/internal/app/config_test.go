@@ -131,3 +131,33 @@ companion_allowed_usernames:
 		t.Fatalf("unexpected companion allowed usernames: got %v want %v", cfg.CompanionAllowedUsernames, want)
 	}
 }
+
+func TestLoadConfigReadsCompanionImageEffectMapFileFromEnv(t *testing.T) {
+	t.Setenv("APP_CONFIG_FILE", "")
+	t.Setenv("CONFIG_FILE", "")
+	t.Setenv("COMPANION_IMAGE_EFFECT_MAP_FILE", "./custom-effect-map.json")
+
+	cfg := loadConfigFromEnv()
+	if cfg.CompanionImageEffectMapFile != "./custom-effect-map.json" {
+		t.Fatalf("unexpected companion image effect map file: %q", cfg.CompanionImageEffectMapFile)
+	}
+}
+
+func TestLoadConfigReadsCompanionImageEffectMapFileFromYAML(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+	content := []byte(`
+companion_image_effect_map_file: "./maps/image-effect-map.json"
+`)
+	if err := os.WriteFile(configPath, content, 0o644); err != nil {
+		t.Fatalf("failed to write temp config: %v", err)
+	}
+
+	cfg, err := loadConfigFromFile(configPath)
+	if err != nil {
+		t.Fatalf("expected config load to succeed, got: %v", err)
+	}
+	if cfg.CompanionImageEffectMapFile != "./maps/image-effect-map.json" {
+		t.Fatalf("unexpected companion image effect map file: %q", cfg.CompanionImageEffectMapFile)
+	}
+}

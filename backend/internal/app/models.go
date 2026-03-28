@@ -342,6 +342,7 @@ type CompanionBridgeState struct {
 	SignalActive        bool           `json:"signalActive"`
 	SignalFrom          string         `json:"signalFrom,omitempty"`
 	SignalMessage       string         `json:"signalMessage,omitempty"`
+	ImageEffectMapJSON  string         `json:"imageEffectMapJson,omitempty"`
 	CurrentPageNumber   int            `json:"currentPageNumber,omitempty"`
 	ProfileVersion      int            `json:"profileVersion,omitempty"`
 	ProfileStatus       string         `json:"profileStatus,omitempty"`

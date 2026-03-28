@@ -39,6 +39,7 @@ type Config struct {
 	TelegramMode                string // "polling" (default) or "webhook"
 	CompanionSharedSecret       string
 	CompanionAllowedUsernames   []string
+	CompanionImageEffectMapFile string
 }
 type fileConfig struct {
 	Addr                               string   `yaml:"app_addr"`
@@ -68,6 +69,7 @@ type fileConfig struct {
 	TelegramMode                       string   `yaml:"telegram_mode"`
 	CompanionSharedSecret              string   `yaml:"companion_shared_secret"`
 	CompanionAllowedUsernames          []string `yaml:"companion_allowed_usernames"`
+	CompanionImageEffectMapFile        string   `yaml:"companion_image_effect_map_file"`
 }
 
 func getEnvWithPresence(k, fallback string) (string, bool) {
@@ -107,6 +109,7 @@ func defaultConfig() Config {
 		TelegramMode:                "polling",
 		CompanionSharedSecret:       "",
 		CompanionAllowedUsernames:   nil,
+		CompanionImageEffectMapFile: "image-effect-map.json",
 	}
 }
 
@@ -237,6 +240,9 @@ func loadConfigFromFile(path string) (Config, error) {
 	if len(fileCfg.CompanionAllowedUsernames) > 0 {
 		cfg.CompanionAllowedUsernames = append([]string{}, splitCSV(strings.Join(fileCfg.CompanionAllowedUsernames, ","))...)
 	}
+	if strings.TrimSpace(fileCfg.CompanionImageEffectMapFile) != "" {
+		cfg.CompanionImageEffectMapFile = strings.TrimSpace(fileCfg.CompanionImageEffectMapFile)
+	}
 	return cfg, nil
 }
 
@@ -273,6 +279,10 @@ func loadConfigFromEnv() Config {
 		TelegramMode:              getEnv("TELEGRAM_MODE", "polling"),
 		CompanionSharedSecret:     getEnv("COMPANION_SHARED_SECRET", ""),
 		CompanionAllowedUsernames: splitCSV(getEnv("COMPANION_ALLOWED_USERNAMES", "")),
+		CompanionImageEffectMapFile: getEnv(
+			"COMPANION_IMAGE_EFFECT_MAP_FILE",
+			"image-effect-map.json",
+		),
 	}
 }
 

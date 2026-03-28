@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -107,6 +109,81 @@ func TestCompanionButtonSnapshotStateMarksPTTSelectedForSelectActions(t *testing
 	}
 	if !listenState.IsListening {
 		t.Fatal("expected select_listen_room button to keep listen marker")
+	}
+}
+
+func TestCompanionButtonSnapshotStateReplyToCallerSetsBlinkEffectOnIncomingSignal(t *testing.T) {
+	s := newCompanionTestServer(t)
+	now := time.Now()
+	s.hub.Add(&client{
+		session:       Session{Token: "token-1", UserID: "u1", Username: "operator", RoleID: "role_a", ExpiresAt: now.Add(time.Hour)},
+		user:          User{ID: "u1", Username: "operator", RoleID: "role_a"},
+		connectedAt:   now,
+		signalFrom:    "caller",
+		signalMessage: "call",
+		signalUntil:   now.Add(time.Second),
+		send:          make(chan WSOutbound, 1),
+		sendPriority:  make(chan WSOutbound, 1),
+		listenRooms:   map[string]struct{}{},
+		talkRooms:     map[string]struct{}{},
+	})
+
+	button := StreamDeckButtonConfig{
+		Index: 7,
+		Action: &StreamDeckButtonAction{
+			Type: StreamDeckActionTypeReplyToCaller,
+		},
+	}
+
+	state := s.companionButtonSnapshotState(context.Background(), "role_a", 0, "operator", PresenceState{}, button)
+	if state.EffectValue != companionIncomingCallEffectValue {
+		t.Fatalf("expected blink effect value %d while signal is active, got %d", companionIncomingCallEffectValue, state.EffectValue)
+	}
+}
+
+func TestCompanionButtonSnapshotStateReplyToCallerKeepsBlinkWhenCallPending(t *testing.T) {
+	s := newCompanionTestServer(t)
+	s.setCompanionPendingIncomingCall("operator", true)
+
+	button := StreamDeckButtonConfig{
+		Index: 5,
+		Action: &StreamDeckButtonAction{
+			Type: StreamDeckActionTypeReplyToCaller,
+		},
+	}
+
+	state := s.companionButtonSnapshotState(context.Background(), "role_a", 0, "operator", PresenceState{}, button)
+	if state.EffectValue != companionIncomingCallEffectValue {
+		t.Fatalf("expected pending call effect value %d, got %d", companionIncomingCallEffectValue, state.EffectValue)
+	}
+}
+
+func TestExecuteCompanionButtonPressReplyToCallerClearsPendingCall(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if _, err := s.store.UpsertUser(ctx, "operator", "source"); err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeReplyToCaller}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	s.setCompanionPendingIncomingCall("operator", true)
+	_ = s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{
+		Command:     "press_button",
+		ButtonIndex: 0,
+		State:       "down",
+	})
+
+	if s.hasCompanionPendingIncomingCall("operator") {
+		t.Fatal("expected pending incoming call to be cleared after reply button press")
 	}
 }
 
@@ -319,6 +396,23 @@ func TestNormalizeCompanionRelayCommandRejectsUnauthorizedBroadcastSignal(t *tes
 	})
 	if err == nil || err.Error() != "not allowed to signal broadcast group" {
 		t.Fatalf("expected broadcast signal authorization error, got %v", err)
+	}
+}
+
+func TestLoadCompanionImageEffectMapJSONFromFile(t *testing.T) {
+	tmp := t.TempDir()
+	mapPath := filepath.Join(tmp, "image-effect-map.json")
+	content := `{"0":{"mode":0},"1":{"mode":"blink","color":"#ff2d26"}}`
+	if err := os.WriteFile(mapPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write image effect map: %v", err)
+	}
+
+	s := newCompanionTestServer(t)
+	s.cfg.CompanionImageEffectMapFile = mapPath
+
+	got := s.loadCompanionImageEffectMapJSON()
+	if got != content {
+		t.Fatalf("unexpected image effect map json: got %q want %q", got, content)
 	}
 }
 

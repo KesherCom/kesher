@@ -26,17 +26,18 @@ const imageStreamRefreshInterval = 2 * time.Second
 
 // ImageStreamMessage represents an image update message sent via WebSocket
 type ImageStreamMessage struct {
-	Type        string `json:"type"` // "update_button_image"
-	Bank        int    `json:"bank"`
-	ButtonIndex int    `json:"buttonIndex"`
-	ImageBuffer string `json:"imageBuffer"` // Base64-encoded PNG
-	Label       string `json:"label,omitempty"`
-	Channel     string `json:"channel,omitempty"`
-	State       string `json:"state,omitempty"` // "IDLE", "TALK", "LISTEN", "BROADCAST"
-	ActionType  string `json:"actionType,omitempty"`
-	Color       string `json:"color,omitempty"`
-	IsListening bool   `json:"isListening,omitempty"`
-	IsPTTSelected bool `json:"isPttSelected,omitempty"`
+	Type          string `json:"type"` // "update_button_image"
+	Bank          int    `json:"bank"`
+	ButtonIndex   int    `json:"buttonIndex"`
+	ImageBuffer   string `json:"imageBuffer"` // Base64-encoded PNG
+	EffectValue   int    `json:"effectValue,omitempty"`
+	Label         string `json:"label,omitempty"`
+	Channel       string `json:"channel,omitempty"`
+	State         string `json:"state,omitempty"` // "IDLE", "TALK", "LISTEN", "BROADCAST"
+	ActionType    string `json:"actionType,omitempty"`
+	Color         string `json:"color,omitempty"`
+	IsListening   bool   `json:"isListening,omitempty"`
+	IsPTTSelected bool   `json:"isPttSelected,omitempty"`
 }
 
 // ButtonImageRenderConfig holds rendering configuration
@@ -66,29 +67,30 @@ func NewButtonImageRenderer(config *ButtonImageRenderConfig) (*ButtonImageRender
 
 // ButtonState represents the state of a button for rendering
 type ButtonState struct {
-	Channel     string
-	State       string // "IDLE", "TALK", "LISTEN", "BROADCAST"
-	Label       string
-	Subtitle    string
-	ActionType  string
-	Color       string
-	TalkCount   int
-	IsListening bool
+	Channel       string
+	State         string // "IDLE", "TALK", "LISTEN", "BROADCAST"
+	Label         string
+	Subtitle      string
+	EffectValue   int
+	ActionType    string
+	Color         string
+	TalkCount     int
+	IsListening   bool
 	IsPTTSelected bool
-	IsActive    bool
+	IsActive      bool
 }
 
 type streamDeckPreviewButtonRequest struct {
-	ButtonIndex int    `json:"buttonIndex"`
-	Label       string `json:"label,omitempty"`
-	Subtitle    string `json:"subtitle,omitempty"`
-	ActionType  string `json:"actionType,omitempty"`
-	Color       string `json:"color,omitempty"`
-	State       string `json:"state,omitempty"`
-	Channel     string `json:"channel,omitempty"`
-	IsListening bool   `json:"isListening,omitempty"`
-	IsPTTSelected bool `json:"isPttSelected,omitempty"`
-	IsActive    bool   `json:"isActive,omitempty"`
+	ButtonIndex   int    `json:"buttonIndex"`
+	Label         string `json:"label,omitempty"`
+	Subtitle      string `json:"subtitle,omitempty"`
+	ActionType    string `json:"actionType,omitempty"`
+	Color         string `json:"color,omitempty"`
+	State         string `json:"state,omitempty"`
+	Channel       string `json:"channel,omitempty"`
+	IsListening   bool   `json:"isListening,omitempty"`
+	IsPTTSelected bool   `json:"isPttSelected,omitempty"`
+	IsActive      bool   `json:"isActive,omitempty"`
 }
 
 type streamDeckPreviewRequest struct {
@@ -459,6 +461,7 @@ func buttonStateSignature(state ButtonState) string {
 			strings.TrimSpace(state.State),
 			strings.TrimSpace(state.Label),
 			strings.TrimSpace(state.Subtitle),
+			strconv.Itoa(state.EffectValue),
 			strings.TrimSpace(state.ActionType),
 			strings.TrimSpace(state.Color),
 			strconv.Itoa(state.TalkCount),
@@ -556,16 +559,17 @@ func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID, username 
 	imageBase64 := base64.StdEncoding.EncodeToString(imageBuf)
 
 	msg := ImageStreamMessage{
-		Type:        "update_button_image",
-		Bank:        bank,
-		ButtonIndex: buttonIndex,
-		ImageBuffer: imageBase64,
-		Label:       state.Label,
-		Channel:     state.Channel,
-		State:       state.State,
-		ActionType:  state.ActionType,
-		Color:       state.Color,
-		IsListening: state.IsListening,
+		Type:          "update_button_image",
+		Bank:          bank,
+		ButtonIndex:   buttonIndex,
+		ImageBuffer:   imageBase64,
+		EffectValue:   state.EffectValue,
+		Label:         state.Label,
+		Channel:       state.Channel,
+		State:         state.State,
+		ActionType:    state.ActionType,
+		Color:         state.Color,
+		IsListening:   state.IsListening,
 		IsPTTSelected: state.IsPTTSelected,
 	}
 
@@ -763,16 +767,17 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 		}
 
 		msg := ImageStreamMessage{
-			Type:        "update_button_image",
-			Bank:        page.Page,
-			ButtonIndex: button.Index,
-			ImageBuffer: base64.StdEncoding.EncodeToString(img),
-			Label:       state.Label,
-			Channel:     state.Channel,
-			State:       state.State,
-			ActionType:  state.ActionType,
-			Color:       state.Color,
-			IsListening: state.IsListening,
+			Type:          "update_button_image",
+			Bank:          page.Page,
+			ButtonIndex:   button.Index,
+			ImageBuffer:   base64.StdEncoding.EncodeToString(img),
+			EffectValue:   state.EffectValue,
+			Label:         state.Label,
+			Channel:       state.Channel,
+			State:         state.State,
+			ActionType:    state.ActionType,
+			Color:         state.Color,
+			IsListening:   state.IsListening,
 			IsPTTSelected: state.IsPTTSelected,
 		}
 
@@ -942,15 +947,15 @@ func (s *Server) handleUserStreamDeckPreview(w http.ResponseWriter, r *http.Requ
 	images := make([]streamDeckPreviewImage, 0, len(req.Buttons))
 	for _, button := range req.Buttons {
 		img, renderErr := renderer.RenderButtonImage(ButtonState{
-			Channel:     strings.TrimSpace(button.Channel),
-			State:       normalizeButtonRenderState(button.State),
-			Label:       strings.TrimSpace(button.Label),
-			Subtitle:    strings.TrimSpace(button.Subtitle),
-			ActionType:  strings.TrimSpace(button.ActionType),
-			Color:       strings.TrimSpace(button.Color),
-			IsListening: button.IsListening,
+			Channel:       strings.TrimSpace(button.Channel),
+			State:         normalizeButtonRenderState(button.State),
+			Label:         strings.TrimSpace(button.Label),
+			Subtitle:      strings.TrimSpace(button.Subtitle),
+			ActionType:    strings.TrimSpace(button.ActionType),
+			Color:         strings.TrimSpace(button.Color),
+			IsListening:   button.IsListening,
 			IsPTTSelected: button.IsPTTSelected,
-			IsActive:    button.IsActive,
+			IsActive:      button.IsActive,
 		})
 		if renderErr != nil {
 			http.Error(w, "failed to render preview image", http.StatusInternalServerError)
