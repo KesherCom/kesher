@@ -22,6 +22,7 @@ type client struct {
 	lastDirectName  string
 	signalFrom      string
 	signalMessage   string
+	signalScope     string
 	signalUntil     time.Time
 	listenRooms     map[string]struct{}
 	talkRooms       map[string]struct{}
@@ -68,6 +69,11 @@ func (h *Hub) ReplyTargetForUsername(username string) (string, string, bool) {
 }
 
 func (h *Hub) SignalStateForUsername(username string) (string, string, bool) {
+	from, message, _, active := h.SignalStateWithScopeForUsername(username)
+	return from, message, active
+}
+
+func (h *Hub) SignalStateWithScopeForUsername(username string) (string, string, string, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	var selected *client
@@ -80,9 +86,9 @@ func (h *Hub) SignalStateForUsername(username string) (string, string, bool) {
 		}
 	}
 	if selected == nil || time.Now().After(selected.signalUntil) || selected.signalFrom == "" {
-		return "", "", false
+		return "", "", "", false
 	}
-	return selected.signalFrom, selected.signalMessage, true
+	return selected.signalFrom, selected.signalMessage, selected.signalScope, true
 }
 
 type ActiveClient struct {
@@ -426,6 +432,7 @@ func (h *Hub) markDirectSignalIncoming(targetUserID string, fromUser User, signa
 		}
 		c.signalFrom = fromUser.Username
 		c.signalMessage = signal
+		c.signalScope = "direct"
 		c.signalUntil = time.Now().Add(incomingSignalAttentionWindow)
 	}
 }
@@ -476,6 +483,7 @@ func (h *Hub) markRoomSignalIncoming(roomID string, fromUser User, signal string
 		}
 		c.signalFrom = signalFrom
 		c.signalMessage = signal
+		c.signalScope = "room"
 		c.signalUntil = time.Now().Add(incomingSignalAttentionWindow)
 	}
 }

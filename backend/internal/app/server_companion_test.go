@@ -23,16 +23,17 @@ func newCompanionTestServer(t *testing.T) *Server {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	hub := NewHub(store, logger)
 	return &Server{
-		cfg:                            Config{},
-		store:                          store,
-		sessions:                       NewSessionManager(time.Minute),
-		hub:                            hub,
-		companionWS:                    make(map[string]map[chan CompanionCommandResult]struct{}),
-		companionState:                 make(map[string]map[chan struct{}]struct{}),
-		companionPageByRole:            make(map[string]int),
-		companionHeldTargets:           make(map[string]string),
-		companionAckedSignalByUser:     make(map[string]string),
-		companionSelectListenHoldDelay: 10 * time.Millisecond,
+		cfg:                             Config{},
+		store:                           store,
+		sessions:                        NewSessionManager(time.Minute),
+		hub:                             hub,
+		companionWS:                     make(map[string]map[chan CompanionCommandResult]struct{}),
+		companionState:                  make(map[string]map[chan struct{}]struct{}),
+		companionPageByRole:             make(map[string]int),
+		companionHeldTargets:            make(map[string]string),
+		companionPendingCallScopeByUser: make(map[string]string),
+		companionAckedSignalByUser:      make(map[string]string),
+		companionSelectListenHoldDelay:  10 * time.Millisecond,
 	}
 }
 
@@ -122,6 +123,7 @@ func TestCompanionButtonSnapshotStateReplyToCallerSetsBlinkEffectOnIncomingSigna
 		connectedAt:   now,
 		signalFrom:    "caller",
 		signalMessage: "call",
+		signalScope:   "direct",
 		signalUntil:   now.Add(time.Second),
 		send:          make(chan WSOutbound, 1),
 		sendPriority:  make(chan WSOutbound, 1),
@@ -142,9 +144,40 @@ func TestCompanionButtonSnapshotStateReplyToCallerSetsBlinkEffectOnIncomingSigna
 	}
 }
 
+func TestCompanionButtonSnapshotStateReplyToCallerDoesNotBlinkOnRoomCall(t *testing.T) {
+	s := newCompanionTestServer(t)
+	now := time.Now()
+	s.hub.Add(&client{
+		session:       Session{Token: "token-1", UserID: "u1", Username: "operator", RoleID: "role_a", ExpiresAt: now.Add(time.Hour)},
+		user:          User{ID: "u1", Username: "operator", RoleID: "role_a"},
+		connectedAt:   now,
+		signalFrom:    "alice (PL Main)",
+		signalMessage: "call",
+		signalScope:   "room",
+		signalUntil:   now.Add(time.Second),
+		send:          make(chan WSOutbound, 1),
+		sendPriority:  make(chan WSOutbound, 1),
+		listenRooms:   map[string]struct{}{},
+		talkRooms:     map[string]struct{}{},
+	})
+
+	button := StreamDeckButtonConfig{
+		Index: 7,
+		Action: &StreamDeckButtonAction{
+			Type: StreamDeckActionTypeReplyToCaller,
+		},
+	}
+
+	state := s.companionButtonSnapshotState(context.Background(), "role_a", 0, "operator", PresenceState{}, button)
+	if state.EffectValue != 0 {
+		t.Fatalf("expected reply-to-caller to ignore room call blink, got effectValue=%d", state.EffectValue)
+	}
+}
+
 func TestCompanionButtonSnapshotStateReplyToCallerKeepsBlinkWhenCallPending(t *testing.T) {
 	s := newCompanionTestServer(t)
 	s.setCompanionPendingIncomingCall("operator", true)
+	s.setCompanionPendingIncomingCallScope("operator", "direct")
 
 	button := StreamDeckButtonConfig{
 		Index: 5,
@@ -168,6 +201,7 @@ func TestCompanionButtonSnapshotStateIncomingCallIndicatorShowsCallerAndBlink(t 
 		connectedAt:   now,
 		signalFrom:    "alice (PL Main)",
 		signalMessage: "call",
+		signalScope:   "room",
 		signalUntil:   now.Add(time.Second),
 		send:          make(chan WSOutbound, 1),
 		sendPriority:  make(chan WSOutbound, 1),
@@ -241,6 +275,7 @@ func TestExecuteCompanionButtonPressIncomingCallIndicatorNoOp(t *testing.T) {
 		connectedAt:   now,
 		signalFrom:    "alice (PL Main)",
 		signalMessage: "call",
+		signalScope:   "room",
 		signalUntil:   now.Add(time.Second),
 		send:          make(chan WSOutbound, 1),
 		sendPriority:  make(chan WSOutbound, 1),
