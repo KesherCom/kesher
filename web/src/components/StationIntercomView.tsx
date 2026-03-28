@@ -2436,6 +2436,10 @@ export function StationIntercomView({
                             <optgroup label="Broadcast and audio">
                               <option value="broadcast_ptt">Broadcast PTT</option>
                             </optgroup>
+                            <optgroup label="Stream Deck navigation">
+                              <option value="page_up">Page up</option>
+                              <option value="page_down">Page down</option>
+                            </optgroup>
                           </select>
                         </label>
 

@@ -40,6 +40,7 @@ type Config struct {
 	CompanionSharedSecret       string
 	CompanionAllowedUsernames   []string
 	CompanionImageEffectMapFile string
+	CompanionDynamicPaging      bool
 }
 type fileConfig struct {
 	Addr                               string   `yaml:"app_addr"`
@@ -70,6 +71,7 @@ type fileConfig struct {
 	CompanionSharedSecret              string   `yaml:"companion_shared_secret"`
 	CompanionAllowedUsernames          []string `yaml:"companion_allowed_usernames"`
 	CompanionImageEffectMapFile        string   `yaml:"companion_image_effect_map_file"`
+	CompanionDynamicPaging             *bool    `yaml:"companion_dynamic_paging"`
 }
 
 func getEnvWithPresence(k, fallback string) (string, bool) {
@@ -110,6 +112,7 @@ func defaultConfig() Config {
 		CompanionSharedSecret:       "",
 		CompanionAllowedUsernames:   nil,
 		CompanionImageEffectMapFile: "image-effect-map.json",
+		CompanionDynamicPaging:      false,
 	}
 }
 
@@ -243,6 +246,9 @@ func loadConfigFromFile(path string) (Config, error) {
 	if strings.TrimSpace(fileCfg.CompanionImageEffectMapFile) != "" {
 		cfg.CompanionImageEffectMapFile = strings.TrimSpace(fileCfg.CompanionImageEffectMapFile)
 	}
+	if fileCfg.CompanionDynamicPaging != nil {
+		cfg.CompanionDynamicPaging = *fileCfg.CompanionDynamicPaging
+	}
 	return cfg, nil
 }
 
@@ -283,6 +289,7 @@ func loadConfigFromEnv() Config {
 			"COMPANION_IMAGE_EFFECT_MAP_FILE",
 			"image-effect-map.json",
 		),
+		CompanionDynamicPaging: getEnv("COMPANION_DYNAMIC_PAGING", "false") == "true",
 	}
 }
 

@@ -500,6 +500,15 @@ func (c *ImageStreamClient) markButtonUpdateSent(bank, buttonIndex int, signatur
 	c.mu.Unlock()
 }
 
+func (c *ImageStreamClient) resetLastSent() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.lastSent = make(map[string]string)
+	c.mu.Unlock()
+}
+
 // NewImageStreamCoordinator creates a new image stream coordinator
 func NewImageStreamCoordinator(logger *slog.Logger) (*ImageStreamCoordinator, error) {
 	renderer, err := NewButtonImageRenderer(nil)
@@ -517,6 +526,37 @@ func NewImageStreamCoordinator(logger *slog.Logger) (*ImageStreamCoordinator, er
 // BroadcastImageUpdate sends an image update to all connected clients.
 func (c *ImageStreamCoordinator) BroadcastImageUpdate(state ButtonState, bank, buttonIndex int) {
 	c.BroadcastImageUpdateForTarget("", "", state, bank, buttonIndex)
+}
+
+// ResetTargetCache clears dedup signatures for matching clients so subsequent image
+// emissions are always re-sent even if signatures are unchanged.
+func (c *ImageStreamCoordinator) ResetTargetCache(roleID, username string) {
+	if c == nil {
+		return
+	}
+	targetRoleID := strings.TrimSpace(roleID)
+	targetUsername := strings.TrimSpace(username)
+
+	c.mu.RLock()
+	clients := make([]*ImageStreamClient, 0, len(c.clients))
+	for client := range c.clients {
+		clientRoleID := strings.TrimSpace(client.RoleID)
+		if targetRoleID != "" && clientRoleID != targetRoleID {
+			continue
+		}
+		if targetUsername != "" {
+			clientUsername := strings.TrimSpace(client.Username)
+			if clientUsername != "" && clientUsername != targetUsername {
+				continue
+			}
+		}
+		clients = append(clients, client)
+	}
+	c.mu.RUnlock()
+
+	for _, client := range clients {
+		client.resetLastSent()
+	}
 }
 
 // BroadcastImageUpdateForTarget sends an image update only to clients bound to the same role.
@@ -547,6 +587,17 @@ func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID, username 
 	c.mu.RUnlock()
 
 	if len(recipients) == 0 {
+		if c.logger != nil {
+			c.logger.Info("companion image update skipped",
+				"roleId", targetRoleID,
+				"username", targetUsername,
+				"bank", bank,
+				"buttonIndex", buttonIndex,
+				"label", strings.TrimSpace(state.Label),
+				"actionType", strings.TrimSpace(state.ActionType),
+				"state", strings.TrimSpace(state.State),
+			)
+		}
 		return
 	}
 
@@ -576,14 +627,35 @@ func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID, username 
 	}
 
 	// Send only to matching clients.
+	sent := 0
+	closed := 0
+	dropped := 0
 	for _, client := range recipients {
 		select {
 		case client.send <- msg:
 			client.markButtonUpdateSent(bank, buttonIndex, signature)
+			sent++
 		case <-client.done:
+			closed++
 		default:
 			// Client queue full, drop message
+			dropped++
 		}
+	}
+	if c.logger != nil {
+		c.logger.Info("companion image update dispatched",
+			"roleId", targetRoleID,
+			"username", targetUsername,
+			"bank", bank,
+			"buttonIndex", buttonIndex,
+			"label", strings.TrimSpace(state.Label),
+			"actionType", strings.TrimSpace(state.ActionType),
+			"state", strings.TrimSpace(state.State),
+			"recipients", len(recipients),
+			"sent", sent,
+			"closed", closed,
+			"dropped", dropped,
+		)
 	}
 }
 
@@ -715,16 +787,8 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 	}
 
 	pageNumber := s.currentCompanionPage(ctx, roleID)
-	var page *StreamDeckPageConfig
-	for i := range profile.StreamDeck.Pages {
-		if profile.StreamDeck.Pages[i].Page == pageNumber {
-			page = &profile.StreamDeck.Pages[i]
-			break
-		}
-	}
-	if page == nil && len(profile.StreamDeck.Pages) > 0 {
-		page = &profile.StreamDeck.Pages[0]
-	}
+	runtimePage := s.resolveCompanionRuntimePage(ctx, roleID, profile.StreamDeck, pageNumber)
+	page := &runtimePage.Page
 	if page == nil {
 		return
 	}
@@ -786,6 +850,17 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 		select {
 		case client.send <- msg:
 			client.markButtonUpdateSent(page.Page, button.Index, signature)
+			if s.logger != nil {
+				s.logger.Info("companion image snapshot queued",
+					"roleId", roleID,
+					"username", renderUsername,
+					"bank", page.Page,
+					"buttonIndex", button.Index,
+					"label", strings.TrimSpace(state.Label),
+					"actionType", strings.TrimSpace(state.ActionType),
+					"state", strings.TrimSpace(state.State),
+				)
+			}
 		default:
 			s.logger.Warn("image snapshot queue full", "roleId", roleID)
 			return
