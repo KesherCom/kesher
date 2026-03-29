@@ -6,7 +6,13 @@ type AdminShellProps = {
   appData: Bootstrap;
   adminPin: string;
   onUpdateAdminPin: (currentPin: string, newPin: string) => Promise<void>;
-  audioStats: { inKbps: number; outKbps: number };
+  audioStats: {
+    inKbps: number;
+    outKbps: number;
+    jitterMs: number;
+    roundTripMs: number;
+    playoutDelayMs: number;
+  };
   activeRoutesCount: number;
   displayUsername: string;
   adminRoleLabel: string;

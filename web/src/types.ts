@@ -183,7 +183,13 @@ export type MediaRealtimeStats = {
   syncRequests: number;
   syncRuns: number;
   syncRequestsCoalesced: number;
+  syncRunAvgMs: number;
+  syncRunMaxMs: number;
+  voiceStateToSyncAvgMs: number;
+  voiceStateToSyncMaxMs: number;
   renegotiations: number;
+  renegotiationAvgMs: number;
+  renegotiationMaxMs: number;
 };
 
 export type StorePolicyCacheStats = {

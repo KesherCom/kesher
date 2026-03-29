@@ -27,6 +27,7 @@ import type {
 import { useLocalMic } from "./useLocalMic";
 import { useRemoteAudio } from "./useRemoteAudio";
 import { useRtpStats } from "./useRtpStats";
+import type { RtpStats } from "./useRtpStats";
 
 type WakeLockSentinelLike = {
   released: boolean;
@@ -262,7 +263,7 @@ export type UseIntercomSessionResult = {
     source?: string;
   }>;
   events: Array<{ label: string; at: string }>;
-  rtpStats: { inKbps: number; outKbps: number };
+  rtpStats: RtpStats;
   incomingAudioActive: boolean;
   activeVoiceRoutes: VoiceRoute[];
   incomingAttention: { title: string; detail: string } | null;

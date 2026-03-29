@@ -4899,8 +4899,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		voiceMode:       initialVoiceMode,
 		micEnabled:      initialMicEnabled,
 		broadcastGroups: make(map[string]struct{}),
-		send:            make(chan WSOutbound, 128),
-		sendPriority:    make(chan WSOutbound, 128),
+		send:            make(chan WSOutbound, 512),
+		sendPriority:    make(chan WSOutbound, 512),
 	}
 	s.hub.Add(c)
 	// Send current presence snapshot to newly connected client so they see all other users
@@ -5004,6 +5004,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			_ = json.Unmarshal(raw, &e)
 			if !s.isInboundAllowed(r.Context(), session, e) {
 				continue
+			}
+			if mediaReady && s.media != nil {
+				s.media.NoteVoiceStateTrigger()
 			}
 			s.hub.SetVoiceState(session.Token, e.Body)
 			if e.Scope == "room" && (e.Body == "always_on" || e.Body == "ptt_start") {

@@ -23,7 +23,13 @@ type MediaRealtimeStats struct {
 	SyncRequests          uint64 `json:"syncRequests"`
 	SyncRuns              uint64 `json:"syncRuns"`
 	SyncRequestsCoalesced uint64 `json:"syncRequestsCoalesced"`
+	SyncRunAvgMs          uint64 `json:"syncRunAvgMs"`
+	SyncRunMaxMs          uint64 `json:"syncRunMaxMs"`
+	VoiceStateToSyncAvgMs uint64 `json:"voiceStateToSyncAvgMs"`
+	VoiceStateToSyncMaxMs uint64 `json:"voiceStateToSyncMaxMs"`
 	Renegotiations        uint64 `json:"renegotiations"`
+	RenegotiationAvgMs    uint64 `json:"renegotiationAvgMs"`
+	RenegotiationMaxMs    uint64 `json:"renegotiationMaxMs"`
 }
 
 type mediaPeer struct {
@@ -52,10 +58,19 @@ type MediaManager struct {
 	syncRequests               atomic.Uint64
 	syncRuns                   atomic.Uint64
 	syncMerged                 atomic.Uint64
+	syncRunTotalNanos          atomic.Uint64
+	syncRunMaxNanos            atomic.Uint64
+	voiceStateTriggerNanos     atomic.Uint64
+	voiceStateToSyncCount      atomic.Uint64
+	voiceStateToSyncTotalNanos atomic.Uint64
+	voiceStateToSyncMaxNanos   atomic.Uint64
 	renegotiations             atomic.Uint64
+	renegotiationTotalNanos    atomic.Uint64
+	renegotiationMaxNanos      atomic.Uint64
 }
 
-const renegotiationDebounce = 60 * time.Millisecond
+const syncRoutingDebounce = 10 * time.Millisecond
+const renegotiationDebounce = 20 * time.Millisecond
 
 func NewMediaManager(hub *Hub, logger *slog.Logger) *MediaManager {
 	return &MediaManager{
@@ -136,24 +151,53 @@ func (m *MediaManager) SyncRouting() {
 	}
 	m.syncScheduled = true
 	m.mu.Unlock()
-	time.AfterFunc(35*time.Millisecond, func() {
+	time.AfterFunc(syncRoutingDebounce, func() {
 		m.mu.Lock()
 		m.syncScheduled = false
 		m.syncRuns.Add(1)
+		recordVoiceStateToSyncNanos(&m.voiceStateTriggerNanos, &m.voiceStateToSyncCount, &m.voiceStateToSyncTotalNanos, &m.voiceStateToSyncMaxNanos)
+		start := time.Now()
 		m.recomputeAllSourcesLocked()
+		recordDurationNanos(&m.syncRunTotalNanos, &m.syncRunMaxNanos, time.Since(start))
 		m.mu.Unlock()
 	})
 }
 
+func (m *MediaManager) NoteVoiceStateTrigger() {
+	m.voiceStateTriggerNanos.Store(uint64(time.Now().UnixNano()))
+}
+
 func (m *MediaManager) RealtimeStats() MediaRealtimeStats {
+	syncRuns := m.syncRuns.Load()
+	renegotiations := m.renegotiations.Load()
+	voiceStateToSyncCount := m.voiceStateToSyncCount.Load()
+	syncAvgMs := uint64(0)
+	if syncRuns > 0 {
+		syncAvgMs = (m.syncRunTotalNanos.Load() / syncRuns) / uint64(time.Millisecond)
+	}
+	voiceStateToSyncAvgMs := uint64(0)
+	if voiceStateToSyncCount > 0 {
+		voiceStateToSyncAvgMs = (m.voiceStateToSyncTotalNanos.Load() / voiceStateToSyncCount) / uint64(time.Millisecond)
+	}
+	renegotiationAvgMs := uint64(0)
+	if renegotiations > 0 {
+		renegotiationAvgMs = (m.renegotiationTotalNanos.Load() / renegotiations) / uint64(time.Millisecond)
+	}
+
 	m.mu.Lock()
 	stats := MediaRealtimeStats{
 		Peers:                 len(m.peers),
 		Sources:               len(m.sources),
 		SyncRequests:          m.syncRequests.Load(),
-		SyncRuns:              m.syncRuns.Load(),
+		SyncRuns:              syncRuns,
 		SyncRequestsCoalesced: m.syncMerged.Load(),
-		Renegotiations:        m.renegotiations.Load(),
+		SyncRunAvgMs:          syncAvgMs,
+		SyncRunMaxMs:          m.syncRunMaxNanos.Load() / uint64(time.Millisecond),
+		VoiceStateToSyncAvgMs: voiceStateToSyncAvgMs,
+		VoiceStateToSyncMaxMs: m.voiceStateToSyncMaxNanos.Load() / uint64(time.Millisecond),
+		Renegotiations:        renegotiations,
+		RenegotiationAvgMs:    renegotiationAvgMs,
+		RenegotiationMaxMs:    m.renegotiationMaxNanos.Load() / uint64(time.Millisecond),
 	}
 	m.mu.Unlock()
 	return stats
@@ -581,6 +625,7 @@ func (m *MediaManager) maybeRenegotiateLocked(peer *mediaPeer) {
 	}
 	peer.pendingRenegotiate = false
 	peer.renegotiating = true
+	start := time.Now()
 	offer, err := peer.pc.CreateOffer(nil)
 	if err != nil {
 		peer.renegotiating = false
@@ -603,6 +648,47 @@ func (m *MediaManager) maybeRenegotiateLocked(peer *mediaPeer) {
 		Type: "webrtc_offer",
 		Data: WebRTCOffer{SDP: offer.SDP},
 	})
+	recordDurationNanos(&m.renegotiationTotalNanos, &m.renegotiationMaxNanos, time.Since(start))
+}
+
+func recordDurationNanos(total, max *atomic.Uint64, d time.Duration) {
+	nanos := uint64(d)
+	total.Add(nanos)
+	for {
+		current := max.Load()
+		if nanos <= current {
+			return
+		}
+		if max.CompareAndSwap(current, nanos) {
+			return
+		}
+	}
+}
+
+func recordVoiceStateToSyncNanos(trigger, count, total, max *atomic.Uint64) {
+	triggerNanos := trigger.Load()
+	if triggerNanos == 0 {
+		return
+	}
+	nowNanos := uint64(time.Now().UnixNano())
+	if nowNanos <= triggerNanos {
+		return
+	}
+	latencyNanos := nowNanos - triggerNanos
+	if latencyNanos > uint64(3*time.Second) {
+		return
+	}
+	count.Add(1)
+	total.Add(latencyNanos)
+	for {
+		current := max.Load()
+		if latencyNanos <= current {
+			return
+		}
+		if max.CompareAndSwap(current, latencyNanos) {
+			return
+		}
+	}
 }
 
 func (m *MediaManager) sendWS(token string, msg WSOutbound) {

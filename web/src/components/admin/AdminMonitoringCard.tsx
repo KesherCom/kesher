@@ -5,7 +5,13 @@ import type { RealtimeStatsResponse } from "../../types";
 type AdminMonitoringCardProps = {
   token: string;
   adminPin: string;
-  audioStats: { inKbps: number; outKbps: number };
+  audioStats: {
+    inKbps: number;
+    outKbps: number;
+    jitterMs: number;
+    roundTripMs: number;
+    playoutDelayMs: number;
+  };
   activeRoutesCount: number;
 };
 const runtimeStatsPollIntervalMs = 2000;
@@ -95,6 +101,18 @@ export function AdminMonitoringCard({
             <div className="admin-metric-value">{audioStats.outKbps} kbps</div>
           </div>
           <div className="admin-metric">
+            <div className="admin-metric-label">RTP jitter</div>
+            <div className="admin-metric-value">{audioStats.jitterMs} ms</div>
+          </div>
+          <div className="admin-metric">
+            <div className="admin-metric-label">RTT</div>
+            <div className="admin-metric-value">{audioStats.roundTripMs} ms</div>
+          </div>
+          <div className="admin-metric">
+            <div className="admin-metric-label">Playout delay</div>
+            <div className="admin-metric-value">{audioStats.playoutDelayMs} ms</div>
+          </div>
+          <div className="admin-metric">
             <div className="admin-metric-label">Active routes</div>
             <div className="admin-metric-value">{activeRoutesCount}</div>
           </div>
@@ -161,9 +179,33 @@ export function AdminMonitoringCard({
             </div>
           </div>
           <div className="admin-metric">
+            <div className="admin-metric-label">Sync run avg/max</div>
+            <div className="admin-metric-value">
+              {stats
+                ? `${stats.media.syncRunAvgMs} / ${stats.media.syncRunMaxMs} ms`
+                : "—"}
+            </div>
+          </div>
+          <div className="admin-metric">
+            <div className="admin-metric-label">Voice state to sync avg/max</div>
+            <div className="admin-metric-value">
+              {stats
+                ? `${stats.media.voiceStateToSyncAvgMs} / ${stats.media.voiceStateToSyncMaxMs} ms`
+                : "—"}
+            </div>
+          </div>
+          <div className="admin-metric">
             <div className="admin-metric-label">Renegotiations</div>
             <div className="admin-metric-value">
               {stats ? stats.media.renegotiations : "—"}
+            </div>
+          </div>
+          <div className="admin-metric">
+            <div className="admin-metric-label">Renegotiation avg/max</div>
+            <div className="admin-metric-value">
+              {stats
+                ? `${stats.media.renegotiationAvgMs} / ${stats.media.renegotiationMaxMs} ms`
+                : "—"}
             </div>
           </div>
           <div className="admin-metric">
