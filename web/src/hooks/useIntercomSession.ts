@@ -27,6 +27,7 @@ import type {
 import { useLocalMic } from "./useLocalMic";
 import { useRemoteAudio } from "./useRemoteAudio";
 import { useRtpStats } from "./useRtpStats";
+import type { RtpStats } from "./useRtpStats";
 
 type WakeLockSentinelLike = {
   released: boolean;
@@ -81,17 +82,60 @@ type WsMessage =
   | { type: "session_revoked"; data: SessionRevokedEvent }
   | { type: "config_updated"; data: unknown };
 const opusMaxBitrateBps = 24000;
-const opusSpeechFmtpParams = [
+
+// Opus ptime/minptime can be overridden at runtime via localStorage for A/B
+// latency testing.  Set `localStorage.setItem('opus_ptime', '2.5')` and reload.
+// Valid values: "2.5", "5", "10", "20".  Default is "5".
+function getOpusPtime(): string {
+  try {
+    const v = localStorage.getItem("opus_ptime");
+    if (v && ["2.5", "5", "10", "20"].includes(v)) return v;
+  } catch {
+    /* ignore */
+  }
+  return "5";
+}
+function getOpusMinPtime(): string {
+  try {
+    const v = localStorage.getItem("opus_minptime");
+    if (v && ["2.5", "5", "10", "20"].includes(v)) return v;
+  } catch {
+    /* ignore */
+  }
+  return "2.5";
+}
+
+const opusSpeechFmtpParams: ReadonlyArray<readonly [string, string]> = [
   ["stereo", "0"],
   ["sprop-stereo", "0"],
-  ["useinbandfec", "1"],
+  ["useinbandfec", "0"],
   ["usedtx", "1"],
+  ["cbr", "1"],
+  ["ptime", getOpusPtime()],
+  ["minptime", getOpusMinPtime()],
   ["maxaveragebitrate", `${opusMaxBitrateBps}`],
-] as const;
+];
 
 const directRoutePriorityLevel = 3;
 const defaultRoutePriorityLevel = 1;
 const duckingGainLinear = 0.1;
+
+function getRoomMatrixSyncDebounceMs(): number {
+  try {
+    const raw = localStorage.getItem("room_matrix_debounce_ms");
+    if (raw != null) {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed)) {
+        return Math.max(5, Math.min(60, Math.trunc(parsed)));
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return 12;
+}
+
+const roomMatrixSyncDebounceMs = getRoomMatrixSyncDebounceMs();
 
 function clampPriorityLevel(value: number | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -100,7 +144,7 @@ function clampPriorityLevel(value: number | undefined): number {
   return Math.max(0, Math.min(3, Math.trunc(value)));
 }
 
-function upsertFmtpParams(existing: string): string {
+export function upsertFmtpParams(existing: string): string {
   const desired = Object.fromEntries(opusSpeechFmtpParams) as Record<
     string,
     string
@@ -123,7 +167,7 @@ function upsertFmtpParams(existing: string): string {
   return next.join(";");
 }
 
-function tuneOpusSdpForSpeech(sdp: string): string {
+export function tuneOpusSdpForSpeech(sdp: string): string {
   if (!sdp) return sdp;
   const lines = sdp.split("\r\n");
   const opusPayloadTypes = lines.flatMap((line) => {
@@ -152,6 +196,31 @@ function tuneOpusSdpForSpeech(sdp: string): string {
     }
   }
   return lines.join("\r\n");
+}
+
+type ReceiverWithPlayoutDelayHint = {
+  playoutDelayHint?: number;
+};
+
+export function trySetReceiverPlayoutDelayHint(
+  receiver: unknown,
+  delayHint: number,
+): boolean {
+  if (
+    !receiver ||
+    typeof receiver !== "object" ||
+    typeof delayHint !== "number" ||
+    !Number.isFinite(delayHint) ||
+    !("playoutDelayHint" in receiver)
+  ) {
+    return false;
+  }
+  try {
+    (receiver as ReceiverWithPlayoutDelayHint).playoutDelayHint = delayHint;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isMobileClient(): boolean {
@@ -262,7 +331,7 @@ export type UseIntercomSessionResult = {
     source?: string;
   }>;
   events: Array<{ label: string; at: string }>;
-  rtpStats: { inKbps: number; outKbps: number };
+  rtpStats: RtpStats;
   incomingAudioActive: boolean;
   activeVoiceRoutes: VoiceRoute[];
   incomingAttention: { title: string; detail: string } | null;
@@ -1472,6 +1541,7 @@ export function useIntercomSession({
           if (sourceUserID) {
             remote.remoteSourceUserIdRef.current.set(key, sourceUserID);
           }
+          trySetReceiverPlayoutDelayHint(event.receiver, 0);
           let audio = remote.remoteAudioRef.current.get(key);
           if (!audio) {
             audio = document.createElement("audio");
@@ -1483,7 +1553,7 @@ export function useIntercomSession({
           if (!remote.remoteAnalyserNodesRef.current.has(key)) {
             const AudioCtx = window.AudioContext;
             if (AudioCtx) {
-              const ctx = new AudioCtx();
+              const ctx = new AudioCtx({ latencyHint: "interactive" });
               const src = ctx.createMediaStreamSource(stream);
               const gain = ctx.createGain();
               const analyser = ctx.createAnalyser();
@@ -2225,7 +2295,7 @@ export function useIntercomSession({
         }),
       );
       pushDebugEvent(`system · matrix updated · ${anchorRoomId || "no-room"}`);
-    }, 120);
+    }, roomMatrixSyncDebounceMs);
     return () => clearRoomSwitchTimer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listenRoomIds, talkRoomIds]);

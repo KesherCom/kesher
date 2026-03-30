@@ -50,6 +50,8 @@ type Server struct {
 	companionWS                      map[string]map[chan CompanionCommandResult]struct{}
 	companionState                   map[string]map[chan struct{}]struct{}
 	companionPageByRole              map[string]int
+	companionPageButtonDown          map[string]bool
+	companionPageNavAnchorByRole     map[string]int
 	companionHeldTargets             map[string]string
 	companionPendingCallByUser       map[string]bool
 	companionPendingCallerByUser     map[string]string
@@ -430,6 +432,15 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			writeRejected("missing command")
 			continue
 		}
+		if in.Data.Command == "press_button" && s.logger != nil {
+			s.logger.Info("companion ws press_button raw",
+				"roleId", strings.TrimSpace(roleID),
+				"commandId", commandID,
+				"buttonIndex", in.Data.ButtonIndex,
+				"state", strings.TrimSpace(in.Data.State),
+				"pageNumber", in.Data.PageNumber,
+			)
+		}
 		resolvedRoleID := strings.TrimSpace(roleID)
 		if in.Data.Command == "press_button" {
 			if resolvedRoleID == "" {
@@ -440,81 +451,20 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			writeCommandResult(result)
 			continue
 		}
-		if in.Data.Command == "navigate_to_page" {
-			if resolvedRoleID == "" {
-				writeRejected("target role unavailable")
-				continue
+		if pageResult, handled := s.executeCompanionPageCommand(r.Context(), resolvedRoleID, resolveUsername(), in.Data); handled {
+			if pageResult.Timestamp == 0 {
+				pageResult.Timestamp = time.Now().UnixMilli()
 			}
-			settings, err := s.store.GetRoleStreamDeckSettings(r.Context(), resolvedRoleID)
-			if err != nil {
-				settings = DefaultStreamDeckSettings()
+			if strings.TrimSpace(pageResult.Source) == "" {
+				pageResult.Source = "bridge"
 			}
-			targetPage := in.Data.PageNumber
-			found := false
-			for _, p := range settings.Pages {
-				if p.Page == targetPage {
-					found = true
-					break
-				}
+			if strings.TrimSpace(pageResult.CommandID) == "" {
+				pageResult.CommandID = commandID
 			}
-			if !found && len(settings.Pages) > 0 {
-				targetPage = settings.Pages[0].Page
+			if strings.TrimSpace(pageResult.Command) == "" {
+				pageResult.Command = in.Data.Command
 			}
-			s.setCompanionCurrentPage(resolvedRoleID, targetPage)
-			s.emitCompanionCurrentPageImages(r.Context(), resolvedRoleID, resolveUsername())
-			writeCommandResult(CompanionCommandResult{
-				CommandID: commandID,
-				Command:   in.Data.Command,
-				OK:        true,
-				Status:    "executed",
-				Source:    "bridge",
-			})
-			continue
-		}
-		if in.Data.Command == "page_up" || in.Data.Command == "page_down" {
-			if resolvedRoleID == "" {
-				writeRejected("target role unavailable")
-				continue
-			}
-			settings, err := s.store.GetRoleStreamDeckSettings(r.Context(), resolvedRoleID)
-			if err != nil {
-				settings = DefaultStreamDeckSettings()
-			}
-			pageOrder := make([]int, 0, len(settings.Pages))
-			for _, entry := range settings.Pages {
-				pageOrder = append(pageOrder, entry.Page)
-			}
-			sort.Ints(pageOrder)
-			currentPage := s.currentCompanionPage(r.Context(), resolvedRoleID)
-			currentIndex := 0
-			for i, pageNo := range pageOrder {
-				if pageNo == currentPage {
-					currentIndex = i
-					break
-				}
-			}
-			offset := 1
-			if in.Data.Command == "page_down" {
-				offset = -1
-			}
-			nextIndex := currentIndex + offset
-			if nextIndex < 0 {
-				nextIndex = 0
-			}
-			if nextIndex >= len(pageOrder) {
-				nextIndex = len(pageOrder) - 1
-			}
-			if len(pageOrder) > 0 {
-				s.setCompanionCurrentPage(resolvedRoleID, pageOrder[nextIndex])
-				s.emitCompanionCurrentPageImages(r.Context(), resolvedRoleID, resolveUsername())
-			}
-			writeCommandResult(CompanionCommandResult{
-				CommandID: commandID,
-				Command:   in.Data.Command,
-				OK:        true,
-				Status:    "executed",
-				Source:    "bridge",
-			})
+			writeCommandResult(pageResult)
 			continue
 		}
 		resolvedUsername := resolveUsername()
@@ -646,6 +596,760 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			Source:    "bridge",
 		})
 	}
+}
+
+func companionPageOrder(settings StreamDeckSettings) []int {
+	seen := make(map[int]struct{}, len(settings.Pages))
+	ordered := make([]int, 0, len(settings.Pages))
+	for _, entry := range settings.Pages {
+		if _, ok := seen[entry.Page]; ok {
+			continue
+		}
+		seen[entry.Page] = struct{}{}
+		ordered = append(ordered, entry.Page)
+	}
+	if len(ordered) == 0 {
+		ordered = append(ordered, settings.SelectedPage)
+	}
+	sort.Ints(ordered)
+	return ordered
+}
+
+func companionPageByNumber(settings StreamDeckSettings) map[int]StreamDeckPageConfig {
+	pageByNumber := make(map[int]StreamDeckPageConfig, len(settings.Pages))
+	for _, page := range settings.Pages {
+		pageByNumber[page.Page] = page
+	}
+	return pageByNumber
+}
+
+func companionRootPageOrder(settings StreamDeckSettings) []int {
+	ordered := make([]int, 0, len(settings.Pages))
+	for _, page := range settings.Pages {
+		if page.ParentPage == nil {
+			ordered = append(ordered, page.Page)
+		}
+	}
+	if len(ordered) == 0 {
+		return companionPageOrder(settings)
+	}
+	sort.Ints(ordered)
+	return ordered
+}
+
+func companionHomePage(settings StreamDeckSettings, dynamic bool) int {
+	if dynamic {
+		return 0
+	}
+	order := companionRootPageOrder(settings)
+	if len(order) > 0 {
+		return order[0]
+	}
+	return 0
+}
+
+type companionRuntimePage struct {
+	Page       StreamDeckPageConfig
+	Dynamic    bool
+	TotalPages int
+}
+
+type companionPageEntry struct {
+	label  string
+	button StreamDeckButtonConfig
+}
+
+func companionSettingsHasExplicitDataActions(settings StreamDeckSettings) bool {
+	for _, page := range settings.Pages {
+		for _, button := range page.Buttons {
+			if button.Action == nil {
+				continue
+			}
+			switch button.Action.Type {
+			case StreamDeckActionTypeNone, StreamDeckActionTypePageUp, StreamDeckActionTypePageDown,
+				StreamDeckActionTypePageJump, StreamDeckActionTypePageHome, StreamDeckActionTypePageBack:
+				continue
+			default:
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func companionCloneButtons(buttons []StreamDeckButtonConfig) []StreamDeckButtonConfig {
+	cloned := make([]StreamDeckButtonConfig, 0, len(buttons))
+	for _, button := range buttons {
+		next := button
+		if button.Action != nil {
+			action := *button.Action
+			next.Action = &action
+		}
+		cloned = append(cloned, next)
+	}
+	return cloned
+}
+
+func companionBuildEmptyButtons(settings StreamDeckSettings) []StreamDeckButtonConfig {
+	buttonCount := companionGridButtonCount(settings)
+	buttons := make([]StreamDeckButtonConfig, 0, buttonCount)
+	for index := 0; index < buttonCount; index++ {
+		buttons = append(buttons, StreamDeckButtonConfig{Index: index})
+	}
+	return buttons
+}
+
+func companionRenderManualPage(settings StreamDeckSettings, page StreamDeckPageConfig) StreamDeckPageConfig {
+	buttons := companionCloneButtons(page.Buttons)
+	if len(buttons) == 0 {
+		buttons = companionBuildEmptyButtons(settings)
+	}
+	if page.ParentPage != nil && len(buttons) > 0 {
+		buttons[0] = StreamDeckButtonConfig{
+			Index: 0,
+			Label: "Back",
+			Action: &StreamDeckButtonAction{
+				Type: StreamDeckActionTypePageBack,
+			},
+		}
+	}
+	page.Buttons = buttons
+	return page
+}
+
+func (s *Server) companionAutoRoleEntries(ctx context.Context, roleID string) []companionPageEntry {
+	roles, err := s.store.ListRoles(ctx)
+	if err != nil {
+		return nil
+	}
+	entries := make([]companionPageEntry, 0, len(roles))
+	for _, role := range roles {
+		allowed, err := s.companionRoleCanDirectToRole(ctx, roleID, role.ID)
+		if err != nil || !allowed {
+			continue
+		}
+		entries = append(entries, companionPageEntry{
+			label: strings.TrimSpace(role.Name),
+			button: StreamDeckButtonConfig{
+				Label: strings.TrimSpace(role.Name),
+				Action: &StreamDeckButtonAction{Type: StreamDeckActionTypeDirectRole, RoleID: strings.TrimSpace(role.ID)},
+			},
+		})
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		left := strings.ToLower(entries[i].label)
+		right := strings.ToLower(entries[j].label)
+		if left == right {
+			return entries[i].button.Action.RoleID < entries[j].button.Action.RoleID
+		}
+		return left < right
+	})
+	return entries
+}
+
+func (s *Server) companionAutoPartyLineEntries(ctx context.Context, roleID string) []companionPageEntry {
+	rooms, err := s.store.ListRooms(ctx)
+	if err != nil {
+		return nil
+	}
+	entries := make([]companionPageEntry, 0, len(rooms))
+	for _, room := range rooms {
+		canTalk, err := s.store.RoomAllowsSenderRole(ctx, room.ID, roleID)
+		if err != nil {
+			continue
+		}
+		canListen, err := s.store.RoomAllowsReceiverRole(ctx, room.ID, roleID)
+		if err != nil {
+			continue
+		}
+		if !canTalk && !canListen {
+			continue
+		}
+		actionType := StreamDeckActionTypeListenRoom
+		if canTalk {
+			actionType = StreamDeckActionTypePTTRoom
+		}
+		entries = append(entries, companionPageEntry{
+			label: strings.TrimSpace(room.Name),
+			button: StreamDeckButtonConfig{
+				Label: strings.TrimSpace(room.Name),
+				Action: &StreamDeckButtonAction{Type: actionType, RoomID: strings.TrimSpace(room.ID)},
+			},
+		})
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		left := strings.ToLower(entries[i].label)
+		right := strings.ToLower(entries[j].label)
+		if left == right {
+			return entries[i].button.Action.RoomID < entries[j].button.Action.RoomID
+		}
+		return left < right
+	})
+	return entries
+}
+
+func companionAutoEntriesForPage(ctx context.Context, s *Server, roleID string, page StreamDeckPageConfig) []companionPageEntry {
+	switch page.PageType {
+	case StreamDeckPageTypeAllRoles:
+		return s.companionAutoRoleEntries(ctx, roleID)
+	case StreamDeckPageTypeAllPartyLines:
+		return s.companionAutoPartyLineEntries(ctx, roleID)
+	default:
+		return nil
+	}
+}
+
+func companionRenderAutoPage(settings StreamDeckSettings, page StreamDeckPageConfig, entries []companionPageEntry, pageIndex int) companionRuntimePage {
+	buttonCount := companionGridButtonCount(settings)
+	buttons := companionBuildEmptyButtons(settings)
+	hasParent := page.ParentPage != nil
+	startSlot := 0
+	if hasParent {
+		buttons[0] = StreamDeckButtonConfig{Index: 0, Label: "Back", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageBack}}
+		startSlot = 1
+	}
+	navSlots := 0
+	if len(entries) > 0 {
+		navSlots = 2
+	}
+	payloadSlots := buttonCount - startSlot - navSlots
+	if payloadSlots <= 0 {
+		payloadSlots = buttonCount - startSlot
+	}
+	totalPages := 1
+	if payloadSlots > 0 && len(entries) > 0 {
+		totalPages = (len(entries) + payloadSlots - 1) / payloadSlots
+	}
+	if totalPages <= 0 {
+		totalPages = 1
+	}
+	if pageIndex < 0 {
+		pageIndex = 0
+	}
+	if pageIndex >= totalPages {
+		pageIndex = totalPages - 1
+	}
+	if payloadSlots > 0 {
+		start := pageIndex * payloadSlots
+		end := start + payloadSlots
+		if end > len(entries) {
+			end = len(entries)
+		}
+		slot := startSlot
+		for itemIndex := start; itemIndex < end && slot < buttonCount; itemIndex++ {
+			mapped := entries[itemIndex].button
+			mapped.Index = slot
+			buttons[slot] = mapped
+			slot++
+		}
+	}
+	if len(entries) > payloadSlots && buttonCount >= 2 {
+		prevSlot := buttonCount - 2
+		nextSlot := buttonCount - 1
+		if pageIndex > 0 {
+			buttons[prevSlot] = StreamDeckButtonConfig{Index: prevSlot, Label: "Page -", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageDown}}
+		}
+		if pageIndex < totalPages-1 {
+			buttons[nextSlot] = StreamDeckButtonConfig{Index: nextSlot, Label: "Page +", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp}}
+		}
+	}
+	page.Buttons = buttons
+	return companionRuntimePage{Page: page, Dynamic: totalPages > 1, TotalPages: totalPages}
+}
+
+func (s *Server) companionResolvedSettings(ctx context.Context, roleID string, settings StreamDeckSettings) StreamDeckSettings {
+	if len(settings.Pages) == 0 {
+		return settings
+	}
+	maxPage := 0
+	for _, page := range settings.Pages {
+		if page.Page > maxPage {
+			maxPage = page.Page
+		}
+	}
+	nextGeneratedPage := maxPage + 1
+	expanded := StreamDeckSettings{
+		Version:      settings.Version,
+		GridColumns:  settings.GridColumns,
+		GridRows:     settings.GridRows,
+		SelectedPage: settings.SelectedPage,
+		Pages:        make([]StreamDeckPageConfig, 0, len(settings.Pages)),
+	}
+	for _, rawPage := range settings.Pages {
+		switch rawPage.PageType {
+		case StreamDeckPageTypeAllRoles, StreamDeckPageTypeAllPartyLines:
+			entries := companionAutoEntriesForPage(ctx, s, roleID, rawPage)
+			buttonCount := companionGridButtonCount(settings)
+			startSlot := 0
+			if rawPage.ParentPage != nil {
+				startSlot = 1
+			}
+			payloadSlots := buttonCount - startSlot - 2
+			if payloadSlots <= 0 {
+				payloadSlots = buttonCount - startSlot
+			}
+			if payloadSlots <= 0 {
+				payloadSlots = 1
+			}
+			totalPages := 1
+			if len(entries) > 0 {
+				totalPages = (len(entries) + payloadSlots - 1) / payloadSlots
+				if totalPages <= 0 {
+					totalPages = 1
+				}
+			}
+			generatedPageNumbers := make([]int, totalPages)
+			generatedPageNumbers[0] = rawPage.Page
+			for i := 1; i < totalPages; i++ {
+				generatedPageNumbers[i] = nextGeneratedPage
+				nextGeneratedPage++
+			}
+			for index := 0; index < totalPages; index++ {
+				buttons := companionBuildEmptyButtons(settings)
+				slot := startSlot
+				start := index * payloadSlots
+				end := start + payloadSlots
+				if end > len(entries) {
+					end = len(entries)
+				}
+				for itemIndex := start; itemIndex < end && slot < buttonCount; itemIndex++ {
+					button := entries[itemIndex].button
+					button.Index = slot
+					buttons[slot] = button
+					slot++
+				}
+				if rawPage.ParentPage != nil {
+					buttons[0] = StreamDeckButtonConfig{Index: 0, Label: "Back", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageBack}}
+				}
+				if totalPages > 1 && buttonCount >= 2 {
+					prevSlot := buttonCount - 2
+					nextSlot := buttonCount - 1
+					if index > 0 {
+						buttons[prevSlot] = StreamDeckButtonConfig{Index: prevSlot, Label: "Page -", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageJump, TargetPage: generatedPageNumbers[index-1]}}
+					}
+					if index < totalPages-1 {
+						buttons[nextSlot] = StreamDeckButtonConfig{Index: nextSlot, Label: "Page +", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageJump, TargetPage: generatedPageNumbers[index+1]}}
+					}
+				}
+				title := rawPage.Title
+				if strings.TrimSpace(title) == "" {
+					switch rawPage.PageType {
+					case StreamDeckPageTypeAllRoles:
+						title = "All roles"
+					case StreamDeckPageTypeAllPartyLines:
+						title = "All party-lines"
+					}
+				}
+				if totalPages > 1 {
+					title = strings.TrimSpace(title)
+					if title == "" {
+						title = "Folder"
+					}
+					title = fmt.Sprintf("%s %d/%d", title, index+1, totalPages)
+				}
+				expanded.Pages = append(expanded.Pages, StreamDeckPageConfig{
+					Page:       generatedPageNumbers[index],
+					Title:      title,
+					PageType:   StreamDeckPageTypeManual,
+					ParentPage: rawPage.ParentPage,
+					Buttons:    buttons,
+				})
+			}
+		default:
+			expanded.Pages = append(expanded.Pages, companionRenderManualPage(settings, rawPage))
+		}
+	}
+	if expanded.SelectedPage < 0 {
+		expanded.SelectedPage = companionHomePage(expanded, false)
+	}
+	return expanded
+}
+
+func (s *Server) buildCompanionChannelRuntimePage(ctx context.Context, roleID string, settings StreamDeckSettings, cursor int) (companionRuntimePage, bool) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" || s.store == nil {
+		return companionRuntimePage{}, false
+	}
+	rooms, err := s.store.ListRooms(ctx)
+	if err != nil {
+		return companionRuntimePage{}, false
+	}
+
+	type runtimeChannel struct {
+		name   string
+		id     string
+		action StreamDeckActionType
+	}
+	channels := make([]runtimeChannel, 0, len(rooms))
+	for _, room := range rooms {
+		canTalk, err := s.store.RoomAllowsSenderRole(ctx, room.ID, roleID)
+		if err != nil {
+			continue
+		}
+		canListen, err := s.store.RoomAllowsReceiverRole(ctx, room.ID, roleID)
+		if err != nil {
+			continue
+		}
+		if !canTalk && !canListen {
+			continue
+		}
+		action := StreamDeckActionTypeListenRoom
+		if canTalk {
+			action = StreamDeckActionTypePTTRoom
+		}
+		channels = append(channels, runtimeChannel{
+			name:   strings.TrimSpace(room.Name),
+			id:     strings.TrimSpace(room.ID),
+			action: action,
+		})
+	}
+	if len(channels) == 0 {
+		return companionRuntimePage{}, false
+	}
+
+	sort.SliceStable(channels, func(i, j int) bool {
+		leftName := strings.ToLower(channels[i].name)
+		rightName := strings.ToLower(channels[j].name)
+		if leftName == rightName {
+			return channels[i].id < channels[j].id
+		}
+		return leftName < rightName
+	})
+
+	buttonCount := companionGridButtonCount(settings)
+	if buttonCount < 3 {
+		return companionRuntimePage{}, false
+	}
+	payloadSlots := buttonCount - 2
+	if payloadSlots <= 0 {
+		return companionRuntimePage{}, false
+	}
+	totalPages := (len(channels) + payloadSlots - 1) / payloadSlots
+	if totalPages <= 0 {
+		totalPages = 1
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= totalPages {
+		cursor = totalPages - 1
+	}
+
+	start := cursor * payloadSlots
+	end := start + payloadSlots
+	if end > len(channels) {
+		end = len(channels)
+	}
+
+	buttons := make([]StreamDeckButtonConfig, 0, buttonCount)
+	for i := 0; i < buttonCount; i++ {
+		buttons = append(buttons, StreamDeckButtonConfig{Index: i})
+	}
+	for slot := 0; slot < payloadSlots && (start+slot) < end; slot++ {
+		channel := channels[start+slot]
+		buttons[slot] = StreamDeckButtonConfig{
+			Index: slot,
+			Label: channel.name,
+			Action: &StreamDeckButtonAction{
+				Type:   channel.action,
+				RoomID: channel.id,
+			},
+		}
+	}
+
+	prevSlot := buttonCount - 2
+	nextSlot := buttonCount - 1
+	if cursor > 0 {
+		buttons[prevSlot] = StreamDeckButtonConfig{
+			Index:  prevSlot,
+			Label:  "Page -",
+			Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageDown},
+		}
+	}
+	if cursor < totalPages-1 {
+		buttons[nextSlot] = StreamDeckButtonConfig{
+			Index:  nextSlot,
+			Label:  "Page +",
+			Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp},
+		}
+	}
+
+	return companionRuntimePage{
+		Page:       StreamDeckPageConfig{Page: cursor, Buttons: buttons},
+		Dynamic:    true,
+		TotalPages: totalPages,
+	}, true
+}
+
+func (s *Server) resolveCompanionRuntimePage(ctx context.Context, roleID string, settings StreamDeckSettings, currentPage int) companionRuntimePage {
+	if page, ok := companionPageByNumber(settings)[currentPage]; ok {
+		if page.PageType == StreamDeckPageTypeAllRoles || page.PageType == StreamDeckPageTypeAllPartyLines {
+			entries := companionAutoEntriesForPage(ctx, s, roleID, page)
+			return companionRenderAutoPage(settings, page, entries, 0)
+		}
+	}
+	if !s.cfg.CompanionDynamicPaging {
+		return companionResolveStaticRuntimePage(settings, currentPage)
+	}
+	if companionSettingsHasExplicitDataActions(settings) {
+		return companionResolveRuntimePage(settings, currentPage)
+	}
+	if runtime, ok := s.buildCompanionChannelRuntimePage(ctx, roleID, settings, currentPage); ok {
+		return runtime
+	}
+	return companionResolveRuntimePage(settings, currentPage)
+}
+
+func companionGridButtonCount(settings StreamDeckSettings) int {
+	count := settings.GridColumns * settings.GridRows
+	if count <= 0 {
+		return StreamDeckButtonCount
+	}
+	return count
+}
+
+func companionCollectSlidingDataButtons(settings StreamDeckSettings) []StreamDeckButtonConfig {
+	if len(settings.Pages) == 0 {
+		return nil
+	}
+	order := companionPageOrder(settings)
+	if len(order) == 0 {
+		return nil
+	}
+	pageByNumber := make(map[int]StreamDeckPageConfig, len(settings.Pages))
+	for _, page := range settings.Pages {
+		pageByNumber[page.Page] = page
+	}
+	data := make([]StreamDeckButtonConfig, 0)
+	for _, pageNo := range order {
+		page, ok := pageByNumber[pageNo]
+		if !ok {
+			continue
+		}
+		orderedButtons := append([]StreamDeckButtonConfig(nil), page.Buttons...)
+		sort.Slice(orderedButtons, func(i, j int) bool {
+			return orderedButtons[i].Index < orderedButtons[j].Index
+		})
+		for _, button := range orderedButtons {
+			if button.Action == nil {
+				continue
+			}
+			switch button.Action.Type {
+			case StreamDeckActionTypeNone, StreamDeckActionTypePageUp, StreamDeckActionTypePageDown,
+				StreamDeckActionTypePageJump, StreamDeckActionTypePageHome:
+				continue
+			default:
+				data = append(data, button)
+			}
+		}
+	}
+	return data
+}
+
+func companionBuildSlidingRuntimePage(settings StreamDeckSettings, cursor int) (companionRuntimePage, bool) {
+	buttonCount := companionGridButtonCount(settings)
+	if buttonCount < 3 {
+		return companionRuntimePage{}, false
+	}
+	dataButtons := companionCollectSlidingDataButtons(settings)
+	if len(dataButtons) == 0 {
+		return companionRuntimePage{}, false
+	}
+	payloadSlots := buttonCount - 2
+	if payloadSlots <= 0 {
+		return companionRuntimePage{}, false
+	}
+	totalPages := (len(dataButtons) + payloadSlots - 1) / payloadSlots
+	if totalPages <= 0 {
+		totalPages = 1
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= totalPages {
+		cursor = totalPages - 1
+	}
+	start := cursor * payloadSlots
+	end := start + payloadSlots
+	if end > len(dataButtons) {
+		end = len(dataButtons)
+	}
+
+	buttons := make([]StreamDeckButtonConfig, 0, buttonCount)
+	for i := 0; i < buttonCount; i++ {
+		buttons = append(buttons, StreamDeckButtonConfig{Index: i})
+	}
+
+	for slot := 0; slot < payloadSlots && (start+slot) < end; slot++ {
+		mapped := dataButtons[start+slot]
+		mapped.Index = slot
+		buttons[slot] = mapped
+	}
+
+	prevSlot := buttonCount - 2
+	nextSlot := buttonCount - 1
+	if cursor > 0 {
+		buttons[prevSlot] = StreamDeckButtonConfig{
+			Index:  prevSlot,
+			Label:  "Page -",
+			Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageDown},
+		}
+	}
+	if cursor < totalPages-1 {
+		buttons[nextSlot] = StreamDeckButtonConfig{
+			Index:  nextSlot,
+			Label:  "Page +",
+			Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp},
+		}
+	}
+
+	return companionRuntimePage{
+		Page: StreamDeckPageConfig{
+			Page:    cursor,
+			Buttons: buttons,
+		},
+		Dynamic:    true,
+		TotalPages: totalPages,
+	}, true
+}
+
+func companionResolveStaticRuntimePage(settings StreamDeckSettings, currentPage int) companionRuntimePage {
+	page := companionRenderManualPage(settings, companionResolvePageConfig(settings, currentPage))
+	order := companionPageOrder(settings)
+	totalPages := len(order)
+	if totalPages <= 0 {
+		totalPages = 1
+	}
+	return companionRuntimePage{Page: page, Dynamic: false, TotalPages: totalPages}
+}
+
+func companionResolveRuntimePage(settings StreamDeckSettings, currentPage int) companionRuntimePage {
+	if runtime, ok := companionBuildSlidingRuntimePage(settings, currentPage); ok {
+		return runtime
+	}
+	return companionResolveStaticRuntimePage(settings, currentPage)
+}
+
+func companionResolvePageConfig(settings StreamDeckSettings, currentPage int) StreamDeckPageConfig {
+	if len(settings.Pages) == 0 {
+		fallback := DefaultStreamDeckSettings()
+		if len(fallback.Pages) > 0 {
+			return fallback.Pages[0]
+		}
+		return StreamDeckPageConfig{Page: currentPage, Buttons: nil}
+	}
+	for _, candidate := range settings.Pages {
+		if candidate.Page == currentPage {
+			return candidate
+		}
+	}
+	return settings.Pages[0]
+}
+
+func (s *Server) executeCompanionPageCommand(ctx context.Context, roleID, username string, command CompanionCommand) (CompanionCommandResult, bool) {
+	cmd := strings.TrimSpace(command.Command)
+	if cmd != "navigate_to_page" && cmd != "page_up" && cmd != "page_down" && cmd != "page_jump" && cmd != "page_home" && cmd != "page_back" {
+		return CompanionCommandResult{}, false
+	}
+	result := CompanionCommandResult{
+		CommandID: command.CommandID,
+		Command:   command.Command,
+		Source:    "bridge",
+		Timestamp: time.Now().UnixMilli(),
+	}
+	if strings.TrimSpace(roleID) == "" {
+		result.OK = false
+		result.Status = "failed"
+		result.Error = "target role unavailable"
+		return result, true
+	}
+	settings, err := s.store.GetRoleStreamDeckSettings(ctx, roleID)
+	if err != nil {
+		settings = DefaultStreamDeckSettings()
+	}
+	settings = s.companionResolvedSettings(ctx, roleID, settings)
+
+	targetPage := s.currentCompanionPage(ctx, roleID)
+	runtime := s.resolveCompanionRuntimePage(ctx, roleID, settings, targetPage)
+	if runtime.Dynamic {
+		maxPage := runtime.TotalPages - 1
+		if maxPage < 0 {
+			maxPage = 0
+		}
+		switch cmd {
+		case "navigate_to_page", "page_jump":
+			targetPage = command.PageNumber
+		case "page_home":
+			targetPage = companionHomePage(settings, true)
+		case "page_back":
+			if page, ok := companionPageByNumber(settings)[targetPage]; ok && page.ParentPage != nil {
+				targetPage = *page.ParentPage
+			}
+		case "page_up":
+			targetPage = targetPage + 1
+		default:
+			targetPage = targetPage - 1
+		}
+		if targetPage < 0 {
+			targetPage = 0
+		}
+		if targetPage > maxPage {
+			targetPage = maxPage
+		}
+	} else {
+		pageOrder := companionPageOrder(settings)
+		switch cmd {
+		case "navigate_to_page", "page_jump":
+			targetPage = command.PageNumber
+			found := false
+			for _, pageNo := range pageOrder {
+				if pageNo == targetPage {
+					found = true
+					break
+				}
+			}
+			if !found && len(pageOrder) > 0 {
+				targetPage = pageOrder[0]
+			}
+		case "page_home":
+			targetPage = companionHomePage(settings, false)
+		case "page_back":
+			if page, ok := companionPageByNumber(settings)[targetPage]; ok && page.ParentPage != nil {
+				targetPage = *page.ParentPage
+			}
+		default:
+			currentIndex := 0
+			for i, pageNo := range pageOrder {
+				if pageNo == targetPage {
+					currentIndex = i
+					break
+				}
+			}
+			offset := 1
+			if cmd == "page_down" {
+				offset = -1
+			}
+			nextIndex := currentIndex + offset
+			if nextIndex < 0 {
+				nextIndex = 0
+			}
+			if nextIndex >= len(pageOrder) {
+				nextIndex = len(pageOrder) - 1
+			}
+			if len(pageOrder) > 0 {
+				targetPage = pageOrder[nextIndex]
+			}
+		}
+	}
+
+	s.setCompanionCurrentPage(roleID, targetPage)
+	if s.imageStreamCoord != nil {
+		s.imageStreamCoord.ResetTargetCache(roleID, username)
+	}
+	s.emitCompanionCurrentPageImages(ctx, roleID, username)
+	result.OK = true
+	result.Status = "executed"
+	return result, true
 }
 
 func (s *Server) companionRoleCanDirectToRole(ctx context.Context, sourceRoleID, targetRoleID string) (bool, error) {
@@ -826,6 +1530,8 @@ func (s *Server) normalizeCompanionRelayCommand(ctx context.Context, sourceRoleI
 			return CompanionCommand{}, errors.New("missing volumeDelta")
 		}
 		return normalized, nil
+	case "navigate_to_page", "page_up", "page_down", "page_jump", "page_home", "page_back":
+		return normalized, nil
 	case "set_streamdeck_brightness", "clear_streamdeck_panel", "reset_streamdeck":
 		return normalized, nil
 	default:
@@ -976,6 +1682,88 @@ func (s *Server) setCompanionCurrentPage(roleID string, page int) {
 	s.companionPageByRole[roleID] = page
 	s.companionMu.Unlock()
 	s.publishCompanionState(roleID)
+}
+
+func (s *Server) markCompanionPageButtonDown(roleID string, buttonIndex int) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return
+	}
+	key := fmt.Sprintf("%s:%d", roleID, buttonIndex)
+	s.companionMu.Lock()
+	if s.companionPageButtonDown == nil {
+		s.companionPageButtonDown = make(map[string]bool)
+	}
+	s.companionPageButtonDown[key] = true
+	s.companionMu.Unlock()
+}
+
+func (s *Server) consumeCompanionPageButtonDown(roleID string, buttonIndex int) bool {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return false
+	}
+	key := fmt.Sprintf("%s:%d", roleID, buttonIndex)
+	s.companionMu.Lock()
+	defer s.companionMu.Unlock()
+	if s.companionPageButtonDown == nil {
+		return false
+	}
+	if !s.companionPageButtonDown[key] {
+		return false
+	}
+	delete(s.companionPageButtonDown, key)
+	return true
+}
+
+func (s *Server) setCompanionPageNavAnchor(roleID string, buttonIndex int) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return
+	}
+	s.companionMu.Lock()
+	if s.companionPageNavAnchorByRole == nil {
+		s.companionPageNavAnchorByRole = make(map[string]int)
+	}
+	s.companionPageNavAnchorByRole[roleID] = buttonIndex
+	s.companionMu.Unlock()
+}
+
+func (s *Server) hasCompanionPageNavAnchor(roleID string, buttonIndex int) bool {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return false
+	}
+	s.companionMu.RLock()
+	defer s.companionMu.RUnlock()
+	if s.companionPageNavAnchorByRole == nil {
+		return false
+	}
+	anchoredIndex, ok := s.companionPageNavAnchorByRole[roleID]
+	if !ok {
+		return false
+	}
+	return anchoredIndex == buttonIndex
+}
+
+func companionResolveUniqueNavigationAction(buttons []StreamDeckButtonConfig) *StreamDeckButtonConfig {
+	var resolved *StreamDeckButtonConfig
+	for i := range buttons {
+		candidate := buttons[i]
+		if candidate.Action == nil {
+			continue
+		}
+		if candidate.Action.Type != StreamDeckActionTypePageUp && candidate.Action.Type != StreamDeckActionTypePageDown &&
+			candidate.Action.Type != StreamDeckActionTypePageJump && candidate.Action.Type != StreamDeckActionTypePageHome {
+			continue
+		}
+		if resolved != nil {
+			return nil
+		}
+		copyCandidate := candidate
+		resolved = &copyCandidate
+	}
+	return resolved
 }
 
 func (s *Server) publishCompanionPresenceUpdate(ctx context.Context, roleID string) {
@@ -1378,14 +2166,10 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		}
 		settings = DefaultStreamDeckSettings()
 	}
+	settings = s.companionResolvedSettings(ctx, roleID, settings)
 	currentPage := s.currentCompanionPage(ctx, roleID)
-	page := settings.Pages[0]
-	for _, candidate := range settings.Pages {
-		if candidate.Page == currentPage {
-			page = candidate
-			break
-		}
-	}
+	runtimePage := s.resolveCompanionRuntimePage(ctx, roleID, settings, currentPage)
+	page := runtimePage.Page
 	var button *StreamDeckButtonConfig
 	for i := range page.Buttons {
 		if page.Buttons[i].Index == command.ButtonIndex {
@@ -1393,7 +2177,39 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			break
 		}
 	}
+	if (button == nil || button.Action == nil || button.Action.Type == StreamDeckActionTypeNone) && s.hasCompanionPageNavAnchor(roleID, command.ButtonIndex) {
+		button = companionResolveUniqueNavigationAction(page.Buttons)
+	}
+	if (button == nil || button.Action == nil || button.Action.Type == StreamDeckActionTypeNone) && runtimePage.Dynamic {
+		buttonCount := companionGridButtonCount(settings)
+		prevSlot := buttonCount - 2
+		nextSlot := buttonCount - 1
+		if command.ButtonIndex == nextSlot && currentPage > 0 {
+			button = &StreamDeckButtonConfig{
+				Index:  nextSlot,
+				Label:  "Page -",
+				Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageDown},
+			}
+		} else if command.ButtonIndex == prevSlot && currentPage < runtimePage.TotalPages-1 {
+			button = &StreamDeckButtonConfig{
+				Index:  prevSlot,
+				Label:  "Page +",
+				Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp},
+			}
+		}
+	}
 	if button == nil || button.Action == nil || button.Action.Type == StreamDeckActionTypeNone {
+		if s.logger != nil {
+			s.logger.Info("companion press_button no-op",
+				"roleId", roleID,
+				"username", username,
+				"buttonIndex", command.ButtonIndex,
+				"phase", command.State,
+				"currentPage", currentPage,
+				"dynamic", runtimePage.Dynamic,
+				"totalPages", runtimePage.TotalPages,
+			)
+		}
 		s.emitCompanionButtonImage(ctx, roleID, username, page.Page, nil, ButtonState{State: "IDLE"})
 		result.OK = true
 		result.Status = "executed"
@@ -1403,6 +2219,23 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 	phase := strings.TrimSpace(command.State)
 	if phase == "" {
 		phase = "down"
+	}
+	if s.logger != nil {
+		s.logger.Info("companion press_button mapped",
+			"roleId", roleID,
+			"username", username,
+			"buttonIndex", command.ButtonIndex,
+			"phase", phase,
+			"currentPage", currentPage,
+			"runtimePage", page.Page,
+			"dynamic", runtimePage.Dynamic,
+			"totalPages", runtimePage.TotalPages,
+			"actionType", button.Action.Type,
+			"actionRoomId", button.Action.RoomID,
+			"actionUserId", button.Action.UserID,
+			"actionRoleId", button.Action.RoleID,
+			"actionBroadcastGroupId", button.Action.BroadcastGroupID,
+		)
 	}
 	if phase == "down" && button.Action != nil && s.hasCompanionPendingIncomingCall(strings.TrimSpace(username)) {
 		sourceType, sourceID, hasSource := s.companionPendingIncomingCallSource(strings.TrimSpace(username))
@@ -1523,33 +2356,132 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 
 	switch button.Action.Type {
 	case StreamDeckActionTypePageUp, StreamDeckActionTypePageDown:
-		pageOrder := make([]int, 0, len(settings.Pages))
-		for _, entry := range settings.Pages {
-			pageOrder = append(pageOrder, entry.Page)
+		if phase == "up" {
+			if s.consumeCompanionPageButtonDown(roleID, command.ButtonIndex) {
+				result.OK = true
+				result.Status = "executed"
+				return result
+			}
+		} else {
+			s.markCompanionPageButtonDown(roleID, command.ButtonIndex)
 		}
-		sort.Ints(pageOrder)
-		currentIndex := 0
-		for i, pageNo := range pageOrder {
-			if pageNo == currentPage {
-				currentIndex = i
-				break
+		if phase != "down" && phase != "up" {
+			result.OK = true
+			result.Status = "executed"
+			return result
+		}
+		targetPage := currentPage
+		if runtimePage.Dynamic {
+			if button.Action.Type == StreamDeckActionTypePageUp {
+				targetPage = currentPage + 1
+			} else {
+				targetPage = currentPage - 1
+			}
+			maxPage := runtimePage.TotalPages - 1
+			if maxPage < 0 {
+				maxPage = 0
+			}
+			if targetPage < 0 {
+				targetPage = 0
+			}
+			if targetPage > maxPage {
+				targetPage = maxPage
+			}
+		} else {
+			pageOrder := companionPageOrder(settings)
+			pageToIndex := make(map[int]int, len(pageOrder))
+			for i, pageNo := range pageOrder {
+				pageToIndex[pageNo] = i
+			}
+			currentIndex := pageToIndex[currentPage]
+			offset := 1
+			if button.Action.Type == StreamDeckActionTypePageDown {
+				offset = -1
+			}
+			nextIndex := currentIndex + offset
+			if nextIndex < 0 {
+				nextIndex = 0
+			}
+			if nextIndex >= len(pageOrder) {
+				nextIndex = len(pageOrder) - 1
+			}
+			if len(pageOrder) > 0 {
+				targetPage = pageOrder[nextIndex]
 			}
 		}
-		offset := 1
-		if button.Action.Type == StreamDeckActionTypePageDown {
-			offset = -1
+		if s.logger != nil {
+			s.logger.Info("companion page navigation",
+				"roleId", roleID,
+				"username", username,
+				"buttonIndex", command.ButtonIndex,
+				"phase", phase,
+				"actionType", button.Action.Type,
+				"dynamic", runtimePage.Dynamic,
+				"fromPage", currentPage,
+				"toPage", targetPage,
+				"totalPages", runtimePage.TotalPages,
+			)
 		}
-		nextIndex := currentIndex + offset
-		if nextIndex < 0 {
-			nextIndex = 0
+		s.setCompanionCurrentPage(roleID, targetPage)
+		if s.imageStreamCoord != nil {
+			s.imageStreamCoord.ResetTargetCache(roleID, username)
 		}
-		if nextIndex >= len(pageOrder) {
-			nextIndex = len(pageOrder) - 1
+		s.setCompanionPageNavAnchor(roleID, command.ButtonIndex)
+		emitCompanionCurrentPageImages()
+		emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE"})
+		result.OK = true
+		result.Status = "executed"
+		return result
+	case StreamDeckActionTypePageJump, StreamDeckActionTypePageHome:
+		if phase != "down" {
+			result.OK = true
+			result.Status = "executed"
+			return result
 		}
-		if len(pageOrder) > 0 {
-			s.setCompanionCurrentPage(roleID, pageOrder[nextIndex])
-			emitCompanionCurrentPageImages()
+		jumpTarget := button.Action.TargetPage
+		if button.Action.Type == StreamDeckActionTypePageHome {
+			jumpTarget = companionHomePage(settings, runtimePage.Dynamic)
 		}
+		if runtimePage.Dynamic {
+			maxPage := runtimePage.TotalPages - 1
+			if maxPage < 0 {
+				maxPage = 0
+			}
+			if jumpTarget < 0 {
+				jumpTarget = 0
+			}
+			if jumpTarget > maxPage {
+				jumpTarget = maxPage
+			}
+		} else {
+			pageOrder := companionPageOrder(settings)
+			found := false
+			for _, pageNo := range pageOrder {
+				if pageNo == jumpTarget {
+					found = true
+					break
+				}
+			}
+			if !found && len(pageOrder) > 0 {
+				jumpTarget = pageOrder[0]
+			}
+		}
+		if s.logger != nil {
+			s.logger.Info("companion page navigation",
+				"roleId", roleID,
+				"username", username,
+				"buttonIndex", command.ButtonIndex,
+				"phase", phase,
+				"actionType", button.Action.Type,
+				"fromPage", currentPage,
+				"toPage", jumpTarget,
+			)
+		}
+		s.setCompanionCurrentPage(roleID, jumpTarget)
+		if s.imageStreamCoord != nil {
+			s.imageStreamCoord.ResetTargetCache(roleID, username)
+		}
+		emitCompanionCurrentPageImages()
 		emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE"})
 		result.OK = true
 		result.Status = "executed"
@@ -2002,6 +2934,7 @@ func (s *Server) emitCompanionCurrentPageImages(ctx context.Context, roleID stri
 			return
 		}
 	}
+	settings = s.companionResolvedSettings(ctx, roleID, settings)
 
 	currentPage := s.currentCompanionPage(ctx, roleID)
 	renderUsername := strings.TrimSpace(username)
@@ -2011,13 +2944,8 @@ func (s *Server) emitCompanionCurrentPageImages(ctx context.Context, roleID stri
 		}
 	}
 	presence, _ := s.hub.PresenceForUsername(renderUsername)
-	page := settings.Pages[0]
-	for _, candidate := range settings.Pages {
-		if candidate.Page == currentPage {
-			page = candidate
-			break
-		}
-	}
+	runtimePage := s.resolveCompanionRuntimePage(ctx, roleID, settings, currentPage)
+	page := runtimePage.Page
 
 	for i := range page.Buttons {
 		button := &page.Buttons[i]
@@ -2193,6 +3121,13 @@ func (s *Server) resolveButtonLabel(ctx context.Context, button StreamDeckButton
 		return "Page +", ""
 	case StreamDeckActionTypePageDown:
 		return "Page -", ""
+	case StreamDeckActionTypePageHome:
+		return "Home", ""
+	case StreamDeckActionTypePageJump:
+		if action.TargetPage >= 0 {
+			return fmt.Sprintf("Page %d", action.TargetPage+1), ""
+		}
+		return "Jump", ""
 	}
 	return fallbackButtonLabel(action.Type), ""
 }
@@ -2388,6 +3323,8 @@ func NewServer(cfg Config) (*Server, error) {
 		companionWS:                      make(map[string]map[chan CompanionCommandResult]struct{}),
 		companionState:                   make(map[string]map[chan struct{}]struct{}),
 		companionPageByRole:              make(map[string]int),
+		companionPageButtonDown:          make(map[string]bool),
+		companionPageNavAnchorByRole:     make(map[string]int),
 		companionHeldTargets:             make(map[string]string),
 		companionPendingCallByUser:       make(map[string]bool),
 		companionPendingCallerByUser:     make(map[string]string),
@@ -3346,6 +4283,7 @@ func (s *Server) buildCompanionProfileResponse(ctx context.Context, targetUser U
 		}
 		settings = DefaultStreamDeckSettings()
 	}
+	settings = s.companionResolvedSettings(ctx, targetUser.RoleID, settings)
 	pageNumber, err := s.store.GetCompanionRolePage(ctx, targetUser.RoleID)
 	if err != nil {
 		return CompanionProfileResponse{}, err
@@ -4296,8 +5234,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		voiceMode:       initialVoiceMode,
 		micEnabled:      initialMicEnabled,
 		broadcastGroups: make(map[string]struct{}),
-		send:            make(chan WSOutbound, 128),
-		sendPriority:    make(chan WSOutbound, 128),
+		send:            make(chan WSOutbound, 512),
+		sendPriority:    make(chan WSOutbound, 512),
 	}
 	s.hub.Add(c)
 	// Send current presence snapshot to newly connected client so they see all other users
@@ -4370,6 +5308,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			var e RoomMatrixEvent
 			_ = json.Unmarshal(raw, &e)
 			prevListen := s.hub.ListenRoomsForToken(session.Token)
+			prevTalk := s.hub.TalkRoomsForToken(session.Token)
 			allowedListen := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, e.ListenRoomIDs, false)
 			allowedListen = s.mergeForcedListenRooms(r.Context(), session.RoleID, allowedListen)
 			allowedTalk := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, e.TalkRoomIDs, true)
@@ -4379,7 +5318,16 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				s.hub.SendRoomChatHistory(session.Token, newlyListened)
 			}
 			if mediaReady {
-				s.media.SyncRouting()
+				listenChanged := !roomSetsEqual(prevListen, allowedListen)
+				talkChanged := !roomSetsEqual(prevTalk, allowedTalk)
+				switch {
+				case listenChanged:
+					// Listen changes can affect gates for many sources that target this peer.
+					s.media.SyncRouting()
+				case talkChanged:
+					// Talk-only changes affect this source's outgoing routing decisions.
+					s.media.SyncRoutingSource(session.Token)
+				}
 			}
 			// Notify Companion clients of listen-state changes so button images update immediately
 			s.publishCompanionPresenceUpdate(r.Context(), session.RoleID)
@@ -4401,6 +5349,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			_ = json.Unmarshal(raw, &e)
 			if !s.isInboundAllowed(r.Context(), session, e) {
 				continue
+			}
+			if mediaReady && s.media != nil {
+				s.media.NoteVoiceStateTrigger()
 			}
 			s.hub.SetVoiceState(session.Token, e.Body)
 			if e.Scope == "room" && (e.Body == "always_on" || e.Body == "ptt_start") {
@@ -4638,6 +5589,29 @@ func addedRooms(previous []string, next []string) []string {
 		added = append(added, roomID)
 	}
 	return added
+}
+
+func roomSetsEqual(a []string, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]struct{}, len(a))
+	for _, roomID := range a {
+		if roomID == "" {
+			continue
+		}
+		set[roomID] = struct{}{}
+	}
+	for _, roomID := range b {
+		if roomID == "" {
+			continue
+		}
+		if _, ok := set[roomID]; !ok {
+			return false
+		}
+		delete(set, roomID)
+	}
+	return len(set) == 0
 }
 
 func (s *Server) resolveRoomTargetID(ctx context.Context, target string) (string, bool) {

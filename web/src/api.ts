@@ -210,6 +210,9 @@ export function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
     "volume_delta",
     "page_up",
     "page_down",
+    "page_jump",
+    "page_home",
+    "page_back",
   ];
   const raw = (data ?? {}) as Record<string, unknown>;
   const version =
@@ -274,6 +277,10 @@ export function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
                   typeof actionRaw.volumeDelta === "number"
                     ? actionRaw.volumeDelta
                     : undefined,
+                targetPage:
+                  typeof actionRaw.targetPage === "number"
+                    ? actionRaw.targetPage
+                    : undefined,
               }
             : undefined;
           return {
@@ -287,6 +294,7 @@ export function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
         })
         .filter((button) => button.index >= 0);
       return { page: pageNo, buttons };
+
     })
     .filter((page) => page.page >= 0);
 
@@ -298,7 +306,25 @@ export function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
     gridColumns,
     gridRows,
     selectedPage,
-    pages,
+    pages: pages.map((pageRaw, index) => {
+      const pageEntry = pagesRaw[index] as Record<string, unknown>;
+      const pageTypeCandidate =
+        typeof pageEntry.pageType === "string" ? pageEntry.pageType : "manual";
+      const pageType =
+        pageTypeCandidate === "all_roles" || pageTypeCandidate === "all_party_lines"
+          ? pageTypeCandidate
+          : "manual";
+      const parentPage =
+        typeof pageEntry.parentPage === "number" && Number.isFinite(pageEntry.parentPage)
+          ? pageEntry.parentPage
+          : undefined;
+      return {
+        ...pageRaw,
+        title: typeof pageEntry.title === "string" ? pageEntry.title : undefined,
+        pageType,
+        parentPage,
+      };
+    }),
   };
 }
 

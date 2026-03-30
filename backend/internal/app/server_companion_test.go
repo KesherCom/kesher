@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -543,6 +544,471 @@ func TestExecuteCompanionButtonPressRejectsPTTSelectedWithoutAllowedTalkRoom(t *
 	}
 	if result.Status != "rejected" {
 		t.Fatalf("expected status rejected, got %q", result.Status)
+	}
+}
+
+func TestExecuteCompanionButtonPressPageButtonsSwitchCurrentPage(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if _, err := s.store.UpsertUser(ctx, "operator", "source"); err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	page0Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
+	page1Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
+	page0Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp}
+	page1Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageDown}
+	settings.SelectedPage = 0
+	settings.Pages = []StreamDeckPageConfig{
+		{Page: 0, Buttons: page0Buttons},
+		{Page: 1, Buttons: page1Buttons},
+	}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	if page := s.currentCompanionPage(ctx, "source"); page != 0 {
+		t.Fatalf("expected initial page 0, got %d", page)
+	}
+
+	forward := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{
+		Command:     "press_button",
+		ButtonIndex: 0,
+		State:       "down",
+	})
+	if !forward.OK || forward.Status != "executed" {
+		t.Fatalf("expected page_up button to execute, got %+v", forward)
+	}
+	if page := s.currentCompanionPage(ctx, "source"); page != 1 {
+		t.Fatalf("expected current page to become 1 after page_up button, got %d", page)
+	}
+
+	backward := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{
+		Command:     "press_button",
+		ButtonIndex: 0,
+		State:       "down",
+	})
+	if !backward.OK || backward.Status != "executed" {
+		t.Fatalf("expected page_down button to execute, got %+v", backward)
+	}
+	if page := s.currentCompanionPage(ctx, "source"); page != 0 {
+		t.Fatalf("expected current page to become 0 after page_down button, got %d", page)
+	}
+}
+
+func TestExecuteCompanionButtonPressPageButtonsIgnoreButtonUp(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if _, err := s.store.UpsertUser(ctx, "operator", "source"); err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	page0Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
+	page1Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
+	page0Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp}
+	page1Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageDown}
+	settings.SelectedPage = 0
+	settings.Pages = []StreamDeckPageConfig{
+		{Page: 0, Buttons: page0Buttons},
+		{Page: 1, Buttons: page1Buttons},
+	}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	down := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{
+		Command:     "press_button",
+		ButtonIndex: 0,
+		State:       "down",
+	})
+	if !down.OK || down.Status != "executed" {
+		t.Fatalf("expected page_up on down to execute, got %+v", down)
+	}
+	if page := s.currentCompanionPage(ctx, "source"); page != 1 {
+		t.Fatalf("expected current page to become 1 after page_up down event, got %d", page)
+	}
+
+	up := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{
+		Command:     "press_button",
+		ButtonIndex: 0,
+		State:       "up",
+	})
+	if !up.OK || up.Status != "executed" {
+		t.Fatalf("expected page_up on up to be ignored as executed no-op, got %+v", up)
+	}
+	if page := s.currentCompanionPage(ctx, "source"); page != 1 {
+		t.Fatalf("expected current page to remain 1 after page_up up event, got %d", page)
+	}
+}
+
+func TestExecuteCompanionButtonPressPageButtonsAllowUpOnlyTrigger(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if _, err := s.store.UpsertUser(ctx, "operator", "source"); err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	page0Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
+	page1Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
+	page0Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp}
+	page1Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageDown}
+	settings.SelectedPage = 0
+	settings.Pages = []StreamDeckPageConfig{
+		{Page: 0, Buttons: page0Buttons},
+		{Page: 1, Buttons: page1Buttons},
+	}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	s.setCompanionCurrentPage("source", 1)
+
+	upOnly := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{
+		Command:     "press_button",
+		ButtonIndex: 0,
+		State:       "up",
+	})
+	if !upOnly.OK || upOnly.Status != "executed" {
+		t.Fatalf("expected page_down on up-only trigger to execute, got %+v", upOnly)
+	}
+	if page := s.currentCompanionPage(ctx, "source"); page != 0 {
+		t.Fatalf("expected current page to become 0 after page_down up-only event, got %d", page)
+	}
+}
+
+func TestExecuteCompanionButtonPressPageButtonsIndependentFromSlotViaAnchor(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if _, err := s.store.UpsertUser(ctx, "operator", "source"); err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	page0Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
+	page1Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
+	page0Buttons[6].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp}
+	page1Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageDown}
+	settings.SelectedPage = 0
+	settings.Pages = []StreamDeckPageConfig{
+		{Page: 0, Buttons: page0Buttons},
+		{Page: 1, Buttons: page1Buttons},
+	}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	forward := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{
+		Command:     "press_button",
+		ButtonIndex: 6,
+		State:       "down",
+	})
+	if !forward.OK || forward.Status != "executed" {
+		t.Fatalf("expected page_up on slot 6 to execute, got %+v", forward)
+	}
+	if page := s.currentCompanionPage(ctx, "source"); page != 1 {
+		t.Fatalf("expected current page to become 1 after page_up, got %d", page)
+	}
+
+	backward := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{
+		Command:     "press_button",
+		ButtonIndex: 6,
+		State:       "down",
+	})
+	if !backward.OK || backward.Status != "executed" {
+		t.Fatalf("expected page_down fallback to execute from anchored slot 6, got %+v", backward)
+	}
+	if page := s.currentCompanionPage(ctx, "source"); page != 0 {
+		t.Fatalf("expected current page to become 0 after anchored fallback page_down, got %d", page)
+	}
+}
+
+func TestCompanionResolveRuntimePageUsesSlidingWindowWithReservedNavSlots(t *testing.T) {
+	settings := DefaultStreamDeckSettings()
+	page0Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
+	page1Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
+
+	for i := 0; i < 10; i++ {
+		page0Buttons[i].Label = "A"
+		page0Buttons[i].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeMuteToggle}
+	}
+	for i := 0; i < 10; i++ {
+		page1Buttons[i].Label = "B"
+		page1Buttons[i].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeMuteToggle}
+	}
+
+	settings.Pages = []StreamDeckPageConfig{
+		{Page: 0, Buttons: page0Buttons},
+		{Page: 1, Buttons: page1Buttons},
+	}
+
+	runtime0 := companionResolveRuntimePage(settings, 0)
+	if !runtime0.Dynamic {
+		t.Fatal("expected sliding runtime page to be dynamic")
+	}
+	if runtime0.TotalPages != 2 {
+		t.Fatalf("expected 2 runtime pages, got %d", runtime0.TotalPages)
+	}
+	if runtime0.Page.Buttons[13].Action != nil {
+		t.Fatal("expected slot 13 to be empty on first runtime page")
+	}
+	if runtime0.Page.Buttons[14].Action == nil || runtime0.Page.Buttons[14].Action.Type != StreamDeckActionTypePageUp {
+		t.Fatalf("expected slot 14 to be page_up on first runtime page, got %+v", runtime0.Page.Buttons[14].Action)
+	}
+
+	runtime1 := companionResolveRuntimePage(settings, 1)
+	if !runtime1.Dynamic {
+		t.Fatal("expected second runtime page to be dynamic")
+	}
+	if runtime1.Page.Buttons[13].Action == nil || runtime1.Page.Buttons[13].Action.Type != StreamDeckActionTypePageDown {
+		t.Fatalf("expected slot 13 to be page_down on second runtime page, got %+v", runtime1.Page.Buttons[13].Action)
+	}
+	if runtime1.Page.Buttons[14].Action != nil {
+		t.Fatal("expected slot 14 to be empty on final runtime page")
+	}
+}
+
+func TestResolveCompanionRuntimePageUsesRoleRoomsAsSlidingDataSource(t *testing.T) {
+	s := newCompanionTestServer(t)
+	s.cfg.CompanionDynamicPaging = true
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+
+	for i := 1; i <= 14; i++ {
+		roomID := fmt.Sprintf("r%02d", i)
+		roomName := fmt.Sprintf("Room %02d", i)
+		if err := s.store.CreateRoom(ctx, roomID, roomName, []string{"source"}, []string{"source"}, nil); err != nil {
+			t.Fatalf("CreateRoom %s failed: %v", roomID, err)
+		}
+	}
+
+	settings := DefaultStreamDeckSettings()
+	runtime0 := s.resolveCompanionRuntimePage(ctx, "source", settings, 0)
+	if !runtime0.Dynamic {
+		t.Fatal("expected runtime page to be dynamic when rooms are available")
+	}
+	if runtime0.TotalPages != 2 {
+		t.Fatalf("expected totalPages=2, got %d", runtime0.TotalPages)
+	}
+	if runtime0.Page.Buttons[0].Action == nil || runtime0.Page.Buttons[0].Action.Type != StreamDeckActionTypePTTRoom {
+		t.Fatalf("expected first payload slot to map to ptt_room, got %+v", runtime0.Page.Buttons[0].Action)
+	}
+	if runtime0.Page.Buttons[13].Action != nil {
+		t.Fatal("expected slot 13 to be empty on first dynamic page")
+	}
+	if runtime0.Page.Buttons[14].Action == nil || runtime0.Page.Buttons[14].Action.Type != StreamDeckActionTypePageUp {
+		t.Fatalf("expected slot 14 to be page_up on first dynamic page, got %+v", runtime0.Page.Buttons[14].Action)
+	}
+
+	runtime1 := s.resolveCompanionRuntimePage(ctx, "source", settings, 1)
+	if !runtime1.Dynamic {
+		t.Fatal("expected second runtime page to remain dynamic")
+	}
+	if runtime1.Page.Buttons[0].Action == nil || strings.TrimSpace(runtime1.Page.Buttons[0].Action.RoomID) != "r14" {
+		t.Fatalf("expected first payload slot on page 2 to be room r14, got %+v", runtime1.Page.Buttons[0].Action)
+	}
+	if runtime1.Page.Buttons[13].Action == nil || runtime1.Page.Buttons[13].Action.Type != StreamDeckActionTypePageDown {
+		t.Fatalf("expected slot 13 to be page_down on second dynamic page, got %+v", runtime1.Page.Buttons[13].Action)
+	}
+	if runtime1.Page.Buttons[14].Action != nil {
+		t.Fatal("expected slot 14 to be empty on final dynamic page")
+	}
+}
+
+func TestBuildCompanionProfileResponseExpandsAutoRoleFolder(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if err := s.store.CreateRole(ctx, "director", "Director", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole director failed: %v", err)
+	}
+	if err := s.store.CreateRoom(ctx, "room-a", "Room A", []string{"source"}, []string{"director"}, nil); err != nil {
+		t.Fatalf("CreateRoom room-a failed: %v", err)
+	}
+	user, err := s.store.UpsertUser(ctx, "operator", "source")
+	if err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[1].Label = "Roles"
+	settings.Pages[0].Buttons[1].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageJump, TargetPage: 1}
+	parentPage := 0
+	settings.Pages = append(settings.Pages, StreamDeckPageConfig{
+		Page:       1,
+		Title:      "Roles",
+		PageType:   StreamDeckPageTypeAllRoles,
+		ParentPage: &parentPage,
+		Buttons:    companionBuildEmptyButtons(settings),
+	})
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	profile, err := s.buildCompanionProfileResponse(ctx, user)
+	if err != nil {
+		t.Fatalf("buildCompanionProfileResponse failed: %v", err)
+	}
+	autoPage := companionResolvePageConfig(profile.StreamDeck, 1)
+	if autoPage.Buttons[0].Action == nil || autoPage.Buttons[0].Action.Type != StreamDeckActionTypePageBack {
+		t.Fatalf("expected auto folder to inject page_back into slot 0, got %+v", autoPage.Buttons[0].Action)
+	}
+	foundDirector := false
+	for _, button := range autoPage.Buttons {
+		if button.Action != nil && button.Action.Type == StreamDeckActionTypeDirectRole && button.Action.RoleID == "director" {
+			foundDirector = true
+			break
+		}
+	}
+	if !foundDirector {
+		t.Fatal("expected expanded auto role folder to include reachable director role")
+	}
+}
+
+func TestExecuteCompanionPageCommandPageBackReturnsToParent(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	settings := DefaultStreamDeckSettings()
+	parentPage := 0
+	settings.Pages = append(settings.Pages, StreamDeckPageConfig{
+		Page:       1,
+		Title:      "Child",
+		PageType:   StreamDeckPageTypeManual,
+		ParentPage: &parentPage,
+		Buttons:    companionBuildEmptyButtons(settings),
+	})
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	s.setCompanionCurrentPage("source", 1)
+	result, handled := s.executeCompanionPageCommand(ctx, "source", "operator", CompanionCommand{Command: "page_back"})
+	if !handled {
+		t.Fatal("expected page_back to be handled")
+	}
+	if !result.OK || result.Status != "executed" {
+		t.Fatalf("expected successful page_back execution, got %+v", result)
+	}
+	if got := s.currentCompanionPage(ctx, "source"); got != 0 {
+		t.Fatalf("expected page_back to return to parent page 0, got %d", got)
+	}
+}
+
+func TestExecuteCompanionButtonPressDynamicEdgeFallbackAllowsReverseOnNextSlot(t *testing.T) {
+	s := newCompanionTestServer(t)
+	s.cfg.CompanionDynamicPaging = true
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if _, err := s.store.UpsertUser(ctx, "operator", "source"); err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	page0Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
+	page1Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
+	for i := 0; i < 10; i++ {
+		page0Buttons[i].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeMuteToggle}
+		page1Buttons[i].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypeMuteToggle}
+	}
+	settings.Pages = []StreamDeckPageConfig{
+		{Page: 0, Buttons: page0Buttons},
+		{Page: 1, Buttons: page1Buttons},
+	}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	s.setCompanionCurrentPage("source", 1)
+
+	// On the last dynamic page, slot 14 (0-based) has no direct action.
+	// Fallback should treat it as reverse navigation to make edge behavior tolerant.
+	res := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{
+		Command:     "press_button",
+		ButtonIndex: 14,
+		State:       "down",
+	})
+	if !res.OK || res.Status != "executed" {
+		t.Fatalf("expected edge fallback navigation to execute, got %+v", res)
+	}
+	if page := s.currentCompanionPage(ctx, "source"); page != 0 {
+		t.Fatalf("expected current page to become 0 after edge fallback, got %d", page)
+	}
+}
+
+func TestExecuteCompanionPageCommandUpdatesRolePageState(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if _, err := s.store.UpsertUser(ctx, "operator", "source"); err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	page0Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
+	page1Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
+	settings.SelectedPage = 0
+	settings.Pages = []StreamDeckPageConfig{
+		{Page: 0, Buttons: page0Buttons},
+		{Page: 1, Buttons: page1Buttons},
+	}
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	pageUpResult, handled := s.executeCompanionPageCommand(ctx, "source", "operator", CompanionCommand{Command: "page_up"})
+	if !handled {
+		t.Fatal("expected page_up command to be handled")
+	}
+	if !pageUpResult.OK || pageUpResult.Status != "executed" {
+		t.Fatalf("expected page_up to execute, got %+v", pageUpResult)
+	}
+	if page := s.currentCompanionPage(ctx, "source"); page != 1 {
+		t.Fatalf("expected current page to become 1 after page_up command, got %d", page)
+	}
+
+	navigateResult, handled := s.executeCompanionPageCommand(ctx, "source", "operator", CompanionCommand{Command: "navigate_to_page", PageNumber: 0})
+	if !handled {
+		t.Fatal("expected navigate_to_page command to be handled")
+	}
+	if !navigateResult.OK || navigateResult.Status != "executed" {
+		t.Fatalf("expected navigate_to_page to execute, got %+v", navigateResult)
+	}
+	if page := s.currentCompanionPage(ctx, "source"); page != 0 {
+		t.Fatalf("expected current page to become 0 after navigate_to_page command, got %d", page)
 	}
 }
 

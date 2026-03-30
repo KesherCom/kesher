@@ -778,6 +778,7 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 	selectedPageValid := false
 	normalizedPages := make([]StreamDeckPageConfig, 0, len(in.Pages))
 	seenPages := make(map[int]struct{}, len(in.Pages))
+	parentByPage := make(map[int]*int, len(in.Pages))
 	for _, page := range in.Pages {
 		if page.Page < 0 {
 			return StreamDeckSettings{}, ErrInvalidInput
@@ -786,6 +787,23 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 			return StreamDeckSettings{}, ErrInvalidInput
 		}
 		seenPages[page.Page] = struct{}{}
+		page.Title = strings.TrimSpace(page.Title)
+		if page.PageType == "" {
+			page.PageType = StreamDeckPageTypeManual
+		}
+		switch page.PageType {
+		case StreamDeckPageTypeManual, StreamDeckPageTypeAllRoles, StreamDeckPageTypeAllPartyLines:
+		default:
+			return StreamDeckSettings{}, ErrInvalidInput
+		}
+		if page.ParentPage != nil {
+			parentPage := *page.ParentPage
+			if parentPage < 0 || parentPage == page.Page {
+				return StreamDeckSettings{}, ErrInvalidInput
+			}
+			page.ParentPage = &parentPage
+		}
+		parentByPage[page.Page] = page.ParentPage
 		if page.Page == in.SelectedPage {
 			selectedPageValid = true
 		}
@@ -811,7 +829,7 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 				action.RoleID = strings.TrimSpace(action.RoleID)
 				action.BroadcastGroupID = strings.TrimSpace(action.BroadcastGroupID)
 				switch action.Type {
-				case StreamDeckActionTypeNone, StreamDeckActionTypeMuteToggle, StreamDeckActionTypeReplyToCaller, StreamDeckActionTypeIncomingCall, StreamDeckActionTypePageUp, StreamDeckActionTypePageDown, StreamDeckActionTypePTTSelected:
+				case StreamDeckActionTypeNone, StreamDeckActionTypeMuteToggle, StreamDeckActionTypeReplyToCaller, StreamDeckActionTypeIncomingCall, StreamDeckActionTypePageUp, StreamDeckActionTypePageDown, StreamDeckActionTypePTTSelected, StreamDeckActionTypePageHome, StreamDeckActionTypePageBack:
 				case StreamDeckActionTypePTTRoom:
 					if action.RoomID == "" {
 						return StreamDeckSettings{}, ErrInvalidInput
@@ -848,6 +866,10 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 					if action.VolumeDelta == 0 {
 						return StreamDeckSettings{}, ErrInvalidInput
 					}
+				case StreamDeckActionTypePageJump:
+					if action.TargetPage < 0 {
+						return StreamDeckSettings{}, ErrInvalidInput
+					}
 				default:
 					return StreamDeckSettings{}, ErrInvalidInput
 				}
@@ -855,10 +877,36 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 			}
 			normalizedButtons = append(normalizedButtons, button)
 		}
-		normalizedPages = append(normalizedPages, StreamDeckPageConfig{Page: page.Page, Buttons: normalizedButtons})
+		normalizedPages = append(normalizedPages, StreamDeckPageConfig{Page: page.Page, Title: page.Title, PageType: page.PageType, ParentPage: page.ParentPage, Buttons: normalizedButtons})
 	}
 	if !selectedPageValid {
 		return StreamDeckSettings{}, ErrInvalidInput
+	}
+	for pageNo := range parentByPage {
+		seen := map[int]struct{}{pageNo: {}}
+		current := parentByPage[pageNo]
+		for current != nil {
+			if _, ok := seen[*current]; ok {
+				return StreamDeckSettings{}, ErrInvalidInput
+			}
+			if _, ok := parentByPage[*current]; !ok {
+				return StreamDeckSettings{}, ErrInvalidInput
+			}
+			seen[*current] = struct{}{}
+			current = parentByPage[*current]
+		}
+	}
+	for i := range normalizedPages {
+		if normalizedPages[i].PageType != StreamDeckPageTypeManual {
+			for _, button := range normalizedPages[i].Buttons {
+				if button.Action == nil {
+					continue
+				}
+				if button.Action.Type != StreamDeckActionTypeNone {
+					break
+				}
+			}
+		}
 	}
 	in.Pages = normalizedPages
 	return in, nil
@@ -1124,7 +1172,7 @@ func (s *Store) SaveCompanionRolePage(ctx context.Context, roleID string, pageNu
 	if roleID == "" {
 		return ErrInvalidInput
 	}
-	if pageNumber < 0 || pageNumber > 14 {
+	if pageNumber < 0 {
 		return ErrInvalidInput
 	}
 	now := time.Now().UnixMilli()

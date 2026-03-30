@@ -10,6 +10,114 @@ import { useEffect, useRef, useState } from "react";
 import { clampGainValue } from "../app/settings";
 import { meterDbFsFloor, peakAmplitudeToDbFs } from "../lib/presence";
 
+type GetUserMediaFn = (
+  constraints: MediaStreamConstraints,
+) => Promise<MediaStream>;
+
+type LowLatencyAudioConstraintKey =
+  | "echoCancellation"
+  | "noiseSuppression"
+  | "autoGainControl"
+  | "channelCount"
+  | "latency";
+
+type LowLatencyAudioConstraints = MediaTrackConstraints & {
+  latency?: number;
+};
+
+const lowLatencyAudioConstraintVariants: ReadonlyArray<
+  ReadonlyArray<LowLatencyAudioConstraintKey>
+> = [
+  [
+    "echoCancellation",
+    "noiseSuppression",
+    "autoGainControl",
+    "channelCount",
+    "latency",
+  ],
+  [
+    "echoCancellation",
+    "noiseSuppression",
+    "autoGainControl",
+    "channelCount",
+  ],
+  [
+    "echoCancellation",
+    "noiseSuppression",
+    "autoGainControl",
+  ],
+  ["channelCount", "latency"],
+  ["channelCount"],
+];
+
+function buildLowLatencyAudioConstraints(
+  keys: ReadonlyArray<LowLatencyAudioConstraintKey>,
+): LowLatencyAudioConstraints {
+  const constraints: LowLatencyAudioConstraints = {};
+  for (const key of keys) {
+    switch (key) {
+      case "echoCancellation":
+        constraints.echoCancellation = false;
+        break;
+      case "noiseSuppression":
+        constraints.noiseSuppression = false;
+        break;
+      case "autoGainControl":
+        constraints.autoGainControl = false;
+        break;
+      case "channelCount":
+        constraints.channelCount = 1;
+        break;
+      case "latency":
+        constraints.latency = 0;
+        break;
+    }
+  }
+  return constraints;
+}
+
+export function buildLowLatencyMicConstraintCandidates(
+  deviceId: string,
+): MediaStreamConstraints[] {
+  const candidates: MediaStreamConstraints[] = [];
+  for (const keys of lowLatencyAudioConstraintVariants) {
+    const audio = buildLowLatencyAudioConstraints(keys);
+    if (deviceId) {
+      candidates.push({
+        audio: { ...audio, deviceId: { exact: deviceId } },
+        video: false,
+      });
+      candidates.push({
+        audio: { ...audio, deviceId },
+        video: false,
+      });
+    }
+    candidates.push({ audio, video: false });
+  }
+  candidates.push({ audio: true, video: false });
+  return candidates;
+}
+
+export async function requestLowLatencyMicStream(
+  deviceId: string,
+  getUserMedia: GetUserMediaFn = (constraints) =>
+    navigator.mediaDevices.getUserMedia(constraints),
+): Promise<MediaStream> {
+  const candidates = buildLowLatencyMicConstraintCandidates(deviceId);
+  let lastError: unknown = null;
+  for (const constraints of candidates) {
+    try {
+      return await getUserMedia(constraints);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new Error("Failed to access microphone with low-latency constraints");
+}
+
 export type UseLocalMicOptions = {
   /** Currently selected input device id (triggers reinit when it changes). */
   selectedInputDeviceId: string;
@@ -100,29 +208,7 @@ export function useLocalMic({
 
   // ── Mic stream acquisition ──
   async function getMicStream(deviceId: string): Promise<MediaStream> {
-    const baseAudio = {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-      channelCount: 1,
-    };
-    if (deviceId) {
-      try {
-        return await navigator.mediaDevices.getUserMedia({
-          audio: { ...baseAudio, deviceId: { exact: deviceId } },
-          video: false,
-        });
-      } catch {
-        return navigator.mediaDevices.getUserMedia({
-          audio: baseAudio,
-          video: false,
-        });
-      }
-    }
-    return navigator.mediaDevices.getUserMedia({
-      audio: baseAudio,
-      video: false,
-    });
+    return requestLowLatencyMicStream(deviceId);
   }
 
   // ── Gain processing ──
@@ -135,7 +221,7 @@ export function useLocalMic({
     const AudioCtx = window.AudioContext;
     if (!AudioCtx) return sourceStream;
     try {
-      const ctx = new AudioCtx();
+      const ctx = new AudioCtx({ latencyHint: "interactive" });
       const src = ctx.createMediaStreamSource(sourceStream);
       const gain = ctx.createGain();
       gain.gain.value = clampGainValue(gainValue);
@@ -197,7 +283,7 @@ export function useLocalMic({
     const monitorTrack = sourceTrack.clone();
     const monitorStream = new MediaStream([monitorTrack]);
     meterMonitorStreamRef.current = monitorStream;
-    const ctx = new AudioCtx();
+    const ctx = new AudioCtx({ latencyHint: "interactive" });
     audioCtxRef.current = ctx;
     const src = ctx.createMediaStreamSource(monitorStream);
     const meterGain = ctx.createGain();

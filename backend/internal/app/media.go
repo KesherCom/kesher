@@ -10,11 +10,34 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/webrtc/v4"
 )
 
+// routedDest holds a per-destination local track and an atomic routing gate.
+// The gate is flipped by recomputeSourceRoutingLocked; the RTP forwarding loop
+// reads it lock-free to decide whether to forward each packet.
+type routedDest struct {
+	localTrack *webrtc.TrackLocalStaticRTP
+	gate       atomic.Bool
+}
+
 type mediaSourceTrack struct {
-	track *webrtc.TrackLocalStaticRTP
+	codec  webrtc.RTPCodecCapability
+	userID string
+	dests  map[string]*routedDest // key: destination peer token
+}
+
+type mediaSnapshotClient struct {
+	userID      string
+	roleID      string
+	listenRooms map[string]struct{}
+	talkRooms   map[string]struct{}
+}
+
+type mediaHubSnapshot struct {
+	clients map[string]mediaSnapshotClient
 }
 
 type MediaRealtimeStats struct {
@@ -23,7 +46,19 @@ type MediaRealtimeStats struct {
 	SyncRequests          uint64 `json:"syncRequests"`
 	SyncRuns              uint64 `json:"syncRuns"`
 	SyncRequestsCoalesced uint64 `json:"syncRequestsCoalesced"`
+	SyncDirtySourcesAvg   uint64 `json:"syncDirtySourcesAvg"`
+	SyncDirtySourcesMax   uint64 `json:"syncDirtySourcesMax"`
+	SyncRunAvgMs          uint64 `json:"syncRunAvgMs"`
+	SyncRunMaxMs          uint64 `json:"syncRunMaxMs"`
+	SyncLockWaitAvgMs     uint64 `json:"syncLockWaitAvgMs"`
+	SyncLockWaitMaxMs     uint64 `json:"syncLockWaitMaxMs"`
+	SyncLockHoldAvgMs     uint64 `json:"syncLockHoldAvgMs"`
+	SyncLockHoldMaxMs     uint64 `json:"syncLockHoldMaxMs"`
+	VoiceStateToSyncAvgMs uint64 `json:"voiceStateToSyncAvgMs"`
+	VoiceStateToSyncMaxMs uint64 `json:"voiceStateToSyncMaxMs"`
 	Renegotiations        uint64 `json:"renegotiations"`
+	RenegotiationAvgMs    uint64 `json:"renegotiationAvgMs"`
+	RenegotiationMaxMs    uint64 `json:"renegotiationMaxMs"`
 }
 
 type mediaPeer struct {
@@ -40,7 +75,7 @@ type mediaPeer struct {
 }
 
 type MediaManager struct {
-	mu                         sync.Mutex
+	mu                         sync.RWMutex
 	logger                     *slog.Logger
 	hub                        *Hub
 	peers                      map[string]*mediaPeer
@@ -48,16 +83,84 @@ type MediaManager struct {
 	broadcastActive            map[string]map[string]struct{} // sourceToken -> broadcastGroupID set
 	directActive               map[string]string              // sourceToken -> targetUserID
 	idleRoomFallbackSuppressed map[string]struct{}            // sourceToken -> suppressed after direct/broadcast release while mic is idle
+	dirtySources               map[string]struct{}            // sourceToken set for incremental recompute
+	syncForceAll               bool
 	syncScheduled              bool
 	syncRequests               atomic.Uint64
 	syncRuns                   atomic.Uint64
 	syncMerged                 atomic.Uint64
+	syncDirtySourcesTotal      atomic.Uint64
+	syncDirtySourcesMax        atomic.Uint64
+	syncRunTotalNanos          atomic.Uint64
+	syncRunMaxNanos            atomic.Uint64
+	syncLockWaitTotalNanos     atomic.Uint64
+	syncLockWaitMaxNanos       atomic.Uint64
+	syncLockHoldTotalNanos     atomic.Uint64
+	syncLockHoldMaxNanos       atomic.Uint64
+	voiceStateTriggerNanos     atomic.Uint64
+	voiceStateToSyncCount      atomic.Uint64
+	voiceStateToSyncTotalNanos atomic.Uint64
+	voiceStateToSyncMaxNanos   atomic.Uint64
 	renegotiations             atomic.Uint64
+	renegotiationTotalNanos    atomic.Uint64
+	renegotiationMaxNanos      atomic.Uint64
+	webrtcAPI                  *webrtc.API
 }
 
-const renegotiationDebounce = 60 * time.Millisecond
+const syncRoutingDebounce = 2 * time.Millisecond
+const renegotiationDebounce = 5 * time.Millisecond
+
+// buildWebRTCAPI creates a Pion webrtc.API tuned for low-latency audio-only SFU.
+// It registers only the Opus codec, disables mDNS for faster ICE, and uses a
+// minimal interceptor set (NACK generator only, no responder/TWCC).
+func buildWebRTCAPI(logger *slog.Logger) (*webrtc.API, error) {
+	// ── MediaEngine: Opus only ─────────────────────────────────────────────
+	me := &webrtc.MediaEngine{}
+	if err := me.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeOpus,
+			ClockRate:   48000,
+			Channels:    2,
+			SDPFmtpLine: "minptime=2;useinbandfec=0;usedtx=1;stereo=0;sprop-stereo=0",
+		},
+		PayloadType: 111,
+	}, webrtc.RTPCodecTypeAudio); err != nil {
+		return nil, fmt.Errorf("register opus codec: %w", err)
+	}
+
+	// ── InterceptorRegistry: minimal ───────────────────────────────────────
+	ir := &interceptor.Registry{}
+	// NACK generator lets the receiver request retransmission if it notices a
+	// gap.  We skip the NACK responder (server-side retransmit) to avoid
+	// the latency of buffering outgoing packets.
+	generator, err := nack.NewGeneratorInterceptor()
+	if err != nil {
+		return nil, fmt.Errorf("nack generator: %w", err)
+	}
+	ir.Add(generator)
+
+	// ── SettingEngine ──────────────────────────────────────────────────────
+	se := webrtc.SettingEngine{}
+	// Disable mDNS so ICE candidates resolve immediately on LAN.
+	se.SetICEMulticastDNSMode(0) // ice.MulticastDNSModeDisabled == 0
+	se.SetSRTPReplayProtectionWindow(64)
+	se.SetReceiveMTU(1200)
+
+	api := webrtc.NewAPI(
+		webrtc.WithMediaEngine(me),
+		webrtc.WithInterceptorRegistry(ir),
+		webrtc.WithSettingEngine(se),
+	)
+	logger.Info("webrtc API built: opus-only, minimal interceptors, mDNS disabled")
+	return api, nil
+}
 
 func NewMediaManager(hub *Hub, logger *slog.Logger) *MediaManager {
+	api, err := buildWebRTCAPI(logger)
+	if err != nil {
+		logger.Error("failed to build low-latency webrtc API, falling back to defaults", "error", err)
+		api = webrtc.NewAPI()
+	}
 	return &MediaManager{
 		logger:                     logger,
 		hub:                        hub,
@@ -66,6 +169,8 @@ func NewMediaManager(hub *Hub, logger *slog.Logger) *MediaManager {
 		broadcastActive:            make(map[string]map[string]struct{}),
 		directActive:               make(map[string]string),
 		idleRoomFallbackSuppressed: make(map[string]struct{}),
+		dirtySources:               make(map[string]struct{}),
+		webrtcAPI:                  api,
 	}
 }
 
@@ -82,7 +187,7 @@ func (m *MediaManager) EnsurePeer(token string, user User) error {
 	if _, ok := m.peers[token]; ok {
 		return nil
 	}
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	pc, err := m.webrtcAPI.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		return err
 	}
@@ -123,12 +228,32 @@ func (m *MediaManager) EnsurePeer(token string, user User) error {
 		}
 	})
 	m.peers[token] = peer
+
+	// Pre-attach existing source tracks to this new peer so audio can flow
+	// instantly when routing gates open (no renegotiation needed later).
+	for sourceToken := range m.sources {
+		m.recomputeSourceRoutingLocked(sourceToken)
+	}
+
 	return nil
 }
 
 func (m *MediaManager) SyncRouting() {
+	m.syncRoutingWithDirty("")
+}
+
+func (m *MediaManager) SyncRoutingSource(sourceToken string) {
+	m.syncRoutingWithDirty(sourceToken)
+}
+
+func (m *MediaManager) syncRoutingWithDirty(sourceToken string) {
 	m.syncRequests.Add(1)
 	m.mu.Lock()
+	if sourceToken == "" {
+		m.syncForceAll = true
+	} else {
+		m.dirtySources[sourceToken] = struct{}{}
+	}
 	if m.syncScheduled {
 		m.syncMerged.Add(1)
 		m.mu.Unlock()
@@ -136,24 +261,71 @@ func (m *MediaManager) SyncRouting() {
 	}
 	m.syncScheduled = true
 	m.mu.Unlock()
-	time.AfterFunc(35*time.Millisecond, func() {
+	time.AfterFunc(syncRoutingDebounce, func() {
+		lockWaitStart := time.Now()
 		m.mu.Lock()
+		recordDurationNanos(&m.syncLockWaitTotalNanos, &m.syncLockWaitMaxNanos, time.Since(lockWaitStart))
+		lockHoldStart := time.Now()
 		m.syncScheduled = false
 		m.syncRuns.Add(1)
-		m.recomputeAllSourcesLocked()
+		recordVoiceStateToSyncNanos(&m.voiceStateTriggerNanos, &m.voiceStateToSyncCount, &m.voiceStateToSyncTotalNanos, &m.voiceStateToSyncMaxNanos)
+		start := time.Now()
+		recomputedSources := m.recomputePendingSourcesLocked()
+		m.syncDirtySourcesTotal.Add(uint64(recomputedSources))
+		updateMax(&m.syncDirtySourcesMax, uint64(recomputedSources))
+		recordDurationNanos(&m.syncRunTotalNanos, &m.syncRunMaxNanos, time.Since(start))
+		recordDurationNanos(&m.syncLockHoldTotalNanos, &m.syncLockHoldMaxNanos, time.Since(lockHoldStart))
 		m.mu.Unlock()
 	})
 }
 
+func (m *MediaManager) NoteVoiceStateTrigger() {
+	m.voiceStateTriggerNanos.Store(uint64(time.Now().UnixNano()))
+}
+
 func (m *MediaManager) RealtimeStats() MediaRealtimeStats {
+	syncRuns := m.syncRuns.Load()
+	renegotiations := m.renegotiations.Load()
+	voiceStateToSyncCount := m.voiceStateToSyncCount.Load()
+	syncAvgMs := uint64(0)
+	syncDirtySourcesAvg := uint64(0)
+	syncLockWaitAvgMs := uint64(0)
+	syncLockHoldAvgMs := uint64(0)
+	if syncRuns > 0 {
+		syncAvgMs = (m.syncRunTotalNanos.Load() / syncRuns) / uint64(time.Millisecond)
+		syncDirtySourcesAvg = m.syncDirtySourcesTotal.Load() / syncRuns
+		syncLockWaitAvgMs = (m.syncLockWaitTotalNanos.Load() / syncRuns) / uint64(time.Millisecond)
+		syncLockHoldAvgMs = (m.syncLockHoldTotalNanos.Load() / syncRuns) / uint64(time.Millisecond)
+	}
+	voiceStateToSyncAvgMs := uint64(0)
+	if voiceStateToSyncCount > 0 {
+		voiceStateToSyncAvgMs = (m.voiceStateToSyncTotalNanos.Load() / voiceStateToSyncCount) / uint64(time.Millisecond)
+	}
+	renegotiationAvgMs := uint64(0)
+	if renegotiations > 0 {
+		renegotiationAvgMs = (m.renegotiationTotalNanos.Load() / renegotiations) / uint64(time.Millisecond)
+	}
+
 	m.mu.Lock()
 	stats := MediaRealtimeStats{
 		Peers:                 len(m.peers),
 		Sources:               len(m.sources),
 		SyncRequests:          m.syncRequests.Load(),
-		SyncRuns:              m.syncRuns.Load(),
+		SyncRuns:              syncRuns,
 		SyncRequestsCoalesced: m.syncMerged.Load(),
-		Renegotiations:        m.renegotiations.Load(),
+		SyncDirtySourcesAvg:   syncDirtySourcesAvg,
+		SyncDirtySourcesMax:   m.syncDirtySourcesMax.Load(),
+		SyncRunAvgMs:          syncAvgMs,
+		SyncRunMaxMs:          m.syncRunMaxNanos.Load() / uint64(time.Millisecond),
+		SyncLockWaitAvgMs:     syncLockWaitAvgMs,
+		SyncLockWaitMaxMs:     m.syncLockWaitMaxNanos.Load() / uint64(time.Millisecond),
+		SyncLockHoldAvgMs:     syncLockHoldAvgMs,
+		SyncLockHoldMaxMs:     m.syncLockHoldMaxNanos.Load() / uint64(time.Millisecond),
+		VoiceStateToSyncAvgMs: voiceStateToSyncAvgMs,
+		VoiceStateToSyncMaxMs: m.voiceStateToSyncMaxNanos.Load() / uint64(time.Millisecond),
+		Renegotiations:        renegotiations,
+		RenegotiationAvgMs:    renegotiationAvgMs,
+		RenegotiationMaxMs:    m.renegotiationMaxNanos.Load() / uint64(time.Millisecond),
 	}
 	m.mu.Unlock()
 	return stats
@@ -240,6 +412,11 @@ func (m *MediaManager) RemovePeer(token string) {
 	delete(m.idleRoomFallbackSuppressed, token)
 	delete(m.sources, token)
 
+	// Clean up per-dest entries referencing this peer from all sources.
+	for _, src := range m.sources {
+		delete(src.dests, token)
+	}
+
 	var affectedSources []string
 	for sourceToken, targetUserID := range m.directActive {
 		if targetUserID == peer.userID {
@@ -262,25 +439,35 @@ func (m *MediaManager) RemovePeer(token string) {
 }
 
 func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.TrackRemote) {
-	localTrack, err := webrtc.NewTrackLocalStaticRTP(remote.Codec().RTPCodecCapability, fmt.Sprintf("audio-user-%s", sourcePeer.userID), "intercom")
-	if err != nil {
-		m.logger.Error("failed to create local track", "error", err)
-		return
-	}
+	codec := remote.Codec().RTPCodecCapability
+
 	m.mu.Lock()
-	m.sources[sourcePeer.token] = &mediaSourceTrack{track: localTrack}
+	src := &mediaSourceTrack{
+		codec:  codec,
+		userID: sourcePeer.userID,
+		dests:  make(map[string]*routedDest),
+	}
+	m.sources[sourcePeer.token] = src
 	m.recomputeSourceRoutingLocked(sourcePeer.token)
 	m.mu.Unlock()
-	buf := make([]byte, 2048)
 
+	buf := make([]byte, 2048)
 	for {
 		n, _, readErr := remote.Read(buf)
 		if readErr != nil {
 			break
 		}
-		if _, writeErr := localTrack.Write(buf[:n]); writeErr != nil {
-			break
+		// RLock allows concurrent forwarding from multiple sources while
+		// routing changes (which need a full Lock) remain infrequent.
+		m.mu.RLock()
+		if s := m.sources[sourcePeer.token]; s != nil {
+			for _, dest := range s.dests {
+				if dest.gate.Load() {
+					_, _ = dest.localTrack.Write(buf[:n])
+				}
+			}
 		}
+		m.mu.RUnlock()
 	}
 
 	m.mu.Lock()
@@ -365,7 +552,37 @@ func (m *MediaManager) recomputeAllSourcesLocked() {
 	}
 }
 
+func (m *MediaManager) recomputePendingSourcesLocked() int {
+	snapshot := m.buildHubSnapshotLocked()
+	if m.syncForceAll || len(m.dirtySources) == 0 {
+		m.syncForceAll = false
+		for sourceToken := range m.sources {
+			m.recomputeSourceRoutingWithSnapshotLocked(sourceToken, snapshot)
+		}
+		for sourceToken := range m.dirtySources {
+			delete(m.dirtySources, sourceToken)
+		}
+		return len(m.sources)
+	}
+	recomputed := 0
+	for sourceToken := range m.dirtySources {
+		if _, ok := m.sources[sourceToken]; !ok {
+			delete(m.dirtySources, sourceToken)
+			continue
+		}
+		m.recomputeSourceRoutingWithSnapshotLocked(sourceToken, snapshot)
+		recomputed++
+		delete(m.dirtySources, sourceToken)
+	}
+	return recomputed
+}
+
 func (m *MediaManager) recomputeSourceRoutingLocked(sourceToken string) {
+	snapshot := m.buildHubSnapshotLocked()
+	m.recomputeSourceRoutingWithSnapshotLocked(sourceToken, snapshot)
+}
+
+func (m *MediaManager) recomputeSourceRoutingWithSnapshotLocked(sourceToken string, snapshot mediaHubSnapshot) {
 	src, ok := m.sources[sourceToken]
 	if !ok {
 		return
@@ -380,45 +597,79 @@ func (m *MediaManager) recomputeSourceRoutingLocked(sourceToken string) {
 			}
 		}
 	}
-	broadcastRooms := m.broadcastRoomsForSourceLocked(sourceToken)
-	talkRooms := m.talkRoomsForSourceLocked(sourceToken)
+	broadcastRooms := m.broadcastRoomsForSourceFromSnapshotLocked(sourceToken, snapshot)
+	talkRooms := m.talkRoomsForSourceFromSnapshotLocked(sourceToken, snapshot)
 	_, idleRoomFallbackSuppressed := m.idleRoomFallbackSuppressed[sourceToken]
 
 	for _, p := range m.peers {
 		if p.token == sourceToken {
 			continue
 		}
+
+		// Ensure a per-destination track exists (pre-attachment).
+		if _, exists := src.dests[p.token]; !exists {
+			localTrack, err := webrtc.NewTrackLocalStaticRTP(
+				src.codec,
+				fmt.Sprintf("audio-user-%s", src.userID),
+				"intercom",
+			)
+			if err != nil {
+				m.logger.Warn("create per-dest track failed", "destPeer", p.token, "error", err)
+				continue
+			}
+			sender, err := p.pc.AddTrack(localTrack)
+			if err != nil {
+				m.logger.Warn("pre-attach track failed", "destPeer", p.token, "sourceToken", sourceToken, "error", err)
+				continue
+			}
+			p.senders[sourceToken] = sender
+			src.dests[p.token] = &routedDest{localTrack: localTrack}
+			m.requestRenegotiationLocked(p)
+		}
+
+		// Compute the routing gate — instant, no renegotiation.
 		shouldReceive := false
 		if directTargetPeerToken != "" {
 			shouldReceive = p.token == directTargetPeerToken
 		} else if len(broadcastRooms) > 0 {
-			shouldReceive = m.peerListensToAnyRoomLocked(p.token, broadcastRooms)
+			shouldReceive = m.peerListensToAnyRoomInSnapshotLocked(p.token, broadcastRooms, snapshot)
 		} else if !idleRoomFallbackSuppressed {
-			shouldReceive = m.peerListensToAnyRoomLocked(p.token, talkRooms)
+			shouldReceive = m.peerListensToAnyRoomInSnapshotLocked(p.token, talkRooms, snapshot)
 		}
+		src.dests[p.token].gate.Store(shouldReceive)
+	}
 
-		if shouldReceive {
-			if m.attachSourceToPeerLocked(sourceToken, src, p) {
-				m.requestRenegotiationLocked(p)
-			}
-			continue
-		}
-		if m.removeSenderLocked(p, sourceToken) {
-			m.requestRenegotiationLocked(p)
+	// Remove stale destinations for peers that no longer exist.
+	for destToken := range src.dests {
+		if _, exists := m.peers[destToken]; !exists {
+			delete(src.dests, destToken)
 		}
 	}
 }
 
-func (m *MediaManager) talkRoomsForSourceLocked(sourceToken string) map[string]struct{} {
+func (m *MediaManager) buildHubSnapshotLocked() mediaHubSnapshot {
 	m.hub.mu.RLock()
 	defer m.hub.mu.RUnlock()
-	c, ok := m.hub.clients[sourceToken]
-	if !ok || len(c.talkRooms) == 0 {
+	snapshot := mediaHubSnapshot{clients: make(map[string]mediaSnapshotClient, len(m.hub.clients))}
+	for token, c := range m.hub.clients {
+		snapshot.clients[token] = mediaSnapshotClient{
+			userID:      c.user.ID,
+			roleID:      c.session.RoleID,
+			listenRooms: cloneRoomSet(c.listenRooms),
+			talkRooms:   cloneRoomSet(c.talkRooms),
+		}
+	}
+	return snapshot
+}
+
+func (m *MediaManager) talkRoomsForSourceFromSnapshotLocked(sourceToken string, snapshot mediaHubSnapshot) map[string]struct{} {
+	sourceClient, ok := snapshot.clients[sourceToken]
+	if !ok || len(sourceClient.talkRooms) == 0 {
 		return map[string]struct{}{}
 	}
-	rooms := make(map[string]struct{}, len(c.talkRooms))
-	for roomID := range c.talkRooms {
-		allowed, err := m.hub.store.RoomAllowsSenderRole(context.Background(), roomID, c.session.RoleID)
+	rooms := make(map[string]struct{}, len(sourceClient.talkRooms))
+	for roomID := range sourceClient.talkRooms {
+		allowed, err := m.hub.store.RoomAllowsSenderRole(context.Background(), roomID, sourceClient.roleID)
 		if err != nil {
 			continue
 		}
@@ -430,21 +681,19 @@ func (m *MediaManager) talkRoomsForSourceLocked(sourceToken string) map[string]s
 	return rooms
 }
 
-func (m *MediaManager) peerListensToAnyRoomLocked(peerToken string, roomSet map[string]struct{}) bool {
+func (m *MediaManager) peerListensToAnyRoomInSnapshotLocked(peerToken string, roomSet map[string]struct{}, snapshot mediaHubSnapshot) bool {
 	if len(roomSet) == 0 {
 		return false
 	}
-	m.hub.mu.RLock()
-	defer m.hub.mu.RUnlock()
-	c, ok := m.hub.clients[peerToken]
+	peerClient, ok := snapshot.clients[peerToken]
 	if !ok {
 		return false
 	}
-	for roomID := range c.listenRooms {
+	for roomID := range peerClient.listenRooms {
 		if _, ok := roomSet[roomID]; !ok {
 			continue
 		}
-		allowed, err := m.hub.store.RoomAllowsReceiverRole(context.Background(), roomID, c.session.RoleID)
+		allowed, err := m.hub.store.RoomAllowsReceiverRole(context.Background(), roomID, peerClient.roleID)
 		if err != nil {
 			continue
 		}
@@ -455,20 +704,18 @@ func (m *MediaManager) peerListensToAnyRoomLocked(peerToken string, roomSet map[
 	return false
 }
 
-func (m *MediaManager) broadcastRoomsForSourceLocked(sourceToken string) map[string]struct{} {
+func (m *MediaManager) broadcastRoomsForSourceFromSnapshotLocked(sourceToken string, snapshot mediaHubSnapshot) map[string]struct{} {
 	groups := m.broadcastActive[sourceToken]
 	if len(groups) == 0 {
 		return map[string]struct{}{}
 	}
-	m.hub.mu.RLock()
-	sourceClient, ok := m.hub.clients[sourceToken]
-	m.hub.mu.RUnlock()
+	sourceClient, ok := snapshot.clients[sourceToken]
 	if !ok {
 		return map[string]struct{}{}
 	}
 	rooms := make(map[string]struct{})
 	for groupID := range groups {
-		allowed, err := m.hub.store.BroadcastGroupAllowsRole(context.Background(), groupID, sourceClient.session.RoleID)
+		allowed, err := m.hub.store.BroadcastGroupAllowsRole(context.Background(), groupID, sourceClient.roleID)
 		if err != nil {
 			m.logger.Warn("broadcast group role lookup failed", "groupId", groupID, "error", err)
 			continue
@@ -482,7 +729,7 @@ func (m *MediaManager) broadcastRoomsForSourceLocked(sourceToken string) map[str
 			continue
 		}
 		for _, roomID := range roomIDs {
-			canSend, err := m.hub.store.RoomAllowsSenderRole(context.Background(), roomID, sourceClient.session.RoleID)
+			canSend, err := m.hub.store.RoomAllowsSenderRole(context.Background(), roomID, sourceClient.roleID)
 			if err != nil {
 				continue
 			}
@@ -495,17 +742,15 @@ func (m *MediaManager) broadcastRoomsForSourceLocked(sourceToken string) map[str
 	return rooms
 }
 
-func (m *MediaManager) attachSourceToPeerLocked(srcToken string, src *mediaSourceTrack, peer *mediaPeer) bool {
-	if _, exists := peer.senders[srcToken]; exists {
-		return false
+func cloneRoomSet(src map[string]struct{}) map[string]struct{} {
+	if len(src) == 0 {
+		return map[string]struct{}{}
 	}
-	sender, err := peer.pc.AddTrack(src.track)
-	if err != nil {
-		m.logger.Warn("add track failed", "peerToken", peer.token, "sourceToken", srcToken, "error", err)
-		return false
+	cloned := make(map[string]struct{}, len(src))
+	for roomID := range src {
+		cloned[roomID] = struct{}{}
 	}
-	peer.senders[srcToken] = sender
-	return true
+	return cloned
 }
 
 func (m *MediaManager) removeSenderLocked(peer *mediaPeer, srcToken string) bool {
@@ -515,6 +760,10 @@ func (m *MediaManager) removeSenderLocked(peer *mediaPeer, srcToken string) bool
 	}
 	_ = peer.pc.RemoveTrack(sender)
 	delete(peer.senders, srcToken)
+	// Also remove the per-destination routing entry if the source still exists.
+	if src, ok := m.sources[srcToken]; ok {
+		delete(src.dests, peer.token)
+	}
 	return true
 }
 
@@ -581,6 +830,7 @@ func (m *MediaManager) maybeRenegotiateLocked(peer *mediaPeer) {
 	}
 	peer.pendingRenegotiate = false
 	peer.renegotiating = true
+	start := time.Now()
 	offer, err := peer.pc.CreateOffer(nil)
 	if err != nil {
 		peer.renegotiating = false
@@ -603,6 +853,51 @@ func (m *MediaManager) maybeRenegotiateLocked(peer *mediaPeer) {
 		Type: "webrtc_offer",
 		Data: WebRTCOffer{SDP: offer.SDP},
 	})
+	recordDurationNanos(&m.renegotiationTotalNanos, &m.renegotiationMaxNanos, time.Since(start))
+}
+
+func recordDurationNanos(total, max *atomic.Uint64, d time.Duration) {
+	nanos := uint64(d)
+	total.Add(nanos)
+	updateMax(max, nanos)
+}
+
+func updateMax(max *atomic.Uint64, value uint64) {
+	for {
+		current := max.Load()
+		if value <= current {
+			return
+		}
+		if max.CompareAndSwap(current, value) {
+			return
+		}
+	}
+}
+
+func recordVoiceStateToSyncNanos(trigger, count, total, max *atomic.Uint64) {
+	triggerNanos := trigger.Load()
+	if triggerNanos == 0 {
+		return
+	}
+	nowNanos := uint64(time.Now().UnixNano())
+	if nowNanos <= triggerNanos {
+		return
+	}
+	latencyNanos := nowNanos - triggerNanos
+	if latencyNanos > uint64(3*time.Second) {
+		return
+	}
+	count.Add(1)
+	total.Add(latencyNanos)
+	for {
+		current := max.Load()
+		if latencyNanos <= current {
+			return
+		}
+		if max.CompareAndSwap(current, latencyNanos) {
+			return
+		}
+	}
 }
 
 func (m *MediaManager) sendWS(token string, msg WSOutbound) {

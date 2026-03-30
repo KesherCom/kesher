@@ -1319,6 +1319,29 @@ export function App() {
         });
         return;
       }
+        if (action.type === "page_home" || action.type === "page_jump") {
+        if (payload.state !== "down") {
+          return;
+        }
+        setStreamDeckSettings((prev) => {
+          if (!prev || prev.pages.length === 0) return prev;
+          const pageOrder = prev.pages
+            .map((entry) => entry.page)
+            .sort((a, b) => a - b);
+            const homePage = pageOrder[0] ?? 0;
+            const targetPage = action.type === "page_home"
+              ? homePage
+              : (action.targetPage ?? homePage);
+          const found = pageOrder.includes(targetPage);
+          const nextPage = found ? targetPage : (pageOrder[0] ?? 0);
+          if (nextPage === prev.selectedPage) return prev;
+            setStreamDeckLastEvent(
+              `-> P${pageOrder.indexOf(nextPage) + 1} (${action.type === "page_home" ? "home" : "jump"})`,
+            );
+          return { ...prev, selectedPage: nextPage };
+        });
+        return;
+      }
       if (action.type === "ptt_room" && action.roomId) {
         if (payload.state === "down" && !isRoomTalkAllowed(action.roomId)) {
           setStreamDeckLastEvent(

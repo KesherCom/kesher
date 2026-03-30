@@ -183,7 +183,13 @@ export type MediaRealtimeStats = {
   syncRequests: number;
   syncRuns: number;
   syncRequestsCoalesced: number;
+  syncRunAvgMs: number;
+  syncRunMaxMs: number;
+  voiceStateToSyncAvgMs: number;
+  voiceStateToSyncMaxMs: number;
   renegotiations: number;
+  renegotiationAvgMs: number;
+  renegotiationMaxMs: number;
 };
 
 export type StorePolicyCacheStats = {
@@ -248,7 +254,15 @@ export type StreamDeckActionType =
   | "mute_toggle"
   | "volume_delta"
   | "page_up"
-  | "page_down";
+  | "page_down"
+  | "page_jump"
+  | "page_home"
+  | "page_back";
+
+export type StreamDeckPageType =
+  | "manual"
+  | "all_roles"
+  | "all_party_lines";
 
 export type StreamDeckButtonAction = {
   type: StreamDeckActionType;
@@ -257,6 +271,7 @@ export type StreamDeckButtonAction = {
   roleId?: string;
   broadcastGroupId?: string;
   volumeDelta?: number;
+  targetPage?: number;
 };
 
 export type StreamDeckButtonConfig = {
@@ -268,6 +283,9 @@ export type StreamDeckButtonConfig = {
 
 export type StreamDeckPageConfig = {
   page: number;
+  title?: string;
+  pageType?: StreamDeckPageType;
+  parentPage?: number;
   buttons: StreamDeckButtonConfig[];
 };
 

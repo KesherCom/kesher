@@ -110,6 +110,10 @@ function resolveActionLabel(
       return "Page +";
     case "page_down":
       return "Page -";
+    case "page_home":
+      return "Home";
+    case "page_jump":
+      return action.targetPage !== undefined ? `Page ${action.targetPage + 1}` : "Jump";
     case "none":
     default:
       return undefined;

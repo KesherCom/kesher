@@ -44,7 +44,13 @@ describe("AdminMenu", () => {
         refreshBootstrapData={vi.fn()}
         adminPin="1234"
         onUpdateAdminPin={vi.fn().mockResolvedValue(undefined)}
-        audioStats={{ inKbps: 1, outKbps: 2 }}
+        audioStats={{
+          inKbps: 1,
+          outKbps: 2,
+          jitterMs: 3,
+          roundTripMs: 4,
+          playoutDelayMs: 5,
+        }}
         activeRoutesCount={0}
       />,
     );
@@ -60,7 +66,13 @@ describe("AdminMenu", () => {
         refreshBootstrapData={vi.fn()}
         adminPin="1234"
         onUpdateAdminPin={vi.fn().mockResolvedValue(undefined)}
-        audioStats={{ inKbps: 1, outKbps: 2 }}
+        audioStats={{
+          inKbps: 1,
+          outKbps: 2,
+          jitterMs: 3,
+          roundTripMs: 4,
+          playoutDelayMs: 5,
+        }}
         activeRoutesCount={3}
       />,
     );
