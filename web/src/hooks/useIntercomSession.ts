@@ -85,8 +85,10 @@ const opusMaxBitrateBps = 24000;
 const opusSpeechFmtpParams = [
   ["stereo", "0"],
   ["sprop-stereo", "0"],
-  ["useinbandfec", "1"],
+  ["useinbandfec", "0"],
   ["usedtx", "1"],
+  ["ptime", "5"],
+  ["minptime", "2.5"],
   ["maxaveragebitrate", `${opusMaxBitrateBps}`],
 ] as const;
 
@@ -101,7 +103,7 @@ function clampPriorityLevel(value: number | undefined): number {
   return Math.max(0, Math.min(3, Math.trunc(value)));
 }
 
-function upsertFmtpParams(existing: string): string {
+export function upsertFmtpParams(existing: string): string {
   const desired = Object.fromEntries(opusSpeechFmtpParams) as Record<
     string,
     string
@@ -124,7 +126,7 @@ function upsertFmtpParams(existing: string): string {
   return next.join(";");
 }
 
-function tuneOpusSdpForSpeech(sdp: string): string {
+export function tuneOpusSdpForSpeech(sdp: string): string {
   if (!sdp) return sdp;
   const lines = sdp.split("\r\n");
   const opusPayloadTypes = lines.flatMap((line) => {
@@ -153,6 +155,31 @@ function tuneOpusSdpForSpeech(sdp: string): string {
     }
   }
   return lines.join("\r\n");
+}
+
+type ReceiverWithPlayoutDelayHint = {
+  playoutDelayHint?: number;
+};
+
+export function trySetReceiverPlayoutDelayHint(
+  receiver: unknown,
+  delayHint: number,
+): boolean {
+  if (
+    !receiver ||
+    typeof receiver !== "object" ||
+    typeof delayHint !== "number" ||
+    !Number.isFinite(delayHint) ||
+    !("playoutDelayHint" in receiver)
+  ) {
+    return false;
+  }
+  try {
+    (receiver as ReceiverWithPlayoutDelayHint).playoutDelayHint = delayHint;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isMobileClient(): boolean {
@@ -1473,6 +1500,7 @@ export function useIntercomSession({
           if (sourceUserID) {
             remote.remoteSourceUserIdRef.current.set(key, sourceUserID);
           }
+          trySetReceiverPlayoutDelayHint(event.receiver, 0);
           let audio = remote.remoteAudioRef.current.get(key);
           if (!audio) {
             audio = document.createElement("audio");
