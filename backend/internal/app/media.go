@@ -107,7 +107,7 @@ type MediaManager struct {
 	webrtcAPI                  *webrtc.API
 }
 
-const syncRoutingDebounce = 2 * time.Millisecond
+const syncRoutingDebounce = 1 * time.Millisecond
 const renegotiationDebounce = 5 * time.Millisecond
 
 // buildWebRTCAPI creates a Pion webrtc.API tuned for low-latency audio-only SFU.
@@ -121,7 +121,7 @@ func buildWebRTCAPI(logger *slog.Logger) (*webrtc.API, error) {
 			MimeType:    webrtc.MimeTypeOpus,
 			ClockRate:   48000,
 			Channels:    2,
-			SDPFmtpLine: "minptime=2;useinbandfec=0;usedtx=1;stereo=0;sprop-stereo=0",
+			SDPFmtpLine: "minptime=2;useinbandfec=0;usedtx=0;stereo=0;sprop-stereo=0",
 		},
 		PayloadType: 111,
 	}, webrtc.RTPCodecTypeAudio); err != nil {

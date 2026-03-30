@@ -85,7 +85,7 @@ const opusMaxBitrateBps = 24000;
 
 // Opus ptime/minptime can be overridden at runtime via localStorage for A/B
 // latency testing.  Set `localStorage.setItem('opus_ptime', '2.5')` and reload.
-// Valid values: "2.5", "5", "10", "20".  Default is "5".
+// Valid values: "2.5", "5", "10", "20".  Default is "2.5".
 function getOpusPtime(): string {
   try {
     const v = localStorage.getItem("opus_ptime");
@@ -93,7 +93,7 @@ function getOpusPtime(): string {
   } catch {
     /* ignore */
   }
-  return "5";
+  return "2.5";
 }
 function getOpusMinPtime(): string {
   try {
@@ -109,7 +109,7 @@ const opusSpeechFmtpParams: ReadonlyArray<readonly [string, string]> = [
   ["stereo", "0"],
   ["sprop-stereo", "0"],
   ["useinbandfec", "0"],
-  ["usedtx", "1"],
+  ["usedtx", "0"],
   ["cbr", "1"],
   ["ptime", getOpusPtime()],
   ["minptime", getOpusMinPtime()],
@@ -931,16 +931,19 @@ export function useIntercomSession({
     const ad = appDataRef.current;
     if (!ad || !canRoleReceiveFromRoom(roomId, ad.self.roleId)) return;
     if (isRoomForcedListen(roomId, ad.self.roleId)) return;
-    setListenRoomIds((prev) => toggleRoomSelectionState(prev, roomId));
+    const nextListen = toggleRoomSelectionState(listenRoomIdsRef.current, roomId);
+    setListenRoomIds(nextListen);
+    sendRoomMatrix(nextListen, talkRoomIdsRef.current, true);
   }
 
   function toggleTalkRoom(roomId: string) {
     const ad = appDataRef.current;
     if (!ad || !canRoleSendToRoom(roomId, ad.self.roleId)) return;
-    setTalkRoomIds((prev) => {
-      if (prev.includes(roomId)) return prev.filter((id) => id !== roomId);
-      return [roomId];
-    });
+    const nextTalk = talkRoomIdsRef.current.includes(roomId)
+      ? talkRoomIdsRef.current.filter((id) => id !== roomId)
+      : [roomId];
+    setTalkRoomIds(nextTalk);
+    sendRoomMatrix(listenRoomIdsRef.current, nextTalk, true);
   }
 
   // ── Cleanup helpers ──

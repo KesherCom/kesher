@@ -14,12 +14,12 @@ describe("useIntercomSession low-latency helpers", () => {
     ).toBe(
       [
         "useinbandfec=0",
-        "usedtx=1",
+        "usedtx=0",
         "maxaveragebitrate=24000",
         "stereo=0",
         "sprop-stereo=0",
         "cbr=1",
-        "ptime=5",
+        "ptime=2.5",
         "minptime=2.5",
       ].join(";"),
     );
@@ -37,7 +37,7 @@ describe("useIntercomSession low-latency helpers", () => {
     ].join("\r\n");
 
     expect(tuneOpusSdpForSpeech(sdp)).toContain(
-      "a=fmtp:111 stereo=0;sprop-stereo=0;useinbandfec=0;usedtx=1;cbr=1;ptime=5;minptime=2.5;maxaveragebitrate=24000",
+      "a=fmtp:111 stereo=0;sprop-stereo=0;useinbandfec=0;usedtx=0;cbr=1;ptime=2.5;minptime=2.5;maxaveragebitrate=24000",
     );
   });
 
