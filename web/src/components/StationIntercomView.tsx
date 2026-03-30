@@ -6,6 +6,7 @@ import type {
   Presence,
   StreamDeckActionType,
   StreamDeckButtonConfig,
+  StreamDeckPageType,
   StreamDeckSettings,
 } from "../types";
 import type { KeyboardShortcutSettings } from "../app/settings";
@@ -99,6 +100,7 @@ function normalizeImportedStreamDeckSettings(input: unknown): StreamDeckSettings
     "page_down",
     "page_jump",
     "page_home",
+    "page_back",
   ]);
 
   const normalizedPages = pagesRaw.map((pageEntry) => {
@@ -156,7 +158,21 @@ function normalizeImportedStreamDeckSettings(input: unknown): StreamDeckSettings
       };
     });
 
-    return { page, buttons };
+    const pageTypeCandidate =
+      typeof pageRaw.pageType === "string" ? pageRaw.pageType : "manual";
+    const pageType =
+      pageTypeCandidate === "all_roles" || pageTypeCandidate === "all_party_lines"
+        ? (pageTypeCandidate as StreamDeckPageType)
+        : ("manual" as StreamDeckPageType);
+    const parentPage = Number(pageRaw.parentPage);
+
+    return {
+      page,
+      title: typeof pageRaw.title === "string" ? pageRaw.title : "",
+      pageType,
+      parentPage: Number.isInteger(parentPage) && parentPage >= 0 ? parentPage : undefined,
+      buttons,
+    };
   });
 
   if (!normalizedPages.some((entry) => entry.page === selectedPage)) {
@@ -1092,23 +1108,23 @@ export function StationIntercomView({
       if (type === "none") {
         return { ...button, action: undefined };
       }
-        if (type === "page_home" || type === "page_jump") {
-          const pageOrder = (streamDeckSettings?.pages ?? [])
-            .map((page) => page.page)
-            .sort((a, b) => a - b);
-          const homePage = pageOrder[0] ?? 0;
-          const defaultTargetPage =
-            button.action?.type === "page_jump" && button.action.targetPage !== undefined
-              ? button.action.targetPage
-              : homePage;
-          return {
-            ...button,
-            action: {
-              type,
-              targetPage: type === "page_home" ? homePage : defaultTargetPage,
-            },
-          };
-        }
+      if (type === "page_home" || type === "page_jump") {
+        const pageOrder = (streamDeckSettings?.pages ?? [])
+          .map((page) => page.page)
+          .sort((a, b) => a - b);
+        const homePage = pageOrder[0] ?? 0;
+        const defaultTargetPage =
+          button.action?.type === "page_jump" && button.action.targetPage !== undefined
+            ? button.action.targetPage
+            : homePage;
+        return {
+          ...button,
+          action: {
+            type,
+            targetPage: type === "page_home" ? homePage : defaultTargetPage,
+          },
+        };
+      }
       if (
         type === "ptt_room" ||
         type === "select_talk_room" ||
@@ -1183,6 +1199,27 @@ export function StationIntercomView({
     });
   };
 
+  const updateStreamDeckCurrentPageMeta = (
+    updater: (page: NonNullable<typeof streamDeckCurrentPage>) => {
+      page: number;
+      title?: string;
+      pageType?: StreamDeckPageType;
+      parentPage?: number;
+      buttons: StreamDeckButtonConfig[];
+    },
+  ) => {
+    if (!streamDeckSettings || !streamDeckCurrentPage) {
+      return;
+    }
+    const nextPage = updater(streamDeckCurrentPage);
+    applyStreamDeckSettings({
+      ...streamDeckSettings,
+      pages: streamDeckSettings.pages.map((page) =>
+        page.page === streamDeckCurrentPage.page ? nextPage : page,
+      ),
+    });
+  };
+
   const goToStreamDeckPage = (direction: -1 | 1) => {
     if (!streamDeckSettings || streamDeckPageOrder.length === 0) return;
     const currentPageIndex = streamDeckPageOrder.findIndex(
@@ -1218,6 +1255,8 @@ export function StationIntercomView({
         ...streamDeckSettings.pages,
         {
           page: nextPageNumber,
+          title: "",
+          pageType: "manual",
           buttons: createEmptyStreamDeckButtons(buttonCount),
         },
       ],
@@ -1241,7 +1280,28 @@ export function StationIntercomView({
     applyStreamDeckSettings({
       ...streamDeckSettings,
       selectedPage: fallbackPage,
-      pages: nextPages,
+      pages: nextPages.map((page) => ({
+        ...page,
+        parentPage:
+          page.parentPage === streamDeckSettings.selectedPage
+            ? undefined
+            : page.parentPage,
+        buttons: page.buttons.map((button) => {
+          if (
+            button.action?.type === "page_jump" &&
+            button.action.targetPage === streamDeckSettings.selectedPage
+          ) {
+            return {
+              ...button,
+              action: {
+                type: "page_jump",
+                targetPage: fallbackPage,
+              },
+            };
+          }
+          return button;
+        }),
+      })),
     });
   };
 
@@ -2285,6 +2345,65 @@ export function StationIntercomView({
                         <small className="station-settings-meta">
                           Drag one key onto another to swap them. Use Copy and Paste to duplicate button setups.
                         </small>
+                        {streamDeckCurrentPage ? (
+                          <div className="streamdeck-toolbar" style={{ marginTop: "0.65rem" }}>
+                            <label className="streamdeck-control">
+                              <span>Page title</span>
+                              <input
+                                type="text"
+                                value={streamDeckCurrentPage.title || ""}
+                                onChange={(event) =>
+                                  updateStreamDeckCurrentPageMeta((page) => ({
+                                    ...page,
+                                    title: event.target.value,
+                                  }))
+                                }
+                                placeholder="Optional folder title"
+                              />
+                            </label>
+                            <label className="streamdeck-control">
+                              <span>Page type</span>
+                              <select
+                                value={streamDeckCurrentPage.pageType || "manual"}
+                                onChange={(event) =>
+                                  updateStreamDeckCurrentPageMeta((page) => ({
+                                    ...page,
+                                    pageType: event.target.value as StreamDeckPageType,
+                                  }))
+                                }
+                              >
+                                <option value="manual">Manual page / folder</option>
+                                <option value="all_roles">Auto folder: all roles</option>
+                                <option value="all_party_lines">Auto folder: all party-lines</option>
+                              </select>
+                            </label>
+                            <label className="streamdeck-control">
+                              <span>Parent page</span>
+                              <select
+                                value={String(streamDeckCurrentPage.parentPage ?? "")}
+                                onChange={(event) =>
+                                  updateStreamDeckCurrentPageMeta((page) => ({
+                                    ...page,
+                                    parentPage:
+                                      event.target.value === ""
+                                        ? undefined
+                                        : Number(event.target.value),
+                                  }))
+                                }
+                              >
+                                <option value="">Root level</option>
+                                {(streamDeckSettings?.pages ?? [])
+                                  .filter((page) => page.page !== streamDeckCurrentPage.page)
+                                  .sort((a, b) => a.page - b.page)
+                                  .map((page, index) => (
+                                    <option key={`sd-parent-page-${page.page}`} value={String(page.page)}>
+                                      {page.title?.trim() || `Page ${index + 1}`}
+                                    </option>
+                                  ))}
+                              </select>
+                            </label>
+                          </div>
+                        ) : null}
 
                         <div className="streamdeck-layout">
                           <div className="streamdeck-grid" role="grid" aria-label="Stream Deck 5x3 grid">
@@ -2464,7 +2583,7 @@ export function StationIntercomView({
                               <option value="page_up">Page up</option>
                               <option value="page_down">Page down</option>
                               <option value="page_home">Home (page 1)</option>
-                              <option value="page_jump">Jump to page</option>
+                              <option value="page_jump">Open page / folder</option>
                             </optgroup>
                           </select>
                         </label>
@@ -2631,7 +2750,7 @@ export function StationIntercomView({
                                 .sort((a, b) => a - b)
                                 .map((pageNo, idx) => (
                                   <option key={`sd-jump-page-${pageNo}`} value={String(pageNo)}>
-                                    Page {idx + 1}
+                                    {(streamDeckSettings?.pages ?? []).find((page) => page.page === pageNo)?.title?.trim() || `Page ${idx + 1}`}
                                   </option>
                                 ))}
                             </select>

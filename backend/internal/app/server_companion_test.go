@@ -836,6 +836,92 @@ func TestResolveCompanionRuntimePageUsesRoleRoomsAsSlidingDataSource(t *testing.
 	}
 }
 
+func TestBuildCompanionProfileResponseExpandsAutoRoleFolder(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	if err := s.store.CreateRole(ctx, "director", "Director", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole director failed: %v", err)
+	}
+	if err := s.store.CreateRoom(ctx, "room-a", "Room A", []string{"source"}, []string{"director"}, nil); err != nil {
+		t.Fatalf("CreateRoom room-a failed: %v", err)
+	}
+	user, err := s.store.UpsertUser(ctx, "operator", "source")
+	if err != nil {
+		t.Fatalf("UpsertUser failed: %v", err)
+	}
+
+	settings := DefaultStreamDeckSettings()
+	settings.Pages[0].Buttons[1].Label = "Roles"
+	settings.Pages[0].Buttons[1].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageJump, TargetPage: 1}
+	parentPage := 0
+	settings.Pages = append(settings.Pages, StreamDeckPageConfig{
+		Page:       1,
+		Title:      "Roles",
+		PageType:   StreamDeckPageTypeAllRoles,
+		ParentPage: &parentPage,
+		Buttons:    companionBuildEmptyButtons(settings),
+	})
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	profile, err := s.buildCompanionProfileResponse(ctx, user)
+	if err != nil {
+		t.Fatalf("buildCompanionProfileResponse failed: %v", err)
+	}
+	autoPage := companionResolvePageConfig(profile.StreamDeck, 1)
+	if autoPage.Buttons[0].Action == nil || autoPage.Buttons[0].Action.Type != StreamDeckActionTypePageBack {
+		t.Fatalf("expected auto folder to inject page_back into slot 0, got %+v", autoPage.Buttons[0].Action)
+	}
+	foundDirector := false
+	for _, button := range autoPage.Buttons {
+		if button.Action != nil && button.Action.Type == StreamDeckActionTypeDirectRole && button.Action.RoleID == "director" {
+			foundDirector = true
+			break
+		}
+	}
+	if !foundDirector {
+		t.Fatal("expected expanded auto role folder to include reachable director role")
+	}
+}
+
+func TestExecuteCompanionPageCommandPageBackReturnsToParent(t *testing.T) {
+	s := newCompanionTestServer(t)
+	ctx := context.Background()
+
+	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
+		t.Fatalf("CreateRole source failed: %v", err)
+	}
+	settings := DefaultStreamDeckSettings()
+	parentPage := 0
+	settings.Pages = append(settings.Pages, StreamDeckPageConfig{
+		Page:       1,
+		Title:      "Child",
+		PageType:   StreamDeckPageTypeManual,
+		ParentPage: &parentPage,
+		Buttons:    companionBuildEmptyButtons(settings),
+	})
+	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
+		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
+	}
+
+	s.setCompanionCurrentPage("source", 1)
+	result, handled := s.executeCompanionPageCommand(ctx, "source", "operator", CompanionCommand{Command: "page_back"})
+	if !handled {
+		t.Fatal("expected page_back to be handled")
+	}
+	if !result.OK || result.Status != "executed" {
+		t.Fatalf("expected successful page_back execution, got %+v", result)
+	}
+	if got := s.currentCompanionPage(ctx, "source"); got != 0 {
+		t.Fatalf("expected page_back to return to parent page 0, got %d", got)
+	}
+}
+
 func TestExecuteCompanionButtonPressDynamicEdgeFallbackAllowsReverseOnNextSlot(t *testing.T) {
 	s := newCompanionTestServer(t)
 	s.cfg.CompanionDynamicPaging = true

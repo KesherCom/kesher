@@ -29,6 +29,9 @@ func TestDefaultStreamDeckSettingsStartsWithUnassignedButtons(t *testing.T) {
 	if len(settings.Pages) == 0 {
 		t.Fatal("expected at least one page")
 	}
+	if settings.Pages[0].PageType != "" && settings.Pages[0].PageType != StreamDeckPageTypeManual {
+		t.Fatalf("expected default page type to be manual-compatible, got %q", settings.Pages[0].PageType)
+	}
 	for _, button := range settings.Pages[0].Buttons {
 		if button.Action != nil {
 			t.Fatalf("expected default button index %d to be unassigned", button.Index)

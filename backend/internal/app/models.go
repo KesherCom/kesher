@@ -112,6 +112,8 @@ type Session struct {
 
 type StreamDeckActionType string
 
+type StreamDeckPageType string
+
 const (
 	StreamDeckActionTypeNone           StreamDeckActionType = "none"
 	StreamDeckActionTypePTTRoom        StreamDeckActionType = "ptt_room"
@@ -131,6 +133,13 @@ const (
 	StreamDeckActionTypePageDown       StreamDeckActionType = "page_down"
 	StreamDeckActionTypePageJump       StreamDeckActionType = "page_jump"
 	StreamDeckActionTypePageHome       StreamDeckActionType = "page_home"
+	StreamDeckActionTypePageBack       StreamDeckActionType = "page_back"
+)
+
+const (
+	StreamDeckPageTypeManual         StreamDeckPageType = "manual"
+	StreamDeckPageTypeAllRoles       StreamDeckPageType = "all_roles"
+	StreamDeckPageTypeAllPartyLines  StreamDeckPageType = "all_party_lines"
 )
 
 const (
@@ -157,8 +166,11 @@ type StreamDeckButtonConfig struct {
 }
 
 type StreamDeckPageConfig struct {
-	Page    int                      `json:"page"`
-	Buttons []StreamDeckButtonConfig `json:"buttons"`
+	Page       int                      `json:"page"`
+	Title      string                   `json:"title,omitempty"`
+	PageType   StreamDeckPageType       `json:"pageType,omitempty"`
+	ParentPage *int                     `json:"parentPage,omitempty"`
+	Buttons    []StreamDeckButtonConfig `json:"buttons"`
 }
 
 type StreamDeckSettings struct {

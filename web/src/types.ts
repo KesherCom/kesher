@@ -256,7 +256,13 @@ export type StreamDeckActionType =
   | "page_up"
   | "page_down"
   | "page_jump"
-  | "page_home";
+  | "page_home"
+  | "page_back";
+
+export type StreamDeckPageType =
+  | "manual"
+  | "all_roles"
+  | "all_party_lines";
 
 export type StreamDeckButtonAction = {
   type: StreamDeckActionType;
@@ -277,6 +283,9 @@ export type StreamDeckButtonConfig = {
 
 export type StreamDeckPageConfig = {
   page: number;
+  title?: string;
+  pageType?: StreamDeckPageType;
+  parentPage?: number;
   buttons: StreamDeckButtonConfig[];
 };
 
