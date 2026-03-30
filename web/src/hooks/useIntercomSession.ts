@@ -120,6 +120,23 @@ const directRoutePriorityLevel = 3;
 const defaultRoutePriorityLevel = 1;
 const duckingGainLinear = 0.1;
 
+function getRoomMatrixSyncDebounceMs(): number {
+  try {
+    const raw = localStorage.getItem("room_matrix_debounce_ms");
+    if (raw != null) {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed)) {
+        return Math.max(5, Math.min(60, Math.trunc(parsed)));
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return 12;
+}
+
+const roomMatrixSyncDebounceMs = getRoomMatrixSyncDebounceMs();
+
 function clampPriorityLevel(value: number | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return defaultRoutePriorityLevel;
@@ -2278,7 +2295,7 @@ export function useIntercomSession({
         }),
       );
       pushDebugEvent(`system · matrix updated · ${anchorRoomId || "no-room"}`);
-    }, 30);
+    }, roomMatrixSyncDebounceMs);
     return () => clearRoomSwitchTimer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listenRoomIds, talkRoomIds]);

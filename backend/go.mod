@@ -11,6 +11,7 @@ require (
 	github.com/libdns/cloudflare v0.2.2
 	github.com/libdns/hetzner v1.0.0
 	github.com/libdns/route53 v1.6.0
+	github.com/pion/interceptor v0.1.44
 	github.com/pion/rtp v1.10.1
 	github.com/pion/webrtc/v4 v4.2.11
 	golang.org/x/image v0.38.0
@@ -48,7 +49,6 @@ require (
 	github.com/pion/datachannel v1.6.0 // indirect
 	github.com/pion/dtls/v3 v3.1.2 // indirect
 	github.com/pion/ice/v4 v4.2.2 // indirect
-	github.com/pion/interceptor v0.1.44 // indirect
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.1.0 // indirect
 	github.com/pion/randutil v0.1.0 // indirect

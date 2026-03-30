@@ -5308,6 +5308,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			var e RoomMatrixEvent
 			_ = json.Unmarshal(raw, &e)
 			prevListen := s.hub.ListenRoomsForToken(session.Token)
+			prevTalk := s.hub.TalkRoomsForToken(session.Token)
 			allowedListen := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, e.ListenRoomIDs, false)
 			allowedListen = s.mergeForcedListenRooms(r.Context(), session.RoleID, allowedListen)
 			allowedTalk := s.filterAllowedRoomsForRole(r.Context(), session.RoleID, e.TalkRoomIDs, true)
@@ -5317,7 +5318,16 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				s.hub.SendRoomChatHistory(session.Token, newlyListened)
 			}
 			if mediaReady {
-				s.media.SyncRouting()
+				listenChanged := !roomSetsEqual(prevListen, allowedListen)
+				talkChanged := !roomSetsEqual(prevTalk, allowedTalk)
+				switch {
+				case listenChanged:
+					// Listen changes can affect gates for many sources that target this peer.
+					s.media.SyncRouting()
+				case talkChanged:
+					// Talk-only changes affect this source's outgoing routing decisions.
+					s.media.SyncRoutingSource(session.Token)
+				}
 			}
 			// Notify Companion clients of listen-state changes so button images update immediately
 			s.publishCompanionPresenceUpdate(r.Context(), session.RoleID)
@@ -5579,6 +5589,29 @@ func addedRooms(previous []string, next []string) []string {
 		added = append(added, roomID)
 	}
 	return added
+}
+
+func roomSetsEqual(a []string, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]struct{}, len(a))
+	for _, roomID := range a {
+		if roomID == "" {
+			continue
+		}
+		set[roomID] = struct{}{}
+	}
+	for _, roomID := range b {
+		if roomID == "" {
+			continue
+		}
+		if _, ok := set[roomID]; !ok {
+			return false
+		}
+		delete(set, roomID)
+	}
+	return len(set) == 0
 }
 
 func (s *Server) resolveRoomTargetID(ctx context.Context, target string) (string, bool) {
