@@ -221,7 +221,7 @@ export function useLocalMic({
     const AudioCtx = window.AudioContext;
     if (!AudioCtx) return sourceStream;
     try {
-      const ctx = new AudioCtx();
+      const ctx = new AudioCtx({ latencyHint: "interactive" });
       const src = ctx.createMediaStreamSource(sourceStream);
       const gain = ctx.createGain();
       gain.gain.value = clampGainValue(gainValue);
@@ -283,7 +283,7 @@ export function useLocalMic({
     const monitorTrack = sourceTrack.clone();
     const monitorStream = new MediaStream([monitorTrack]);
     meterMonitorStreamRef.current = monitorStream;
-    const ctx = new AudioCtx();
+    const ctx = new AudioCtx({ latencyHint: "interactive" });
     audioCtxRef.current = ctx;
     const src = ctx.createMediaStreamSource(monitorStream);
     const meterGain = ctx.createGain();

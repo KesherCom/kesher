@@ -10,11 +10,23 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/webrtc/v4"
 )
 
+// routedDest holds a per-destination local track and an atomic routing gate.
+// The gate is flipped by recomputeSourceRoutingLocked; the RTP forwarding loop
+// reads it lock-free to decide whether to forward each packet.
+type routedDest struct {
+	localTrack *webrtc.TrackLocalStaticRTP
+	gate       atomic.Bool
+}
+
 type mediaSourceTrack struct {
-	track *webrtc.TrackLocalStaticRTP
+	codec  webrtc.RTPCodecCapability
+	userID string
+	dests  map[string]*routedDest // key: destination peer token
 }
 
 type MediaRealtimeStats struct {
@@ -46,7 +58,7 @@ type mediaPeer struct {
 }
 
 type MediaManager struct {
-	mu                         sync.Mutex
+	mu                         sync.RWMutex
 	logger                     *slog.Logger
 	hub                        *Hub
 	peers                      map[string]*mediaPeer
@@ -67,12 +79,63 @@ type MediaManager struct {
 	renegotiations             atomic.Uint64
 	renegotiationTotalNanos    atomic.Uint64
 	renegotiationMaxNanos      atomic.Uint64
+	webrtcAPI                  *webrtc.API
 }
 
-const syncRoutingDebounce = 10 * time.Millisecond
-const renegotiationDebounce = 20 * time.Millisecond
+const syncRoutingDebounce = 2 * time.Millisecond
+const renegotiationDebounce = 5 * time.Millisecond
+
+// buildWebRTCAPI creates a Pion webrtc.API tuned for low-latency audio-only SFU.
+// It registers only the Opus codec, disables mDNS for faster ICE, and uses a
+// minimal interceptor set (NACK generator only, no responder/TWCC).
+func buildWebRTCAPI(logger *slog.Logger) (*webrtc.API, error) {
+	// ── MediaEngine: Opus only ─────────────────────────────────────────────
+	me := &webrtc.MediaEngine{}
+	if err := me.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeOpus,
+			ClockRate:   48000,
+			Channels:    2,
+			SDPFmtpLine: "minptime=2;useinbandfec=0;usedtx=1;stereo=0;sprop-stereo=0",
+		},
+		PayloadType: 111,
+	}, webrtc.RTPCodecTypeAudio); err != nil {
+		return nil, fmt.Errorf("register opus codec: %w", err)
+	}
+
+	// ── InterceptorRegistry: minimal ───────────────────────────────────────
+	ir := &interceptor.Registry{}
+	// NACK generator lets the receiver request retransmission if it notices a
+	// gap.  We skip the NACK responder (server-side retransmit) to avoid
+	// the latency of buffering outgoing packets.
+	generator, err := nack.NewGeneratorInterceptor()
+	if err != nil {
+		return nil, fmt.Errorf("nack generator: %w", err)
+	}
+	ir.Add(generator)
+
+	// ── SettingEngine ──────────────────────────────────────────────────────
+	se := webrtc.SettingEngine{}
+	// Disable mDNS so ICE candidates resolve immediately on LAN.
+	se.SetICEMulticastDNSMode(0) // ice.MulticastDNSModeDisabled == 0
+	se.SetSRTPReplayProtectionWindow(64)
+	se.SetReceiveMTU(1200)
+
+	api := webrtc.NewAPI(
+		webrtc.WithMediaEngine(me),
+		webrtc.WithInterceptorRegistry(ir),
+		webrtc.WithSettingEngine(se),
+	)
+	logger.Info("webrtc API built: opus-only, minimal interceptors, mDNS disabled")
+	return api, nil
+}
 
 func NewMediaManager(hub *Hub, logger *slog.Logger) *MediaManager {
+	api, err := buildWebRTCAPI(logger)
+	if err != nil {
+		logger.Error("failed to build low-latency webrtc API, falling back to defaults", "error", err)
+		api = webrtc.NewAPI()
+	}
 	return &MediaManager{
 		logger:                     logger,
 		hub:                        hub,
@@ -81,6 +144,7 @@ func NewMediaManager(hub *Hub, logger *slog.Logger) *MediaManager {
 		broadcastActive:            make(map[string]map[string]struct{}),
 		directActive:               make(map[string]string),
 		idleRoomFallbackSuppressed: make(map[string]struct{}),
+		webrtcAPI:                  api,
 	}
 }
 
@@ -97,7 +161,7 @@ func (m *MediaManager) EnsurePeer(token string, user User) error {
 	if _, ok := m.peers[token]; ok {
 		return nil
 	}
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	pc, err := m.webrtcAPI.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		return err
 	}
@@ -138,6 +202,13 @@ func (m *MediaManager) EnsurePeer(token string, user User) error {
 		}
 	})
 	m.peers[token] = peer
+
+	// Pre-attach existing source tracks to this new peer so audio can flow
+	// instantly when routing gates open (no renegotiation needed later).
+	for sourceToken := range m.sources {
+		m.recomputeSourceRoutingLocked(sourceToken)
+	}
+
 	return nil
 }
 
@@ -284,6 +355,11 @@ func (m *MediaManager) RemovePeer(token string) {
 	delete(m.idleRoomFallbackSuppressed, token)
 	delete(m.sources, token)
 
+	// Clean up per-dest entries referencing this peer from all sources.
+	for _, src := range m.sources {
+		delete(src.dests, token)
+	}
+
 	var affectedSources []string
 	for sourceToken, targetUserID := range m.directActive {
 		if targetUserID == peer.userID {
@@ -306,25 +382,35 @@ func (m *MediaManager) RemovePeer(token string) {
 }
 
 func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.TrackRemote) {
-	localTrack, err := webrtc.NewTrackLocalStaticRTP(remote.Codec().RTPCodecCapability, fmt.Sprintf("audio-user-%s", sourcePeer.userID), "intercom")
-	if err != nil {
-		m.logger.Error("failed to create local track", "error", err)
-		return
-	}
+	codec := remote.Codec().RTPCodecCapability
+
 	m.mu.Lock()
-	m.sources[sourcePeer.token] = &mediaSourceTrack{track: localTrack}
+	src := &mediaSourceTrack{
+		codec:  codec,
+		userID: sourcePeer.userID,
+		dests:  make(map[string]*routedDest),
+	}
+	m.sources[sourcePeer.token] = src
 	m.recomputeSourceRoutingLocked(sourcePeer.token)
 	m.mu.Unlock()
-	buf := make([]byte, 2048)
 
+	buf := make([]byte, 2048)
 	for {
 		n, _, readErr := remote.Read(buf)
 		if readErr != nil {
 			break
 		}
-		if _, writeErr := localTrack.Write(buf[:n]); writeErr != nil {
-			break
+		// RLock allows concurrent forwarding from multiple sources while
+		// routing changes (which need a full Lock) remain infrequent.
+		m.mu.RLock()
+		if s := m.sources[sourcePeer.token]; s != nil {
+			for _, dest := range s.dests {
+				if dest.gate.Load() {
+					_, _ = dest.localTrack.Write(buf[:n])
+				}
+			}
 		}
+		m.mu.RUnlock()
 	}
 
 	m.mu.Lock()
@@ -432,6 +518,29 @@ func (m *MediaManager) recomputeSourceRoutingLocked(sourceToken string) {
 		if p.token == sourceToken {
 			continue
 		}
+
+		// Ensure a per-destination track exists (pre-attachment).
+		if _, exists := src.dests[p.token]; !exists {
+			localTrack, err := webrtc.NewTrackLocalStaticRTP(
+				src.codec,
+				fmt.Sprintf("audio-user-%s", src.userID),
+				"intercom",
+			)
+			if err != nil {
+				m.logger.Warn("create per-dest track failed", "destPeer", p.token, "error", err)
+				continue
+			}
+			sender, err := p.pc.AddTrack(localTrack)
+			if err != nil {
+				m.logger.Warn("pre-attach track failed", "destPeer", p.token, "sourceToken", sourceToken, "error", err)
+				continue
+			}
+			p.senders[sourceToken] = sender
+			src.dests[p.token] = &routedDest{localTrack: localTrack}
+			m.requestRenegotiationLocked(p)
+		}
+
+		// Compute the routing gate — instant, no renegotiation.
 		shouldReceive := false
 		if directTargetPeerToken != "" {
 			shouldReceive = p.token == directTargetPeerToken
@@ -440,15 +549,13 @@ func (m *MediaManager) recomputeSourceRoutingLocked(sourceToken string) {
 		} else if !idleRoomFallbackSuppressed {
 			shouldReceive = m.peerListensToAnyRoomLocked(p.token, talkRooms)
 		}
+		src.dests[p.token].gate.Store(shouldReceive)
+	}
 
-		if shouldReceive {
-			if m.attachSourceToPeerLocked(sourceToken, src, p) {
-				m.requestRenegotiationLocked(p)
-			}
-			continue
-		}
-		if m.removeSenderLocked(p, sourceToken) {
-			m.requestRenegotiationLocked(p)
+	// Remove stale destinations for peers that no longer exist.
+	for destToken := range src.dests {
+		if _, exists := m.peers[destToken]; !exists {
+			delete(src.dests, destToken)
 		}
 	}
 }
@@ -539,19 +646,6 @@ func (m *MediaManager) broadcastRoomsForSourceLocked(sourceToken string) map[str
 	return rooms
 }
 
-func (m *MediaManager) attachSourceToPeerLocked(srcToken string, src *mediaSourceTrack, peer *mediaPeer) bool {
-	if _, exists := peer.senders[srcToken]; exists {
-		return false
-	}
-	sender, err := peer.pc.AddTrack(src.track)
-	if err != nil {
-		m.logger.Warn("add track failed", "peerToken", peer.token, "sourceToken", srcToken, "error", err)
-		return false
-	}
-	peer.senders[srcToken] = sender
-	return true
-}
-
 func (m *MediaManager) removeSenderLocked(peer *mediaPeer, srcToken string) bool {
 	sender, ok := peer.senders[srcToken]
 	if !ok {
@@ -559,6 +653,10 @@ func (m *MediaManager) removeSenderLocked(peer *mediaPeer, srcToken string) bool
 	}
 	_ = peer.pc.RemoveTrack(sender)
 	delete(peer.senders, srcToken)
+	// Also remove the per-destination routing entry if the source still exists.
+	if src, ok := m.sources[srcToken]; ok {
+		delete(src.dests, peer.token)
+	}
 	return true
 }
 

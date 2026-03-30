@@ -82,15 +82,39 @@ type WsMessage =
   | { type: "session_revoked"; data: SessionRevokedEvent }
   | { type: "config_updated"; data: unknown };
 const opusMaxBitrateBps = 24000;
-const opusSpeechFmtpParams = [
+
+// Opus ptime/minptime can be overridden at runtime via localStorage for A/B
+// latency testing.  Set `localStorage.setItem('opus_ptime', '2.5')` and reload.
+// Valid values: "2.5", "5", "10", "20".  Default is "5".
+function getOpusPtime(): string {
+  try {
+    const v = localStorage.getItem("opus_ptime");
+    if (v && ["2.5", "5", "10", "20"].includes(v)) return v;
+  } catch {
+    /* ignore */
+  }
+  return "5";
+}
+function getOpusMinPtime(): string {
+  try {
+    const v = localStorage.getItem("opus_minptime");
+    if (v && ["2.5", "5", "10", "20"].includes(v)) return v;
+  } catch {
+    /* ignore */
+  }
+  return "2.5";
+}
+
+const opusSpeechFmtpParams: ReadonlyArray<readonly [string, string]> = [
   ["stereo", "0"],
   ["sprop-stereo", "0"],
   ["useinbandfec", "0"],
   ["usedtx", "1"],
-  ["ptime", "5"],
-  ["minptime", "2.5"],
+  ["cbr", "1"],
+  ["ptime", getOpusPtime()],
+  ["minptime", getOpusMinPtime()],
   ["maxaveragebitrate", `${opusMaxBitrateBps}`],
-] as const;
+];
 
 const directRoutePriorityLevel = 3;
 const defaultRoutePriorityLevel = 1;
@@ -1512,7 +1536,7 @@ export function useIntercomSession({
           if (!remote.remoteAnalyserNodesRef.current.has(key)) {
             const AudioCtx = window.AudioContext;
             if (AudioCtx) {
-              const ctx = new AudioCtx();
+              const ctx = new AudioCtx({ latencyHint: "interactive" });
               const src = ctx.createMediaStreamSource(stream);
               const gain = ctx.createGain();
               const analyser = ctx.createAnalyser();
@@ -2254,7 +2278,7 @@ export function useIntercomSession({
         }),
       );
       pushDebugEvent(`system · matrix updated · ${anchorRoomId || "no-room"}`);
-    }, 120);
+    }, 30);
     return () => clearRoomSwitchTimer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listenRoomIds, talkRoomIds]);
