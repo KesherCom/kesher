@@ -195,16 +195,6 @@ func (h *Hub) ListenRoomsForToken(token string) []string {
 	return roomSetToSortedSlice(c.listenRooms)
 }
 
-func (h *Hub) TalkRoomsForToken(token string) []string {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	c, ok := h.clients[token]
-	if !ok {
-		return nil
-	}
-	return roomSetToSortedSlice(c.talkRooms)
-}
-
 func (h *Hub) SendChatHistorySnapshot(token string) int {
 	h.mu.RLock()
 	c, ok := h.clients[token]

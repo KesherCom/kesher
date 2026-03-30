@@ -132,7 +132,7 @@ function getRoomMatrixSyncDebounceMs(): number {
   } catch {
     /* ignore */
   }
-  return 12;
+  return 20;
 }
 
 const roomMatrixSyncDebounceMs = getRoomMatrixSyncDebounceMs();
@@ -523,6 +523,7 @@ export function useIntercomSession({
   const observedVoiceSendersRef = useRef<Set<string>>(new Set());
   const incomingAttentionTimeoutRef = useRef<number | null>(null);
   const roomSwitchTimerRef = useRef<number | null>(null);
+  const pendingRoomMatrixEchoKeyRef = useRef<string | null>(null);
   const voiceModeRef = useRef<"always_on" | "ptt">(
     resolveVoiceModeForClient(initialVoiceMode),
   );
@@ -1159,6 +1160,34 @@ export function useIntercomSession({
     );
   }
 
+  function roomMatrixSyncKey(listenRooms: string[], talkRooms: string[]): string {
+    const listen = [...listenRooms].sort().join("|");
+    const talk = [...talkRooms].sort().join("|");
+    return `${listen}::${talk}`;
+  }
+
+  function sendRoomMatrix(
+    listenRooms: string[],
+    talkRooms: string[],
+    suppressNextDebounced = false,
+  ): boolean {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    const syncKey = roomMatrixSyncKey(listenRooms, talkRooms);
+    if (suppressNextDebounced) {
+      pendingRoomMatrixEchoKeyRef.current = syncKey;
+    }
+    ws.send(
+      JSON.stringify({
+        type: "set_room_matrix",
+        data: { listenRoomIds: listenRooms, talkRoomIds: talkRooms },
+      }),
+    );
+    return true;
+  }
+
   function sendVoiceState(state: string) {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     const voiceTargetId = matrixAnchorRoomId(
@@ -1302,15 +1331,7 @@ export function useIntercomSession({
     setPttPressed(true);
     setPttPressedChannelId(channelId);
     prevChannelRef.current = channelId;
-    wsRef.current.send(
-      JSON.stringify({
-        type: "set_room_matrix",
-        data: {
-          listenRoomIds: listenRoomIdsRef.current,
-          talkRoomIds: [channelId],
-        },
-      }),
-    );
+    sendRoomMatrix(listenRoomIdsRef.current, [channelId], true);
     sendScopedVoiceState("room", channelId, "ptt_start");
   }
 
@@ -1624,15 +1645,7 @@ export function useIntercomSession({
           pushDebugEvent("system · local/mic · capture failed (receive-only)");
         }
         ws.send(JSON.stringify({ type: "webrtc_ready", data: {} }));
-        ws.send(
-          JSON.stringify({
-            type: "set_room_matrix",
-            data: {
-              listenRoomIds: listenRoomIdsRef.current,
-              talkRoomIds: talkRoomIdsRef.current,
-            },
-          }),
-        );
+        sendRoomMatrix(listenRoomIdsRef.current, talkRoomIdsRef.current, true);
         const initialVoiceModeValue = voiceModeRef.current;
         const voiceState =
           initialVoiceModeValue === "always_on" ? "always_on" : "ptt_stop";
@@ -1822,14 +1835,7 @@ export function useIntercomSession({
             if (Array.isArray(msg.data.talkRoomIds)) {
               setTalkRoomIds(msg.data.talkRoomIds);
             }
-            if (wsRef.current?.readyState === WebSocket.OPEN) {
-              wsRef.current.send(
-                JSON.stringify({
-                  type: "set_room_matrix",
-                  data: { listenRoomIds: nextListen, talkRoomIds: nextTalk },
-                }),
-              );
-            }
+            sendRoomMatrix(nextListen, nextTalk, true);
             ackSuccess();
             return;
           }
@@ -2241,17 +2247,7 @@ export function useIntercomSession({
         selfPresence.talkRooms,
       );
       if (!matchesListen || !matchesTalk) {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(
-            JSON.stringify({
-              type: "set_room_matrix",
-              data: {
-                listenRoomIds: listenRoomIdsRef.current,
-                talkRoomIds: talkRoomIdsRef.current,
-              },
-            }),
-          );
-        }
+        sendRoomMatrix(listenRoomIdsRef.current, talkRoomIdsRef.current, true);
         return;
       }
       pendingInitialRoomRestoreRef.current = false;
@@ -2287,13 +2283,13 @@ export function useIntercomSession({
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     roomSwitchTimerRef.current = window.setTimeout(() => {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+      const syncKey = roomMatrixSyncKey(listenRoomIds, talkRoomIds);
+      if (pendingRoomMatrixEchoKeyRef.current === syncKey) {
+        pendingRoomMatrixEchoKeyRef.current = null;
+        return;
+      }
       const anchorRoomId = matrixAnchorRoomId(listenRoomIds, talkRoomIds);
-      wsRef.current.send(
-        JSON.stringify({
-          type: "set_room_matrix",
-          data: { listenRoomIds, talkRoomIds },
-        }),
-      );
+      sendRoomMatrix(listenRoomIds, talkRoomIds);
       pushDebugEvent(`system · matrix updated · ${anchorRoomId || "no-room"}`);
     }, roomMatrixSyncDebounceMs);
     return () => clearRoomSwitchTimer();
