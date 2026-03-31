@@ -3,8 +3,10 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::AppHandle;
 use tauri::Manager;
+use tauri::Url;
 
 const DEFAULT_SERVER_URL: &str = "http://127.0.0.1:8080";
+const DEFAULT_SERVER_PORT: u16 = 8080;
 const CONFIG_FILE_NAME: &str = "desktop-config.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,23 +55,37 @@ fn write_config(app: &AppHandle, config: &DesktopConfig) -> Result<(), String> {
     fs::write(path, raw).map_err(|error| format!("failed to write desktop config: {error}"))
 }
 
-#[tauri::command]
-pub fn get_server_url(app: AppHandle) -> Result<String, String> {
-    Ok(read_config(&app)?.server_url)
-}
-
-#[tauri::command]
-pub fn set_server_url(app: AppHandle, server_url: String) -> Result<(), String> {
-    let trimmed = server_url.trim();
+fn normalize_server_url(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err("server URL must not be empty".to_string());
     }
 
-    let parsed = trimmed
-        .parse::<tauri::Url>()
-        .map_err(|error| format!("invalid server URL: {error}"))?;
+    let candidate = if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("http://{trimmed}")
+    };
 
+    let mut parsed = Url::parse(&candidate).map_err(|error| format!("invalid server URL: {error}"))?;
+    if parsed.port().is_none() {
+        parsed
+            .set_port(Some(DEFAULT_SERVER_PORT))
+            .map_err(|_| "failed to set default server port".to_string())?;
+    }
+
+    Ok(parsed.to_string().trim_end_matches('/').to_string())
+}
+
+#[tauri::command]
+pub fn get_server_url(app: AppHandle) -> Result<String, String> {
+    normalize_server_url(&read_config(&app)?.server_url)
+}
+
+#[tauri::command]
+pub fn set_server_url(app: AppHandle, server_url: String) -> Result<(), String> {
+    let normalized = normalize_server_url(&server_url)?;
     let mut config = read_config(&app)?;
-    config.server_url = parsed.to_string();
+    config.server_url = normalized;
     write_config(&app, &config)
 }
