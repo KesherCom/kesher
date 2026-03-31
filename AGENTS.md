@@ -111,9 +111,9 @@ Desktop proxy implementation lives in the standalone repo:
 
 ## Companion integration
 
-- Discovery endpoint: `GET /api/companion/discovery?username=<username>`
-- Bridge WebSocket: `/api/companion/ws?username=<username>`
-- Backend binds companion commands to the latest active token for that username, then relays commands through normal WS control paths.
+- Discovery endpoint: `GET /api/companion/discovery?roleId=<roleId>` (preferred, `username` still supported as legacy fallback)
+- Bridge WebSocket: `/api/companion/ws?roleId=<roleId>` (preferred, `username` still supported as legacy fallback)
+- Backend binds companion commands to the latest active token for that role ID, then relays commands through normal WS control paths.
 
 ## Module paths and runtime dependencies
 

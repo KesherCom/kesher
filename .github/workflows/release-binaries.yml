@@ -2,6 +2,7 @@ name: Release binaries
 
 on:
   push:
+    branches: ["main", "dev"]
     tags:
       - "v*"
   workflow_dispatch:
@@ -10,25 +11,19 @@ permissions:
   contents: write
 
 jobs:
+  # 1. Backend & Web CI/Release
   build:
-    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    name: Build Backend ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
-          - goos: windows
-            goarch: amd64
-          - goos: windows
-            goarch: arm64
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
     env:
       GO_VERSION: "1.25.x"
       NODE_VERSION: "22"
@@ -40,13 +35,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+
+      - name: Install Dependencies
+        run: npm install
 
       - name: Build web UI
-        run: |
-          npm --prefix web ci
-          npm --prefix web run build
+        run: npm --prefix web run build
 
       - name: Embed web UI into backend
         run: |
@@ -68,47 +62,181 @@ jobs:
         run: |
           mkdir -p dist/bin dist/packages
           ext=""
-          if [ "${GOOS}" = "windows" ]; then ext=".exe"; fi
-          bin="kesher-${GOOS}-${GOARCH}${ext}"
-          archive="kesher-${GOOS}-${GOARCH}"
-
-          (
-            cd backend
-            go build -trimpath -ldflags="-s -w" -o "../dist/bin/${bin}" ./cmd/server
-          )
-
-          if [ "${GOOS}" = "windows" ]; then
-            (
-              cd dist/bin
-              zip -9 "../packages/${archive}.zip" "${bin}"
-            )
+          if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
+          bin="kesher-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
+          cd backend
+          go build -trimpath -ldflags="-s -w" -o "../dist/bin/${bin}" ./cmd/server
+          cd ..
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip -j "dist/packages/kesher-${{ matrix.goos }}-${{ matrix.goarch }}.zip" "dist/bin/${bin}"
           else
-            tar -C dist/bin -czf "dist/packages/${archive}.tar.gz" "${bin}"
+            tar -czf "dist/packages/kesher-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" -C dist/bin "${bin}"
           fi
 
-      - name: Upload build artifacts
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: backend-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/packages/*
-          if-no-files-found: error
 
+  # 1b. Fast Desktop Validation (runs on every push/tag/dispatch)
+  desktop-check:
+    name: Desktop Check (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Desktop web check
+        run: npm --prefix desktop run build:web
+
+      - name: Desktop native check
+        run: |
+          cd desktop/src-tauri
+          cargo check
+
+  # 2. Windows Desktop
+  build-desktop-windows:
+    name: Build Desktop (Windows)
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Build
+        run: |
+          npm install
+          npm --prefix desktop run tauri build
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: |
+            desktop/src-tauri/target/release/bundle/msi/*.msi
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+
+  # 3. macOS Desktop (Apple Silicon)
+  build-desktop-macos-arm64:
+    name: Build Desktop (macOS arm64)
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Install Opus toolchain
+        run: |
+          brew install opus pkg-config
+          echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          npm install
+          npm --prefix desktop run tauri build -- --target aarch64-apple-darwin
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos-arm64
+          path: desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+
+  # 4. macOS Desktop (Intel)
+  build-desktop-macos-amd64:
+    name: Build Desktop (macOS amd64)
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Install Opus toolchain
+        run: |
+          brew install opus pkg-config
+          echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          npm install
+          npm --prefix desktop run tauri build -- --target x86_64-apple-darwin
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos-amd64
+          path: desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+
+  # 5. Release (Nur bei Tags!)
   release:
-    name: Publish GitHub release assets
+    name: Publish Release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: build
+    needs: [build, build-desktop-windows, build-desktop-macos-arm64, build-desktop-macos-amd64]
     runs-on: ubuntu-latest
     steps:
-      - name: Download build artifacts
+      - name: Download All
         uses: actions/download-artifact@v4
         with:
-          path: release-artifacts
+          path: all-assets
           merge-multiple: true
 
-      - name: Create release and upload assets
+      - name: Create GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          allowUpdates: true
-          artifactErrorsFailBuild: true
-          artifacts: "release-artifacts/*"
+          artifacts: "all-assets/*"
+          token: ${{ secrets.GITHUB_TOKEN }}
           generateReleaseNotes: true
