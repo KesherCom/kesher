@@ -109,7 +109,7 @@ export function DesktopConnectionSetup({ onContinue }: DesktopConnectionSetupPro
           id="desktop-server-address"
           className="desktop-connection-input"
           type="text"
-          placeholder="z.B. 192.168.1.50, intercom.local oder https://intercom.example.org"
+          placeholder="z.B. 192.168.1.50  |  server.local  |  https://intercom.example.org"
           value={input}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {

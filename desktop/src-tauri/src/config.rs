@@ -5,7 +5,6 @@ use tauri::AppHandle;
 use tauri::Manager;
 use tauri::Url;
 
-const DEFAULT_SERVER_URL: &str = "http://127.0.0.1:8080";
 const DEFAULT_SERVER_PORT: u16 = 8080;
 const CONFIG_FILE_NAME: &str = "desktop-config.json";
 
@@ -17,7 +16,7 @@ pub struct DesktopConfig {
 impl Default for DesktopConfig {
     fn default() -> Self {
         Self {
-            server_url: DEFAULT_SERVER_URL.to_string(),
+            server_url: String::new(),
         }
     }
 }
@@ -79,7 +78,11 @@ fn normalize_server_url(input: &str) -> Result<String, String> {
 
 #[tauri::command]
 pub fn get_server_url(app: AppHandle) -> Result<String, String> {
-    normalize_server_url(&read_config(&app)?.server_url)
+    let stored = read_config(&app)?.server_url;
+    if stored.trim().is_empty() {
+        return Ok(String::new());
+    }
+    normalize_server_url(&stored)
 }
 
 #[tauri::command]

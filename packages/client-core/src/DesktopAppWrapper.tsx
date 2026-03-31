@@ -35,6 +35,12 @@ export function DesktopAppWrapper() {
       return;
     }
 
+    // No URL configured yet → skip probe, show setup immediately
+    if (!baseUrl) {
+      setEntryState("setup");
+      return;
+    }
+
     let cancelled = false;
 
     const runStartupCheck = async () => {
@@ -57,7 +63,7 @@ export function DesktopAppWrapper() {
   }
 
   if (!isReady || entryState === "probing") {
-    return <div className="desktop-connection-loading">Pruefe gespeicherten Server ...</div>;
+    return <div className="desktop-connection-loading">Verbinde mit Server ...</div>;
   }
 
   if (entryState === "setup") {

@@ -43,14 +43,18 @@ export function ApiBaseUrlProvider({ children }: { children: React.ReactNode }) 
         // @ts-expect-error Tauri window object is injected at runtime
         const { invoke } = window.__TAURI__.core;
         const url = await invoke<string>("get_server_url");
-        const normalized = normalizeServerAddressInput(url);
-        setBaseUrlState(normalized);
-        setGlobalApiBaseUrl(normalized);
+        if (url) {
+          const normalized = normalizeServerAddressInput(url);
+          setBaseUrlState(normalized);
+          setGlobalApiBaseUrl(normalized);
+        } else {
+          setBaseUrlState("");
+          setGlobalApiBaseUrl("");
+        }
       } catch (error) {
         console.error("Failed to load server URL from Tauri:", error);
-        const fallback = "http://127.0.0.1:8080";
-        setBaseUrlState(fallback);
-        setGlobalApiBaseUrl(fallback);
+        setBaseUrlState("");
+        setGlobalApiBaseUrl("");
       } finally {
         setIsReady(true);
       }
