@@ -15,9 +15,10 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use opus::{Application, Channels, Decoder, Encoder};
 use serde::{Deserialize, Serialize};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
 };
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 use webrtc::{
@@ -55,6 +56,63 @@ const OPUS_FRAME_SIZE: usize = 120;
 const MAX_OPUS_PACKET: usize = 256;
 /// Default target bitrate in bits/s
 const OPUS_BITRATE: i32 = 24_000;
+/// Queue depth between CPAL capture callback and Opus encoder thread.
+const CAPTURE_RAW_QUEUE_CAPACITY: usize = 4;
+/// Queue depth between Opus encoder thread and async WebRTC sender.
+const CAPTURE_ENCODED_QUEUE_CAPACITY: usize = 16;
+/// Queue depth between async RTP reader and Opus decoder thread.
+const PLAYBACK_OPUS_QUEUE_CAPACITY: usize = 8;
+/// Queue depth between Opus decoder thread and CPAL output callback.
+const PLAYBACK_PCM_QUEUE_CAPACITY: usize = 8;
+/// Throttled log interval to avoid spamming on sustained frame drops.
+const DROP_LOG_EVERY: u32 = 200;
+/// Periodic interval for latency telemetry logs.
+const LATENCY_LOG_INTERVAL: Duration = Duration::from_secs(5);
+
+struct EncodedFrame {
+    data: bytes::Bytes,
+    encoded_at: Instant,
+}
+
+struct OpusFrame {
+    payload: Vec<u8>,
+    received_at: Instant,
+}
+
+struct PcmFrame {
+    samples: Vec<f32>,
+    decoded_at: Instant,
+}
+
+#[derive(Default)]
+struct AtomicLatencyStats {
+    sum_us: AtomicU64,
+    count: AtomicU64,
+    max_us: AtomicU64,
+}
+
+impl AtomicLatencyStats {
+    fn record(&self, d: Duration) {
+        let us = d.as_micros() as u64;
+        self.sum_us.fetch_add(us, Ordering::Relaxed);
+        self.count.fetch_add(1, Ordering::Relaxed);
+        self.max_us.fetch_max(us, Ordering::Relaxed);
+    }
+
+    fn snapshot_and_reset(&self) -> Option<(f64, f64, u64)> {
+        let count = self.count.swap(0, Ordering::Relaxed);
+        if count == 0 {
+            let _ = self.sum_us.swap(0, Ordering::Relaxed);
+            let _ = self.max_us.swap(0, Ordering::Relaxed);
+            return None;
+        }
+        let sum_us = self.sum_us.swap(0, Ordering::Relaxed);
+        let max_us = self.max_us.swap(0, Ordering::Relaxed);
+        let avg_ms = (sum_us as f64 / count as f64) / 1000.0;
+        let max_ms = max_us as f64 / 1000.0;
+        Some((avg_ms, max_ms, count))
+    }
+}
 
 // ── Public serialisable types (IPC) ─────────────────────────────────────────
 
@@ -332,7 +390,7 @@ async fn capture_loop(
 ) {
     // ── Sync thread: owns !Send cpal::Stream + Opus encoder ─────────────
     // encoded bytes flow: sync thread → tokio channel → async WebRTC sender
-    let (encoded_tx, mut encoded_rx) = mpsc::channel::<bytes::Bytes>(32);
+    let (encoded_tx, mut encoded_rx) = mpsc::channel::<EncodedFrame>(CAPTURE_ENCODED_QUEUE_CAPACITY);
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_clone = Arc::clone(&stop_flag);
     let ptt_clone = Arc::clone(&ptt_active);
@@ -349,10 +407,23 @@ async fn capture_loop(
             sample_rate: cpal::SampleRate(SAMPLE_RATE),
             buffer_size: cpal::BufferSize::Fixed(OPUS_FRAME_SIZE as u32),
         };
-        let (raw_tx, raw_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(8);
+        let (raw_tx, raw_rx) =
+            std::sync::mpsc::sync_channel::<(Vec<f32>, Instant)>(CAPTURE_RAW_QUEUE_CAPACITY);
+        let mut dropped_capture_frames: u32 = 0;
         let stream = match device.build_input_stream(
             &config,
-            move |data: &[f32], _| { let _ = raw_tx.try_send(data.to_vec()); },
+            move |data: &[f32], _| {
+                if raw_tx.try_send((data.to_vec(), Instant::now())).is_err() {
+                    dropped_capture_frames = dropped_capture_frames.saturating_add(1);
+                    if dropped_capture_frames % DROP_LOG_EVERY == 0 {
+                        log::warn!(
+                            "[audio] capture queue full, dropped frames={} (queue={})",
+                            dropped_capture_frames,
+                            CAPTURE_RAW_QUEUE_CAPACITY
+                        );
+                    }
+                }
+            },
             |err| log::error!("[audio] capture stream error: {err}"),
             None,
         ) {
@@ -375,11 +446,23 @@ async fn capture_loop(
         let silence = vec![0.0f32; OPUS_FRAME_SIZE];
         let mut input_peak = 0.0f32;
         let mut meter_frames: u32 = 0;
+        let mut dropped_encoded_frames: u32 = 0;
+        let mut raw_queue_count: u64 = 0;
+        let mut raw_queue_sum_ms: f64 = 0.0;
+        let mut raw_queue_max_ms: f64 = 0.0;
+        let mut next_latency_log = Instant::now() + LATENCY_LOG_INTERVAL;
 
         loop {
             if stop_clone.load(Ordering::Relaxed) { break; }
             match raw_rx.recv_timeout(std::time::Duration::from_millis(20)) {
-                Ok(chunk) => {
+                Ok((chunk, captured_at)) => {
+                    let raw_queue_ms = captured_at.elapsed().as_secs_f64() * 1000.0;
+                    raw_queue_count += 1;
+                    raw_queue_sum_ms += raw_queue_ms;
+                    if raw_queue_ms > raw_queue_max_ms {
+                        raw_queue_max_ms = raw_queue_ms;
+                    }
+
                     for &s in &chunk { if s.abs() > input_peak { input_peak = s.abs(); } }
                     pcm_accum.extend_from_slice(&chunk);
                     meter_frames += chunk.len() as u32;
@@ -391,14 +474,51 @@ async fn capture_loop(
                         meter_frames = 0;
                     }
                     while pcm_accum.len() >= OPUS_FRAME_SIZE {
-                        let frame: Vec<f32> = pcm_accum.drain(..OPUS_FRAME_SIZE).collect();
                         let active = ptt_clone.load(Ordering::Acquire);
-                        let src: &[f32] = if active { &frame } else { &silence };
+                        let src: &[f32] = if active {
+                            &pcm_accum[..OPUS_FRAME_SIZE]
+                        } else {
+                            &silence
+                        };
                         if let Ok(n) = encoder.encode_float(src, &mut buf) {
-                            let _ = encoded_tx.blocking_send(
-                                bytes::Bytes::copy_from_slice(&buf[..n])
-                            );
+                            if encoded_tx
+                                .try_send(EncodedFrame {
+                                    data: bytes::Bytes::copy_from_slice(&buf[..n]),
+                                    encoded_at: Instant::now(),
+                                })
+                                .is_err()
+                            {
+                                dropped_encoded_frames = dropped_encoded_frames.saturating_add(1);
+                                if dropped_encoded_frames % DROP_LOG_EVERY == 0 {
+                                    log::warn!(
+                                        "[audio] encoded queue full, dropped frames={} (queue={})",
+                                        dropped_encoded_frames,
+                                        CAPTURE_ENCODED_QUEUE_CAPACITY
+                                    );
+                                }
+                            }
                         }
+                        pcm_accum.drain(..OPUS_FRAME_SIZE);
+                    }
+
+                    if Instant::now() >= next_latency_log {
+                        let raw_avg_ms = if raw_queue_count > 0 {
+                            raw_queue_sum_ms / raw_queue_count as f64
+                        } else {
+                            0.0
+                        };
+                        log::info!(
+                            "[audio][latency] capture_raw_queue avg_ms={:.2} max_ms={:.2} samples={} dropped_raw={} dropped_encoded={}",
+                            raw_avg_ms,
+                            raw_queue_max_ms,
+                            raw_queue_count,
+                            dropped_capture_frames,
+                            dropped_encoded_frames
+                        );
+                        raw_queue_count = 0;
+                        raw_queue_sum_ms = 0.0;
+                        raw_queue_max_ms = 0.0;
+                        next_latency_log = Instant::now() + LATENCY_LOG_INTERVAL;
                     }
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
@@ -411,6 +531,10 @@ async fn capture_loop(
     });
 
     // ── Async half: forward encoded frames to WebRTC track ───────────────
+    let mut encoded_queue_count: u64 = 0;
+    let mut encoded_queue_sum_ms: f64 = 0.0;
+    let mut encoded_queue_max_ms: f64 = 0.0;
+    let mut next_encoded_log = Instant::now() + LATENCY_LOG_INTERVAL;
     loop {
         tokio::select! {
             _ = shutdown.recv() => {
@@ -419,14 +543,39 @@ async fn capture_loop(
             }
             maybe = encoded_rx.recv() => {
                 match maybe {
-                    Some(data) => {
+                    Some(frame) => {
+                        let encoded_queue_ms = frame.encoded_at.elapsed().as_secs_f64() * 1000.0;
+                        encoded_queue_count += 1;
+                        encoded_queue_sum_ms += encoded_queue_ms;
+                        if encoded_queue_ms > encoded_queue_max_ms {
+                            encoded_queue_max_ms = encoded_queue_ms;
+                        }
+
                         let sample = Sample {
-                            data,
+                            data: frame.data,
                             duration: std::time::Duration::from_millis(3),
                             ..Default::default()
                         };
                         if let Err(e) = track.write_sample(&sample).await {
                             log::warn!("[audio] track write: {e}");
+                        }
+
+                        if Instant::now() >= next_encoded_log {
+                            let encoded_avg_ms = if encoded_queue_count > 0 {
+                                encoded_queue_sum_ms / encoded_queue_count as f64
+                            } else {
+                                0.0
+                            };
+                            log::info!(
+                                "[audio][latency] capture_encoded_queue avg_ms={:.2} max_ms={:.2} samples={}",
+                                encoded_avg_ms,
+                                encoded_queue_max_ms,
+                                encoded_queue_count
+                            );
+                            encoded_queue_count = 0;
+                            encoded_queue_sum_ms = 0.0;
+                            encoded_queue_max_ms = 0.0;
+                            next_encoded_log = Instant::now() + LATENCY_LOG_INTERVAL;
                         }
                     }
                     None => break,
@@ -446,7 +595,8 @@ async fn playback_loop(
     app: AppHandle,
 ) {
     // opus payload bytes: async WebRTC reader → sync decoder thread
-    let (opus_tx, opus_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(16);
+    let (opus_tx, opus_rx) =
+        std::sync::mpsc::sync_channel::<OpusFrame>(PLAYBACK_OPUS_QUEUE_CAPACITY);
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_clone = Arc::clone(&stop_flag);
     let app_clone = app.clone();
@@ -464,15 +614,22 @@ async fn playback_loop(
             buffer_size: cpal::BufferSize::Fixed(OPUS_FRAME_SIZE as u32),
         };
         // PCM ring: decoder → CPAL output callback
-        let (pcm_tx, pcm_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(16);
+        let (pcm_tx, pcm_rx) =
+            std::sync::mpsc::sync_channel::<PcmFrame>(PLAYBACK_PCM_QUEUE_CAPACITY);
+        let pcm_queue_latency = Arc::new(AtomicLatencyStats::default());
+        let pcm_queue_latency_cb = Arc::clone(&pcm_queue_latency);
+        let output_drop_counter = Arc::new(AtomicU64::new(0));
+        let output_drop_counter_cb = Arc::clone(&output_drop_counter);
         let stream = match device.build_output_stream(
             &config,
             move |output: &mut [f32], _| {
-                if let Ok(chunk) = pcm_rx.try_recv() {
-                    let n = output.len().min(chunk.len());
-                    output[..n].copy_from_slice(&chunk[..n]);
+                if let Ok(frame) = pcm_rx.try_recv() {
+                    pcm_queue_latency_cb.record(frame.decoded_at.elapsed());
+                    let n = output.len().min(frame.samples.len());
+                    output[..n].copy_from_slice(&frame.samples[..n]);
                     if n < output.len() { output[n..].fill(0.0); }
                 } else {
+                    output_drop_counter_cb.fetch_add(1, Ordering::Relaxed);
                     output.fill(0.0);
                 }
             },
@@ -492,12 +649,24 @@ async fn playback_loop(
         let mut decode_buf = [0.0f32; OPUS_FRAME_SIZE * 4];
         let mut output_peak = 0.0f32;
         let mut meter_frames: u32 = 0;
+        let mut dropped_pcm_frames: u32 = 0;
+        let mut rtp_queue_count: u64 = 0;
+        let mut rtp_queue_sum_ms: f64 = 0.0;
+        let mut rtp_queue_max_ms: f64 = 0.0;
+        let mut next_latency_log = Instant::now() + LATENCY_LOG_INTERVAL;
 
         loop {
             if stop_clone.load(Ordering::Relaxed) { break; }
             match opus_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                Ok(payload) => {
-                    match decoder.decode_float(&payload, &mut decode_buf, false) {
+                Ok(frame) => {
+                    let rtp_queue_ms = frame.received_at.elapsed().as_secs_f64() * 1000.0;
+                    rtp_queue_count += 1;
+                    rtp_queue_sum_ms += rtp_queue_ms;
+                    if rtp_queue_ms > rtp_queue_max_ms {
+                        rtp_queue_max_ms = rtp_queue_ms;
+                    }
+
+                    match decoder.decode_float(&frame.payload, &mut decode_buf, false) {
                         Ok(n) => {
                             let pcm = decode_buf[..n].to_vec();
                             for &s in &pcm {
@@ -509,9 +678,50 @@ async fn playback_loop(
                                 output_peak = 0.0;
                                 meter_frames = 0;
                             }
-                            let _ = pcm_tx.try_send(pcm);
+                            if pcm_tx
+                                .try_send(PcmFrame {
+                                    samples: pcm,
+                                    decoded_at: Instant::now(),
+                                })
+                                .is_err()
+                            {
+                                dropped_pcm_frames = dropped_pcm_frames.saturating_add(1);
+                                if dropped_pcm_frames % DROP_LOG_EVERY == 0 {
+                                    log::warn!(
+                                        "[audio] playback pcm queue full, dropped frames={} (queue={})",
+                                        dropped_pcm_frames,
+                                        PLAYBACK_PCM_QUEUE_CAPACITY
+                                    );
+                                }
+                            }
                         }
                         Err(e) => log::warn!("[audio] opus decode: {e}"),
+                    }
+
+                    if Instant::now() >= next_latency_log {
+                        let rtp_avg_ms = if rtp_queue_count > 0 {
+                            rtp_queue_sum_ms / rtp_queue_count as f64
+                        } else {
+                            0.0
+                        };
+                        let (pcm_avg_ms, pcm_max_ms, pcm_samples) =
+                            pcm_queue_latency.snapshot_and_reset().unwrap_or((0.0, 0.0, 0));
+                        let output_underruns = output_drop_counter.swap(0, Ordering::Relaxed);
+                        log::info!(
+                            "[audio][latency] playback_rtp_queue avg_ms={:.2} max_ms={:.2} samples={} | playback_pcm_queue avg_ms={:.2} max_ms={:.2} samples={} | pcm_drops={} underruns={}",
+                            rtp_avg_ms,
+                            rtp_queue_max_ms,
+                            rtp_queue_count,
+                            pcm_avg_ms,
+                            pcm_max_ms,
+                            pcm_samples,
+                            dropped_pcm_frames,
+                            output_underruns
+                        );
+                        rtp_queue_count = 0;
+                        rtp_queue_sum_ms = 0.0;
+                        rtp_queue_max_ms = 0.0;
+                        next_latency_log = Instant::now() + LATENCY_LOG_INTERVAL;
                     }
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
@@ -524,12 +734,26 @@ async fn playback_loop(
 
     // ── Async half: read RTP packets and forward Opus payload to decoder ─
     let mut rtp_buf = [0u8; 1500];
+    let mut dropped_opus_frames: u32 = 0;
     loop {
         match track.read(&mut rtp_buf).await {
             Ok((packet, _attr)) => {
                 let payload = packet.payload.to_vec();
-                if opus_tx.try_send(payload).is_err() {
-                    log::warn!("[audio] playback channel full, dropping frame");
+                if opus_tx
+                    .try_send(OpusFrame {
+                        payload,
+                        received_at: Instant::now(),
+                    })
+                    .is_err()
+                {
+                    dropped_opus_frames = dropped_opus_frames.saturating_add(1);
+                    if dropped_opus_frames % DROP_LOG_EVERY == 0 {
+                        log::warn!(
+                            "[audio] playback opus queue full, dropped frames={} (queue={})",
+                            dropped_opus_frames,
+                            PLAYBACK_OPUS_QUEUE_CAPACITY
+                        );
+                    }
                 }
             }
             Err(e) => {
