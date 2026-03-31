@@ -35,10 +35,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
 
       - name: Install Dependencies
-        run: npm ci
+        run: npm install
 
       - name: Build web UI
         run: npm --prefix web run build
@@ -90,7 +89,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -103,7 +101,7 @@ jobs:
           workspaces: desktop/src-tauri -> target
 
       - name: Install Dependencies
-        run: npm ci
+        run: npm install
 
       - name: Desktop web check
         run: npm --prefix desktop run build:web
@@ -123,7 +121,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
       
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -137,7 +134,7 @@ jobs:
 
       - name: Build
         run: |
-          npm ci
+          npm install
           npm --prefix desktop run tauri build
 
       - name: Upload
@@ -158,7 +155,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -172,7 +168,7 @@ jobs:
 
       - name: Build
         run: |
-          npm ci
+          npm install
           npm --prefix desktop run tauri build -- --target universal-apple-darwin
 
       - name: Upload
