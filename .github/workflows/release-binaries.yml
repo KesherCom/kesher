@@ -145,9 +145,9 @@ jobs:
             desktop/src-tauri/target/release/bundle/msi/*.msi
             desktop/src-tauri/target/release/bundle/nsis/*.exe
 
-  # 3. macOS Desktop
-  build-desktop-macos:
-    name: Build Desktop (macOS)
+  # 3. macOS Desktop (Apple Silicon)
+  build-desktop-macos-arm64:
+    name: Build Desktop (macOS arm64)
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     steps:
@@ -180,16 +180,52 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-macos
-          path: |
-            desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-            desktop/src-tauri/target/release/bundle/dmg/*.dmg
+          name: desktop-macos-arm64
+          path: desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
 
-  # 4. Release (Nur bei Tags!)
+  # 4. macOS Desktop (Intel)
+  build-desktop-macos-amd64:
+    name: Build Desktop (macOS amd64)
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Install Opus toolchain
+        run: |
+          brew install opus pkg-config
+          echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          npm install
+          npm --prefix desktop run tauri build -- --target x86_64-apple-darwin
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos-amd64
+          path: desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+
+  # 5. Release (Nur bei Tags!)
   release:
     name: Publish Release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build, build-desktop-windows, build-desktop-macos]
+    needs: [build, build-desktop-windows, build-desktop-macos-arm64, build-desktop-macos-amd64]
     runs-on: ubuntu-latest
     steps:
       - name: Download All
