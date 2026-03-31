@@ -181,7 +181,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: desktop-macos
-          path: desktop/src-tauri/target/release/bundle/dmg/*.dmg
+          path: |
+            desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            desktop/src-tauri/target/release/bundle/dmg/*.dmg
 
   # 4. Release (Nur bei Tags!)
   release:
