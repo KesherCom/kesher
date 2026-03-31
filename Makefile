@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 LAN_IP ?= 127.0.0.1
 
-.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build test loadtest loadtest-20 docker-build docker-up docker-down clean
+.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build-desktop-web build-desktop-windows dev-desktop build test ci-test ci-backend-test ci-desktop-test loadtest loadtest-20 docker-build docker-up docker-down clean
 
 help:
 	@echo "Available targets:"
@@ -20,6 +20,16 @@ help:
 	@echo "  make build-web     - build frontend bundle"
 	@echo "  make build         - build backend + frontend"
 	@echo "  make test          - run backend tests + frontend build"
+	@echo ""
+	@echo "  Desktop & CI Targets (local GitHub Actions simulation):"
+	@echo "  make build-desktop-web     - build web bundle for desktop"
+	@echo "  make build-desktop-windows - build Windows app (MSI + NSIS)"
+	@echo "  make build-desktop-macos   - build macOS app (DMG + universal)"
+	@echo "  make dev-desktop           - run Tauri dev server"
+	@echo "  make ci-test               - run full CI test suite"
+	@echo "  make ci-backend-test       - test backend builds"
+	@echo "  make ci-desktop-test       - test backend + desktop builds"
+	@echo ""
 	@echo "  make loadtest      - run staged backend load test with non-ideal network simulation"
 	@echo "  make loadtest-20   - run staged backend load test profile that ramps to 20 clients"
 	@echo "  make docker-build  - build Docker image via compose"
@@ -28,9 +38,11 @@ help:
 	@echo "  make clean         - remove common build artifacts"
 
 deps:
-	@cd backend && go mod tidy
-	@cd web && npm install
-	@npm install --no-save
+	@npm ci
+	@npm --workspace=@kesher/client-core install
+	@npm --prefix web install
+	@npm --prefix desktop install
+	@cd backend && go mod download && go mod tidy
 
 dev-backend:
 	@cd backend && go run ./cmd/server
@@ -139,6 +151,37 @@ test:
 	@cd web && npm run build
 	@npm --prefix packages/client-core test
 
+# === Desktop & CI Targets (GitHub Actions local simulation) ===
+
+build-desktop-web: build-web
+	@echo "Building desktop web bundle..."
+	@cd desktop && npm run build:web
+
+build-desktop-windows: build-desktop-web
+	@echo "Building Windows desktop app (MSI + NSIS)..."
+	@cd desktop && npm run tauri build
+
+build-desktop-macos: build-desktop-web
+	@echo "Building macOS desktop app (DMG + universal)..."
+	@cd desktop && npm run tauri build -- --target universal-apple-darwin
+
+dev-desktop:
+	@echo "Starting Tauri dev server..."
+	@cd desktop && npm run tauri dev
+
+ci-backend-test: sync-embedded-web
+	@echo "Building backend binaries (Windows + Linux)..."
+	@mkdir -p dist/bin
+	@cd backend && go build -trimpath -ldflags="-s -w" -o "../dist/bin/kesher-windows-amd64.exe" ./cmd/server
+	@cd backend && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "../dist/bin/kesher-linux-amd64" ./cmd/server
+	@echo "✓ Backend builds complete!"
+
+ci-desktop-test: ci-backend-test build-desktop-windows
+	@echo "✓ Desktop + Backend builds complete!"
+
+ci-test: test build-desktop-web
+	@echo "✓ Full CI tests passed!"
+
 loadtest:
 	@cd backend && LOADTEST_RUN=1 go test -tags=loadtest -run TestRealWorldLoadRamp -count=1 -v -timeout 30m ./internal/app
 
@@ -157,3 +200,6 @@ docker-down:
 clean:
 	@rm -rf backend/bin
 	@rm -rf web/dist
+	@rm -rf desktop/src-tauri/target
+	@rm -rf dist/bin dist/packages
+	@echo "✓ Build artifacts cleaned"
