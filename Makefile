@@ -30,6 +30,7 @@ help:
 deps:
 	@cd backend && go mod tidy
 	@cd web && npm install
+	@npm install --no-save
 
 dev-backend:
 	@cd backend && go run ./cmd/server
@@ -136,6 +137,7 @@ build: build-backend
 test:
 	@cd backend && go test ./...
 	@cd web && npm run build
+	@npm --prefix packages/client-core test
 
 loadtest:
 	@cd backend && LOADTEST_RUN=1 go test -tags=loadtest -run TestRealWorldLoadRamp -count=1 -v -timeout 30m ./internal/app

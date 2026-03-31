@@ -1,0 +1,80 @@
+import { createContext, useContext, useState, useCallback, useEffect } from "react";
+import { setGlobalApiBaseUrl } from "../api";
+
+/**
+ * On desktop (Tauri), this provides runtime-configurable server URL.
+ * On web, this defaults to relative paths (proxied during dev, same-origin in prod).
+ */
+
+type ApiBaseUrlContextType = {
+  baseUrl: string;
+  setBaseUrl: (url: string) => void;
+  isDesktop: boolean;
+};
+
+const ApiBaseUrlContext = createContext<ApiBaseUrlContextType | null>(null);
+
+export function useApiBaseUrl(): ApiBaseUrlContextType {
+  const ctx = useContext(ApiBaseUrlContext);
+  if (!ctx) {
+    throw new Error("useApiBaseUrl must be used within ApiBaseUrlProvider");
+  }
+  return ctx;
+}
+
+export function ApiBaseUrlProvider({ children }: { children: React.ReactNode }) {
+  const [baseUrl, setBaseUrlState] = useState<string>(() => {
+    // Check if running in Tauri desktop environment
+    return typeof window !== "undefined" && "__TAURI__" in window ? "" : "";
+  });
+  const [isDesktop] = useState(() => typeof window !== "undefined" && "__TAURI__" in window);
+
+  // On desktop, load the server URL from Tauri command on mount
+  useEffect(() => {
+    if (!isDesktop) return;
+
+    const loadServerUrl = async () => {
+      try {
+        // @ts-expect-error Tauri window object is injected at runtime
+        const { invoke } = window.__TAURI__.core;
+        const url = await invoke<string>("get_server_url");
+        setBaseUrlState(url);
+        setGlobalApiBaseUrl(url);
+      } catch (error) {
+        console.error("Failed to load server URL from Tauri:", error);
+        const fallback = "http://127.0.0.1:8080";
+        setBaseUrlState(fallback);
+        setGlobalApiBaseUrl(fallback);
+      }
+    };
+
+    loadServerUrl();
+  }, [isDesktop]);
+
+  const handleSetBaseUrl = useCallback((url: string) => {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+
+    setBaseUrlState(trimmed);
+    setGlobalApiBaseUrl(trimmed);
+
+    // Persist to Tauri if on desktop
+    if (isDesktop) {
+      try {
+        // @ts-expect-error Tauri window object is injected at runtime
+        const { invoke } = window.__TAURI__.core;
+        invoke("set_server_url", { serverUrl: trimmed }).catch((error: unknown) => {
+          console.error("Failed to persist server URL to Tauri:", error);
+        });
+      } catch (error) {
+        console.error("Failed to invoke Tauri set_server_url:", error);
+      }
+    }
+  }, [isDesktop]);
+
+  return (
+    <ApiBaseUrlContext.Provider value={{ baseUrl, setBaseUrl: handleSetBaseUrl, isDesktop }}>
+      {children}
+    </ApiBaseUrlContext.Provider>
+  );
+}
