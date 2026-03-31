@@ -18,6 +18,7 @@ export { useIntercomSession } from "./hooks/useIntercomSession";
 export { useAudioDevices } from "./hooks/useAudioDevices";
 export { useSettings } from "./hooks/useSettings";
 export { useApiBaseUrl, ApiBaseUrlProvider } from "./hooks/useApiBaseUrl";
+export { useNativeAudio } from "./hooks/useNativeAudio";
 
 // Types & API
 export * from "./types";

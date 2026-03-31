@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 LAN_IP ?= 127.0.0.1
 
-.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build-desktop-web build-desktop-windows dev-desktop build test ci-test ci-backend-test ci-desktop-test loadtest loadtest-20 docker-build docker-up docker-down clean
+.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build-desktop-web build-desktop-windows dev-desktop desktop-web-check desktop-rust-check desktop-check local-smoke build test ci-test ci-backend-test ci-desktop-test loadtest loadtest-20 docker-build docker-up docker-down clean
 
 help:
 	@echo "Available targets:"
@@ -26,6 +26,10 @@ help:
 	@echo "  make build-desktop-windows - build Windows app (MSI + NSIS)"
 	@echo "  make build-desktop-macos   - build macOS app (DMG + universal)"
 	@echo "  make dev-desktop           - run Tauri dev server"
+	@echo "  make desktop-web-check     - TypeScript + Vite build check for desktop web shell"
+	@echo "  make desktop-rust-check    - cargo check for desktop native (Tauri/Rust)"
+	@echo "  make desktop-check         - run desktop web + native checks"
+	@echo "  make local-smoke           - run complete local smoke checks (deps, tests, desktop checks)"
 	@echo "  make ci-test               - run full CI test suite"
 	@echo "  make ci-backend-test       - test backend builds"
 	@echo "  make ci-desktop-test       - test backend + desktop builds"
@@ -39,9 +43,6 @@ help:
 
 deps:
 	@npm ci
-	@npm --workspace=@kesher/client-core install
-	@npm --prefix web install
-	@npm --prefix desktop install
 	@cd backend && go mod download && go mod tidy
 
 dev-backend:
@@ -169,6 +170,20 @@ dev-desktop:
 	@echo "Starting Tauri dev server..."
 	@cd desktop && npm run tauri dev
 
+desktop-web-check:
+	@echo "Running desktop web build check..."
+	@cd desktop && npm run build:web
+
+desktop-rust-check:
+	@echo "Running desktop Rust check..."
+	@cd desktop/src-tauri && cargo check
+
+desktop-check: desktop-web-check desktop-rust-check
+	@echo "✓ Desktop checks passed!"
+
+local-smoke: deps test desktop-check
+	@echo "✓ Local smoke checks passed!"
+
 ci-backend-test: sync-embedded-web
 	@echo "Building backend binaries (Windows + Linux)..."
 	@mkdir -p dist/bin
@@ -179,7 +194,7 @@ ci-backend-test: sync-embedded-web
 ci-desktop-test: ci-backend-test build-desktop-windows
 	@echo "✓ Desktop + Backend builds complete!"
 
-ci-test: test build-desktop-web
+ci-test: test desktop-check
 	@echo "✓ Full CI tests passed!"
 
 loadtest:

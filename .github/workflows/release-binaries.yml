@@ -2,7 +2,7 @@ name: Release binaries
 
 on:
   push:
-    branches: ["main", "develop"]
+    branches: ["main", "dev"]
     tags:
       - "v*"
   workflow_dispatch:
@@ -79,6 +79,39 @@ jobs:
         with:
           name: backend-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/packages/*
+
+  # 1b. Fast Desktop Validation (runs on every push/tag/dispatch)
+  desktop-check:
+    name: Desktop Check (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Desktop web check
+        run: npm --prefix desktop run build:web
+
+      - name: Desktop native check
+        run: |
+          cd desktop/src-tauri
+          cargo check
 
   # 2. Windows Desktop
   build-desktop-windows:

@@ -62,6 +62,7 @@ import type {
 import { useSettings } from "./hooks/useSettings";
 import { useAudioDevices } from "./hooks/useAudioDevices";
 import { useIntercomSession } from "./hooks/useIntercomSession";
+import { useNativeAudio } from "./hooks/useNativeAudio";
 
 const adminPathname = "/admin";
 const loginPathname = "/login";
@@ -257,6 +258,9 @@ export function App() {
   // ── Settings & preferences ──
   const settings = useSettings();
 
+  // ── Native desktop audio (Tauri only; noop in browser) ──
+  const nativeAudio = useNativeAudio();
+
   // ── Audio devices ──
   const audioDevices = useAudioDevices({
     setSelectedInputDeviceId: settings.setSelectedInputDeviceId,
@@ -343,6 +347,7 @@ export function App() {
       setAppData(null);
     },
     onStreamDeckHardwareCommand: handleStreamDeckHardwareCommand,
+    nativeAudio,
   });
 
   // ── Computed values ──
