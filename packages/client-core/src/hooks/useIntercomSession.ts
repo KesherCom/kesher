@@ -28,6 +28,7 @@ import { useLocalMic } from "./useLocalMic";
 import { useRemoteAudio } from "./useRemoteAudio";
 import { useRtpStats } from "./useRtpStats";
 import type { RtpStats } from "./useRtpStats";
+import type { NativeAudioHook } from "./useNativeAudio";
 
 type WakeLockSentinelLike = {
   released: boolean;
@@ -308,6 +309,12 @@ export type UseIntercomSessionOptions = {
     command: string;
     brightness?: number;
   }) => void;
+  /**
+   * Optional native audio engine (Tauri desktop only).
+   * When provided and `isNative=true`, WebRTC negotiation and PTT are
+   * handled by the Rust audio engine instead of the browser RTCPeerConnection.
+   */
+  nativeAudio?: NativeAudioHook;
 };
 
 export type UseIntercomSessionResult = {
@@ -419,6 +426,7 @@ export function useIntercomSession({
   onRefreshAudioDevices,
   onSessionRevoked,
   onStreamDeckHardwareCommand,
+  nativeAudio,
 }: UseIntercomSessionOptions): UseIntercomSessionResult {
   const forcePttOnMobile = isMobileClient();
   const resolveVoiceModeForClient = (
@@ -1293,10 +1301,12 @@ export function useIntercomSession({
   function startPtt() {
     setPttPressed(true);
     sendVoiceState("ptt_start");
+    nativeAudio?.setPtt(true);
   }
   function stopPtt() {
     setPttPressed(false);
     sendVoiceState("ptt_stop");
+    nativeAudio?.setPtt(false);
   }
 
   function startBroadcastPtt(groupId: string) {
@@ -1874,6 +1884,53 @@ export function useIntercomSession({
           return;
         }
         if (msg.type === "webrtc_offer") {
+          // ── Native audio path (Tauri desktop) ──────────────────────────
+          if (nativeAudio?.isNative) {
+            void (async () => {
+              const result = await nativeAudio.handleOffer({
+                offerSdp: msg.data.sdp,
+                inputDeviceId: selectedInputDeviceIdRef.current || undefined,
+                outputDeviceId: selectedOutputDeviceIdRef.current || undefined,
+              });
+              if (result && wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(
+                  JSON.stringify({
+                    type: "webrtc_answer",
+                    data: { sdp: result.answerSdp },
+                  }),
+                );
+                // Relay ICE candidates back to the SFU
+                for (const candidateJson of result.iceCandidates) {
+                  try {
+                    const c = JSON.parse(candidateJson) as RTCIceCandidateInit;
+                    wsRef.current?.send(
+                      JSON.stringify({
+                        type: "webrtc_ice_candidate",
+                        data: {
+                          candidate: c.candidate,
+                          sdpMid: c.sdpMid ?? undefined,
+                          sdpMLineIndex: c.sdpMLineIndex ?? undefined,
+                        },
+                      }),
+                    );
+                  } catch {
+                    // skip malformed candidate
+                  }
+                }
+                pushDebugEvent("system · webrtc · native engine answered offer");
+                return;
+              }
+              // Fall through to browser path if native failed
+              pushDebugEvent("system · webrtc · native engine failed, falling back");
+            })().catch((err) => {
+              setAudioError(
+                `Native audio engine failed: ${err instanceof Error ? err.message : "unknown error"}`,
+              );
+            });
+            return;
+          }
+
+          // ── Browser RTCPeerConnection path (fallback / web) ────────────
           const pc = pcRef.current;
           if (
             !pc ||

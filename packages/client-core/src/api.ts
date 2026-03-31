@@ -24,6 +24,36 @@ import { toStringArray } from "./lib/normalize";
 
 const adminPinHeaderName = "X-Admin-Pin";
 
+// Global base URL state for runtime configuration (desktop Tauri + web)
+let globalApiBaseUrl: string | null = null;
+
+export function setGlobalApiBaseUrl(url: string): void {
+  globalApiBaseUrl = url;
+}
+
+export function getGlobalApiBaseUrl(): string {
+  if (globalApiBaseUrl !== null) {
+    return globalApiBaseUrl;
+  }
+  // Default for web: relative paths (proxied in dev, same-origin in prod)
+  return "";
+}
+
+/**
+ * Constructs full API URL with configured base URL prefix.
+ * - On web: returns path as-is (proxied in dev, same-origin in prod)
+ * - On desktop: prefixes with configured server URL (e.g., http://127.0.0.1:8080)
+ */
+function apiUrl(path: string): string {
+  const base = getGlobalApiBaseUrl();
+  if (!base) {
+    return path; // relative URL for web
+  }
+  // Ensure no double-slash by removing leading slash from path
+  const cleanPath = path.startsWith("/") ? path.slice(1) : path;
+  return `${base}/${cleanPath}`;
+}
+
 export function normalizePublicBootstrap(data: unknown): PublicBootstrap {
   const raw = (data ?? {}) as Record<string, unknown>;
   const roles = Array.isArray(raw.roles) ? raw.roles : [];
@@ -329,7 +359,7 @@ export function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
 }
 
 export async function getPublicBootstrap(): Promise<PublicBootstrap> {
-  const res = await fetch("/api/public-bootstrap");
+  const res = await fetch(apiUrl("/api/public-bootstrap"));
   if (!res.ok) throw new Error("failed to load public bootstrap");
   const raw = (await res.json()) as unknown;
   return normalizePublicBootstrap(raw);
@@ -339,7 +369,7 @@ export async function login(
   username: string,
   roleId: string,
 ): Promise<LoginSuccess | LoginConflict> {
-  const res = await fetch("/api/login", {
+  const res = await fetch(apiUrl("/api/login"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, roleId }),
@@ -355,7 +385,7 @@ export async function loginTakeover(
   username: string,
   roleId: string,
 ): Promise<LoginSuccess> {
-  const res = await fetch("/api/login/takeover", {
+  const res = await fetch(apiUrl("/api/login/takeover"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, roleId }),
@@ -365,7 +395,7 @@ export async function loginTakeover(
 }
 
 export async function adminLogin(pin: string): Promise<LoginSuccess> {
-  const res = await fetch("/api/admin/login", {
+  const res = await fetch(apiUrl("/api/admin/login"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pin }),
@@ -375,7 +405,7 @@ export async function adminLogin(pin: string): Promise<LoginSuccess> {
 }
 
 export async function bootstrap(token: string): Promise<Bootstrap> {
-  const res = await fetch("/api/bootstrap", {
+  const res = await fetch(apiUrl("/api/bootstrap"), {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error("failed to load bootstrap");
@@ -384,7 +414,7 @@ export async function bootstrap(token: string): Promise<Bootstrap> {
 }
 
 export async function logout(token: string): Promise<void> {
-  await fetch("/api/logout", {
+  await fetch(apiUrl("/api/logout"), {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -394,7 +424,7 @@ export async function getRealtimeStats(
   token: string,
   adminPin: string,
 ): Promise<RealtimeStatsResponse> {
-  const res = await fetch("/api/realtime-stats", {
+  const res = await fetch(apiUrl("/api/realtime-stats"), {
     headers: {
       Authorization: `Bearer ${token}`,
       [adminPinHeaderName]: adminPin,
@@ -405,7 +435,7 @@ export async function getRealtimeStats(
 }
 
 export async function getStatus(token: string): Promise<StatusResponse> {
-  const res = await fetch("/api/status", {
+  const res = await fetch(apiUrl("/api/status"), {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error("failed to load status");
@@ -591,7 +621,7 @@ export async function exportConfiguration(
   token: string,
   adminPin: string,
 ): Promise<ConfigurationDocument> {
-  const res = await fetch("/api/admin/configuration-export", {
+  const res = await fetch(apiUrl("/api/admin/configuration-export"), {
     headers: {
       Authorization: `Bearer ${token}`,
       [adminPinHeaderName]: adminPin,
@@ -608,7 +638,7 @@ export async function importConfiguration(
   document: ConfigurationDocument,
   sections: ConfigurationSection[],
 ): Promise<ConfigurationImportResponse> {
-  const res = await fetch("/api/admin/configuration-import", {
+  const res = await fetch(apiUrl("/api/admin/configuration-import"), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -625,7 +655,7 @@ export async function getCompanionAdminSummary(
   token: string,
   adminPin: string,
 ): Promise<CompanionAdminSummary> {
-  const res = await fetch("/api/admin/companion/config", {
+  const res = await fetch(apiUrl("/api/admin/companion/config"), {
     headers: {
       Authorization: `Bearer ${token}`,
       [adminPinHeaderName]: adminPin,
@@ -640,7 +670,7 @@ export async function publishCompanionProfile(
   adminPin: string,
   roleId?: string,
 ): Promise<CompanionProfileResponse> {
-  const res = await fetch("/api/admin/companion/publish", {
+  const res = await fetch(apiUrl("/api/admin/companion/publish"), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -656,7 +686,7 @@ export async function publishCompanionProfile(
 export async function publishUserCompanionProfile(
   token: string,
 ): Promise<CompanionProfileResponse> {
-  const res = await fetch("/api/user/companion/publish", {
+  const res = await fetch(apiUrl("/api/user/companion/publish"), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -671,7 +701,7 @@ export async function getAdminCompanionRolePages(
   token: string,
   adminPin: string,
 ): Promise<CompanionRolePagesResponse> {
-  const res = await fetch("/api/admin/companion/role-pages", {
+  const res = await fetch(apiUrl("/api/admin/companion/role-pages"), {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -688,7 +718,7 @@ export async function saveAdminCompanionRolePage(
   roleId: string,
   pageNumber: number,
 ): Promise<CompanionRolePageConfig> {
-  const res = await fetch("/api/admin/companion/role-pages", {
+  const res = await fetch(apiUrl("/api/admin/companion/role-pages"), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -705,7 +735,7 @@ export async function getTelegramStatus(
   token: string,
   adminPin: string,
 ): Promise<TelegramStatus> {
-  const res = await fetch("/api/admin/telegram", {
+  const res = await fetch(apiUrl("/api/admin/telegram"), {
     headers: {
       Authorization: `Bearer ${token}`,
       [adminPinHeaderName]: adminPin,
@@ -755,7 +785,7 @@ export async function getTelegramAllowlist(
   token: string,
   adminPin: string,
 ): Promise<TelegramAllowlistEntry[]> {
-  const res = await fetch("/api/admin/telegram-users", {
+  const res = await fetch(apiUrl("/api/admin/telegram-users"), {
     headers: {
       Authorization: `Bearer ${token}`,
       [adminPinHeaderName]: adminPin,
@@ -830,7 +860,7 @@ export async function getAdminLogs(
   adminPin: string,
   query: AdminLogQuery = {},
 ): Promise<AdminLogsResponse> {
-  const res = await fetch(`/api/admin/logs${buildAdminLogQueryString(query)}`, {
+  const res = await fetch(apiUrl(`/api/admin/logs${buildAdminLogQueryString(query)}`), {
     headers: {
       Authorization: `Bearer ${token}`,
       [adminPinHeaderName]: adminPin,
@@ -896,7 +926,7 @@ export async function updateAckSettings(
   adminPin: string,
   enabled: boolean,
 ): Promise<{ enabled: boolean }> {
-  const res = await fetch("/api/admin/ack-settings", {
+  const res = await fetch(apiUrl("/api/admin/ack-settings"), {
     method: "PUT",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -914,7 +944,7 @@ export async function updateAckSettings(
 export async function getStreamDeckSettings(
   token: string,
 ): Promise<StreamDeckSettings> {
-  const res = await fetch("/api/user/stream-deck/settings", {
+  const res = await fetch(apiUrl("/api/user/stream-deck/settings"), {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(await res.text());
@@ -926,7 +956,7 @@ export async function updateStreamDeckSettings(
   token: string,
   settings: StreamDeckSettings,
 ): Promise<StreamDeckSettings> {
-  const res = await fetch("/api/user/stream-deck/settings", {
+  const res = await fetch(apiUrl("/api/user/stream-deck/settings"), {
     method: "PUT",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -942,7 +972,7 @@ export async function updateStreamDeckSettings(
 export async function resetStreamDeckSettings(
   token: string,
 ): Promise<StreamDeckSettings> {
-  const res = await fetch("/api/user/stream-deck/settings", {
+  const res = await fetch(apiUrl("/api/user/stream-deck/settings"), {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -977,7 +1007,7 @@ export async function renderStreamDeckPreviewImages(
     return new Map();
   }
 
-  const res = await fetch("/api/user/stream-deck/preview", {
+  const res = await fetch(apiUrl("/api/user/stream-deck/preview"), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -1066,7 +1096,7 @@ export async function fetchAdminUsers(
   token: string,
   adminPin: string,
 ): Promise<UserWithOnlineStatus[]> {
-  const res = await fetch("/api/admin/users", {
+  const res = await fetch(apiUrl("/api/admin/users"), {
     headers: {
       Authorization: `Bearer ${token}`,
       [adminPinHeaderName]: adminPin,

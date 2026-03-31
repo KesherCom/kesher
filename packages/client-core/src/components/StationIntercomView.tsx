@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Bootstrap,
   BroadcastGroup,
@@ -17,16 +17,16 @@ import { sortDirectUsersByRoleAndUsername } from "../lib/users";
 import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
 
 const DB_MIN = -60;
-const DB_MAX = 6; // +6 dB ≈ gain 2.0
+const DB_MAX = 6; // +6 dB ~ gain 2.0
 const MUTE_POS = DB_MIN - 1; // sentinel slider position for mute
 
-/** Slider position (dB) → linear gain. Bottom-of-slider = mute. */
+/** Slider position (dB) -> linear gain. Bottom-of-slider = mute. */
 function sliderToGain(sliderDb: number): number {
   if (sliderDb <= MUTE_POS) return 0;
   return Math.pow(10, Math.max(DB_MIN, Math.min(DB_MAX, sliderDb)) / 20);
 }
 
-/** Linear gain → slider position (dB). */
+/** Linear gain -> slider position (dB). */
 function gainToSlider(gain: number): number {
   if (gain <= 0) return MUTE_POS;
   const db = 20 * Math.log10(gain);
@@ -34,7 +34,7 @@ function gainToSlider(gain: number): number {
   return Math.round(Math.max(DB_MIN, Math.min(DB_MAX, db)));
 }
 
-/** Gain → display label like "+6 db", "0 db", "-∞". */
+/** Gain -> display label like "+6 db", "0 db", "-inf". */
 function gainToDbLabel(gain: number): string {
   if (gain <= 0) return "-\u221E";
   const db = 20 * Math.log10(gain);
@@ -287,7 +287,7 @@ function meterDbFsToPercent(dbFs: number): number {
 }
 
 function formatDbFs(dbFs: number): string {
-  if (!Number.isFinite(dbFs) || dbFs <= METER_DBFS_MIN) return "-∞ dBFS";
+  if (!Number.isFinite(dbFs) || dbFs <= METER_DBFS_MIN) return "-inf dBFS";
   if (Math.abs(dbFs) < 0.05) return "0.0 dBFS";
   return `${dbFs.toFixed(1)} dBFS`;
 }
@@ -1448,9 +1448,9 @@ export function StationIntercomView({
         <div className="connection-offline-banner">
           <span className="connection-offline-icon" />
           {connectionState === "reconnecting"
-            ? "Reconnecting…"
+            ? "Reconnecting..."
             : connectionState === "connecting"
-              ? "Connecting…"
+              ? "Connecting..."
               : "Offline"}
         </div>
       )}
@@ -1593,7 +1593,7 @@ export function StationIntercomView({
                           : "Add channel to favorites"
                       }
                     >
-                      ★
+                      *
                     </button>
                     <button
                       className={talkButtonClassName}
@@ -1611,7 +1611,7 @@ export function StationIntercomView({
                       }
                     >
                       {isReceivingRoom(room.id) ? (
-                        <span className="station-receiving-badge">🔊</span>
+                        <span className="station-receiving-badge">RX</span>
                       ) : null}
                       <small>Talk</small>
                       <strong>{room.name}</strong>
@@ -1666,13 +1666,13 @@ export function StationIntercomView({
                         disabled={!canListen || isForced}
                         title={
                           isForced
-                            ? "Forced listen — cannot be deselected"
+                            ? "Forced listen - cannot be deselected"
                             : canListen
                               ? ""
                               : "Your role is not allowed to receive from this party line"
                         }
                       >
-                        {isForced ? "🔒 Listen" : "Listen"}
+                        {isForced ? "Locked Listen" : "Listen"}
                       </button>
                       <button
                         className={`call ${canTalk ? "" : "disabled"}`}
@@ -1741,7 +1741,7 @@ export function StationIntercomView({
                               : "Add user to favorites"
                           }
                         >
-                          ★
+                          *
                         </button>
                         <button
                           className={`station-card-head direct-ptt hold-button ${directPttPressedUserId === p.userId ? "active" : ""}`}
@@ -1751,7 +1751,7 @@ export function StationIntercomView({
                           })}
                         >
                           {isReceivingDirect(p.userId) ? (
-                            <span className="station-receiving-badge">🔊</span>
+                            <span className="station-receiving-badge">RX</span>
                           ) : null}
                           <small>Direct</small>
                           <strong>{p.username}</strong>
@@ -1850,7 +1850,7 @@ export function StationIntercomView({
                           : "Add user to favorites"
                       }
                     >
-                      ★
+                      *
                     </button>
                     <button
                       className={`station-card-head direct-ptt hold-button ${directPttPressedUserId === p.userId ? "active" : ""}`}
@@ -1860,7 +1860,7 @@ export function StationIntercomView({
                       })}
                     >
                       {isReceivingDirect(p.userId) ? (
-                        <span className="station-receiving-badge">🔊</span>
+                        <span className="station-receiving-badge">RX</span>
                       ) : null}
                       <small>Direct</small>
                       <strong>{p.username}</strong>
@@ -1954,7 +1954,7 @@ export function StationIntercomView({
                       }
                     >
                       {isReceivingBroadcast(group.id) ? (
-                        <span className="station-broadcast-receiving">🔊</span>
+                        <span className="station-broadcast-receiving">RX</span>
                       ) : null}
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "0.15rem" }}>
                         <span>{group.name}</span>
@@ -2101,8 +2101,8 @@ export function StationIntercomView({
 
               <section className="station-settings-section station-settings-status">
                 <small className="station-settings-meta">
-                  Media controls: {mediaSessionSupported ? "supported" : "not supported"} · Wake
-                  lock: {wakeLockSupported ? (wakeLockActive ? "active" : "available") : "not supported"} · Install mode: {isStandaloneDisplayMode ? "installed app" : "browser tab"}
+                  Media controls: {mediaSessionSupported ? "supported" : "not supported"} | Wake
+                  lock: {wakeLockSupported ? (wakeLockActive ? "active" : "available") : "not supported"} | Install mode: {isStandaloneDisplayMode ? "installed app" : "browser tab"}
                 </small>
                 <small className="station-settings-meta">
                   For best mobile reliability, keep background audio assist
@@ -2127,7 +2127,7 @@ export function StationIntercomView({
                     >
                       Stream Deck
                       <span className={`chev ${isStreamDeckOpen ? "open" : ""}`}>
-                        ▾
+                        v
                       </span>
                     </button>
                   </div>
@@ -2237,20 +2237,20 @@ export function StationIntercomView({
                             : "ready"
                           : "not supported"
                       }
-                      {" · "}
+                      {" | "}
                       Input: {streamDeckBridgeConnected ? "connected" : "waiting"}
                       {streamDeckBridgeLastEvent
-                        ? ` · Last event: ${streamDeckBridgeLastEvent}`
+                        ? ` | Last event: ${streamDeckBridgeLastEvent}`
                         : ""}
                     </small>
                     {lastCompanionCommand ? (
                       <small className="station-settings-meta">
                         Companion: {lastCompanionCommand.command || "unknown"}
-                        {` · ${lastCompanionCommand.status}`}
+                        {` | ${lastCompanionCommand.status}`}
                         {lastCompanionCommand.error
-                          ? ` · ${lastCompanionCommand.error}`
+                          ? ` | ${lastCompanionCommand.error}`
                           : ""}
-                        {` · ${new Date(lastCompanionCommand.at).toLocaleTimeString()}`}
+                        {` | ${new Date(lastCompanionCommand.at).toLocaleTimeString()}`}
                       </small>
                     ) : null}
                     {showDebug ? (
@@ -2288,7 +2288,7 @@ export function StationIntercomView({
                                   streamDeckSettings.selectedPage
                               }
                             >
-                              ◀
+                              {"<"}
                             </button>
                             <span>
                               Page {streamDeckSettings.selectedPage + 1}
@@ -2303,7 +2303,7 @@ export function StationIntercomView({
                                   streamDeckSettings.selectedPage
                               }
                             >
-                              ▶
+                              {">"}
                             </button>
                           </div>
                           <button
@@ -2579,12 +2579,7 @@ export function StationIntercomView({
                             <optgroup label="Broadcast and audio">
                               <option value="broadcast_ptt">Broadcast PTT</option>
                             </optgroup>
-                            <optgroup label="Stream Deck navigation">
-                              <option value="page_up">Page up</option>
-                              <option value="page_down">Page down</option>
-                              <option value="page_home">Home (page 1)</option>
-                              <option value="page_jump">Open page / folder</option>
-                            </optgroup>
+                            {!isUserSettingsOpen && (<><optgroup label="Stream Deck navigation"><option value="page_up">Page up</option><option value="page_down">Page down</option><option value="page_home">Home (page 1)</option><option value="page_jump">Open page / folder</option></optgroup><optgroup label="Volume"><option value="volume_delta">Volume +/-</option></optgroup></>)}
                           </select>
                         </label>
 
@@ -2777,7 +2772,7 @@ export function StationIntercomView({
                     >
                       Sound settings
                       <span className={`chev ${isAudioOpen ? "open" : ""}`}>
-                        ▾
+                        v
                       </span>
                     </button>
                   </div>
@@ -2796,7 +2791,7 @@ export function StationIntercomView({
                               aria-expanded={isMicMenuOpen}
                             >
                               <span>{selectedMicLabel}</span>
-                              <span>▾</span>
+                              <span>v</span>
                             </button>
                             {isMicMenuOpen ? (
                               <div className="mic-dropdown-menu" role="listbox">
@@ -2881,7 +2876,7 @@ export function StationIntercomView({
                             aria-expanded={isOutputMenuOpen}
                           >
                             <span>{selectedOutputLabel}</span>
-                            <span>▾</span>
+                            <span>v</span>
                           </button>
                           {isOutputMenuOpen ? (
                             <div className="mic-dropdown-menu" role="listbox">
@@ -2949,3 +2944,4 @@ export function StationIntercomView({
     </div>
   );
 }
+

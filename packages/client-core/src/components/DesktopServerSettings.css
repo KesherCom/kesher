@@ -1,0 +1,74 @@
+.desktop-server-settings {
+  padding: 1rem;
+  margin: 1rem 0;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  background-color: #f9f9f9;
+}
+
+.desktop-server-settings fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.desktop-server-settings legend {
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  padding: 0;
+}
+
+.desktop-server-settings .field-group {
+  margin-bottom: 0.75rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.desktop-server-settings label {
+  min-width: 140px;
+  font-weight: 500;
+}
+
+.desktop-server-settings input[type="text"] {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 0.9rem;
+}
+
+.desktop-server-settings input[type="text"]:focus {
+  outline: none;
+  border-color: #2196f3;
+  box-shadow: 0 0 4px rgba(33, 150, 243, 0.3);
+}
+
+.desktop-server-settings .button-group {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.desktop-server-settings button {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  background-color: #fff;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.desktop-server-settings button:hover {
+  background-color: #f0f0f0;
+}
+
+.desktop-server-settings button:active {
+  background-color: #e0e0e0;
+}
+
+.desktop-server-settings .success-message {
+  margin-top: 0.5rem;
+  color: #4caf50;
+  font-size: 0.85rem;
+}
