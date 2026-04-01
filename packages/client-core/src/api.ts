@@ -71,19 +71,75 @@ export function getGlobalApiBaseUrl(): string {
   return "";
 }
 
+function normalizeApiPath(path: string): string {
+  if (!path) {
+    return "/";
+  }
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
+/**
+ * Builds an API URL for network requests.
+ * - On web: returns a relative path (works with Vite proxy in dev)
+ * - On desktop: prefixes path with configured server URL
+ */
+export function buildApiUrl(path: string): string {
+  const normalizedPath = normalizeApiPath(path);
+  const base = getGlobalApiBaseUrl();
+  if (!base) {
+    return normalizedPath;
+  }
+  return `${base}${normalizedPath}`;
+}
+
+/**
+ * Builds an absolute API URL for display/integration output.
+ */
+export function buildAbsoluteApiUrl(path: string): string {
+  const normalizedPath = normalizeApiPath(path);
+  const base = getGlobalApiBaseUrl();
+  if (base) {
+    return `${base}${normalizedPath}`;
+  }
+  if (typeof window !== "undefined" && window.location.origin) {
+    return `${window.location.origin}${normalizedPath}`;
+  }
+  return normalizedPath;
+}
+
+/**
+ * Builds a websocket URL from the currently active API origin.
+ */
+export function buildWebSocketUrl(
+  path: string,
+  query: Record<string, string | number | boolean | undefined> = {},
+): string {
+  const normalizedPath = normalizeApiPath(path);
+  const base = getGlobalApiBaseUrl() ||
+    (typeof window !== "undefined" ? window.location.origin : "");
+
+  if (!base) {
+    throw new Error("Unable to resolve websocket origin.");
+  }
+
+  const parsedBase = new URL(base);
+  const wsProtocol = parsedBase.protocol === "https:" ? "wss:" : "ws:";
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined) continue;
+    params.set(key, String(value));
+  }
+  const queryString = params.toString();
+  return `${wsProtocol}//${parsedBase.host}${normalizedPath}${queryString ? `?${queryString}` : ""}`;
+}
+
 /**
  * Constructs full API URL with configured base URL prefix.
  * - On web: returns path as-is (proxied in dev, same-origin in prod)
  * - On desktop: prefixes with configured server URL (e.g., http://127.0.0.1:8080)
  */
 function apiUrl(path: string): string {
-  const base = getGlobalApiBaseUrl();
-  if (!base) {
-    return path; // relative URL for web
-  }
-  // Ensure no double-slash by removing leading slash from path
-  const cleanPath = path.startsWith("/") ? path.slice(1) : path;
-  return `${base}/${cleanPath}`;
+  return buildApiUrl(path);
 }
 
 export function normalizePublicBootstrap(data: unknown): PublicBootstrap {
@@ -481,7 +537,7 @@ async function apiMutation(
   adminPin: string,
   body?: unknown,
 ): Promise<void> {
-  const res = await fetch(url, {
+  const res = await fetch(apiUrl(url), {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -908,7 +964,7 @@ export async function exportAdminLogsText(
   query: AdminLogQuery = {},
 ): Promise<string> {
   const res = await fetch(
-    `/api/admin/logs/export${buildAdminLogQueryString(query)}`,
+    apiUrl(`/api/admin/logs/export${buildAdminLogQueryString(query)}`),
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -1068,7 +1124,7 @@ export async function getAdminRoleStreamDeckSettings(
   roleId: string,
 ): Promise<StreamDeckSettings> {
   const res = await fetch(
-    `/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`,
+    apiUrl(`/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`),
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -1088,7 +1144,7 @@ export async function updateAdminRoleStreamDeckSettings(
   settings: StreamDeckSettings,
 ): Promise<StreamDeckSettings> {
   const res = await fetch(
-    `/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`,
+    apiUrl(`/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`),
     {
       method: "PUT",
       headers: {
@@ -1110,7 +1166,7 @@ export async function resetAdminRoleStreamDeckSettings(
   roleId: string,
 ): Promise<StreamDeckSettings> {
   const res = await fetch(
-    `/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`,
+    apiUrl(`/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`),
     {
       method: "DELETE",
       headers: {

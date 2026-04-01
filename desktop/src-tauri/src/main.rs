@@ -7,6 +7,7 @@ use audio_engine::{
     AudioDeviceInfo, AudioEngineState, EngineAnswerPayload, StartEngineParams,
 };
 use config::{get_server_url, set_server_url};
+#[cfg(target_os = "windows")]
 use tauri::State;
 
 // ── IPC: device enumeration ───────────────────────────────────────────────────

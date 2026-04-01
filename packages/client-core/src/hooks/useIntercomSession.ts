@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { bootstrap, normalizePublicBootstrap } from "../api";
+import { bootstrap, buildWebSocketUrl, normalizePublicBootstrap } from "../api";
 import {
   matrixAnchorRoomId,
   mergeForcedListenRooms,
@@ -1547,9 +1547,8 @@ export function useIntercomSession({
         reconnectAttemptsRef.current > 0 ? "reconnecting" : "connecting",
       );
       pendingInitialRoomRestoreRef.current = true;
-      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(
-        `${proto}//${window.location.host}/ws?token=${encodeURIComponent(token)}`,
+        buildWebSocketUrl("/ws", { token }),
       );
       wsRef.current = ws;
 

@@ -4,6 +4,8 @@ import { setupServer } from "msw/node";
 import {
   adminLogin,
   bootstrap,
+  buildAbsoluteApiUrl,
+  buildWebSocketUrl,
   createRole,
   exportConfiguration,
   getPublicBootstrap,
@@ -14,6 +16,7 @@ import {
   logout,
   renderStreamDeckPreviewImages,
   resetStreamDeckSettings,
+  setGlobalApiBaseUrl,
   updateStreamDeckSettings,
 } from "./api";
 
@@ -179,6 +182,30 @@ afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 describe("api helpers", () => {
+  afterEach(() => {
+    setGlobalApiBaseUrl("");
+  });
+
+  it("builds absolute API URL from browser origin when no desktop base is configured", () => {
+    expect(buildAbsoluteApiUrl("/api/telegram/webhook")).toBe(
+      "http://localhost/api/telegram/webhook",
+    );
+  });
+
+  it("builds absolute API URL from configured desktop base", () => {
+    setGlobalApiBaseUrl("http://192.168.1.50:8080");
+    expect(buildAbsoluteApiUrl("/api/telegram/webhook")).toBe(
+      "http://192.168.1.50:8080/api/telegram/webhook",
+    );
+  });
+
+  it("builds websocket URL from configured desktop base", () => {
+    setGlobalApiBaseUrl("https://intercom.example.org");
+    expect(buildWebSocketUrl("/ws", { token: "abc" })).toBe(
+      "wss://intercom.example.org/ws?token=abc",
+    );
+  });
+
   it("loads public bootstrap", async () => {
     const data = await getPublicBootstrap();
     expect(data.roles).toHaveLength(1);

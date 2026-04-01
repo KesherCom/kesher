@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  buildAbsoluteApiUrl,
   getCompanionAdminSummary,
   publishCompanionProfile,
 } from "../../api";
@@ -74,9 +75,14 @@ export function AdminCompanionCard({
   const selectedPublishedProfile = selectedRoleId
     ? publishedByRoleId.get(selectedRoleId)
     : undefined;
-  const locationProtocol = window.location.protocol;
-  const locationHost = window.location.hostname;
-  const locationPort = resolveModulePort(locationProtocol, window.location.port);
+  const backendOrigin = useMemo(() => {
+    const discovery = buildAbsoluteApiUrl("/api/companion/discovery");
+    return new URL(discovery).origin;
+  }, []);
+  const backendUrl = useMemo(() => new URL(backendOrigin), [backendOrigin]);
+  const locationProtocol = backendUrl.protocol;
+  const locationHost = backendUrl.hostname;
+  const locationPort = resolveModulePort(locationProtocol, backendUrl.port);
   const useTls = locationProtocol === "https:";
   const minimalModeAvailable = publishedProfiles.length === 1;
   const effectiveRoleId = minimalModeAvailable ? "" : selectedRoleId;
@@ -84,19 +90,19 @@ export function AdminCompanionCard({
     const params = new URLSearchParams();
     if (effectiveRoleId) params.set("roleId", effectiveRoleId);
     if (summary?.sharedSecret) params.set("secret", summary.sharedSecret);
-    const base = `${window.location.origin}/api/companion/discovery`;
+    const base = `${backendOrigin}/api/companion/discovery`;
     const query = params.toString();
     return query ? `${base}?${query}` : base;
-  }, [effectiveRoleId, summary?.sharedSecret]);
+  }, [backendOrigin, effectiveRoleId, summary?.sharedSecret]);
 
   const profileUrl = useMemo(() => {
     const params = new URLSearchParams();
     if (effectiveRoleId) params.set("roleId", effectiveRoleId);
     if (summary?.sharedSecret) params.set("secret", summary.sharedSecret);
-    const base = `${window.location.origin}/api/companion/profile`;
+    const base = `${backendOrigin}/api/companion/profile`;
     const query = params.toString();
     return query ? `${base}?${query}` : base;
-  }, [effectiveRoleId, summary?.sharedSecret]);
+  }, [backendOrigin, effectiveRoleId, summary?.sharedSecret]);
 
   const moduleConfigText = useMemo(() => {
     return [

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  buildAbsoluteApiUrl,
   createTelegramMapping,
   deleteTelegramMapping,
   getTelegramStatus,
@@ -109,7 +110,7 @@ export function AdminTelegramCard({
     });
   }
 
-  const webhookUrl = `${window.location.origin}/api/telegram/webhook`;
+  const webhookUrl = buildAbsoluteApiUrl("/api/telegram/webhook");
 
   return (
     <div className="admin-card">

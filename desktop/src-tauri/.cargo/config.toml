@@ -1,10 +1,6 @@
-[build]
-# Ensure faster compilation and proper cross-compilation support
-rustflags = ["-C", "link-arg=-fuse-ld=lld"]
-
 [target.x86_64-pc-windows-msvc]
 # Windows: enable audio/webrtc features
-# Note: This only works as a hint; for guaranteed features, use --features in build command
+# Keep lld only for the Windows target.
 rustflags = ["-C", "link-arg=-fuse-ld=lld"]
 
 [target.aarch64-apple-darwin]
