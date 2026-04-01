@@ -105,7 +105,7 @@ export function DesktopConnectionSetup({
       <section className="desktop-connection-card" aria-label="Desktop connection setup">
         <h1 className="desktop-connection-title">Server-Verbindung einrichten</h1>
         <p className="desktop-connection-subtitle">
-          Die Adresse wird lokal gespeichert. Erlaubt sind IP, DNS oder volle URL.
+          Die Adresse wird lokal gespeichert. Erlaubt sind IP, DNS oder volle URL inklusive frei waehlbarem Port.
         </p>
 
         <label className="desktop-connection-label" htmlFor="desktop-server-address">
@@ -115,7 +115,7 @@ export function DesktopConnectionSetup({
           id="desktop-server-address"
           className="desktop-connection-input"
           type="text"
-          placeholder="z.B. 192.168.1.50  |  server.local  |  https://intercom.example.org"
+          placeholder="z.B. 192.168.1.50:8090  |  server.local:3000  |  https://intercom.example.org:8443"
           value={input}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {

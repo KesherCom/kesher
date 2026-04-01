@@ -23,7 +23,6 @@ import type {
 import { toStringArray } from "./lib/normalize";
 
 const adminPinHeaderName = "X-Admin-Pin";
-const defaultDesktopServerPort = "8080";
 
 // Global base URL state for runtime configuration (desktop Tauri + web)
 let globalApiBaseUrl: string | null = null;
@@ -48,8 +47,8 @@ export function normalizeServerAddressInput(input: string): string {
     throw new Error("Invalid server address.");
   }
 
-  if (!parsed.port) {
-    parsed.port = defaultDesktopServerPort;
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("Server address must use http or https.");
   }
 
   if (parsed.pathname === "/") {

@@ -4,8 +4,6 @@ use std::path::PathBuf;
 use tauri::AppHandle;
 use tauri::Manager;
 use tauri::Url;
-
-const DEFAULT_SERVER_PORT: u16 = 8080;
 const CONFIG_FILE_NAME: &str = "desktop-config.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,11 +64,9 @@ fn normalize_server_url(input: &str) -> Result<String, String> {
         format!("http://{trimmed}")
     };
 
-    let mut parsed = Url::parse(&candidate).map_err(|error| format!("invalid server URL: {error}"))?;
-    if parsed.port().is_none() {
-        parsed
-            .set_port(Some(DEFAULT_SERVER_PORT))
-            .map_err(|_| "failed to set default server port".to_string())?;
+    let parsed = Url::parse(&candidate).map_err(|error| format!("invalid server URL: {error}"))?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("server URL must use http or https".to_string());
     }
 
     Ok(parsed.to_string().trim_end_matches('/').to_string())

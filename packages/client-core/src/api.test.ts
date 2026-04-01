@@ -14,6 +14,7 @@ import {
   login,
   loginTakeover,
   logout,
+  normalizeServerAddressInput,
   renderStreamDeckPreviewImages,
   resetStreamDeckSettings,
   setGlobalApiBaseUrl,
@@ -203,6 +204,18 @@ describe("api helpers", () => {
     setGlobalApiBaseUrl("https://intercom.example.org");
     expect(buildWebSocketUrl("/ws", { token: "abc" })).toBe(
       "wss://intercom.example.org/ws?token=abc",
+    );
+  });
+
+  it("preserves explicitly configured custom port", () => {
+    expect(normalizeServerAddressInput("192.168.1.50:8090")).toBe(
+      "http://192.168.1.50:8090",
+    );
+  });
+
+  it("does not force default port when none is configured", () => {
+    expect(normalizeServerAddressInput("server.local")).toBe(
+      "http://server.local",
     );
   });
 
