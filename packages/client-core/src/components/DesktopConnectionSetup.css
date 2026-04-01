@@ -6,6 +6,12 @@
   background: radial-gradient(circle at top right, #f2f8ff 0%, #eef4ff 35%, #e8efe6 100%);
 }
 
+.desktop-connection-root.compact {
+  min-height: auto;
+  padding: 0;
+  background: transparent;
+}
+
 .desktop-connection-card {
   width: min(680px, 100%);
   background: #ffffff;
@@ -13,6 +19,10 @@
   border-radius: 14px;
   box-shadow: 0 16px 40px rgba(37, 48, 31, 0.1);
   padding: 1.25rem 1.25rem 1rem;
+}
+
+.desktop-connection-root.compact .desktop-connection-card {
+  width: min(720px, calc(100vw - 2rem));
 }
 
 .desktop-connection-title {

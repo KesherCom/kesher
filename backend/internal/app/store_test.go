@@ -92,6 +92,43 @@ func TestDeleteRoleConflictsWhenRoleAssignedToUser(t *testing.T) {
 	}
 }
 
+func TestUpsertUserTreatsUsernameCaseInsensitively(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	first, err := store.UpsertUser(context.Background(), "Lubo", "audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.UpsertUser(context.Background(), "lubo", "video")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("expected same user id across username casing changes, got %q and %q", first.ID, second.ID)
+	}
+	if second.RoleID != "video" {
+		t.Fatalf("expected updated role, got %+v", second)
+	}
+	users, err := store.ListUsers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("expected one logical user after case-only re-login, got %+v", users)
+	}
+	lookup, err := store.FindUserByUsername(context.Background(), "LUBO")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lookup.ID != first.ID {
+		t.Fatalf("expected case-insensitive lookup to resolve same user, got %+v", lookup)
+	}
+}
+
 func TestBroadcastGroupAllowsRoleReturnsNotFoundForUnknownGroup(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {

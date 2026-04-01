@@ -66,6 +66,7 @@ type mediaPeer struct {
 	userID               string
 	pc                   *webrtc.PeerConnection
 	senders              map[string]*webrtc.RTPSender
+	ready                bool
 	renegotiating        bool
 	pendingRenegotiate   bool
 	lastSenderSetHash    uint64
@@ -338,6 +339,7 @@ func (m *MediaManager) EnsureNegotiation(token string) {
 	if !ok {
 		return
 	}
+	peer.ready = true
 	m.requestRenegotiationLocked(peer)
 }
 
@@ -814,6 +816,9 @@ func (m *MediaManager) scheduleRenegotiationLocked(token string) {
 
 func (m *MediaManager) maybeRenegotiateLocked(peer *mediaPeer) {
 	if !peer.pendingRenegotiate {
+		return
+	}
+	if !peer.ready {
 		return
 	}
 	if peer.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {

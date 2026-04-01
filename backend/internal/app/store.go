@@ -710,8 +710,27 @@ func (s *Store) UpsertUser(ctx context.Context, username, roleID string) (User, 
 	if username == "" || roleID == "" || hasWhitespace(username) {
 		return User{}, ErrInvalidInput
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO users (id, username, role_id) VALUES (lower(hex(randomblob(16))), ?, ?)
-	ON CONFLICT(username) DO UPDATE SET role_id = excluded.role_id`, username, roleID); err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return User{}, err
+	}
+	defer tx.Rollback()
+
+	var existingID string
+	err = tx.QueryRowContext(ctx, `SELECT id FROM users WHERE username = ? COLLATE NOCASE`, username).Scan(&existingID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return User{}, err
+	}
+	if existingID == "" {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, role_id) VALUES (lower(hex(randomblob(16))), ?, ?)`, username, roleID); err != nil {
+			return User{}, err
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET username = ?, role_id = ? WHERE id = ?`, username, roleID, existingID); err != nil {
+			return User{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return User{}, err
 	}
 	return s.FindUserByUsername(ctx, username)
@@ -719,7 +738,8 @@ func (s *Store) UpsertUser(ctx context.Context, username, roleID string) (User, 
 
 func (s *Store) FindUserByUsername(ctx context.Context, username string) (User, error) {
 	var u User
-	err := s.db.QueryRowContext(ctx, `SELECT id, username, role_id FROM users WHERE username = ?`, username).Scan(&u.ID, &u.Username, &u.RoleID)
+	username = strings.TrimSpace(username)
+	err := s.db.QueryRowContext(ctx, `SELECT id, username, role_id FROM users WHERE username = ? COLLATE NOCASE`, username).Scan(&u.ID, &u.Username, &u.RoleID)
 	return u, err
 }
 

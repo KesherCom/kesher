@@ -5,11 +5,17 @@ import "./DesktopConnectionSetup.css";
 
 type DesktopConnectionSetupProps = {
   onContinue: () => void;
+  onCancel?: () => void;
+  compact?: boolean;
 };
 
 const connectionCheckTimeoutMs = 6000;
 
-export function DesktopConnectionSetup({ onContinue }: DesktopConnectionSetupProps) {
+export function DesktopConnectionSetup({
+  onContinue,
+  onCancel,
+  compact = false,
+}: DesktopConnectionSetupProps) {
   const { baseUrl, setBaseUrl, isReady } = useApiBaseUrl();
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
@@ -95,7 +101,7 @@ export function DesktopConnectionSetup({ onContinue }: DesktopConnectionSetupPro
   }
 
   return (
-    <div className="desktop-connection-root">
+    <div className={`desktop-connection-root${compact ? " compact" : ""}`}>
       <section className="desktop-connection-card" aria-label="Desktop connection setup">
         <h1 className="desktop-connection-title">Server-Verbindung einrichten</h1>
         <p className="desktop-connection-subtitle">
@@ -131,6 +137,7 @@ export function DesktopConnectionSetup({ onContinue }: DesktopConnectionSetupPro
           </button>
           <button type="button" onClick={handleContinueWithoutCheck}>Ohne Test starten</button>
           <button type="button" onClick={() => setInput(baseUrl)}>Letzte Adresse laden</button>
+          {onCancel ? <button type="button" onClick={onCancel}>Schliessen</button> : null}
         </div>
 
         {error ? <p className="desktop-connection-status error">{error}</p> : null}

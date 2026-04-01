@@ -78,3 +78,20 @@ func TestSessionManagerDeleteByRole(t *testing.T) {
 		t.Fatal("expected other role session to remain")
 	}
 }
+
+func TestSessionManagerDeleteByUsernameIgnoresCase(t *testing.T) {
+	m := NewSessionManager(time.Minute)
+	target := m.Create(User{ID: "u1", Username: "Lubo", RoleID: "audio"})
+	other := m.Create(User{ID: "u2", Username: "Silas", RoleID: "lighting"})
+
+	deleted := m.DeleteByUsername("lubo")
+	if len(deleted) != 1 || deleted[0].Token != target.Token {
+		t.Fatalf("unexpected deleted sessions: %+v", deleted)
+	}
+	if _, ok := m.Get(target.Token); ok {
+		t.Fatal("expected matching username session to be removed")
+	}
+	if _, ok := m.Get(other.Token); !ok {
+		t.Fatal("expected other username session to remain")
+	}
+}
