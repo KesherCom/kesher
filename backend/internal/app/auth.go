@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -102,6 +103,7 @@ func (m *SessionManager) DeleteByRole(roleID string) []Session {
 func (m *SessionManager) DeleteByUsername(username string) []Session {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	username = strings.TrimSpace(username)
 	now := time.Now()
 	deleted := make([]Session, 0)
 	for token, session := range m.sessions {
@@ -109,7 +111,7 @@ func (m *SessionManager) DeleteByUsername(username string) []Session {
 			delete(m.sessions, token)
 			continue
 		}
-		if session.Username != username {
+		if !strings.EqualFold(strings.TrimSpace(session.Username), username) {
 			continue
 		}
 		deleted = append(deleted, session)

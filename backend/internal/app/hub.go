@@ -57,7 +57,7 @@ func (h *Hub) ReplyTargetForUsername(username string) (string, string, bool) {
 	defer h.mu.RUnlock()
 	var selected *client
 	for _, c := range h.clients {
-		if c.user.Username != username {
+		if !strings.EqualFold(c.user.Username, username) {
 			continue
 		}
 		if selected == nil || c.connectedAt.After(selected.connectedAt) {
@@ -85,7 +85,7 @@ func (h *Hub) SignalStateWithMetadataForUsername(username string) (string, strin
 	defer h.mu.RUnlock()
 	var selected *client
 	for _, c := range h.clients {
-		if c.user.Username != username {
+		if !strings.EqualFold(c.user.Username, username) {
 			continue
 		}
 		if selected == nil || c.connectedAt.After(selected.connectedAt) {
@@ -115,8 +115,9 @@ func (h *Hub) GetActiveClients(ctx context.Context) []ActiveClient {
 	// Use a map to deduplicate by username (in case multiple sessions exist)
 	clientMap := make(map[string]*client)
 	for _, c := range h.clients {
-		if existing, exists := clientMap[c.user.Username]; !exists || c.connectedAt.After(existing.connectedAt) {
-			clientMap[c.user.Username] = c
+		usernameKey := strings.ToLower(strings.TrimSpace(c.user.Username))
+		if existing, exists := clientMap[usernameKey]; !exists || c.connectedAt.After(existing.connectedAt) {
+			clientMap[usernameKey] = c
 		}
 	}
 
@@ -996,7 +997,7 @@ func (h *Hub) LatestTokenForUsername(username string) (string, bool) {
 	var selectedToken string
 	var selectedAt time.Time
 	for token, c := range h.clients {
-		if c.user.Username != username {
+		if !strings.EqualFold(c.user.Username, username) {
 			continue
 		}
 		if selectedToken == "" || c.connectedAt.After(selectedAt) {
@@ -1015,7 +1016,7 @@ func (h *Hub) SessionCountForUsername(username string) int {
 	defer h.mu.RUnlock()
 	count := 0
 	for _, c := range h.clients {
-		if c.user.Username == username {
+		if strings.EqualFold(c.user.Username, username) {
 			count++
 		}
 	}
@@ -1027,7 +1028,7 @@ func (h *Hub) PresenceForUsername(username string) (PresenceState, bool) {
 	defer h.mu.RUnlock()
 	var selected *client
 	for _, c := range h.clients {
-		if c.user.Username != username {
+		if !strings.EqualFold(c.user.Username, username) {
 			continue
 		}
 		if selected == nil || c.connectedAt.After(selected.connectedAt) {
