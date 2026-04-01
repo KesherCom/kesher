@@ -31,10 +31,20 @@ function detectDesktopEnvironment(): boolean {
     return false;
   }
   const tauriWindow = window as TauriWindow;
-  if ("__TAURI__" in tauriWindow || "__TAURI_INTERNALS__" in tauriWindow) {
-    return true;
+  const hasTauri = "__TAURI__" in tauriWindow || "__TAURI_INTERNALS__" in tauriWindow;
+  const tauri55Style = typeof (tauriWindow as any).__TAURI_PLUGIN__ !== "undefined";
+  const userAgentCheck = /\bTauri\b/i.test(navigator.userAgent || "");
+  
+  const detected = hasTauri || tauri55Style || userAgentCheck;
+  if (detected) {
+    console.debug("[detectDesktopEnvironment] Desktop detected:", {
+      __TAURI__: "__TAURI__" in tauriWindow,
+      __TAURI_INTERNALS__: "__TAURI_INTERNALS__" in tauriWindow,
+      __TAURI_PLUGIN__: typeof (tauriWindow as any).__TAURI_PLUGIN__,
+      userAgent: navigator.userAgent,
+    });
   }
-  return /\bTauri\b/i.test(navigator.userAgent || "");
+  return detected;
 }
 
 async function invokeTauri<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
