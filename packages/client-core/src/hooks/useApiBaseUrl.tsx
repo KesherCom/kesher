@@ -15,6 +15,51 @@ type ApiBaseUrlContextType = {
 
 const ApiBaseUrlContext = createContext<ApiBaseUrlContextType | null>(null);
 
+type TauriWindow = Window & {
+  __TAURI__?: {
+    core?: {
+      invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+    };
+  };
+  __TAURI_INTERNALS__?: {
+    invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+  };
+};
+
+function detectDesktopEnvironment(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const tauriWindow = window as TauriWindow;
+  const hasTauri = "__TAURI__" in tauriWindow || "__TAURI_INTERNALS__" in tauriWindow;
+  const tauri55Style = typeof (tauriWindow as any).__TAURI_PLUGIN__ !== "undefined";
+  const userAgentCheck = /\bTauri\b/i.test(navigator.userAgent || "");
+  
+  const detected = hasTauri || tauri55Style || userAgentCheck;
+  if (detected) {
+    console.debug("[detectDesktopEnvironment] Desktop detected:", {
+      __TAURI__: "__TAURI__" in tauriWindow,
+      __TAURI_INTERNALS__: "__TAURI_INTERNALS__" in tauriWindow,
+      __TAURI_PLUGIN__: typeof (tauriWindow as any).__TAURI_PLUGIN__,
+      userAgent: navigator.userAgent,
+    });
+  }
+  return detected;
+}
+
+async function invokeTauri<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const tauriWindow = window as TauriWindow;
+  const globalInvoke = tauriWindow.__TAURI__?.core?.invoke;
+  if (typeof globalInvoke === "function") {
+    return globalInvoke<T>(cmd, args);
+  }
+  const internalsInvoke = tauriWindow.__TAURI_INTERNALS__?.invoke;
+  if (typeof internalsInvoke === "function") {
+    return internalsInvoke<T>(cmd, args);
+  }
+  throw new Error("Tauri invoke API is not available");
+}
+
 export function useApiBaseUrl(): ApiBaseUrlContextType {
   const ctx = useContext(ApiBaseUrlContext);
   if (!ctx) {
@@ -24,11 +69,8 @@ export function useApiBaseUrl(): ApiBaseUrlContextType {
 }
 
 export function ApiBaseUrlProvider({ children }: { children: React.ReactNode }) {
-  const [baseUrl, setBaseUrlState] = useState<string>(() => {
-    // Check if running in Tauri desktop environment
-    return typeof window !== "undefined" && "__TAURI__" in window ? "" : "";
-  });
-  const [isDesktop] = useState(() => typeof window !== "undefined" && "__TAURI__" in window);
+  const [baseUrl, setBaseUrlState] = useState<string>("");
+  const [isDesktop] = useState(detectDesktopEnvironment);
   const [isReady, setIsReady] = useState(() => !isDesktop);
 
   // On desktop, load the server URL from Tauri command on mount
@@ -40,17 +82,10 @@ export function ApiBaseUrlProvider({ children }: { children: React.ReactNode }) 
 
     const loadServerUrl = async () => {
       try {
-        // @ts-expect-error Tauri window object is injected at runtime
-        const { invoke } = window.__TAURI__.core;
-        const url = await invoke<string>("get_server_url");
-        if (url) {
-          const normalized = normalizeServerAddressInput(url);
-          setBaseUrlState(normalized);
-          setGlobalApiBaseUrl(normalized);
-        } else {
-          setBaseUrlState("");
-          setGlobalApiBaseUrl("");
-        }
+        const url = await invokeTauri<string>("get_server_url");
+        const normalized = normalizeServerAddressInput(url);
+        setBaseUrlState(normalized);
+        setGlobalApiBaseUrl(normalized);
       } catch (error) {
         console.error("Failed to load server URL from Tauri:", error);
         setBaseUrlState("");
@@ -77,9 +112,7 @@ export function ApiBaseUrlProvider({ children }: { children: React.ReactNode }) 
     // Persist to Tauri if on desktop
     if (isDesktop) {
       try {
-        // @ts-expect-error Tauri window object is injected at runtime
-        const { invoke } = window.__TAURI__.core;
-        invoke("set_server_url", { serverUrl: normalized }).catch((error: unknown) => {
+        invokeTauri("set_server_url", { serverUrl: normalized }).catch((error: unknown) => {
           console.error("Failed to persist server URL to Tauri:", error);
         });
       } catch (error) {

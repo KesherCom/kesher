@@ -1,0 +1,16 @@
+[build]
+# Ensure faster compilation and proper cross-compilation support
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.x86_64-pc-windows-msvc]
+# Windows: enable audio/webrtc features
+# Note: This only works as a hint; for guaranteed features, use --features in build command
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.aarch64-apple-darwin]
+# macOS Arm64: no audio capture features (uses browser WebRTC)
+rustflags = []
+
+[target.x86_64-apple-darwin]
+# macOS Intel: no audio capture features (uses browser WebRTC)
+rustflags = []

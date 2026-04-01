@@ -32,6 +32,11 @@ export function DesktopAppWrapper() {
   const [entryState, setEntryState] = useState<"probing" | "setup" | "app">("probing");
   const [isNetworkSettingsOpen, setIsNetworkSettingsOpen] = useState(false);
 
+  // DEBUG: Log desktop detection
+  if (typeof window !== "undefined" && true) {
+    console.debug("[DesktopAppWrapper] isDesktop:", isDesktop, "isReady:", isReady, "entryState:", entryState, "baseUrl:", baseUrl);
+  }
+
   useEffect(() => {
     if (!isDesktop || !isReady) {
       return;
