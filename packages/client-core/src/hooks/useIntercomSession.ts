@@ -535,6 +535,7 @@ export function useIntercomSession({
   const voiceModeRef = useRef<"always_on" | "ptt">(
     resolveVoiceModeForClient(initialVoiceMode),
   );
+  const restoreAlwaysOnAfterDirectPttRef = useRef(false);
   const prevChannelRef = useRef<string>("");
   const pendingInitialRoomRestoreRef = useRef(hadStoredSessionSettings);
   const appDataRef = useRef(appData);
@@ -971,6 +972,7 @@ export function useIntercomSession({
 
   function cleanupRealtimeResources() {
     mic.micReinitGenerationRef.current += 1;
+    restoreAlwaysOnAfterDirectPttRef.current = false;
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -1259,6 +1261,7 @@ export function useIntercomSession({
 
   // ── Voice mode actions ──
   function setAlwaysOn(enabled: boolean) {
+    restoreAlwaysOnAfterDirectPttRef.current = false;
     if (forcePttOnMobile) {
       if (voiceModeRef.current !== "ptt") {
         setVoiceMode("ptt");
@@ -1323,6 +1326,12 @@ export function useIntercomSession({
 
   function startDirectPtt(userId: string) {
     if (!canSendScopedVoiceState("direct", userId)) return;
+    if (voiceModeRef.current === "always_on") {
+      restoreAlwaysOnAfterDirectPttRef.current = true;
+      setVoiceMode("ptt");
+      voiceModeRef.current = "ptt";
+      sendVoiceState("always_off");
+    }
     setdirectPttPressedUserId(userId);
     sendScopedVoiceState("direct", userId, "ptt_start");
   }
@@ -1333,6 +1342,12 @@ export function useIntercomSession({
       current === userId ? null : current,
     );
     sendScopedVoiceState("direct", userId, "ptt_stop");
+    if (restoreAlwaysOnAfterDirectPttRef.current) {
+      restoreAlwaysOnAfterDirectPttRef.current = false;
+      setVoiceMode("always_on");
+      voiceModeRef.current = "always_on";
+      sendVoiceState("always_on");
+    }
   }
 
   // ── Channel PTT ──
@@ -1789,12 +1804,12 @@ export function useIntercomSession({
             if (nextScope === "room") {
               setPttPressed(desiredState === "ptt_start");
             } else if (nextScope === "direct") {
-              if (desiredState === "ptt_start" && resolvedTargetId) {
-                setdirectPttPressedUserId(resolvedTargetId);
-              } else {
-                setdirectPttPressedUserId((current) =>
-                  current === resolvedTargetId ? null : current,
-                );
+              if (resolvedTargetId) {
+                if (desiredState === "ptt_start") {
+                  startDirectPtt(resolvedTargetId);
+                } else {
+                  stopDirectPtt(resolvedTargetId);
+                }
               }
             } else if (nextScope === "broadcast") {
               if (desiredState === "ptt_start" && resolvedTargetId) {
@@ -1807,6 +1822,10 @@ export function useIntercomSession({
             }
             if (!resolvedTargetId) {
               ackRejected("missing targetId");
+              return;
+            }
+            if (nextScope === "direct") {
+              ackSuccess();
               return;
             }
             sendScopedVoiceState(nextScope, resolvedTargetId, desiredState);
