@@ -11,26 +11,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2.1.1", features = [] }
 
-# Audio capture / playback (Windows only due to compilation issues on macOS)
-cpal = { version = "0.15", optional = true }
-
-# Opus codec (Windows only - C-based, requires MSVC or MinGW)
-opus = { version = "0.3", optional = true }
-
 # Async runtime
 tokio = { version = "1", features = ["full"] }
-
-# WebRTC transport (optional - not strictly needed for client mode)
-webrtc = { version = "0.12", optional = true }
-
-# bytes::Bytes is required by webrtc::media::Sample
-bytes = "1"
 
 # Logging
 log = "0.4"
 env_logger = "0.11"
 
-[features]
-default = []
-# Audio capture only on Windows
-audio-capture = ["cpal", "opus", "webrtc"]
+[target.'cfg(target_os = "windows")'.dependencies]
+# Native audio pipeline dependencies are compiled only on Windows.
+cpal = "0.15"
+opus = "0.3"
+webrtc = "0.12"
+bytes = "1"
