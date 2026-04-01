@@ -57,13 +57,15 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
+          VERSION: ${{ github.ref_name }}
         run: |
           mkdir -p dist/bin dist/packages
+          BUILD_TIMESTAMP="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           ext=""
           if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
           bin="kesher-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
           cd backend
-          go build -trimpath -ldflags="-s -w" -o "../dist/bin/${bin}" ./cmd/server
+          go build -trimpath -ldflags="-s -w -X github.com/KesherCom/kesher/backend/internal/app.Version=${VERSION} -X github.com/KesherCom/kesher/backend/internal/app.BuildTimestamp=${BUILD_TIMESTAMP}" -o "../dist/bin/${bin}" ./cmd/server
           cd ..
           if [ "${{ matrix.goos }}" = "windows" ]; then
             zip -j "dist/packages/kesher-${{ matrix.goos }}-${{ matrix.goarch }}.zip" "dist/bin/${bin}"
