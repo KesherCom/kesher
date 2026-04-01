@@ -1,0 +1,94 @@
+.desktop-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.desktop-shell-menu {
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.75rem;
+  border-bottom: 1px solid #27303b;
+  background: linear-gradient(180deg, #1f2b38 0%, #17202a 100%);
+  color: #d6e2ef;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+.desktop-shell-menu-left {
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.desktop-shell-menu-right {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.desktop-shell-current-server {
+  max-width: 45vw;
+  font-size: 0.74rem;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.desktop-shell-network-button {
+  border: 1px solid #3a4a5f;
+  border-radius: 8px;
+  padding: 0.28rem 0.7rem;
+  background: #263647;
+  color: #f1f6fc;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.desktop-shell-network-button:hover {
+  background: #30465d;
+}
+
+.desktop-shell-content {
+  flex: 1;
+  min-height: 0;
+}
+
+.desktop-network-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(8, 14, 20, 0.48);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.desktop-network-modal {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+}
+
+@media (max-width: 640px) {
+  .desktop-shell-menu {
+    height: auto;
+    min-height: 42px;
+    padding: 0.5rem 0.65rem;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .desktop-shell-menu-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .desktop-shell-current-server {
+    max-width: 58vw;
+  }
+}
