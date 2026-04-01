@@ -179,6 +179,7 @@ export function AdminRoutingMatrixCard({
             toggle permissions for each role/party‑line combination.
           </p>
 
+          <div className="routing-matrix-wrapper">
             <table className="routing-matrix" role="grid">
               <thead>
                 <tr>
@@ -246,6 +247,7 @@ export function AdminRoutingMatrixCard({
                 ))}
               </tbody>
             </table>
+          </div>
 
           <div className="routing-matrix-legend">
             <span className="routing-matrix-legend-item">
