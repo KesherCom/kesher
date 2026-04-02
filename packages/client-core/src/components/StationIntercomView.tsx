@@ -17,37 +17,38 @@ import { sortDirectUsersByRoleAndUsername } from "../lib/users";
 import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
 
 const DB_MIN = -60;
-const DB_MAX = 6; // +6 dB ~ gain 2.0
+const OUTPUT_DB_MAX = 6; // +6 dB ~ gain 2.0
+const INPUT_DB_MAX = 18; // +18 dB ~ gain 7.94
 const MUTE_POS = DB_MIN - 1; // sentinel slider position for mute
 
 /** Slider position (dB) -> linear gain. Bottom-of-slider = mute. */
-function sliderToGain(sliderDb: number): number {
+function sliderToGain(sliderDb: number, dbMax = OUTPUT_DB_MAX): number {
   if (sliderDb <= MUTE_POS) return 0;
-  return Math.pow(10, Math.max(DB_MIN, Math.min(DB_MAX, sliderDb)) / 20);
+  return Math.pow(10, Math.max(DB_MIN, Math.min(dbMax, sliderDb)) / 20);
 }
 
 /** Linear gain -> slider position (dB). */
-function gainToSlider(gain: number): number {
+function gainToSlider(gain: number, dbMax = OUTPUT_DB_MAX): number {
   if (gain <= 0) return MUTE_POS;
   const db = 20 * Math.log10(gain);
   if (db < DB_MIN) return MUTE_POS;
-  return Math.round(Math.max(DB_MIN, Math.min(DB_MAX, db)));
+  return Math.round(Math.max(DB_MIN, Math.min(dbMax, db)));
 }
 
 /** Gain -> display label like "+6 db", "0 db", "-inf". */
-function gainToDbLabel(gain: number): string {
+function gainToDbLabel(gain: number, dbMax = OUTPUT_DB_MAX): string {
   if (gain <= 0) return "-\u221E";
   const db = 20 * Math.log10(gain);
   if (db < DB_MIN) return "-\u221E";
-  const r = Math.round(db);
+  const r = Math.round(Math.max(DB_MIN, Math.min(dbMax, db)));
   if (r === 0) return "0 db";
   return `${r > 0 ? "+" : ""}${r} db`;
 }
 
 /** Slider fill percentage for CSS background gradient. */
-function sliderFillPercent(gain: number): number {
-  const pos = gainToSlider(gain);
-  return ((pos - MUTE_POS) / (DB_MAX - MUTE_POS)) * 100;
+function sliderFillPercent(gain: number, dbMax = OUTPUT_DB_MAX): number {
+  const pos = gainToSlider(gain, dbMax);
+  return ((pos - MUTE_POS) / (dbMax - MUTE_POS)) * 100;
 }
 
 const METER_DBFS_MIN = -60;
@@ -1639,7 +1640,7 @@ export function StationIntercomView({
                           id={`room-gain-${room.id}`}
                           type="range"
                           min={MUTE_POS}
-                          max={DB_MAX}
+                          max={OUTPUT_DB_MAX}
                           step={1}
                           value={gainToSlider(roomGainById[room.id] ?? 1)}
                           style={
@@ -1784,7 +1785,7 @@ export function StationIntercomView({
                               id={`direct-gain-${p.userId}`}
                               type="range"
                               min={MUTE_POS}
-                              max={DB_MAX}
+                              max={OUTPUT_DB_MAX}
                               step={1}
                               value={gainToSlider(
                                 directGainByUserId[p.userId] ?? 1,
@@ -1879,7 +1880,7 @@ export function StationIntercomView({
                           id={`direct-gain-${p.userId}`}
                           type="range"
                           min={MUTE_POS}
-                          max={DB_MAX}
+                          max={OUTPUT_DB_MAX}
                           step={1}
                           value={gainToSlider(directGainByUserId[p.userId] ?? 1)}
                           style={
@@ -2839,24 +2840,27 @@ export function StationIntercomView({
                         {showVolumeControls ? (
                           <div className="station-gain-control input-gain-control">
                             <label htmlFor="input-gain">
-                              {gainToDbLabel(inputGain)}
+                              {gainToDbLabel(inputGain, INPUT_DB_MAX)}
                             </label>
                             <input
                               id="input-gain"
                               type="range"
                               min={MUTE_POS}
-                              max={DB_MAX}
+                              max={INPUT_DB_MAX}
                               step={1}
-                              value={gainToSlider(inputGain)}
+                              value={gainToSlider(inputGain, INPUT_DB_MAX)}
                               style={
                                 {
-                                  "--fill": `${sliderFillPercent(inputGain)}%`,
+                                  "--fill": `${sliderFillPercent(inputGain, INPUT_DB_MAX)}%`,
                                 } as React.CSSProperties
                               }
                               onChange={(event) =>
                                 onInputGainChange(
                                   selectedInputDeviceId,
-                                  sliderToGain(Number(event.currentTarget.value)),
+                                  sliderToGain(
+                                    Number(event.currentTarget.value),
+                                    INPUT_DB_MAX,
+                                  ),
                                 )
                               }
                               aria-label="Input gain"

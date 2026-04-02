@@ -8,7 +8,11 @@ import {
   toggleRoomSelectionState,
 } from "../lib/intercom";
 import { normalizePresenceList, samePresenceList } from "../lib/presence";
-import { clampGainValue } from "../app/settings";
+import {
+  clampGainValue,
+  clampInputGainValue,
+  micInputBaseBoost,
+} from "../app/settings";
 import { gainWithDbDelta } from "../lib/streamDeckBridge";
 import {
   sameStringArray,
@@ -1909,6 +1913,10 @@ export function useIntercomSession({
                 offerSdp: msg.data.sdp,
                 inputDeviceId: selectedInputDeviceIdRef.current || undefined,
                 outputDeviceId: selectedOutputDeviceIdRef.current || undefined,
+                inputGain: clampInputGainValue(
+                  micInputBaseBoost *
+                    selectedInputGainFor(selectedInputDeviceIdRef.current),
+                ),
               });
               if (result && wsRef.current?.readyState === WebSocket.OPEN) {
                 wsRef.current.send(

@@ -93,18 +93,31 @@ export type FavoriteSettings = {
   showPinnedOnly: boolean;
 };
 
-export function clampGainValue(value: number): number {
+// Fixed global mic base boost (+6 dB) applied on top of per-device input gain.
+export const micInputBaseBoost = 2;
+
+export function clampInputGainValue(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(0, Math.min(16, value));
+}
+
+export function clampOutputGainValue(value: number): number {
   if (!Number.isFinite(value)) return 1;
   return Math.max(0, Math.min(2, value));
 }
 
-function sanitizeGainMap(value: unknown): Record<string, number> {
+// Backward-compatible alias used by existing room/direct volume code paths.
+export const clampGainValue = clampOutputGainValue;
+
+function sanitizeGainMap(
+  value: unknown,
+  clampFn: (value: number) => number,
+): Record<string, number> {
   if (!value || typeof value !== "object") return {};
   const entries = Object.entries(value as Record<string, unknown>)
     .filter(([key]) => typeof key === "string" && key.length > 0)
     .map(
-      ([key, raw]) =>
-        [key, clampGainValue(typeof raw === "number" ? raw : 1)] as const,
+      ([key, raw]) => [key, clampFn(typeof raw === "number" ? raw : 1)] as const,
     );
   return Object.fromEntries(entries);
 }
@@ -183,9 +196,15 @@ export function loadGlobalSettings(): GlobalSettings {
         typeof parsed.showVolumeControls === "boolean"
           ? parsed.showVolumeControls
           : true,
-      inputGainByDeviceId: sanitizeGainMap(parsed.inputGainByDeviceId),
-      roomGainById: sanitizeGainMap(parsed.roomGainById),
-      directGainByUserId: sanitizeGainMap(parsed.directGainByUserId),
+      inputGainByDeviceId: sanitizeGainMap(
+        parsed.inputGainByDeviceId,
+        clampInputGainValue,
+      ),
+      roomGainById: sanitizeGainMap(parsed.roomGainById, clampOutputGainValue),
+      directGainByUserId: sanitizeGainMap(
+        parsed.directGainByUserId,
+        clampOutputGainValue,
+      ),
     };
   } catch {
     return {

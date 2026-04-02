@@ -7,7 +7,7 @@
  * caller can access the current stream / gain node without triggering re-renders.
  */
 import { useEffect, useRef, useState } from "react";
-import { clampGainValue } from "../app/settings";
+import { clampInputGainValue, micInputBaseBoost } from "../app/settings";
 import { meterDbFsFloor, peakAmplitudeToDbFs } from "../lib/presence";
 
 type GetUserMediaFn = (
@@ -189,6 +189,9 @@ export function useLocalMic({
   onAfterAudioSenderUpdated,
   enableReinit,
 }: UseLocalMicOptions): UseLocalMicResult {
+  const effectiveInputGain = (deviceGain: number): number =>
+    clampInputGainValue(deviceGain * micInputBaseBoost);
+
   // ── State ──
   const [inputLevelDbFs, setInputLevelDbFs] = useState(meterDbFsFloor);
   const [inputSamplePeakClipping, setInputSamplePeakClipping] = useState(false);
@@ -224,7 +227,7 @@ export function useLocalMic({
       const ctx = new AudioCtx({ latencyHint: "interactive" });
       const src = ctx.createMediaStreamSource(sourceStream);
       const gain = ctx.createGain();
-      gain.gain.value = clampGainValue(gainValue);
+      gain.gain.value = effectiveInputGain(gainValue);
       const dest = ctx.createMediaStreamDestination();
       src.connect(gain);
       gain.connect(dest);
@@ -294,9 +297,7 @@ export function useLocalMic({
     analyserRef.current = analyser;
     const buf = new Float32Array(analyser.fftSize);
     const tick = () => {
-      meterGain.gain.value = clampGainValue(
-        inputGainNodeRef.current?.gain.value ?? 1,
-      );
+      meterGain.gain.value = clampInputGainValue(inputGainNodeRef.current?.gain.value ?? 1);
       analyser.getFloatTimeDomainData(buf);
       let peak = 0;
       for (const v of buf) {
@@ -382,7 +383,7 @@ export function useLocalMic({
   useEffect(() => {
     const selectedGain = selectedInputGainFor(selectedInputDeviceId);
     if (inputGainNodeRef.current) {
-      inputGainNodeRef.current.gain.value = selectedGain;
+      inputGainNodeRef.current.gain.value = effectiveInputGain(selectedGain);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedInputDeviceId, inputGainByDeviceId]);

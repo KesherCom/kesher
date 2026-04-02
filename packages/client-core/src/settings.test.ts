@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   clampGainValue,
+  clampInputGainValue,
   favoritesStorageKey,
   globalSettingsStorageKey,
   loadFavoriteSettings,
   loadGlobalSettings,
   loadSessionSettings,
+  micInputBaseBoost,
   sessionSettingsStorageKey,
 } from "./settings";
 
@@ -16,11 +18,19 @@ describe("settings helpers", () => {
     localStorage.removeItem(favoritesStorageKey);
   });
 
-  it("clamps gain values to expected range", () => {
+  it("clamps output gain values to expected range", () => {
     expect(clampGainValue(-1)).toBe(0);
     expect(clampGainValue(3)).toBe(2);
     expect(clampGainValue(1.25)).toBe(1.25);
     expect(clampGainValue(Number.NaN)).toBe(1);
+  });
+
+  it("clamps input gain values to expanded range", () => {
+    expect(clampInputGainValue(-1)).toBe(0);
+    expect(clampInputGainValue(8)).toBe(8);
+    expect(clampInputGainValue(99)).toBe(16);
+    expect(clampInputGainValue(Number.POSITIVE_INFINITY)).toBe(1);
+    expect(micInputBaseBoost).toBe(2);
   });
 
   it("loads default session settings when unset or invalid", () => {

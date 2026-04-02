@@ -69,6 +69,7 @@ export type NativeAudioHook = {
     offerSdp: string;
     inputDeviceId?: string;
     outputDeviceId?: string;
+    inputGain?: number;
   }) => Promise<{ answerSdp: string; iceCandidates: string[] } | null>;
   /** Open or close the send gate in the Rust engine. */
   setPtt: (active: boolean) => void;
@@ -125,6 +126,7 @@ export function useNativeAudio(
       offerSdp: string;
       inputDeviceId?: string;
       outputDeviceId?: string;
+      inputGain?: number;
     }): Promise<{ answerSdp: string; iceCandidates: string[] } | null> => {
       if (!isNative) return null;
 
@@ -137,6 +139,7 @@ export function useNativeAudio(
             offer_sdp: params.offerSdp,
             input_device_id: params.inputDeviceId ?? null,
             output_device_id: params.outputDeviceId ?? null,
+            input_gain: params.inputGain ?? null,
           },
         });
 
