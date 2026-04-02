@@ -112,7 +112,12 @@ Desktop proxy source, run/build instructions, and release artifacts are in:
 
 ### macOS desktop release signing (maintainers)
 
-To avoid Gatekeeper "app is damaged/modified" errors in GitHub Releases, macOS desktop artifacts must be signed and notarized in CI.
+The GitHub workflow supports two modes:
+
+- With all Apple secrets configured: signed + notarized artifacts.
+- Without Apple secrets: unsigned artifacts (build still succeeds).
+
+Signed + notarized artifacts are recommended to avoid Gatekeeper warnings in normal user environments.
 
 Required GitHub Actions secrets (repository settings):
 
@@ -123,7 +128,9 @@ Required GitHub Actions secrets (repository settings):
 - `APPLE_PASSWORD`: App-specific password for that Apple ID
 - `APPLE_TEAM_ID`: Apple Developer Team ID
 
-If one of these secrets is missing, the macOS release jobs intentionally fail to prevent shipping broken/unsigned DMGs.
+If one or more secrets are missing, macOS builds continue in unsigned mode.
+
+If you are not part of the Apple Developer Program yet, you can still ship unsigned test artifacts. Users may need to open the app manually via Finder context menu (Open) or allow it in Privacy & Security.
 
 ````
 
