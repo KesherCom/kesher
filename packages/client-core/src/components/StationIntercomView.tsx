@@ -2127,9 +2127,7 @@ export function StationIntercomView({
                       aria-expanded={isStreamDeckOpen}
                     >
                       Stream Deck
-                      <span className={`chev ${isStreamDeckOpen ? "open" : ""}`}>
-                        v
-                      </span>
+                      <span className={`chev ${isStreamDeckOpen ? "open" : ""}`}>▾</span>
                     </button>
                   </div>
                   {isStreamDeckOpen ? (
@@ -2772,9 +2770,7 @@ export function StationIntercomView({
                       aria-expanded={isAudioOpen}
                     >
                       Sound settings
-                      <span className={`chev ${isAudioOpen ? "open" : ""}`}>
-                        v
-                      </span>
+                      <span className={`chev ${isAudioOpen ? "open" : ""}`}>▾</span>
                     </button>
                   </div>
                   {isAudioOpen ? (
