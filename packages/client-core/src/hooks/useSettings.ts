@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  clampGainValue,
+  clampInputGainValue,
+  clampOutputGainValue,
   defaultAdminPin,
   favoritesStorageKey,
   type FavoriteSettings,
@@ -238,13 +239,16 @@ export function useSettings(): UseSettingsResult {
 
   // Stable gain callbacks
   const onRoomGainChange = useCallback((roomId: string, gain: number) => {
-    setRoomGainById((prev) => ({ ...prev, [roomId]: clampGainValue(gain) }));
+    setRoomGainById((prev) => ({
+      ...prev,
+      [roomId]: clampOutputGainValue(gain),
+    }));
   }, []);
 
   const onDirectGainChange = useCallback((userId: string, gain: number) => {
     setDirectGainByUserId((prev) => ({
       ...prev,
-      [userId]: clampGainValue(gain),
+      [userId]: clampOutputGainValue(gain),
     }));
   }, []);
 
@@ -252,13 +256,13 @@ export function useSettings(): UseSettingsResult {
     const key = inputGainDeviceKey(deviceId);
     setInputGainByDeviceId((prev) => ({
       ...prev,
-      [key]: clampGainValue(gain),
+      [key]: clampInputGainValue(gain),
     }));
   }, []);
 
   const selectedInputGainFor = useCallback(
     (deviceId: string): number => {
-      return clampGainValue(
+      return clampInputGainValue(
         inputGainByDeviceIdRef.current[inputGainDeviceKey(deviceId)] ?? 1,
       );
     },

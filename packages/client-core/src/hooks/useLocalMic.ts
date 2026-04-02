@@ -7,7 +7,7 @@
  * caller can access the current stream / gain node without triggering re-renders.
  */
 import { useEffect, useRef, useState } from "react";
-import { clampGainValue } from "../app/settings";
+import { clampInputGainValue, micInputBaseBoost } from "../app/settings";
 import { meterDbFsFloor, peakAmplitudeToDbFs } from "../lib/presence";
 
 type GetUserMediaFn = (
@@ -164,6 +164,8 @@ export type UseLocalMicResult = {
   inputLevelDbFs: number;
   /** True while a recent clipping peak has been detected. */
   displayedInputClipping: boolean;
+  /** True while the local audio monitor (mic loopback) is active. */
+  isLocalMonitorActive: boolean;
 
   getMicStream: (deviceId: string) => Promise<MediaStream>;
   buildOutgoingMicStream: (
@@ -174,6 +176,10 @@ export type UseLocalMicResult = {
   startLevelMeter: (stream: MediaStream) => void;
   stopLevelMeter: () => void;
   applyVoiceModeToLocalTracks: (mode: "always_on" | "ptt") => void;
+  /** Start playing mic input back to the user via the selected output device. */
+  startLocalMonitor: (outputDeviceId: string) => Promise<void>;
+  /** Stop local audio monitor loopback. */
+  stopLocalMonitor: () => void;
 };
 
 export function useLocalMic({
@@ -189,10 +195,14 @@ export function useLocalMic({
   onAfterAudioSenderUpdated,
   enableReinit,
 }: UseLocalMicOptions): UseLocalMicResult {
+  const effectiveInputGain = (deviceGain: number): number =>
+    clampInputGainValue(deviceGain * micInputBaseBoost);
+
   // ── State ──
   const [inputLevelDbFs, setInputLevelDbFs] = useState(meterDbFsFloor);
   const [inputSamplePeakClipping, setInputSamplePeakClipping] = useState(false);
   const [displayedInputClipping, setDisplayedInputClipping] = useState(false);
+  const [isLocalMonitorActive, setIsLocalMonitorActive] = useState(false);
 
   // ── Refs ──
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -205,6 +215,8 @@ export function useLocalMic({
   const meterRafRef = useRef<number | null>(null);
   const inputClippingDisplayTimeoutRef = useRef<number | null>(null);
   const micReinitGenerationRef = useRef(0);
+  const localMonitorCtxRef = useRef<AudioContext | null>(null);
+  const localMonitorAudioElRef = useRef<HTMLAudioElement | null>(null);
 
   // ── Mic stream acquisition ──
   async function getMicStream(deviceId: string): Promise<MediaStream> {
@@ -224,7 +236,7 @@ export function useLocalMic({
       const ctx = new AudioCtx({ latencyHint: "interactive" });
       const src = ctx.createMediaStreamSource(sourceStream);
       const gain = ctx.createGain();
-      gain.gain.value = clampGainValue(gainValue);
+      gain.gain.value = effectiveInputGain(gainValue);
       const dest = ctx.createMediaStreamDestination();
       src.connect(gain);
       gain.connect(dest);
@@ -294,9 +306,7 @@ export function useLocalMic({
     analyserRef.current = analyser;
     const buf = new Float32Array(analyser.fftSize);
     const tick = () => {
-      meterGain.gain.value = clampGainValue(
-        inputGainNodeRef.current?.gain.value ?? 1,
-      );
+      meterGain.gain.value = clampInputGainValue(inputGainNodeRef.current?.gain.value ?? 1);
       analyser.getFloatTimeDomainData(buf);
       let peak = 0;
       for (const v of buf) {
@@ -308,6 +318,54 @@ export function useLocalMic({
       meterRafRef.current = requestAnimationFrame(tick);
     };
     meterRafRef.current = requestAnimationFrame(tick);
+  }
+
+  // ── Local audio monitor (mic loopback) ──
+  function stopLocalMonitor() {
+    const el = localMonitorAudioElRef.current;
+    if (el) {
+      el.pause();
+      el.srcObject = null;
+      localMonitorAudioElRef.current = null;
+    }
+    if (localMonitorCtxRef.current) {
+      void localMonitorCtxRef.current.close();
+      localMonitorCtxRef.current = null;
+    }
+    setIsLocalMonitorActive(false);
+  }
+
+  async function startLocalMonitor(outputDeviceId: string): Promise<void> {
+    const captureStream = inputCaptureStreamRef.current;
+    if (!captureStream) return;
+    const AudioCtx = window.AudioContext;
+    if (!AudioCtx) return;
+    stopLocalMonitor();
+    try {
+      const ctx = new AudioCtx({ latencyHint: "interactive" });
+      localMonitorCtxRef.current = ctx;
+      const src = ctx.createMediaStreamSource(captureStream);
+      const gain = ctx.createGain();
+      gain.gain.value = clampInputGainValue(
+        inputGainNodeRef.current?.gain.value ?? 1,
+      );
+      const dest = ctx.createMediaStreamDestination();
+      src.connect(gain);
+      gain.connect(dest);
+      const el = new Audio();
+      el.srcObject = dest.stream;
+      const elWithSink = el as HTMLAudioElement & {
+        setSinkId?: (sinkId: string) => Promise<void>;
+      };
+      if (outputDeviceId && typeof elWithSink.setSinkId === "function") {
+        await elWithSink.setSinkId(outputDeviceId);
+      }
+      await el.play();
+      localMonitorAudioElRef.current = el;
+      setIsLocalMonitorActive(true);
+    } catch {
+      stopLocalMonitor();
+    }
   }
 
   // ── Track enable/disable ──
@@ -323,6 +381,7 @@ export function useLocalMic({
   // ── Mic reinit on device or connection change ──
   useEffect(() => {
     if (!enableReinit || !pcRef.current) return;
+    stopLocalMonitor();
     const generation = ++micReinitGenerationRef.current;
     void (async () => {
       const pc = pcRef.current;
@@ -382,15 +441,16 @@ export function useLocalMic({
   useEffect(() => {
     const selectedGain = selectedInputGainFor(selectedInputDeviceId);
     if (inputGainNodeRef.current) {
-      inputGainNodeRef.current.gain.value = selectedGain;
+      inputGainNodeRef.current.gain.value = effectiveInputGain(selectedGain);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedInputDeviceId, inputGainByDeviceId]);
 
-  // ── Level meter toggle (settings panel open/close) ──
+  // ── Level meter toggle + local monitor auto-stop (settings panel open/close) ──
   useEffect(() => {
     if (!isUserSettingsOpen) {
       stopLevelMeter();
+      stopLocalMonitor();
       return;
     }
     const captureStream = inputCaptureStreamRef.current;
@@ -417,13 +477,14 @@ export function useLocalMic({
     };
   }, [inputSamplePeakClipping, displayedInputClipping]);
 
-  // Cleanup clipping timeout on unmount
+  // Cleanup clipping timeout and local monitor on unmount
   useEffect(
     () => () => {
       if (inputClippingDisplayTimeoutRef.current !== null) {
         window.clearTimeout(inputClippingDisplayTimeoutRef.current);
         inputClippingDisplayTimeoutRef.current = null;
       }
+      stopLocalMonitor();
     },
     [],
   );
@@ -445,11 +506,14 @@ export function useLocalMic({
     micReinitGenerationRef,
     inputLevelDbFs,
     displayedInputClipping,
+    isLocalMonitorActive,
     getMicStream,
     buildOutgoingMicStream,
     stopInputProcessing,
     startLevelMeter,
     stopLevelMeter,
     applyVoiceModeToLocalTracks,
+    startLocalMonitor,
+    stopLocalMonitor,
   };
 }

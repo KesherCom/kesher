@@ -56,6 +56,11 @@ const OPUS_FRAME_SIZE: usize = 120;
 const MAX_OPUS_PACKET: usize = 256;
 /// Default target bitrate in bits/s
 const OPUS_BITRATE: i32 = 24_000;
+/// Input mic gain range: 1.0 = unity, 2.0 = +6 dB, 8.0 = +18 dB,
+/// 16.0 = +24 dB (global +6 dB base boost plus +18 dB slider).
+const MIN_INPUT_GAIN: f32 = 0.0;
+const MAX_INPUT_GAIN: f32 = 16.0;
+const DEFAULT_INPUT_GAIN: f32 = 1.0;
 /// Queue depth between CPAL capture callback and Opus encoder thread.
 const CAPTURE_RAW_QUEUE_CAPACITY: usize = 4;
 /// Queue depth between Opus encoder thread and async WebRTC sender.
@@ -130,6 +135,7 @@ pub struct StartEngineParams {
     pub offer_sdp: String,
     pub output_device_id: Option<String>,
     pub input_device_id: Option<String>,
+    pub input_gain: Option<f32>,
 }
 
 /// Answer SDP + ICE candidates emitted back to JavaScript.
@@ -167,6 +173,33 @@ pub struct RunningEngine {
     pub ptt_active: Arc<AtomicBool>,
     /// Dropping this sender shuts down the capture/encode/send loop.
     _shutdown: mpsc::Sender<()>,
+}
+
+fn clamp_input_gain(gain: f32) -> f32 {
+    if !gain.is_finite() {
+        return DEFAULT_INPUT_GAIN;
+    }
+    gain.max(MIN_INPUT_GAIN).min(MAX_INPUT_GAIN)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clamp_input_gain, DEFAULT_INPUT_GAIN, MAX_INPUT_GAIN, MIN_INPUT_GAIN};
+
+    #[test]
+    fn clamp_input_gain_bounds() {
+        assert_eq!(clamp_input_gain(-1.0), MIN_INPUT_GAIN);
+        assert_eq!(clamp_input_gain(0.5), 0.5);
+        assert_eq!(clamp_input_gain(8.0), 8.0);
+        assert_eq!(clamp_input_gain(64.0), MAX_INPUT_GAIN);
+    }
+
+    #[test]
+    fn clamp_input_gain_non_finite_defaults() {
+        assert_eq!(clamp_input_gain(f32::NAN), DEFAULT_INPUT_GAIN);
+        assert_eq!(clamp_input_gain(f32::INFINITY), DEFAULT_INPUT_GAIN);
+        assert_eq!(clamp_input_gain(f32::NEG_INFINITY), DEFAULT_INPUT_GAIN);
+    }
 }
 
 // ── Device enumeration ────────────────────────────────────────────────────────
@@ -353,10 +386,13 @@ pub async fn start_engine(
     let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>(1);
     let ptt_active = Arc::new(AtomicBool::new(false));
 
+    let input_gain = clamp_input_gain(params.input_gain.unwrap_or(DEFAULT_INPUT_GAIN));
+
     tokio::spawn(capture_loop(
         audio_track,
         Arc::clone(&ptt_active),
         params.input_device_id,
+        input_gain,
         app.clone(),
         shutdown_rx,
     ));
@@ -385,6 +421,7 @@ async fn capture_loop(
     track: Arc<TrackLocalStaticSample>,
     ptt_active: Arc<AtomicBool>,
     device_id: Option<String>,
+    input_gain: f32,
     app: AppHandle,
     mut shutdown: mpsc::Receiver<()>,
 ) {
@@ -463,8 +500,13 @@ async fn capture_loop(
                         raw_queue_max_ms = raw_queue_ms;
                     }
 
-                    for &s in &chunk { if s.abs() > input_peak { input_peak = s.abs(); } }
-                    pcm_accum.extend_from_slice(&chunk);
+                    for &s in &chunk {
+                        let gained = s * input_gain;
+                        if gained.abs() > input_peak {
+                            input_peak = gained.abs();
+                        }
+                        pcm_accum.push(gained.clamp(-1.0, 1.0));
+                    }
                     meter_frames += chunk.len() as u32;
                     if meter_frames >= 2400 {
                         let _ = app_clone.emit("audio_level_meter", LevelMeterEvent {

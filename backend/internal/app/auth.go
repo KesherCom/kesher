@@ -9,15 +9,17 @@ import (
 )
 
 type SessionManager struct {
-	mu       sync.RWMutex
-	sessions map[string]Session
-	ttl      time.Duration
+	mu              sync.RWMutex
+	sessions        map[string]Session
+	ttl             time.Duration
+	scheduledRevoke map[string]*time.Timer
 }
 
 func NewSessionManager(ttl time.Duration) *SessionManager {
 	return &SessionManager{
-		sessions: make(map[string]Session),
-		ttl:      ttl,
+		sessions:        make(map[string]Session),
+		ttl:             ttl,
+		scheduledRevoke: make(map[string]*time.Timer),
 	}
 }
 
@@ -53,7 +55,44 @@ func (m *SessionManager) Get(token string) (Session, bool) {
 func (m *SessionManager) Delete(token string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if timer, ok := m.scheduledRevoke[token]; ok {
+		timer.Stop()
+		delete(m.scheduledRevoke, token)
+	}
 	delete(m.sessions, token)
+}
+
+func (m *SessionManager) ScheduleDisconnectLogout(token string, delay time.Duration) bool {
+	if delay <= 0 {
+		m.Delete(token)
+		return true
+	}
+
+	m.mu.Lock()
+	if _, ok := m.sessions[token]; !ok {
+		m.mu.Unlock()
+		return false
+	}
+	if timer, ok := m.scheduledRevoke[token]; ok {
+		timer.Stop()
+	}
+	m.scheduledRevoke[token] = time.AfterFunc(delay, func() {
+		m.Delete(token)
+	})
+	m.mu.Unlock()
+	return true
+}
+
+func (m *SessionManager) CancelScheduledDisconnectLogout(token string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	timer, ok := m.scheduledRevoke[token]
+	if !ok {
+		return false
+	}
+	timer.Stop()
+	delete(m.scheduledRevoke, token)
+	return true
 }
 
 func (m *SessionManager) LatestForRole(roleID string) (Session, bool) {

@@ -24,6 +24,9 @@ func TestLoadConfigFromEnvDefaultsToInternalTLSMode(t *testing.T) {
 	if cfg.TLSMode != "internal" {
 		t.Fatalf("expected default TLS mode to be internal, got %q", cfg.TLSMode)
 	}
+	if cfg.DisconnectLogoutDelay != 60*time.Second {
+		t.Fatalf("expected default disconnect logout delay to be 60s, got %s", cfg.DisconnectLogoutDelay)
+	}
 }
 
 func TestGetEnvIntFallbackOnInvalidValue(t *testing.T) {
@@ -52,13 +55,12 @@ func TestGetEnvUsesFallbackWhenUnset(t *testing.T) {
 func TestLoadConfigPrefersConfigFileOverEnv(t *testing.T) {
 	tmp := t.TempDir()
 	configPath := filepath.Join(tmp, "config.yaml")
-	content := []byte(`
-app_addr: ":9999"
-allow_cors: false
-session_ttl_minutes: 10
-certmagic_domains:
-  - intercom.example.org
-`)
+	content := []byte("app_addr: \":9999\"\n" +
+		"allow_cors: false\n" +
+		"session_ttl_minutes: 10\n" +
+		"disconnect_logout_delay_seconds: 45\n" +
+		"certmagic_domains:\n" +
+		"  - intercom.example.org\n")
 	if err := os.WriteFile(configPath, content, 0o644); err != nil {
 		t.Fatalf("failed to write temp config: %v", err)
 	}
@@ -80,6 +82,9 @@ certmagic_domains:
 	if cfg.SessionTTL != 10*time.Minute {
 		t.Fatalf("expected session ttl to be 10m, got %s", cfg.SessionTTL)
 	}
+	if cfg.DisconnectLogoutDelay != 45*time.Second {
+		t.Fatalf("expected disconnect logout delay to be 45s, got %s", cfg.DisconnectLogoutDelay)
+	}
 	if !reflect.DeepEqual(cfg.CertMagicDomains, []string{"intercom.example.org"}) {
 		t.Fatalf("unexpected certmagic domains: %v", cfg.CertMagicDomains)
 	}
@@ -89,12 +94,16 @@ func TestLoadConfigFallsBackToEnvWhenNoConfigFile(t *testing.T) {
 	t.Setenv("APP_CONFIG_FILE", "")
 	t.Setenv("CONFIG_FILE", "")
 	t.Setenv("APP_ADDR", ":7010")
+	t.Setenv("DISCONNECT_LOGOUT_DELAY_SECONDS", "75")
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("expected config load to succeed, got: %v", err)
 	}
 	if cfg.Addr != ":7010" {
 		t.Fatalf("expected addr from env, got %q", cfg.Addr)
+	}
+	if cfg.DisconnectLogoutDelay != 75*time.Second {
+		t.Fatalf("expected disconnect logout delay from env, got %s", cfg.DisconnectLogoutDelay)
 	}
 }
 

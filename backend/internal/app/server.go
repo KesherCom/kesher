@@ -731,7 +731,7 @@ func (s *Server) companionAutoRoleEntries(ctx context.Context, roleID string) []
 		entries = append(entries, companionPageEntry{
 			label: strings.TrimSpace(role.Name),
 			button: StreamDeckButtonConfig{
-				Label: strings.TrimSpace(role.Name),
+				Label:  strings.TrimSpace(role.Name),
 				Action: &StreamDeckButtonAction{Type: StreamDeckActionTypeDirectRole, RoleID: strings.TrimSpace(role.ID)},
 			},
 		})
@@ -772,7 +772,7 @@ func (s *Server) companionAutoPartyLineEntries(ctx context.Context, roleID strin
 		entries = append(entries, companionPageEntry{
 			label: strings.TrimSpace(room.Name),
 			button: StreamDeckButtonConfig{
-				Label: strings.TrimSpace(room.Name),
+				Label:  strings.TrimSpace(room.Name),
 				Action: &StreamDeckButtonAction{Type: actionType, RoomID: strings.TrimSpace(room.ID)},
 			},
 		})
@@ -5151,6 +5151,7 @@ func (s *Server) withAuth(next func(http.ResponseWriter, *http.Request, Session)
 			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
 		}
+		s.sessions.CancelScheduledDisconnectLogout(session.Token)
 		next(w, r, session)
 	}
 }
@@ -5177,6 +5178,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	s.sessions.CancelScheduledDisconnectLogout(session.Token)
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.logger.Error("websocket upgrade failed", "error", err)
@@ -5244,7 +5246,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if err := s.media.EnsurePeer(session.Token, user); err != nil {
 		s.logger.Error("failed to initialize media peer", "error", err)
 	}
-	defer s.hub.Remove(session.Token)
+	defer func() {
+		s.hub.Remove(session.Token)
+		s.sessions.ScheduleDisconnectLogout(session.Token, s.cfg.DisconnectLogoutDelay)
+	}()
 	mediaReady := false
 	var connMu sync.Mutex
 

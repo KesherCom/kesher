@@ -8,7 +8,11 @@ import {
   toggleRoomSelectionState,
 } from "../lib/intercom";
 import { normalizePresenceList, samePresenceList } from "../lib/presence";
-import { clampGainValue } from "../app/settings";
+import {
+  clampGainValue,
+  clampInputGainValue,
+  micInputBaseBoost,
+} from "../app/settings";
 import { gainWithDbDelta } from "../lib/streamDeckBridge";
 import {
   sameStringArray,
@@ -365,6 +369,8 @@ export type UseIntercomSessionResult = {
   setMessage: (v: string) => void;
   inputLevelDbFs: number;
   displayedInputClipping: boolean;
+  isLocalMonitorActive: boolean;
+  toggleLocalMonitor: () => Promise<void>;
   mediaSessionSupported: boolean;
   wakeLockSupported: boolean;
   wakeLockActive: boolean;
@@ -1909,6 +1915,10 @@ export function useIntercomSession({
                 offerSdp: msg.data.sdp,
                 inputDeviceId: selectedInputDeviceIdRef.current || undefined,
                 outputDeviceId: selectedOutputDeviceIdRef.current || undefined,
+                inputGain: clampInputGainValue(
+                  micInputBaseBoost *
+                    selectedInputGainFor(selectedInputDeviceIdRef.current),
+                ),
               });
               if (result && wsRef.current?.readyState === WebSocket.OPEN) {
                 wsRef.current.send(
@@ -2402,6 +2412,14 @@ export function useIntercomSession({
     setMessage,
     inputLevelDbFs: mic.inputLevelDbFs,
     displayedInputClipping: mic.displayedInputClipping,
+    isLocalMonitorActive: mic.isLocalMonitorActive,
+    toggleLocalMonitor: async () => {
+      if (mic.isLocalMonitorActive) {
+        mic.stopLocalMonitor();
+      } else {
+        await mic.startLocalMonitor(selectedOutputDeviceId);
+      }
+    },
     mediaSessionSupported,
     wakeLockSupported,
     wakeLockActive,

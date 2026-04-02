@@ -53,7 +53,7 @@ export function DesktopConnectionSetup({
     const timer = window.setTimeout(() => controller.abort(), connectionCheckTimeoutMs);
 
     try {
-      const response = await fetch(`${base}/api/public/bootstrap`, {
+      const response = await fetch(`${base}/api/public-bootstrap`, {
         method: "GET",
         signal: controller.signal,
       });

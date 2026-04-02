@@ -1974,6 +1974,8 @@ export function App() {
         inputLevelDbFs={session.inputLevelDbFs}
         inputGain={selectedInputGain}
         inputClipping={session.displayedInputClipping}
+        isLocalMonitorActive={session.isLocalMonitorActive}
+        onToggleLocalMonitor={() => void session.toggleLocalMonitor()}
         onInputGainChange={settings.onInputGainChange}
         outputDevices={audioDevices.outputDevices}
         selectedOutputDeviceId={settings.selectedOutputDeviceId}
