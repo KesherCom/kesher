@@ -110,6 +110,21 @@ The backend must serve the UI itself (`make run-backend` or the embedded binary)
 Desktop proxy source, run/build instructions, and release artifacts are in:
 `https://github.com/KesherCom/kesher-desktop-proxy`
 
+### macOS desktop release signing (maintainers)
+
+To avoid Gatekeeper "app is damaged/modified" errors in GitHub Releases, macOS desktop artifacts must be signed and notarized in CI.
+
+Required GitHub Actions secrets (repository settings):
+
+- `APPLE_CERTIFICATE`: Base64-encoded `.p12` certificate export (Developer ID Application)
+- `APPLE_CERTIFICATE_PASSWORD`: Password for the `.p12` certificate
+- `APPLE_SIGNING_IDENTITY`: Certificate common name, e.g. `Developer ID Application: Example GmbH (TEAMID1234)`
+- `APPLE_ID`: Apple ID used for notarization
+- `APPLE_PASSWORD`: App-specific password for that Apple ID
+- `APPLE_TEAM_ID`: Apple Developer Team ID
+
+If one of these secrets is missing, the macOS release jobs intentionally fail to prevent shipping broken/unsigned DMGs.
+
 ````
 
 ## Single-binary build (embedded UI)

@@ -2857,36 +2857,34 @@ export function StationIntercomView({
                             </small>
                           ) : null}
                         </div>
-                        {showVolumeControls ? (
-                          <div className="station-gain-control input-gain-control">
-                            <label htmlFor="input-gain">
-                              {gainToDbLabel(inputGain, INPUT_DB_MAX)}
-                            </label>
-                            <input
-                              id="input-gain"
-                              type="range"
-                              min={MUTE_POS}
-                              max={INPUT_DB_MAX}
-                              step={1}
-                              value={gainToSlider(inputGain, INPUT_DB_MAX)}
-                              style={
-                                {
-                                  "--fill": `${sliderFillPercent(inputGain, INPUT_DB_MAX)}%`,
-                                } as React.CSSProperties
-                              }
-                              onChange={(event) =>
-                                onInputGainChange(
-                                  selectedInputDeviceId,
-                                  sliderToGain(
-                                    Number(event.currentTarget.value),
-                                    INPUT_DB_MAX,
-                                  ),
-                                )
-                              }
-                              aria-label="Input gain"
-                            />
-                          </div>
-                        ) : null}
+                        <div className="station-gain-control input-gain-control">
+                          <label htmlFor="input-gain">
+                            {gainToDbLabel(inputGain, INPUT_DB_MAX)}
+                          </label>
+                          <input
+                            id="input-gain"
+                            type="range"
+                            min={MUTE_POS}
+                            max={INPUT_DB_MAX}
+                            step={1}
+                            value={gainToSlider(inputGain, INPUT_DB_MAX)}
+                            style={
+                              {
+                                "--fill": `${sliderFillPercent(inputGain, INPUT_DB_MAX)}%`,
+                              } as React.CSSProperties
+                            }
+                            onChange={(event) =>
+                              onInputGainChange(
+                                selectedInputDeviceId,
+                                sliderToGain(
+                                  Number(event.currentTarget.value),
+                                  INPUT_DB_MAX,
+                                ),
+                              )
+                            }
+                            aria-label="Input gain"
+                          />
+                        </div>
                       </div>
                       <div className="audio-right">
                         <h4>Speaker output</h4>
