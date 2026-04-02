@@ -4,6 +4,7 @@ db_path: "intercom.db"
 allow_cors: true
 admin_pin: "123456"
 session_ttl_minutes: 720
+disconnect_logout_delay_seconds: 60
 companion_shared_secret: ""
 companion_allowed_usernames: []
 companion_image_effect_map_file: "image-effect-map.json"

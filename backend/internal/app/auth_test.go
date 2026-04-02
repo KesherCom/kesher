@@ -95,3 +95,39 @@ func TestSessionManagerDeleteByUsernameIgnoresCase(t *testing.T) {
 		t.Fatal("expected other username session to remain")
 	}
 }
+
+func TestSessionManagerScheduleDisconnectLogoutDeletesAfterDelay(t *testing.T) {
+	m := NewSessionManager(time.Minute)
+	s := m.Create(User{ID: "u1", Username: "tim", RoleID: "audio"})
+
+	if ok := m.ScheduleDisconnectLogout(s.Token, 20*time.Millisecond); !ok {
+		t.Fatal("expected schedule to succeed")
+	}
+	time.Sleep(60 * time.Millisecond)
+	if _, ok := m.Get(s.Token); ok {
+		t.Fatal("expected session to be deleted after scheduled disconnect logout")
+	}
+}
+
+func TestSessionManagerCancelScheduledDisconnectLogoutKeepsSession(t *testing.T) {
+	m := NewSessionManager(time.Minute)
+	s := m.Create(User{ID: "u1", Username: "tim", RoleID: "audio"})
+
+	if ok := m.ScheduleDisconnectLogout(s.Token, 80*time.Millisecond); !ok {
+		t.Fatal("expected schedule to succeed")
+	}
+	if ok := m.CancelScheduledDisconnectLogout(s.Token); !ok {
+		t.Fatal("expected cancel to succeed")
+	}
+	time.Sleep(120 * time.Millisecond)
+	if _, ok := m.Get(s.Token); !ok {
+		t.Fatal("expected session to remain after canceling scheduled disconnect logout")
+	}
+}
+
+func TestSessionManagerScheduleDisconnectLogoutUnknownToken(t *testing.T) {
+	m := NewSessionManager(time.Minute)
+	if ok := m.ScheduleDisconnectLogout("missing", time.Second); ok {
+		t.Fatal("expected schedule to fail for unknown token")
+	}
+}

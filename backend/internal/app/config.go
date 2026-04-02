@@ -18,6 +18,7 @@ type Config struct {
 	AdminPIN                    string
 	AdminPINFromEnv             bool
 	SessionTTL                  time.Duration
+	DisconnectLogoutDelay       time.Duration
 	TrustedLANHTTP              bool
 	TLSMode                     string
 	TLSCertFile                 string
@@ -49,6 +50,7 @@ type fileConfig struct {
 	AllowCORS                          *bool    `yaml:"allow_cors"`
 	AdminPIN                           string   `yaml:"admin_pin"`
 	SessionTTLMinutes                  *int     `yaml:"session_ttl_minutes"`
+	DisconnectLogoutDelaySeconds       *int     `yaml:"disconnect_logout_delay_seconds"`
 	TrustedLANHTTP                     *bool    `yaml:"trusted_lan_http"`
 	TLSMode                            string   `yaml:"tls_mode"`
 	TLSCertFile                        string   `yaml:"tls_cert_file"`
@@ -90,6 +92,7 @@ func defaultConfig() Config {
 		AdminPIN:                    "123456",
 		AdminPINFromEnv:             false,
 		SessionTTL:                  720 * time.Minute,
+		DisconnectLogoutDelay:       60 * time.Second,
 		TrustedLANHTTP:              true,
 		TLSMode:                     "internal",
 		TLSCertFile:                 "",
@@ -180,6 +183,9 @@ func loadConfigFromFile(path string) (Config, error) {
 	if fileCfg.SessionTTLMinutes != nil {
 		cfg.SessionTTL = time.Duration(*fileCfg.SessionTTLMinutes) * time.Minute
 	}
+	if fileCfg.DisconnectLogoutDelaySeconds != nil {
+		cfg.DisconnectLogoutDelay = time.Duration(*fileCfg.DisconnectLogoutDelaySeconds) * time.Second
+	}
 	if fileCfg.TrustedLANHTTP != nil {
 		cfg.TrustedLANHTTP = *fileCfg.TrustedLANHTTP
 	}
@@ -262,6 +268,7 @@ func loadConfigFromEnv() Config {
 		AdminPIN:                   adminPIN,
 		AdminPINFromEnv:            adminPINFromEnv,
 		SessionTTL:                 time.Duration(getEnvInt("SESSION_TTL_MINUTES", 720)) * time.Minute,
+		DisconnectLogoutDelay:      time.Duration(getEnvInt("DISCONNECT_LOGOUT_DELAY_SECONDS", 60)) * time.Second,
 		TrustedLANHTTP:             getEnv("TRUSTED_LAN_HTTP", "true") == "true",
 		TLSMode:                    getEnv("TLS_MODE", "internal"),
 		TLSCertFile:                getEnv("TLS_CERT_FILE", ""),
