@@ -264,7 +264,29 @@ jobs:
           path: all-assets
           merge-multiple: true
 
-      - name: Create GitHub Release
+      - name: Resolve release notes file
+        id: notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          notes_file="docs/releases/${version}.md"
+          if [ -f "$notes_file" ]; then
+            echo "has_notes=true" >> "$GITHUB_OUTPUT"
+            echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release (with notes file)
+        if: steps.notes.outputs.has_notes == 'true'
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "all-assets/*"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          bodyFile: ${{ steps.notes.outputs.notes_file }}
+          generateReleaseNotes: true
+
+      - name: Create GitHub Release (generated notes only)
+        if: steps.notes.outputs.has_notes != 'true'
         uses: ncipollo/release-action@v1
         with:
           artifacts: "all-assets/*"
