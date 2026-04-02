@@ -374,6 +374,8 @@ type StationIntercomViewProps = {
   inputLevelDbFs: number;
   inputGain: number;
   inputClipping: boolean;
+  isLocalMonitorActive: boolean;
+  onToggleLocalMonitor: () => void;
   onInputGainChange: (deviceId: string, gain: number) => void;
   outputDevices: MediaDeviceInfo[];
   selectedOutputDeviceId: string;
@@ -482,6 +484,8 @@ export function StationIntercomView({
   inputLevelDbFs,
   inputGain,
   inputClipping,
+  isLocalMonitorActive,
+  onToggleLocalMonitor,
   onInputGainChange,
   outputDevices,
   selectedOutputDeviceId,
@@ -2832,6 +2836,26 @@ export function StationIntercomView({
                               ? "audio clipping"
                               : "audio level ok"}
                           </small>
+                        </div>
+                        <div className="local-monitor-control">
+                          <small className="local-monitor-hint">
+                            Use headphones before starting the test.
+                          </small>
+                          <button
+                            type="button"
+                            className={`local-monitor-btn${isLocalMonitorActive ? " active" : ""}`}
+                            onClick={onToggleLocalMonitor}
+                          >
+                            {isLocalMonitorActive
+                              ? "Stop audio test"
+                              : "Test microphone"}
+                          </button>
+                          {isLocalMonitorActive ? (
+                            <small className="local-monitor-status">
+                              You are hearing yourself — adjust headset and
+                              check gain.
+                            </small>
+                          ) : null}
                         </div>
                         {showVolumeControls ? (
                           <div className="station-gain-control input-gain-control">

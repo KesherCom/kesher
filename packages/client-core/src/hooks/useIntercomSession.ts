@@ -369,6 +369,8 @@ export type UseIntercomSessionResult = {
   setMessage: (v: string) => void;
   inputLevelDbFs: number;
   displayedInputClipping: boolean;
+  isLocalMonitorActive: boolean;
+  toggleLocalMonitor: () => Promise<void>;
   mediaSessionSupported: boolean;
   wakeLockSupported: boolean;
   wakeLockActive: boolean;
@@ -2410,6 +2412,14 @@ export function useIntercomSession({
     setMessage,
     inputLevelDbFs: mic.inputLevelDbFs,
     displayedInputClipping: mic.displayedInputClipping,
+    isLocalMonitorActive: mic.isLocalMonitorActive,
+    toggleLocalMonitor: async () => {
+      if (mic.isLocalMonitorActive) {
+        mic.stopLocalMonitor();
+      } else {
+        await mic.startLocalMonitor(selectedOutputDeviceId);
+      }
+    },
     mediaSessionSupported,
     wakeLockSupported,
     wakeLockActive,
