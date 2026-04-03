@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildLowLatencyMicConstraintCandidates,
   requestLowLatencyMicStream,
+  computeGateCoefficients,
 } from "./useLocalMic";
 
 describe("useLocalMic helpers", () => {
@@ -88,5 +89,18 @@ describe("useLocalMic helpers", () => {
       audio: true,
       video: false,
     });
+  });
+
+  it("computes gate coefficients for smooth attack and release", () => {
+    const { attackCoeff, releaseCoeff } = computeGateCoefficients(48000);
+
+    // Both coefficients should be in [0, 1]
+    expect(attackCoeff).toBeGreaterThan(0);
+    expect(attackCoeff).toBeLessThanOrEqual(1);
+    expect(releaseCoeff).toBeGreaterThan(0);
+    expect(releaseCoeff).toBeLessThanOrEqual(1);
+
+    // Attack should be faster (higher coefficient) than release
+    expect(attackCoeff).toBeGreaterThan(releaseCoeff);
   });
 });

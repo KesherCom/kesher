@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  clampAudioGateThresholdDb,
   clampInputGainValue,
   clampOutputGainValue,
   defaultAdminPin,
@@ -49,6 +50,10 @@ export type UseSettingsResult = {
   setKeepScreenAwake: (v: boolean) => void;
   showVolumeControls: boolean;
   setShowVolumeControls: (v: boolean) => void;
+  audioGateEnabled: boolean;
+  setAudioGateEnabled: (v: boolean) => void;
+  audioGateThresholdDb: number;
+  setAudioGateThresholdDb: (v: number) => void;
   inputGainByDeviceId: Record<string, number>;
   setInputGainByDeviceId: React.Dispatch<
     React.SetStateAction<Record<string, number>>
@@ -125,6 +130,12 @@ export function useSettings(): UseSettingsResult {
   const [showVolumeControls, setShowVolumeControls] = useState(
     initialGlobalSettings.showVolumeControls,
   );
+  const [audioGateEnabled, setAudioGateEnabled] = useState(
+    initialGlobalSettings.audioGateEnabled,
+  );
+  const [audioGateThresholdDb, setAudioGateThresholdDb] = useState(
+    initialGlobalSettings.audioGateThresholdDb,
+  );
   const [inputGainByDeviceId, setInputGainByDeviceId] = useState<
     Record<string, number>
   >(initialGlobalSettings.inputGainByDeviceId ?? {});
@@ -198,6 +209,8 @@ export function useSettings(): UseSettingsResult {
         enableBackgroundAudioRecovery,
         keepScreenAwake,
         showVolumeControls,
+        audioGateEnabled,
+        audioGateThresholdDb,
         inputGainByDeviceId,
         roomGainById,
         directGainByUserId,
@@ -212,6 +225,8 @@ export function useSettings(): UseSettingsResult {
     enableBackgroundAudioRecovery,
     keepScreenAwake,
     showVolumeControls,
+    audioGateEnabled,
+    audioGateThresholdDb,
     inputGainByDeviceId,
     roomGainById,
     directGainByUserId,
@@ -296,6 +311,11 @@ export function useSettings(): UseSettingsResult {
     setKeepScreenAwake,
     showVolumeControls,
     setShowVolumeControls,
+    audioGateEnabled,
+    setAudioGateEnabled,
+    audioGateThresholdDb,
+    setAudioGateThresholdDb: (value: number) =>
+      setAudioGateThresholdDb(clampAudioGateThresholdDb(value)),
     inputGainByDeviceId,
     setInputGainByDeviceId,
     inputGainByDeviceIdRef,
