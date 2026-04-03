@@ -8,10 +8,13 @@ const startupCheckTimeoutMs = 3500;
 
 async function checkServerReachable(baseUrl: string): Promise<boolean> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), startupCheckTimeoutMs);
+  const timer = window.setTimeout(
+    () => controller.abort(),
+    startupCheckTimeoutMs,
+  );
 
   try {
-    const response = await fetch(`${baseUrl}/api/public/bootstrap`, {
+    const response = await fetch(`${baseUrl}/api/public-bootstrap`, {
       method: "GET",
       signal: controller.signal,
     });
@@ -29,12 +32,23 @@ async function checkServerReachable(baseUrl: string): Promise<boolean> {
  */
 export function DesktopAppWrapper() {
   const { isDesktop, isReady, baseUrl } = useApiBaseUrl();
-  const [entryState, setEntryState] = useState<"probing" | "setup" | "app">("probing");
+  const [entryState, setEntryState] = useState<"probing" | "setup" | "app">(
+    "probing",
+  );
   const [isNetworkSettingsOpen, setIsNetworkSettingsOpen] = useState(false);
 
   // DEBUG: Log desktop detection
   if (typeof window !== "undefined" && true) {
-    console.debug("[DesktopAppWrapper] isDesktop:", isDesktop, "isReady:", isReady, "entryState:", entryState, "baseUrl:", baseUrl);
+    console.debug(
+      "[DesktopAppWrapper] isDesktop:",
+      isDesktop,
+      "isReady:",
+      isReady,
+      "entryState:",
+      entryState,
+      "baseUrl:",
+      baseUrl,
+    );
   }
 
   useEffect(() => {
@@ -70,13 +84,13 @@ export function DesktopAppWrapper() {
   }
 
   if (!isReady || entryState === "probing") {
-    return <div className="desktop-connection-loading">Verbinde mit Server ...</div>;
+    return (
+      <div className="desktop-connection-loading">Verbinde mit Server ...</div>
+    );
   }
 
   if (entryState === "setup") {
-    return (
-      <DesktopConnectionSetup onContinue={() => setEntryState("app")} />
-    );
+    return <DesktopConnectionSetup onContinue={() => setEntryState("app")} />;
   }
 
   return (
@@ -100,8 +114,14 @@ export function DesktopAppWrapper() {
       </main>
 
       {isNetworkSettingsOpen ? (
-        <div className="desktop-network-modal-backdrop" onClick={() => setIsNetworkSettingsOpen(false)}>
-          <div className="desktop-network-modal" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="desktop-network-modal-backdrop"
+          onClick={() => setIsNetworkSettingsOpen(false)}
+        >
+          <div
+            className="desktop-network-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
             <DesktopConnectionSetup
               compact
               onContinue={() => {
