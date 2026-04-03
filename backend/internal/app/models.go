@@ -221,8 +221,9 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	Token string `json:"token"`
-	User  User   `json:"user"`
+	Token                string `json:"token"`
+	User                 User   `json:"user"`
+	ShowBirthdayGreeting bool   `json:"showBirthdayGreeting,omitempty"`
 }
 
 type LoginConflictResponse struct {

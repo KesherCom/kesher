@@ -1205,3 +1205,35 @@ export async function deleteUser(
     adminPin,
   );
 }
+
+export async function getAdminBirthdayUsersToday(
+  token: string,
+  adminPin: string,
+): Promise<{ usernames: string[] }> {
+  const res = await fetch(apiUrl("/api/admin/birthday-users"), {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+    },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ usernames: string[] }>;
+}
+
+export async function updateAdminBirthdayUsersToday(
+  token: string,
+  adminPin: string,
+  usernames: string[],
+): Promise<{ usernames: string[] }> {
+  const res = await fetch(apiUrl("/api/admin/birthday-users"), {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ usernames }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ usernames: string[] }>;
+}

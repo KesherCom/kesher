@@ -1300,7 +1300,25 @@ button {
   font-size: 0.95rem;
   transition: all 120ms ease;
 }
+.admin-pin-field textarea {
+  width: 100%;
+  min-height: 4.2rem;
+  resize: vertical;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--admin-title);
+  font-size: 0.95rem;
+  transition: all 120ms ease;
+}
 .admin-pin-field input:focus {
+  outline: none;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 0 2px rgba(79, 172, 254, 0.1);
+}
+.admin-pin-field textarea:focus {
   outline: none;
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.06);
@@ -1392,6 +1410,54 @@ button {
   transform: translateY(-1px);
 }
 
+
+.birthday-gate {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255, 186, 73, 0.22), transparent 40%),
+    radial-gradient(circle at 85% 10%, rgba(88, 183, 236, 0.25), transparent 35%),
+    linear-gradient(140deg, #111826 0%, #1e3147 55%, #192739 100%);
+}
+
+.birthday-gate-card {
+  width: min(560px, 100%);
+  display: grid;
+  gap: 0.85rem;
+  background: rgba(10, 15, 22, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  padding: 1.35rem;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.38);
+}
+
+.birthday-gate-kicker {
+  margin: 0;
+  color: #f0cc8b;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.birthday-gate-card h1 {
+  margin: 0;
+  color: #f5f8ff;
+  font-size: clamp(1.65rem, 4.8vw, 2.5rem);
+}
+
+.birthday-gate-card p {
+  margin: 0;
+  color: rgba(243, 248, 255, 0.9);
+}
+
+.birthday-gate-card button {
+  width: fit-content;
+  margin-top: 0.35rem;
+}
 .admin-list li > span {
   min-width: 0;
   color: var(--text-bright-alt2);

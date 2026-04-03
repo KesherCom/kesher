@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,6 +27,7 @@ func hasWhitespace(value string) bool {
 }
 
 const defaultAdminPIN = "123456"
+const birthdayUsersTodaySettingKey = "birthday_users_today"
 
 const (
 	MinPriorityLevel = 0
@@ -137,6 +139,64 @@ func (s *Store) SetAdminPIN(ctx context.Context, pin string) error {
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO app_settings (key, value) VALUES ('admin_pin', ?)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, pin)
+	return err
+}
+
+func normalizeBirthdayUsersToday(usernames []string) ([]string, error) {
+	normalized := make([]string, 0, len(usernames))
+	seen := make(map[string]struct{}, len(usernames))
+	for _, username := range usernames {
+		username = strings.TrimSpace(username)
+		if username == "" {
+			continue
+		}
+		if hasWhitespace(username) {
+			return nil, ErrInvalidInput
+		}
+		key := strings.ToLower(username)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, key)
+	}
+	sort.Strings(normalized)
+	return normalized, nil
+}
+
+func (s *Store) GetBirthdayUsersToday(ctx context.Context) ([]string, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM app_settings WHERE key = ?`, birthdayUsersTodaySettingKey).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return []string{}, nil
+		}
+		return nil, err
+	}
+	if strings.TrimSpace(raw) == "" {
+		return []string{}, nil
+	}
+	var usernames []string
+	if err := json.Unmarshal([]byte(raw), &usernames); err != nil {
+		parts := strings.FieldsFunc(raw, func(r rune) bool {
+			return r == ',' || r == '\n' || r == ';'
+		})
+		return normalizeBirthdayUsersToday(parts)
+	}
+	return normalizeBirthdayUsersToday(usernames)
+}
+
+func (s *Store) SetBirthdayUsersToday(ctx context.Context, usernames []string) error {
+	normalized, err := normalizeBirthdayUsersToday(usernames)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(normalized)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO app_settings (key, value) VALUES (?, ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value`, birthdayUsersTodaySettingKey, string(payload))
 	return err
 }
 

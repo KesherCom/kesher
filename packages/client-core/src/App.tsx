@@ -217,6 +217,8 @@ export function App() {
   const [adminLoginError, setAdminLoginError] = useState("");
   const [operatorLoginError, setOperatorLoginError] = useState("");
   const [adminOverrideActive, setAdminOverrideActive] = useState(false);
+  const [showBirthdayGreeting, setShowBirthdayGreeting] = useState(false);
+  const [birthdayGreetingUsername, setBirthdayGreetingUsername] = useState("");
   const [pathname, setPathname] = useState(() => window.location.pathname);
   const [roomListenerCounts, setRoomListenerCounts] = useState<
     Record<string, number>
@@ -1027,6 +1029,8 @@ export function App() {
     setAdminLoginError("");
     setPendingTakeover(null);
     sessionStorage.setItem(tokenStorageKey, res.token);
+    setShowBirthdayGreeting(Boolean(res.showBirthdayGreeting));
+    setBirthdayGreetingUsername(res.user.username || useUsername);
     setToken(res.token);
     return true;
   }
@@ -1056,6 +1060,8 @@ export function App() {
       const res = await adminLogin(adminPinInput.trim());
       setPendingTakeover(null);
       setOperatorLoginError("");
+      setShowBirthdayGreeting(false);
+      setBirthdayGreetingUsername("");
       sessionStorage.setItem(tokenStorageKey, res.token);
       setToken(res.token);
       setAdminOverrideActive(true);
@@ -1078,6 +1084,8 @@ export function App() {
     setAdminLoginError("");
     setOperatorLoginError("");
     setAdminOverrideActive(false);
+    setShowBirthdayGreeting(false);
+    setBirthdayGreetingUsername("");
     setPendingTakeover(null);
     setToken(null);
     setAppData(null);
@@ -1095,6 +1103,8 @@ export function App() {
       setPendingTakeover(null);
       setAuthMode(pendingTakeover.targetAuthMode);
       setAdminOverrideActive(pendingTakeover.adminOverrideActive);
+      setShowBirthdayGreeting(Boolean(res.showBirthdayGreeting));
+      setBirthdayGreetingUsername(res.user.username || pendingTakeover.username);
       sessionStorage.setItem(tokenStorageKey, res.token);
       setToken(res.token);
     } catch (error) {
@@ -1703,6 +1713,24 @@ export function App() {
   }
 
   if (!appData) return <div className="root">Loading data...</div>;
+
+  if (authMode === "operator" && showBirthdayGreeting) {
+    const displayName = birthdayGreetingUsername || appData.self.username;
+    return (
+      <div className="root birthday-gate" role="dialog" aria-modal="true">
+        <div className="birthday-gate-card">
+          <p className="birthday-gate-kicker">Today in focus</p>
+          <h1>Happy Birthday, {displayName}!</h1>
+          <p>
+            We wish you a great day and smooth comms for every party line.
+          </p>
+          <button type="button" onClick={() => setShowBirthdayGreeting(false)}>
+            Continue to intercom
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ── Admin view ──
   if (authMode === "admin") {

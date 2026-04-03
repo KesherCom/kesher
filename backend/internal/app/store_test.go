@@ -380,6 +380,32 @@ func TestNewStoreDoesNotReseedDeletedDefaultsOnReopen(t *testing.T) {
 	}
 }
 
+func TestBirthdayUsersTodayRoundTripAndNormalization(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	if err := store.SetBirthdayUsersToday(ctx, []string{" Alice ", "alice", "BOB"}); err != nil {
+		t.Fatalf("set birthday users: %v", err)
+	}
+
+	users, err := store.GetBirthdayUsersToday(ctx)
+	if err != nil {
+		t.Fatalf("get birthday users: %v", err)
+	}
+	expected := []string{"alice", "bob"}
+	if !slices.Equal(users, expected) {
+		t.Fatalf("unexpected birthday users: got=%v want=%v", users, expected)
+	}
+
+	if err := store.SetBirthdayUsersToday(ctx, []string{"invalid name"}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput for username with whitespace, got %v", err)
+	}
+}
+
 func TestUserStreamDeckSettingsRoundTrip(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
