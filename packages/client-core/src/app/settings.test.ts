@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  clampAudioGateThresholdDb,
   clampGainValue,
   favoritesStorageKey,
   globalSettingsStorageKey,
@@ -21,6 +22,13 @@ describe("settings helpers", () => {
     expect(clampGainValue(3)).toBe(2);
     expect(clampGainValue(1.25)).toBe(1.25);
     expect(clampGainValue(Number.NaN)).toBe(1);
+  });
+
+  it("clamps audio gate threshold values to expected range", () => {
+    expect(clampAudioGateThresholdDb(-100)).toBe(-72);
+    expect(clampAudioGateThresholdDb(-42.4)).toBe(-42);
+    expect(clampAudioGateThresholdDb(0)).toBe(-12);
+    expect(clampAudioGateThresholdDb(Number.NaN)).toBe(-52);
   });
 
   it("loads default session settings when unset or invalid", () => {
@@ -50,6 +58,8 @@ describe("settings helpers", () => {
       enableBackgroundAudioRecovery: true,
       keepScreenAwake: false,
       showVolumeControls: true,
+      audioGateEnabled: false,
+      audioGateThresholdDb: -52,
       inputGainByDeviceId: {},
       roomGainById: {},
       directGainByUserId: {},
@@ -67,6 +77,8 @@ describe("settings helpers", () => {
         swapPttAndReplyButtons: true,
         enableBackgroundAudioRecovery: false,
         keepScreenAwake: true,
+        audioGateEnabled: true,
+        audioGateThresholdDb: -200,
         inputGainByDeviceId: { "mic-1": 0.9, broken: -3 },
         roomGainById: { a: 1.5, b: -2 },
         directGainByUserId: { u1: 5, u2: 0.5 },
@@ -82,6 +94,8 @@ describe("settings helpers", () => {
       enableBackgroundAudioRecovery: false,
       keepScreenAwake: true,
       showVolumeControls: true,
+      audioGateEnabled: true,
+      audioGateThresholdDb: -72,
       inputGainByDeviceId: { "mic-1": 0.9, broken: 0 },
       roomGainById: { a: 1.5, b: 0 },
       directGainByUserId: { u1: 2, u2: 0.5 },

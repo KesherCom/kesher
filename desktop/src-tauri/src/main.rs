@@ -50,6 +50,18 @@ fn set_ptt(active: bool, state: State<'_, AudioEngineState>) {
     audio_engine::set_ptt(&state, active);
 }
 
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn set_input_gain(gain: f32, state: State<'_, AudioEngineState>) {
+    audio_engine::set_input_gain(&state, gain);
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn set_audio_gate(enabled: bool, threshold_db: f32, state: State<'_, AudioEngineState>) {
+    audio_engine::set_audio_gate(&state, enabled, threshold_db);
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -67,6 +79,8 @@ pub fn run() {
                 start_audio_engine,
                 stop_audio_engine,
                 set_ptt,
+                set_input_gain,
+                set_audio_gate,
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");

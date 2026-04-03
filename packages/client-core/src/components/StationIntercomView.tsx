@@ -293,6 +293,10 @@ function formatDbFs(dbFs: number): string {
   return `${dbFs.toFixed(1)} dBFS`;
 }
 
+function formatGateThresholdDb(dbFs: number): string {
+  return `${Math.round(dbFs)} dBFS`;
+}
+
 type StationIntercomViewProps = {
   token: string;
   connectionState: "connecting" | "connected" | "reconnecting" | "offline";
@@ -377,6 +381,10 @@ type StationIntercomViewProps = {
   isLocalMonitorActive: boolean;
   onToggleLocalMonitor: () => void;
   onInputGainChange: (deviceId: string, gain: number) => void;
+  audioGateEnabled: boolean;
+  onAudioGateEnabledChange: (enabled: boolean) => void;
+  audioGateThresholdDb: number;
+  onAudioGateThresholdDbChange: (db: number) => void;
   outputDevices: MediaDeviceInfo[];
   selectedOutputDeviceId: string;
   selectedOutputLabel: string;
@@ -487,6 +495,10 @@ export function StationIntercomView({
   isLocalMonitorActive,
   onToggleLocalMonitor,
   onInputGainChange,
+  audioGateEnabled,
+  onAudioGateEnabledChange,
+  audioGateThresholdDb,
+  onAudioGateThresholdDbChange,
   outputDevices,
   selectedOutputDeviceId,
   selectedOutputLabel,
@@ -2883,6 +2895,43 @@ export function StationIntercomView({
                               )
                             }
                             aria-label="Input gain"
+                          />
+                        </div>
+                        <div className="local-monitor-control">
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={audioGateEnabled}
+                              onChange={(event) =>
+                                onAudioGateEnabledChange(
+                                  event.currentTarget.checked,
+                                )
+                              }
+                            />{" "}
+                            Noise gate
+                          </label>
+                          <small className="local-monitor-hint">
+                            Cuts low-level background noise before mic gain.
+                          </small>
+                        </div>
+                        <div className="station-gain-control input-gain-control">
+                          <label htmlFor="input-gate-threshold">
+                            Gate threshold {formatGateThresholdDb(audioGateThresholdDb)}
+                          </label>
+                          <input
+                            id="input-gate-threshold"
+                            type="range"
+                            min={-72}
+                            max={-12}
+                            step={1}
+                            value={audioGateThresholdDb}
+                            disabled={!audioGateEnabled}
+                            onChange={(event) =>
+                              onAudioGateThresholdDbChange(
+                                Number(event.currentTarget.value),
+                              )
+                            }
+                            aria-label="Microphone gate threshold"
                           />
                         </div>
                       </div>

@@ -15,7 +15,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use opus::{Application, Channels, Decoder, Encoder};
 use serde::{Deserialize, Serialize};
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     Arc, Mutex,
 };
 use std::time::{Duration, Instant};
@@ -61,6 +61,14 @@ const OPUS_BITRATE: i32 = 24_000;
 const MIN_INPUT_GAIN: f32 = 0.0;
 const MAX_INPUT_GAIN: f32 = 16.0;
 const DEFAULT_INPUT_GAIN: f32 = 1.0;
+const DEFAULT_AUDIO_GATE_ENABLED: bool = false;
+const MIN_AUDIO_GATE_THRESHOLD_DB: f32 = -72.0;
+const MAX_AUDIO_GATE_THRESHOLD_DB: f32 = -12.0;
+const DEFAULT_AUDIO_GATE_THRESHOLD_DB: f32 = -52.0;
+/// Gate attack time in milliseconds (how fast the gate opens on signal)
+const GATE_ATTACK_TIME_MS: f32 = 10.0;
+/// Gate release time in milliseconds (how fast the gate closes after signal stops)
+const GATE_RELEASE_TIME_MS: f32 = 150.0;
 /// Queue depth between CPAL capture callback and Opus encoder thread.
 const CAPTURE_RAW_QUEUE_CAPACITY: usize = 4;
 /// Queue depth between Opus encoder thread and async WebRTC sender.
@@ -136,6 +144,8 @@ pub struct StartEngineParams {
     pub output_device_id: Option<String>,
     pub input_device_id: Option<String>,
     pub input_gain: Option<f32>,
+    pub audio_gate_enabled: Option<bool>,
+    pub audio_gate_threshold_db: Option<f32>,
 }
 
 /// Answer SDP + ICE candidates emitted back to JavaScript.
@@ -171,8 +181,53 @@ impl Default for AudioEngineState {
 pub struct RunningEngine {
     pub peer_connection: Arc<RTCPeerConnection>,
     pub ptt_active: Arc<AtomicBool>,
+    pub audio_processing: Arc<AudioProcessingState>,
     /// Dropping this sender shuts down the capture/encode/send loop.
     _shutdown: mpsc::Sender<()>,
+}
+
+pub struct AudioProcessingState {
+    input_gain_bits: AtomicU32,
+    audio_gate_enabled: AtomicBool,
+    audio_gate_threshold_bits: AtomicU32,
+}
+
+impl AudioProcessingState {
+    fn new(input_gain: f32, audio_gate_enabled: bool, audio_gate_threshold_db: f32) -> Self {
+        Self {
+            input_gain_bits: AtomicU32::new(input_gain.to_bits()),
+            audio_gate_enabled: AtomicBool::new(audio_gate_enabled),
+            audio_gate_threshold_bits: AtomicU32::new(audio_gate_threshold_db.to_bits()),
+        }
+    }
+
+    fn input_gain(&self) -> f32 {
+        f32::from_bits(self.input_gain_bits.load(Ordering::Relaxed))
+    }
+
+    fn set_input_gain(&self, gain: f32) {
+        self.input_gain_bits
+            .store(clamp_input_gain(gain).to_bits(), Ordering::Relaxed);
+    }
+
+    fn audio_gate_enabled(&self) -> bool {
+        self.audio_gate_enabled.load(Ordering::Relaxed)
+    }
+
+    fn set_audio_gate_enabled(&self, enabled: bool) {
+        self.audio_gate_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    fn audio_gate_threshold_db(&self) -> f32 {
+        f32::from_bits(self.audio_gate_threshold_bits.load(Ordering::Relaxed))
+    }
+
+    fn set_audio_gate_threshold_db(&self, threshold_db: f32) {
+        self.audio_gate_threshold_bits.store(
+            clamp_audio_gate_threshold_db(threshold_db).to_bits(),
+            Ordering::Relaxed,
+        );
+    }
 }
 
 fn clamp_input_gain(gain: f32) -> f32 {
@@ -182,9 +237,35 @@ fn clamp_input_gain(gain: f32) -> f32 {
     gain.max(MIN_INPUT_GAIN).min(MAX_INPUT_GAIN)
 }
 
+fn clamp_audio_gate_threshold_db(threshold_db: f32) -> f32 {
+    if !threshold_db.is_finite() {
+        return DEFAULT_AUDIO_GATE_THRESHOLD_DB;
+    }
+    threshold_db
+        .max(MIN_AUDIO_GATE_THRESHOLD_DB)
+        .min(MAX_AUDIO_GATE_THRESHOLD_DB)
+}
+
+fn dbfs_to_linear_amplitude(dbfs: f32) -> f32 {
+    10.0f32.powf(clamp_audio_gate_threshold_db(dbfs) / 20.0)
+}
+
+/// Computes one-pole lowpass coefficient for gate attack/release smoothing.
+/// Uses formula: coeff = 1.0 - exp(-2π * fc * dt)
+/// where fc is cutoff frequency (1/time_constant_ms) and dt is 1/sample_rate
+fn compute_gate_coefficient(sample_rate: f32, time_ms: f32) -> f32 {
+    let time_s = time_ms / 1000.0;
+    let freq_hz = 1.0 / time_s;
+    1.0 - (-2.0 * std::f32::consts::PI * freq_hz / sample_rate).exp()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{clamp_input_gain, DEFAULT_INPUT_GAIN, MAX_INPUT_GAIN, MIN_INPUT_GAIN};
+    use super::{
+        clamp_audio_gate_threshold_db, clamp_input_gain, dbfs_to_linear_amplitude,
+        DEFAULT_AUDIO_GATE_THRESHOLD_DB, DEFAULT_INPUT_GAIN, MAX_AUDIO_GATE_THRESHOLD_DB,
+        MAX_INPUT_GAIN, MIN_AUDIO_GATE_THRESHOLD_DB, MIN_INPUT_GAIN,
+    };
 
     #[test]
     fn clamp_input_gain_bounds() {
@@ -199,6 +280,44 @@ mod tests {
         assert_eq!(clamp_input_gain(f32::NAN), DEFAULT_INPUT_GAIN);
         assert_eq!(clamp_input_gain(f32::INFINITY), DEFAULT_INPUT_GAIN);
         assert_eq!(clamp_input_gain(f32::NEG_INFINITY), DEFAULT_INPUT_GAIN);
+    }
+
+    #[test]
+    fn clamp_audio_gate_threshold_bounds() {
+        assert_eq!(
+            clamp_audio_gate_threshold_db(-100.0),
+            MIN_AUDIO_GATE_THRESHOLD_DB
+        );
+        assert_eq!(clamp_audio_gate_threshold_db(-42.0), -42.0);
+        assert_eq!(
+            clamp_audio_gate_threshold_db(0.0),
+            MAX_AUDIO_GATE_THRESHOLD_DB
+        );
+    }
+
+    #[test]
+    fn clamp_audio_gate_threshold_non_finite_defaults() {
+        assert_eq!(
+            clamp_audio_gate_threshold_db(f32::NAN),
+            DEFAULT_AUDIO_GATE_THRESHOLD_DB
+        );
+    }
+
+    #[test]
+    fn converts_dbfs_threshold_to_linear_amplitude() {
+        let amplitude = dbfs_to_linear_amplitude(-40.0);
+        assert!(amplitude > 0.009 && amplitude < 0.011);
+    }
+
+    #[test]
+    fn gate_coefficients_are_reasonable() {
+        // Attack should be faster than release (higher coefficient)
+        let attack = super::compute_gate_coefficient(48000.0, super::GATE_ATTACK_TIME_MS);
+        let release = super::compute_gate_coefficient(48000.0, super::GATE_RELEASE_TIME_MS);
+        
+        assert!(attack > 0.0 && attack <= 1.0, "Attack coefficient should be in [0,1]");
+        assert!(release > 0.0 && release <= 1.0, "Release coefficient should be in [0,1]");
+        assert!(attack > release, "Attack should be faster (higher coeff) than release");
     }
 }
 
@@ -387,12 +506,25 @@ pub async fn start_engine(
     let ptt_active = Arc::new(AtomicBool::new(false));
 
     let input_gain = clamp_input_gain(params.input_gain.unwrap_or(DEFAULT_INPUT_GAIN));
+    let audio_gate_enabled = params
+        .audio_gate_enabled
+        .unwrap_or(DEFAULT_AUDIO_GATE_ENABLED);
+    let audio_gate_threshold_db = clamp_audio_gate_threshold_db(
+        params
+            .audio_gate_threshold_db
+            .unwrap_or(DEFAULT_AUDIO_GATE_THRESHOLD_DB),
+    );
+    let audio_processing = Arc::new(AudioProcessingState::new(
+        input_gain,
+        audio_gate_enabled,
+        audio_gate_threshold_db,
+    ));
 
     tokio::spawn(capture_loop(
         audio_track,
         Arc::clone(&ptt_active),
         params.input_device_id,
-        input_gain,
+        Arc::clone(&audio_processing),
         app.clone(),
         shutdown_rx,
     ));
@@ -402,6 +534,7 @@ pub async fn start_engine(
         let engine = RunningEngine {
             peer_connection: Arc::clone(&pc),
             ptt_active: Arc::clone(&ptt_active),
+            audio_processing: Arc::clone(&audio_processing),
             _shutdown: shutdown_tx,
         };
         *state.engine.lock().unwrap() = Some(engine);
@@ -421,7 +554,7 @@ async fn capture_loop(
     track: Arc<TrackLocalStaticSample>,
     ptt_active: Arc<AtomicBool>,
     device_id: Option<String>,
-    input_gain: f32,
+    audio_processing: Arc<AudioProcessingState>,
     app: AppHandle,
     mut shutdown: mpsc::Receiver<()>,
 ) {
@@ -488,6 +621,12 @@ async fn capture_loop(
         let mut raw_queue_sum_ms: f64 = 0.0;
         let mut raw_queue_max_ms: f64 = 0.0;
         let mut next_latency_log = Instant::now() + LATENCY_LOG_INTERVAL;
+        
+        // Gate envelope for smooth attack/release (0.0 = fully muted, 1.0 = fully open)
+        let mut gate_envelope: f32 = 0.0;
+        // Precompute coefficients (attack and release)
+        let attack_coeff = compute_gate_coefficient(SAMPLE_RATE as f32, GATE_ATTACK_TIME_MS);
+        let release_coeff = compute_gate_coefficient(SAMPLE_RATE as f32, GATE_RELEASE_TIME_MS);
 
         loop {
             if stop_clone.load(Ordering::Relaxed) { break; }
@@ -500,8 +639,26 @@ async fn capture_loop(
                         raw_queue_max_ms = raw_queue_ms;
                     }
 
+                    let input_gain = audio_processing.input_gain();
+                    let audio_gate_enabled = audio_processing.audio_gate_enabled();
+                    let audio_gate_threshold =
+                        dbfs_to_linear_amplitude(audio_processing.audio_gate_threshold_db());
+
                     for &s in &chunk {
-                        let gained = s * input_gain;
+                        let is_above_threshold = s.abs() >= audio_gate_threshold;
+                        
+                        // Smooth gate envelope: attack on signal, release when no signal
+                        let target_envelope = if is_above_threshold { 1.0 } else { 0.0 };
+                        let coeff = if is_above_threshold { attack_coeff } else { release_coeff };
+                        gate_envelope = target_envelope * coeff + gate_envelope * (1.0 - coeff);
+                        
+                        // Apply soft gate (multiply by envelope instead of hard mute)
+                        let gated = if audio_gate_enabled {
+                            s * gate_envelope
+                        } else {
+                            s
+                        };
+                        let gained = gated * input_gain;
                         if gained.abs() > input_peak {
                             input_peak = gained.abs();
                         }
@@ -836,6 +993,21 @@ fn find_output_device(host: &cpal::Host, id: Option<&str>) -> Option<cpal::Devic
 pub fn set_ptt(state: &AudioEngineState, active: bool) {
     if let Some(engine) = state.engine.lock().unwrap().as_ref() {
         engine.ptt_active.store(active, Ordering::Release);
+    }
+}
+
+pub fn set_input_gain(state: &AudioEngineState, gain: f32) {
+    if let Some(engine) = state.engine.lock().unwrap().as_ref() {
+        engine.audio_processing.set_input_gain(gain);
+    }
+}
+
+pub fn set_audio_gate(state: &AudioEngineState, enabled: bool, threshold_db: f32) {
+    if let Some(engine) = state.engine.lock().unwrap().as_ref() {
+        engine.audio_processing.set_audio_gate_enabled(enabled);
+        engine
+            .audio_processing
+            .set_audio_gate_threshold_db(threshold_db);
     }
 }
 

@@ -95,7 +95,13 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
   inputLevelDbFs: -60,
   inputGain: 1,
   inputClipping: false,
+  isLocalMonitorActive: false,
+  onToggleLocalMonitor: vi.fn(),
   onInputGainChange: vi.fn(),
+  audioGateEnabled: false,
+  onAudioGateEnabledChange: vi.fn(),
+  audioGateThresholdDb: -52,
+  onAudioGateThresholdDbChange: vi.fn(),
   outputDevices: [],
   selectedOutputDeviceId: "",
   selectedOutputLabel: "Default output",
@@ -695,5 +701,31 @@ describe("StationIntercomView", () => {
       buttonIndex: 0,
       state: "up",
     });
+  });
+
+  it("renders audio gate controls and dispatches changes", async () => {
+    const user = userEvent.setup();
+    const onAudioGateEnabledChange = vi.fn();
+    const onAudioGateThresholdDbChange = vi.fn();
+
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        audioGateEnabled
+        onAudioGateEnabledChange={onAudioGateEnabledChange}
+        onAudioGateThresholdDbChange={onAudioGateThresholdDbChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Sound settings/ }));
+    await user.click(screen.getByRole("checkbox", { name: "Noise gate" }));
+    fireEvent.change(
+      screen.getByRole("slider", { name: "Microphone gate threshold" }),
+      { target: { value: "-40" } },
+    );
+
+    expect(onAudioGateEnabledChange).toHaveBeenCalledWith(false);
+    expect(onAudioGateThresholdDbChange).toHaveBeenCalledWith(-40);
   });
 });

@@ -293,6 +293,8 @@ export type UseIntercomSessionOptions = {
   keepScreenAwake: boolean;
   isUserSettingsOpen: boolean;
   isUserSettingsOpenRef: React.MutableRefObject<boolean>;
+  audioGateEnabled: boolean;
+  audioGateThresholdDb: number;
   selectedInputGainFor: (deviceId: string) => number;
   onInputGainChange: (deviceId: string, gain: number) => void;
 
@@ -421,6 +423,8 @@ export function useIntercomSession({
   keepScreenAwake,
   isUserSettingsOpen,
   isUserSettingsOpenRef,
+  audioGateEnabled,
+  audioGateThresholdDb,
   selectedInputGainFor,
   onInputGainChange,
   initialListenRoomIds,
@@ -821,6 +825,8 @@ export function useIntercomSession({
     selectedInputDeviceIdRef,
     selectedInputGainFor,
     inputGainByDeviceId,
+    audioGateEnabled,
+    audioGateThresholdDb,
     isUserSettingsOpen,
     isUserSettingsOpenRef,
     voiceModeRef,
@@ -832,6 +838,27 @@ export function useIntercomSession({
   });
 
   const { rtpStats, startStatsLoop, stopStatsLoop } = useRtpStats();
+
+  useEffect(() => {
+    if (!nativeAudio?.isNative) return;
+    nativeAudio.setInputGain(
+      clampInputGainValue(
+        micInputBaseBoost *
+          selectedInputGainFor(selectedInputDeviceIdRef.current),
+      ),
+    );
+  }, [
+    nativeAudio,
+    selectedInputDeviceId,
+    inputGainByDeviceId,
+    selectedInputGainFor,
+    selectedInputDeviceIdRef,
+  ]);
+
+  useEffect(() => {
+    if (!nativeAudio?.isNative) return;
+    nativeAudio.setAudioGate(audioGateEnabled, audioGateThresholdDb);
+  }, [nativeAudio, audioGateEnabled, audioGateThresholdDb]);
 
   const remote = useRemoteAudio({
     selectedOutputDeviceId,
@@ -1919,6 +1946,8 @@ export function useIntercomSession({
                   micInputBaseBoost *
                     selectedInputGainFor(selectedInputDeviceIdRef.current),
                 ),
+                audioGateEnabled,
+                audioGateThresholdDb,
               });
               if (result && wsRef.current?.readyState === WebSocket.OPEN) {
                 wsRef.current.send(

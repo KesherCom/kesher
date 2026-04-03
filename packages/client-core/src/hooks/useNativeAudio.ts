@@ -70,9 +70,13 @@ export type NativeAudioHook = {
     inputDeviceId?: string;
     outputDeviceId?: string;
     inputGain?: number;
+    audioGateEnabled?: boolean;
+    audioGateThresholdDb?: number;
   }) => Promise<{ answerSdp: string; iceCandidates: string[] } | null>;
   /** Open or close the send gate in the Rust engine. */
   setPtt: (active: boolean) => void;
+  setInputGain: (gain: number) => void;
+  setAudioGate: (enabled: boolean, thresholdDb: number) => void;
   /** Tear down the native engine (call on disconnect). */
   stopEngine: () => Promise<void>;
 };
@@ -127,6 +131,8 @@ export function useNativeAudio(
       inputDeviceId?: string;
       outputDeviceId?: string;
       inputGain?: number;
+      audioGateEnabled?: boolean;
+      audioGateThresholdDb?: number;
     }): Promise<{ answerSdp: string; iceCandidates: string[] } | null> => {
       if (!isNative) return null;
 
@@ -140,6 +146,8 @@ export function useNativeAudio(
             input_device_id: params.inputDeviceId ?? null,
             output_device_id: params.outputDeviceId ?? null,
             input_gain: params.inputGain ?? null,
+            audio_gate_enabled: params.audioGateEnabled ?? null,
+            audio_gate_threshold_db: params.audioGateThresholdDb ?? null,
           },
         });
 
@@ -166,6 +174,29 @@ export function useNativeAudio(
     [isNative],
   );
 
+  const setInputGain = useCallback(
+    (gain: number) => {
+      if (!isNative) return;
+      tauriInvoke("set_input_gain", { gain }).catch((err) =>
+        console.error("[native-audio] set_input_gain failed:", err),
+      );
+    },
+    [isNative],
+  );
+
+  const setAudioGate = useCallback(
+    (enabled: boolean, thresholdDb: number) => {
+      if (!isNative) return;
+      tauriInvoke("set_audio_gate", {
+        enabled,
+        threshold_db: thresholdDb,
+      }).catch((err) =>
+        console.error("[native-audio] set_audio_gate failed:", err),
+      );
+    },
+    [isNative],
+  );
+
   const stopEngine = useCallback(async () => {
     if (!isNative) return;
     try {
@@ -175,5 +206,13 @@ export function useNativeAudio(
     }
   }, [isNative]);
 
-  return { isNative, listDevices, handleOffer, setPtt, stopEngine };
+  return {
+    isNative,
+    listDevices,
+    handleOffer,
+    setPtt,
+    setInputGain,
+    setAudioGate,
+    stopEngine,
+  };
 }

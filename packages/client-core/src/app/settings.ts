@@ -4,6 +4,8 @@ export const globalSettingsStorageKey = "intercom-global-settings";
 export const favoritesStorageKey = "intercom-favorites";
 export const keyboardShortcutsStorageKey = "intercom-keyboard-shortcuts";
 export const defaultAdminPin = "123456";
+export const defaultAudioGateEnabled = false;
+export const defaultAudioGateThresholdDb = -52;
 
 // ── Keyboard shortcut types ──────────────────────────────────────────
 
@@ -82,6 +84,8 @@ export type GlobalSettings = {
   enableBackgroundAudioRecovery: boolean;
   keepScreenAwake: boolean;
   showVolumeControls: boolean;
+  audioGateEnabled: boolean;
+  audioGateThresholdDb: number;
   inputGainByDeviceId: Record<string, number>;
   roomGainById: Record<string, number>;
   directGainByUserId: Record<string, number>;
@@ -99,6 +103,11 @@ export const micInputBaseBoost = 2;
 export function clampInputGainValue(value: number): number {
   if (!Number.isFinite(value)) return 1;
   return Math.max(0, Math.min(16, value));
+}
+
+export function clampAudioGateThresholdDb(value: number): number {
+  if (!Number.isFinite(value)) return defaultAudioGateThresholdDb;
+  return Math.max(-72, Math.min(-12, Math.round(value)));
 }
 
 export function clampOutputGainValue(value: number): number {
@@ -157,6 +166,8 @@ export function loadGlobalSettings(): GlobalSettings {
         enableBackgroundAudioRecovery: true,
         keepScreenAwake: false,
         showVolumeControls: true,
+        audioGateEnabled: defaultAudioGateEnabled,
+        audioGateThresholdDb: defaultAudioGateThresholdDb,
         inputGainByDeviceId: {},
         roomGainById: {},
         directGainByUserId: {},
@@ -196,6 +207,15 @@ export function loadGlobalSettings(): GlobalSettings {
         typeof parsed.showVolumeControls === "boolean"
           ? parsed.showVolumeControls
           : true,
+      audioGateEnabled:
+        typeof parsed.audioGateEnabled === "boolean"
+          ? parsed.audioGateEnabled
+          : defaultAudioGateEnabled,
+      audioGateThresholdDb: clampAudioGateThresholdDb(
+        typeof parsed.audioGateThresholdDb === "number"
+          ? parsed.audioGateThresholdDb
+          : defaultAudioGateThresholdDb,
+      ),
       inputGainByDeviceId: sanitizeGainMap(
         parsed.inputGainByDeviceId,
         clampInputGainValue,
@@ -216,6 +236,8 @@ export function loadGlobalSettings(): GlobalSettings {
       enableBackgroundAudioRecovery: true,
       keepScreenAwake: false,
       showVolumeControls: true,
+      audioGateEnabled: defaultAudioGateEnabled,
+      audioGateThresholdDb: defaultAudioGateThresholdDb,
       inputGainByDeviceId: {},
       roomGainById: {},
       directGainByUserId: {},

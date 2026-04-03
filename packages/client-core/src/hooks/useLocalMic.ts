@@ -7,8 +7,39 @@
  * caller can access the current stream / gain node without triggering re-renders.
  */
 import { useEffect, useRef, useState } from "react";
-import { clampInputGainValue, micInputBaseBoost } from "../app/settings";
+import {
+  clampAudioGateThresholdDb,
+  clampInputGainValue,
+  micInputBaseBoost,
+} from "../app/settings";
 import { meterDbFsFloor, peakAmplitudeToDbFs } from "../lib/presence";
+
+const webAudioGateBufferSize = 256;
+const gateAttackTimeMs = 10;
+const gateReleaseTimeMs = 150;
+
+function dbFsToAmplitude(dbFs: number): number {
+  return Math.pow(10, clampAudioGateThresholdDb(dbFs) / 20);
+}
+
+/**
+ * Computes gate envelope attack/release coefficients for smooth gate opening/closing.
+ * Prevents clicks and pops, and allows faster gate opening for word beginnings.
+ */
+function computeGateCoefficients(sampleRate: number): {
+  attackCoeff: number;
+  releaseCoeff: number;
+} {
+  const attackTimeSeconds = gateAttackTimeMs / 1000;
+  const releaseTimeSeconds = gateReleaseTimeMs / 1000;
+  // One-pole lowpass: coeff = 1.0 - exp(-2π * fc * dt)
+  // where fc is cutoff in Hz, dt is time step
+  const attackCoeff = 1.0 - Math.exp(-2 * Math.PI * (1 / attackTimeSeconds) / sampleRate);
+  const releaseCoeff = 1.0 - Math.exp(-2 * Math.PI * (1 / releaseTimeSeconds) / sampleRate);
+  return { attackCoeff, releaseCoeff };
+}
+
+export { computeGateCoefficients };
 
 type GetUserMediaFn = (
   constraints: MediaStreamConstraints,
@@ -130,6 +161,10 @@ export type UseLocalMicOptions = {
   selectedInputGainFor: (deviceId: string) => number;
   /** Raw gain map – used only as effect dependency to detect gain changes. */
   inputGainByDeviceId: Record<string, number>;
+  /** User-configurable microphone gate toggle. */
+  audioGateEnabled: boolean;
+  /** User-configurable microphone gate threshold in dBFS. */
+  audioGateThresholdDb: number;
   /** Whether the settings panel is open (controls level meter). */
   isUserSettingsOpen: boolean;
   /** Stable ref so the async WS-open path can check the current value. */
@@ -186,6 +221,8 @@ export function useLocalMic({
   selectedInputDeviceId,
   selectedInputGainFor,
   inputGainByDeviceId,
+  audioGateEnabled,
+  audioGateThresholdDb,
   isUserSettingsOpen,
   isUserSettingsOpenRef,
   voiceModeRef,
@@ -209,6 +246,7 @@ export function useLocalMic({
   const inputCaptureStreamRef = useRef<MediaStream | null>(null);
   const inputProcessingAudioCtxRef = useRef<AudioContext | null>(null);
   const inputGainNodeRef = useRef<GainNode | null>(null);
+  const gateProcessorNodeRef = useRef<ScriptProcessorNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const meterMonitorStreamRef = useRef<MediaStream | null>(null);
@@ -217,6 +255,18 @@ export function useLocalMic({
   const micReinitGenerationRef = useRef(0);
   const localMonitorCtxRef = useRef<AudioContext | null>(null);
   const localMonitorAudioElRef = useRef<HTMLAudioElement | null>(null);
+  const audioGateEnabledRef = useRef(audioGateEnabled);
+  const audioGateThresholdDbRef = useRef(audioGateThresholdDb);
+  const gateEnvelopeRef = useRef(0.0); // Current gate envelope (0.0 = fully muted, 1.0 = fully open)
+  const gateCoefficientsRef = useRef({ attackCoeff: 0.1, releaseCoeff: 0.01 });
+
+  useEffect(() => {
+    audioGateEnabledRef.current = audioGateEnabled;
+  }, [audioGateEnabled]);
+
+  useEffect(() => {
+    audioGateThresholdDbRef.current = audioGateThresholdDb;
+  }, [audioGateThresholdDb]);
 
   // ── Mic stream acquisition ──
   async function getMicStream(deviceId: string): Promise<MediaStream> {
@@ -234,11 +284,46 @@ export function useLocalMic({
     if (!AudioCtx) return sourceStream;
     try {
       const ctx = new AudioCtx({ latencyHint: "interactive" });
+      const sampleRate = ctx.sampleRate;
+      gateCoefficientsRef.current = computeGateCoefficients(sampleRate);
+      gateEnvelopeRef.current = 0.0;
+      
       const src = ctx.createMediaStreamSource(sourceStream);
+      const gate = ctx.createScriptProcessor(webAudioGateBufferSize, 1, 1);
       const gain = ctx.createGain();
       gain.gain.value = effectiveInputGain(gainValue);
       const dest = ctx.createMediaStreamDestination();
-      src.connect(gain);
+      
+      gate.onaudioprocess = (event) => {
+        const input = event.inputBuffer.getChannelData(0);
+        const output = event.outputBuffer.getChannelData(0);
+        if (!audioGateEnabledRef.current) {
+          output.set(input);
+          return;
+        }
+        
+        const threshold = dbFsToAmplitude(audioGateThresholdDbRef.current);
+        const { attackCoeff, releaseCoeff } = gateCoefficientsRef.current;
+        let gateEnvelope = gateEnvelopeRef.current;
+        
+        for (let index = 0; index < input.length; index += 1) {
+          const sample = input[index] ?? 0;
+          const isAboveThreshold = Math.abs(sample) >= threshold;
+          
+          // Smooth envelope: attack on signal, release when no signal
+          const targetEnvelope = isAboveThreshold ? 1.0 : 0.0;
+          const coeff = isAboveThreshold ? attackCoeff : releaseCoeff;
+          gateEnvelope = targetEnvelope * coeff + gateEnvelope * (1.0 - coeff);
+          
+          // Apply soft gate (multiply by envelope instead of hard mute)
+          output[index] = sample * gateEnvelope;
+        }
+        
+        gateEnvelopeRef.current = gateEnvelope;
+      };
+      
+      src.connect(gate);
+      gate.connect(gain);
       gain.connect(dest);
       const processedTrack = dest.stream.getAudioTracks()[0];
       if (!processedTrack) {
@@ -247,6 +332,7 @@ export function useLocalMic({
       }
       inputProcessingAudioCtxRef.current = ctx;
       inputGainNodeRef.current = gain;
+      gateProcessorNodeRef.current = gate;
       return new MediaStream([processedTrack]);
     } catch {
       return sourceStream;
@@ -263,6 +349,7 @@ export function useLocalMic({
       void inputProcessingAudioCtxRef.current.close();
       inputProcessingAudioCtxRef.current = null;
     }
+    gateProcessorNodeRef.current = null;
     inputGainNodeRef.current = null;
   }
 

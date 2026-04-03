@@ -331,6 +331,8 @@ export function App() {
     keepScreenAwake: settings.keepScreenAwake,
     isUserSettingsOpen,
     isUserSettingsOpenRef,
+    audioGateEnabled: settings.audioGateEnabled,
+    audioGateThresholdDb: settings.audioGateThresholdDb,
     selectedInputGainFor: settings.selectedInputGainFor,
     onInputGainChange: settings.onInputGainChange,
     initialListenRoomIds: storedSession.listenRoomIds ?? [],
@@ -1977,6 +1979,10 @@ export function App() {
         isLocalMonitorActive={session.isLocalMonitorActive}
         onToggleLocalMonitor={() => void session.toggleLocalMonitor()}
         onInputGainChange={settings.onInputGainChange}
+        audioGateEnabled={settings.audioGateEnabled}
+        onAudioGateEnabledChange={settings.setAudioGateEnabled}
+        audioGateThresholdDb={settings.audioGateThresholdDb}
+        onAudioGateThresholdDbChange={settings.setAudioGateThresholdDb}
         outputDevices={audioDevices.outputDevices}
         selectedOutputDeviceId={settings.selectedOutputDeviceId}
         selectedOutputLabel={selectedOutputLabel}
