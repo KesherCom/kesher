@@ -106,7 +106,11 @@ export type CompanionRolePagesResponse = {
   rolePages: Record<string, number>;
 };
 
-export type LoginSuccess = { token: string; user: User };
+export type LoginSuccess = {
+  token: string;
+  user: User;
+  showBirthdayGreeting?: boolean;
+};
 export type LoginConflict = {
   requiresTakeover: true;
   conflictRoleId: string;

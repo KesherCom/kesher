@@ -3390,6 +3390,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/logs/export", s.withAuth(s.handleAdminLogsExport))
 	mux.HandleFunc("/api/admin/chat-history/clear", s.withAuth(s.handleAdminClearChatHistory))
 	mux.HandleFunc("/api/admin/ack-settings", s.withAuth(s.handleAdminAckSettings))
+	mux.HandleFunc("/api/admin/birthday-users", s.withAuth(s.handleAdminBirthdayUsers))
 	mux.HandleFunc("/api/admin/configuration-export", s.withAuth(s.handleAdminConfigurationExport))
 	mux.HandleFunc("/api/admin/configuration-import", s.withAuth(s.handleAdminConfigurationImport))
 	mux.HandleFunc("/api/admin/routing-matrix", s.withAuth(s.handleAdminRoutingMatrix))
@@ -3611,7 +3612,27 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session := s.sessions.Create(user)
-	s.writeJSON(w, http.StatusOK, LoginResponse{Token: session.Token, User: user})
+	s.writeJSON(w, http.StatusOK, LoginResponse{
+		Token:                session.Token,
+		User:                 user,
+		ShowBirthdayGreeting: s.shouldShowBirthdayGreeting(r.Context(), req.Username),
+	})
+}
+
+func (s *Server) shouldShowBirthdayGreeting(ctx context.Context, username string) bool {
+	users, err := s.store.GetBirthdayUsersToday(ctx)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("birthday user list lookup failed", "error", err)
+		}
+		return false
+	}
+	for _, entry := range users {
+		if strings.EqualFold(entry, username) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleLoginTakeover(w http.ResponseWriter, r *http.Request) {
@@ -3668,7 +3689,11 @@ func (s *Server) handleLoginTakeover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session := s.sessions.Create(user)
-	s.writeJSON(w, http.StatusOK, LoginResponse{Token: session.Token, User: user})
+	s.writeJSON(w, http.StatusOK, LoginResponse{
+		Token:                session.Token,
+		User:                 user,
+		ShowBirthdayGreeting: s.shouldShowBirthdayGreeting(r.Context(), req.Username),
+	})
 }
 
 func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
@@ -4811,6 +4836,51 @@ func (s *Server) handleAdminAckSettings(w http.ResponseWriter, r *http.Request, 
 			})
 		}
 		s.writeJSON(w, http.StatusOK, AckSettings{Enabled: s.isAckEnabled()})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+type birthdayUsersTodayRequest struct {
+	Usernames []string `json:"usernames"`
+}
+
+type birthdayUsersTodayResponse struct {
+	Usernames []string `json:"usernames"`
+}
+
+func (s *Server) handleAdminBirthdayUsers(w http.ResponseWriter, r *http.Request, session Session) {
+	if !s.requireAdmin(w, r, session) {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		users, err := s.store.GetBirthdayUsersToday(r.Context())
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, birthdayUsersTodayResponse{Usernames: users})
+	case http.MethodPut:
+		var req birthdayUsersTodayRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.SetBirthdayUsersToday(r.Context(), req.Usernames); err != nil {
+			if s.writeStoreErr(w, err) {
+				return
+			}
+			s.internalErr(w, err)
+			return
+		}
+		users, err := s.store.GetBirthdayUsersToday(r.Context())
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		s.logAdminAction(session, r.Method, r.URL.Path, "birthday user list updated", http.StatusOK)
+		s.writeJSON(w, http.StatusOK, birthdayUsersTodayResponse{Usernames: users})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -354,6 +355,36 @@ func TestServerHandleLoginSuccess(t *testing.T) {
 	}
 	if resp.Token == "" || resp.User.Username != "tim" || resp.User.RoleID != "audio" {
 		t.Fatalf("unexpected login response: %+v", resp)
+	}
+	if resp.ShowBirthdayGreeting {
+		t.Fatal("expected birthday greeting to be false by default")
+	}
+}
+
+func TestServerHandleLoginIncludesBirthdayGreetingFlag(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.SetBirthdayUsersToday(context.Background(), []string{"alice"}); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute)}
+	body := bytes.NewBufferString("{\"username\":\"ALICE\",\"roleId\":\"audio\"}")
+	req := httptest.NewRequest(http.MethodPost, "/api/login", body)
+	rec := httptest.NewRecorder()
+	s.handleLogin(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp LoginResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode login response: %v", err)
+	}
+	if !resp.ShowBirthdayGreeting {
+		t.Fatal("expected birthday greeting for matching username")
 	}
 }
 
@@ -1242,6 +1273,47 @@ func TestServerHandleAdminAckSettingsUpdateAndGet(t *testing.T) {
 	}
 	if out.Enabled {
 		t.Fatal("expected GET response to report disabled ack setting")
+	}
+}
+
+func TestServerHandleAdminBirthdayUsersUpdateAndGet(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hub := NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := &Server{store: store, hub: hub, sessions: NewSessionManager(time.Minute)}
+	session := s.sessions.Create(User{ID: "u1", Username: "tim", RoleID: "audio"})
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/admin/birthday-users", bytes.NewBufferString(`{"usernames":["Max","max","ANNA"]}`))
+	putReq.Header.Set("X-Admin-Pin", "123456")
+	putRec := httptest.NewRecorder()
+	s.handleAdminBirthdayUsers(putRec, putReq, session)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for PUT, got %d", putRec.Code)
+	}
+	var putOut birthdayUsersTodayResponse
+	if err := json.Unmarshal(putRec.Body.Bytes(), &putOut); err != nil {
+		t.Fatalf("failed to decode birthday users PUT response: %v", err)
+	}
+	if !slices.Equal(putOut.Usernames, []string{"anna", "max"}) {
+		t.Fatalf("unexpected normalized birthday users from PUT: %v", putOut.Usernames)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/admin/birthday-users", nil)
+	getReq.Header.Set("X-Admin-Pin", "123456")
+	getRec := httptest.NewRecorder()
+	s.handleAdminBirthdayUsers(getRec, getReq, session)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for GET, got %d", getRec.Code)
+	}
+	var getOut birthdayUsersTodayResponse
+	if err := json.Unmarshal(getRec.Body.Bytes(), &getOut); err != nil {
+		t.Fatalf("failed to decode birthday users GET response: %v", err)
+	}
+	if !slices.Equal(getOut.Usernames, []string{"anna", "max"}) {
+		t.Fatalf("unexpected birthday users from GET: %v", getOut.Usernames)
 	}
 }
 func TestServerWithCORSOptionsRequest(t *testing.T) {
