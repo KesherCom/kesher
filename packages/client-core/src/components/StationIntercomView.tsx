@@ -2594,7 +2594,15 @@ export function StationIntercomView({
                             <optgroup label="Broadcast and audio">
                               <option value="broadcast_ptt">Broadcast PTT</option>
                             </optgroup>
-                            {!isUserSettingsOpen && (<><optgroup label="Stream Deck navigation"><option value="page_up">Page up</option><option value="page_down">Page down</option><option value="page_home">Home (page 1)</option><option value="page_jump">Open page / folder</option></optgroup><optgroup label="Volume"><option value="volume_delta">Volume +/-</option></optgroup></>)}
+                            <optgroup label="Stream Deck navigation">
+                              <option value="page_up">Page up</option>
+                              <option value="page_down">Page down</option>
+                              <option value="page_home">Home (page 1)</option>
+                              <option value="page_jump">Open page / folder</option>
+                            </optgroup>
+                            <optgroup label="Volume">
+                              <option value="volume_delta">Volume +/-</option>
+                            </optgroup>
                           </select>
                         </label>
 
