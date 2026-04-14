@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  resolveUnknownSourceGain,
   trySetReceiverPlayoutDelayHint,
   tuneOpusSdpForSpeech,
   upsertFmtpParams,
@@ -61,5 +62,64 @@ describe("useIntercomSession low-latency helpers", () => {
     };
 
     expect(trySetReceiverPlayoutDelayHint(receiver, 0)).toBe(false);
+  });
+});
+
+describe("resolveUnknownSourceGain", () => {
+  it("applies attenuated direct gain for unknown source tracks", () => {
+    const gain = resolveUnknownSourceGain({
+      routes: [
+        {
+          senderUserID: "u1",
+          scope: "direct",
+          targetID: "self",
+        },
+      ],
+      selfUserID: "self",
+      listenRoomIDs: ["r1"],
+      talkRoomIDs: ["r1"],
+      roomGainById: {},
+      directGainByUserId: { u1: 0.35 },
+      presence: [],
+      clampGain: (value) => Math.max(0, Math.min(2, value)),
+    });
+
+    expect(gain).toBeCloseTo(0.35, 5);
+  });
+
+  it("applies attenuated room gain for unknown source tracks", () => {
+    const gain = resolveUnknownSourceGain({
+      routes: [
+        {
+          senderUserID: "u1",
+          scope: "room",
+          targetID: "r1",
+        },
+      ],
+      selfUserID: "self",
+      listenRoomIDs: ["r1"],
+      talkRoomIDs: ["r1"],
+      roomGainById: { r1: 0.25 },
+      directGainByUserId: {},
+      presence: [],
+      clampGain: (value) => Math.max(0, Math.min(2, value)),
+    });
+
+    expect(gain).toBeCloseTo(0.25, 5);
+  });
+
+  it("falls back to unity gain when no route context is available", () => {
+    const gain = resolveUnknownSourceGain({
+      routes: [],
+      selfUserID: "self",
+      listenRoomIDs: [],
+      talkRoomIDs: [],
+      roomGainById: {},
+      directGainByUserId: {},
+      presence: [],
+      clampGain: (value) => Math.max(0, Math.min(2, value)),
+    });
+
+    expect(gain).toBe(1);
   });
 });

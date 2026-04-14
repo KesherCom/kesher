@@ -14,9 +14,10 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use opus::{Application, Channels, Decoder, Encoder};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
-    Arc, Mutex,
+    Arc, Mutex, RwLock,
 };
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -61,6 +62,9 @@ const OPUS_BITRATE: i32 = 24_000;
 const MIN_INPUT_GAIN: f32 = 0.0;
 const MAX_INPUT_GAIN: f32 = 16.0;
 const DEFAULT_INPUT_GAIN: f32 = 1.0;
+const MIN_OUTPUT_GAIN: f32 = 0.0;
+const MAX_OUTPUT_GAIN: f32 = 2.0;
+const DEFAULT_OUTPUT_GAIN: f32 = 1.0;
 const DEFAULT_AUDIO_GATE_ENABLED: bool = false;
 const MIN_AUDIO_GATE_THRESHOLD_DB: f32 = -72.0;
 const MAX_AUDIO_GATE_THRESHOLD_DB: f32 = -12.0;
@@ -182,6 +186,7 @@ pub struct RunningEngine {
     pub peer_connection: Arc<RTCPeerConnection>,
     pub ptt_active: Arc<AtomicBool>,
     pub audio_processing: Arc<AudioProcessingState>,
+    pub output_routing: Arc<OutputRoutingState>,
     /// Dropping this sender shuts down the capture/encode/send loop.
     _shutdown: mpsc::Sender<()>,
 }
@@ -190,6 +195,44 @@ pub struct AudioProcessingState {
     input_gain_bits: AtomicU32,
     audio_gate_enabled: AtomicBool,
     audio_gate_threshold_bits: AtomicU32,
+}
+
+pub struct OutputRoutingState {
+    output_gain_by_user_id: RwLock<HashMap<String, f32>>,
+}
+
+impl OutputRoutingState {
+    fn new() -> Self {
+        Self {
+            output_gain_by_user_id: RwLock::new(HashMap::new()),
+        }
+    }
+
+    fn set_output_gains(&self, gains_by_user_id: HashMap<String, f32>) {
+        let mut next = HashMap::with_capacity(gains_by_user_id.len());
+        for (user_id, gain) in gains_by_user_id {
+            if user_id.trim().is_empty() {
+                continue;
+            }
+            next.insert(user_id, clamp_output_gain(gain));
+        }
+        if let Ok(mut map) = self.output_gain_by_user_id.write() {
+            *map = next;
+        }
+    }
+
+    fn gain_for_user(&self, user_id: &str) -> f32 {
+        if user_id.is_empty() {
+            return DEFAULT_OUTPUT_GAIN;
+        }
+        if let Ok(map) = self.output_gain_by_user_id.read() {
+            return map
+                .get(user_id)
+                .copied()
+                .unwrap_or(DEFAULT_OUTPUT_GAIN);
+        }
+        DEFAULT_OUTPUT_GAIN
+    }
 }
 
 impl AudioProcessingState {
@@ -246,6 +289,22 @@ fn clamp_audio_gate_threshold_db(threshold_db: f32) -> f32 {
         .min(MAX_AUDIO_GATE_THRESHOLD_DB)
 }
 
+fn clamp_output_gain(gain: f32) -> f32 {
+    if !gain.is_finite() {
+        return DEFAULT_OUTPUT_GAIN;
+    }
+    gain.max(MIN_OUTPUT_GAIN).min(MAX_OUTPUT_GAIN)
+}
+
+fn source_user_id_from_track_id(track_id: &str) -> Option<String> {
+    const PREFIX: &str = "audio-user-";
+    track_id
+        .strip_prefix(PREFIX)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
 fn dbfs_to_linear_amplitude(dbfs: f32) -> f32 {
     10.0f32.powf(clamp_audio_gate_threshold_db(dbfs) / 20.0)
 }
@@ -262,9 +321,11 @@ fn compute_gate_coefficient(sample_rate: f32, time_ms: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_audio_gate_threshold_db, clamp_input_gain, dbfs_to_linear_amplitude,
+        clamp_audio_gate_threshold_db, clamp_input_gain, clamp_output_gain,
+        dbfs_to_linear_amplitude,
         DEFAULT_AUDIO_GATE_THRESHOLD_DB, DEFAULT_INPUT_GAIN, MAX_AUDIO_GATE_THRESHOLD_DB,
-        MAX_INPUT_GAIN, MIN_AUDIO_GATE_THRESHOLD_DB, MIN_INPUT_GAIN,
+        MAX_INPUT_GAIN, MAX_OUTPUT_GAIN, MIN_AUDIO_GATE_THRESHOLD_DB, MIN_INPUT_GAIN,
+        MIN_OUTPUT_GAIN,
     };
 
     #[test]
@@ -318,6 +379,14 @@ mod tests {
         assert!(attack > 0.0 && attack <= 1.0, "Attack coefficient should be in [0,1]");
         assert!(release > 0.0 && release <= 1.0, "Release coefficient should be in [0,1]");
         assert!(attack > release, "Attack should be faster (higher coeff) than release");
+    }
+
+    #[test]
+    fn clamp_output_gain_bounds() {
+        assert_eq!(clamp_output_gain(-1.0), MIN_OUTPUT_GAIN);
+        assert_eq!(clamp_output_gain(0.5), 0.5);
+        assert_eq!(clamp_output_gain(1.0), 1.0);
+        assert_eq!(clamp_output_gain(99.0), MAX_OUTPUT_GAIN);
     }
 }
 
@@ -490,17 +559,6 @@ pub async fn start_engine(
 
     let collected_candidates = ice_candidates.lock().unwrap().clone();
 
-    // ── 7. Wire up incoming tracks for playback ───────────────────────────
-    let output_device_id = params.output_device_id.clone();
-    let app_clone = app.clone();
-    pc.on_track(Box::new(move |track, _receiver, _transceiver| {
-        let output_device_id = output_device_id.clone();
-        let app_clone = app_clone.clone();
-        Box::pin(async move {
-            tokio::spawn(playback_loop(track, output_device_id, app_clone));
-        })
-    }));
-
     // ── 8. Wire up capture → encode → send ───────────────────────────────
     let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>(1);
     let ptt_active = Arc::new(AtomicBool::new(false));
@@ -519,6 +577,28 @@ pub async fn start_engine(
         audio_gate_enabled,
         audio_gate_threshold_db,
     ));
+    let output_routing = Arc::new(OutputRoutingState::new());
+
+    // ── 7. Wire up incoming tracks for playback ───────────────────────────
+    let output_device_id = params.output_device_id.clone();
+    let app_clone = app.clone();
+    let output_routing_for_track = Arc::clone(&output_routing);
+    pc.on_track(Box::new(move |track, _receiver, _transceiver| {
+        let output_device_id = output_device_id.clone();
+        let app_clone = app_clone.clone();
+        let output_routing_for_track = Arc::clone(&output_routing_for_track);
+        Box::pin(async move {
+            let track_id = track.id();
+            let source_user_id = source_user_id_from_track_id(&track_id);
+            tokio::spawn(playback_loop(
+                track,
+                source_user_id,
+                output_routing_for_track,
+                output_device_id,
+                app_clone,
+            ));
+        })
+    }));
 
     tokio::spawn(capture_loop(
         audio_track,
@@ -535,6 +615,7 @@ pub async fn start_engine(
             peer_connection: Arc::clone(&pc),
             ptt_active: Arc::clone(&ptt_active),
             audio_processing: Arc::clone(&audio_processing),
+            output_routing: Arc::clone(&output_routing),
             _shutdown: shutdown_tx,
         };
         *state.engine.lock().unwrap() = Some(engine);
@@ -790,6 +871,8 @@ async fn capture_loop(
 /// Reads RTP from an incoming track, Opus-decodes it, and pushes PCM to CPAL output.
 async fn playback_loop(
     track: Arc<TrackRemote>,
+    source_user_id: Option<String>,
+    output_routing: Arc<OutputRoutingState>,
     device_id: Option<String>,
     app: AppHandle,
 ) {
@@ -867,7 +950,16 @@ async fn playback_loop(
 
                     match decoder.decode_float(&frame.payload, &mut decode_buf, false) {
                         Ok(n) => {
-                            let pcm = decode_buf[..n].to_vec();
+                            let user_gain = source_user_id
+                                .as_deref()
+                                .map(|user_id| output_routing.gain_for_user(user_id))
+                                .unwrap_or(DEFAULT_OUTPUT_GAIN);
+                            let mut pcm = decode_buf[..n].to_vec();
+                            if user_gain != DEFAULT_OUTPUT_GAIN {
+                                for sample in &mut pcm {
+                                    *sample = (*sample * user_gain).clamp(-1.0, 1.0);
+                                }
+                            }
                             for &s in &pcm {
                                 if s.abs() > output_peak { output_peak = s.abs(); }
                             }
@@ -1008,6 +1100,12 @@ pub fn set_audio_gate(state: &AudioEngineState, enabled: bool, threshold_db: f32
         engine
             .audio_processing
             .set_audio_gate_threshold_db(threshold_db);
+    }
+}
+
+pub fn set_output_gains(state: &AudioEngineState, gains_by_user_id: HashMap<String, f32>) {
+    if let Some(engine) = state.engine.lock().unwrap().as_ref() {
+        engine.output_routing.set_output_gains(gains_by_user_id);
     }
 }
 

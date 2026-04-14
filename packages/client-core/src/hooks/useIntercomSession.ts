@@ -149,6 +149,97 @@ function clampPriorityLevel(value: number | undefined): number {
   return Math.max(0, Math.min(3, Math.trunc(value)));
 }
 
+type GainRoute = {
+  senderUserID: string;
+  scope: "direct" | "room" | "broadcast";
+  targetID: string;
+};
+
+type GainPresence = {
+  userId: string;
+  voiceMode?: "ptt" | "always_on";
+  micEnabled?: boolean;
+  talkRooms?: string[];
+};
+
+type ResolveUnknownSourceGainOptions = {
+  routes: GainRoute[];
+  selfUserID: string;
+  listenRoomIDs: string[];
+  talkRoomIDs: string[];
+  roomGainById: Record<string, number>;
+  directGainByUserId: Record<string, number>;
+  presence: GainPresence[];
+  clampGain: (value: number) => number;
+};
+
+export function resolveUnknownSourceGain({
+  routes,
+  selfUserID,
+  listenRoomIDs,
+  talkRoomIDs,
+  roomGainById,
+  directGainByUserId,
+  presence,
+  clampGain,
+}: ResolveUnknownSourceGainOptions): number {
+  const directToSelfRoutes = routes.filter(
+    (route) => route.scope === "direct" && route.targetID === selfUserID,
+  );
+  if (directToSelfRoutes.length > 0) {
+    let maxDirectGain = 0;
+    for (const route of directToSelfRoutes) {
+      maxDirectGain = Math.max(
+        maxDirectGain,
+        clampGain(directGainByUserId[route.senderUserID] ?? 1),
+      );
+    }
+    if (maxDirectGain > 0) return maxDirectGain;
+  }
+
+  let maxRoomGain = 0;
+  let sawRoomCandidate = false;
+  for (const route of routes) {
+    if (route.scope !== "room") continue;
+    if (!listenRoomIDs.includes(route.targetID)) continue;
+    sawRoomCandidate = true;
+    maxRoomGain = Math.max(
+      maxRoomGain,
+      clampGain(roomGainById[route.targetID] ?? 1),
+    );
+  }
+  if (sawRoomCandidate) return maxRoomGain;
+
+  for (const p of presence) {
+    if (p.userId === selfUserID) continue;
+    if (p.voiceMode !== "always_on" || !p.micEnabled) continue;
+    for (const roomId of p.talkRooms || []) {
+      if (!listenRoomIDs.includes(roomId)) continue;
+      sawRoomCandidate = true;
+      maxRoomGain = Math.max(maxRoomGain, clampGain(roomGainById[roomId] ?? 1));
+    }
+  }
+  if (sawRoomCandidate) return maxRoomGain;
+
+  const anchorRoomID = matrixAnchorRoomId(listenRoomIDs, talkRoomIDs);
+  if (anchorRoomID) {
+    return clampGain(roomGainById[anchorRoomID] ?? 1);
+  }
+
+  if (listenRoomIDs.length > 0) {
+    let fallbackRoomGain = 0;
+    for (const roomID of listenRoomIDs) {
+      fallbackRoomGain = Math.max(
+        fallbackRoomGain,
+        clampGain(roomGainById[roomID] ?? 1),
+      );
+    }
+    if (fallbackRoomGain > 0) return fallbackRoomGain;
+  }
+
+  return 1;
+}
+
 export function upsertFmtpParams(existing: string): string {
   const desired = Object.fromEntries(opusSpeechFmtpParams) as Record<
     string,
@@ -702,62 +793,16 @@ export function useIntercomSession({
     };
 
     if (!sourceUserID) {
-      const directToSelfRoutes = routes.filter(
-        (route) => route.scope === "direct" && route.targetID === ad.self.id,
-      );
-      if (directToSelfRoutes.length > 0) {
-        let gain = 1;
-        for (const route of directToSelfRoutes) {
-          gain = Math.max(
-            gain,
-            clampGainValue(
-              directGainByUserIdRef.current[route.senderUserID] ?? 1,
-            ),
-          );
-        }
-        return gain;
-      }
-      let roomGain = 1;
-      for (const route of routes) {
-        if (route.scope !== "room") continue;
-        if (!listenRoomIdsRef.current.includes(route.targetID)) continue;
-        roomGain = Math.max(
-          roomGain,
-          clampGainValue(roomGainByIdRef.current[route.targetID] ?? 1),
-        );
-      }
-      if (roomGain !== 1) return roomGain;
-      for (const p of presenceRef.current) {
-        if (p.userId === ad.self.id) continue;
-        if (p.voiceMode !== "always_on" || !p.micEnabled) continue;
-        for (const roomId of p.talkRooms || []) {
-          if (!listenRoomIdsRef.current.includes(roomId)) continue;
-          roomGain = Math.max(
-            roomGain,
-            clampGainValue(roomGainByIdRef.current[roomId] ?? 1),
-          );
-        }
-      }
-      const anchorRoomID = matrixAnchorRoomId(
-        listenRoomIdsRef.current,
-        talkRoomIdsRef.current,
-      );
-      if (anchorRoomID) {
-        return clampGainValue(
-          roomGainByIdRef.current[anchorRoomID] ?? roomGain,
-        );
-      }
-      if (listenRoomIdsRef.current.length > 0) {
-        let fallbackRoomGain = roomGain;
-        for (const roomID of listenRoomIdsRef.current) {
-          fallbackRoomGain = Math.max(
-            fallbackRoomGain,
-            clampGainValue(roomGainByIdRef.current[roomID] ?? 1),
-          );
-        }
-        return fallbackRoomGain;
-      }
-      return roomGain;
+      return resolveUnknownSourceGain({
+        routes,
+        selfUserID: ad.self.id,
+        listenRoomIDs: listenRoomIdsRef.current,
+        talkRoomIDs: talkRoomIdsRef.current,
+        roomGainById: roomGainByIdRef.current,
+        directGainByUserId: directGainByUserIdRef.current,
+        presence: presenceRef.current,
+        clampGain: clampGainValue,
+      });
     }
     const directToSelf = routes.some(
       (route) =>
@@ -859,6 +904,31 @@ export function useIntercomSession({
     if (!nativeAudio?.isNative) return;
     nativeAudio.setAudioGate(audioGateEnabled, audioGateThresholdDb);
   }, [nativeAudio, audioGateEnabled, audioGateThresholdDb]);
+
+  useEffect(() => {
+    if (!nativeAudio?.isNative) return;
+    if (!appDataRef.current) {
+      nativeAudio.setOutputGains({});
+      return;
+    }
+
+    const gainsByUserId: Record<string, number> = {};
+    for (const user of appDataRef.current.users) {
+      if (user.id === appDataRef.current.self.id) continue;
+      gainsByUserId[user.id] = resolveGainForSourceUser(user.id);
+    }
+    nativeAudio.setOutputGains(gainsByUserId);
+  }, [
+    nativeAudio,
+    appData,
+    roomGainById,
+    directGainByUserId,
+    presence,
+    activeVoiceRoutes,
+    listenRoomIds,
+    talkRoomIds,
+    resolveGainForSourceUser,
+  ]);
 
   const remote = useRemoteAudio({
     selectedOutputDeviceId,
