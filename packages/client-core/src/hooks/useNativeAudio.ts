@@ -78,6 +78,7 @@ export type NativeAudioHook = {
   setInputGain: (gain: number) => void;
   setAudioGate: (enabled: boolean, thresholdDb: number) => void;
   setOutputGains: (gainsByUserId: Record<string, number>) => void;
+  setOutputDevice: (outputDeviceId: string) => void;
   /** Tear down the native engine (call on disconnect). */
   stopEngine: () => Promise<void>;
 };
@@ -210,6 +211,18 @@ export function useNativeAudio(
     [isNative],
   );
 
+  const setOutputDevice = useCallback(
+    (outputDeviceId: string) => {
+      if (!isNative) return;
+      tauriInvoke("set_output_device", {
+        output_device_id: outputDeviceId || null,
+      }).catch((err) =>
+        console.error("[native-audio] set_output_device failed:", err),
+      );
+    },
+    [isNative],
+  );
+
   const stopEngine = useCallback(async () => {
     if (!isNative) return;
     try {
@@ -227,6 +240,7 @@ export function useNativeAudio(
     setInputGain,
     setAudioGate,
     setOutputGains,
+    setOutputDevice,
     stopEngine,
   };
 }

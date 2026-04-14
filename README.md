@@ -226,6 +226,7 @@ telegram_webhook_secret: ""
 telegram_mode: "polling"
 companion_shared_secret: ""
 companion_allowed_usernames: []
+desktop_audio_adaptation_profile: "balanced"
 ```
 
 | Variable                        | Default       | Description                                                                          |
@@ -244,6 +245,27 @@ companion_allowed_usernames: []
 | `PRODUCTION_HTTP_REDIRECT_ADDR` | `:80`         | HTTP redirect address in production mode                                             |
 | `COMPANION_SHARED_SECRET`       | _(empty)_     | Optional shared secret required by Companion discovery and bridge endpoints           |
 | `COMPANION_ALLOWED_USERNAMES`   | _(empty)_     | Optional comma-separated allowlist of usernames that may be controlled by Companion   |
+
+### Desktop audio adaptation profile (YAML)
+
+The native desktop audio engine can read an adaptation profile from `config.yaml`/`config.yml`:
+
+```yaml
+desktop_audio_adaptation_profile: "balanced"
+```
+
+Supported values:
+
+- `balanced` (default)
+- `ultra-low-latency`
+- `robust-wlan`
+
+Priority order for profile selection is:
+
+1. Tauri `start_audio_engine` payload field `adaptation_profile`
+2. Environment variable `KESHER_AUDIO_PROFILE`
+3. YAML key `desktop_audio_adaptation_profile`
+4. Built-in default `balanced`
 
 ### CertMagic variables (when `TLS_MODE=certmagic`)
 

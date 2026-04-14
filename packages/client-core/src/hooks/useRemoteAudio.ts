@@ -117,7 +117,26 @@ export function useRemoteAudio({
   // Apply output device when it changes
   useEffect(() => {
     for (const audio of remoteAudioRef.current.values()) {
-      void applyOutputDeviceToAudio(audio, selectedOutputDeviceId);
+      void (async () => {
+        const sinkApplied = await applyOutputDeviceToAudio(
+          audio,
+          selectedOutputDeviceId,
+        );
+        // Fail closed for explicit device selection to avoid default-device leaks.
+        if (selectedOutputDeviceId && !sinkApplied) {
+          audio.pause();
+          audio.muted = true;
+          return;
+        }
+        audio.muted = false;
+        if (audio.srcObject) {
+          await audio.play();
+        }
+      })().catch((err) => {
+        onAudioError(
+          `Failed to resume remote audio: ${err instanceof Error ? err.message : "unknown error"}`,
+        );
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedOutputDeviceId]);

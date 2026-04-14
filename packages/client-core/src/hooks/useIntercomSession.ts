@@ -1725,23 +1725,25 @@ export function useIntercomSession({
           }
           audio.srcObject = stream;
           remote.applyVolumeToRemoteAudio(key);
-          const reapplyOutputDevice = () => {
-            void remote.applyOutputDeviceToAudio(
+          void (async () => {
+            const outputDeviceId = selectedOutputDeviceIdRef.current;
+            const sinkApplied = await remote.applyOutputDeviceToAudio(
               audio,
-              selectedOutputDeviceIdRef.current,
+              outputDeviceId,
             );
-          };
-          reapplyOutputDevice();
-          void audio
-            .play()
-            .then(() => {
-              reapplyOutputDevice();
-            })
-            .catch((err) => {
-              setAudioError(
-                `Remote audio playback blocked: ${err instanceof Error ? err.message : "unknown error"}`,
-              );
-            });
+            // Fail closed: with an explicit output selection, never leak to default.
+            if (outputDeviceId && !sinkApplied) {
+              audio.pause();
+              audio.muted = true;
+              return;
+            }
+            audio.muted = false;
+            await audio.play();
+          })().catch((err) => {
+            setAudioError(
+              `Remote audio playback blocked: ${err instanceof Error ? err.message : "unknown error"}`,
+            );
+          });
           pushDebugEvent("system · webrtc · remote audio track attached");
         };
         try {
