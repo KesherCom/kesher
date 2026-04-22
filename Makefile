@@ -42,7 +42,7 @@ help:
 	@echo "  make clean         - remove common build artifacts"
 
 deps:
-	@npm ci
+	@npm ci || npm install
 	@cd backend && go mod download && go mod tidy
 
 dev-backend:

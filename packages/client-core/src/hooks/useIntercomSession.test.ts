@@ -4,17 +4,18 @@ import {
   trySetReceiverPlayoutDelayHint,
   tuneOpusSdpForSpeech,
   upsertFmtpParams,
+  getAdaptivePlayoutDelayHint,
 } from "./useIntercomSession";
 
 describe("useIntercomSession low-latency helpers", () => {
-  it("upserts opus fmtp params for low-latency speech", () => {
+  it("upserts opus fmtp params for low-latency speech with FEC enabled", () => {
     expect(
       upsertFmtpParams(
-        "useinbandfec=1;usedtx=0;maxaveragebitrate=64000;stereo=1",
+        "useinbandfec=0;usedtx=0;maxaveragebitrate=64000;stereo=1",
       ),
     ).toBe(
       [
-        "useinbandfec=0",
+        "useinbandfec=1",
         "usedtx=0",
         "maxaveragebitrate=24000",
         "stereo=0",
@@ -38,7 +39,7 @@ describe("useIntercomSession low-latency helpers", () => {
     ].join("\r\n");
 
     expect(tuneOpusSdpForSpeech(sdp)).toContain(
-      "a=fmtp:111 stereo=0;sprop-stereo=0;useinbandfec=0;usedtx=0;cbr=1;ptime=2.5;minptime=2.5;maxaveragebitrate=24000",
+      "a=fmtp:111 stereo=0;sprop-stereo=0;useinbandfec=1;usedtx=0;cbr=1;ptime=2.5;minptime=2.5;maxaveragebitrate=24000",
     );
   });
 
@@ -62,6 +63,26 @@ describe("useIntercomSession low-latency helpers", () => {
     };
 
     expect(trySetReceiverPlayoutDelayHint(receiver, 0)).toBe(false);
+  });
+
+  it("returns aggressive 0ms delay for LAN with low jitter", () => {
+    expect(getAdaptivePlayoutDelayHint(2, 3)).toBe(0);
+  });
+
+  it("returns 20ms delay for good network", () => {
+    expect(getAdaptivePlayoutDelayHint(10, 8)).toBe(0.02);
+  });
+
+  it("returns 50ms delay for moderate RTT", () => {
+    expect(getAdaptivePlayoutDelayHint(35, 12)).toBe(0.05);
+  });
+
+  it("returns 100ms delay for higher RTT", () => {
+    expect(getAdaptivePlayoutDelayHint(80, 20)).toBe(0.1);
+  });
+
+  it("returns 150ms delay for poor network", () => {
+    expect(getAdaptivePlayoutDelayHint(120, 30)).toBe(0.15);
   });
 });
 

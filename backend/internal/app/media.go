@@ -122,7 +122,7 @@ func buildWebRTCAPI(logger *slog.Logger) (*webrtc.API, error) {
 			MimeType:    webrtc.MimeTypeOpus,
 			ClockRate:   48000,
 			Channels:    2,
-			SDPFmtpLine: "minptime=2;useinbandfec=0;usedtx=0;stereo=0;sprop-stereo=0",
+			SDPFmtpLine: "minptime=2;useinbandfec=1;usedtx=0;stereo=0;sprop-stereo=0",
 		},
 		PayloadType: 111,
 	}, webrtc.RTPCodecTypeAudio); err != nil {
@@ -144,7 +144,8 @@ func buildWebRTCAPI(logger *slog.Logger) (*webrtc.API, error) {
 	se := webrtc.SettingEngine{}
 	// Disable mDNS so ICE candidates resolve immediately on LAN.
 	se.SetICEMulticastDNSMode(0) // ice.MulticastDNSModeDisabled == 0
-	se.SetSRTPReplayProtectionWindow(64)
+	// Increased replay window to tolerate more packet reordering on jittery networks
+	se.SetSRTPReplayProtectionWindow(128)
 	se.SetReceiveMTU(1200)
 
 	api := webrtc.NewAPI(
@@ -463,9 +464,12 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 		// routing changes (which need a full Lock) remain infrequent.
 		m.mu.RLock()
 		if s := m.sources[sourcePeer.token]; s != nil {
-			for _, dest := range s.dests {
+			for destToken, dest := range s.dests {
 				if dest.gate.Load() {
-					_, _ = dest.localTrack.Write(buf[:n])
+					if _, err := dest.localTrack.Write(buf[:n]); err != nil {
+						// Log RTP write failures for diagnostics; may indicate full send buffer or peer disconnection
+						m.logger.Debug("rtp forward write failed", "dest_token", destToken, "error", err)
+					}
 				}
 			}
 		}

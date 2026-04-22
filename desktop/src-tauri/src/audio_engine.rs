@@ -168,9 +168,11 @@ const CAPTURE_RAW_QUEUE_CAPACITY: usize = 4;
 /// Queue depth between Opus encoder thread and async WebRTC sender.
 const CAPTURE_ENCODED_QUEUE_CAPACITY: usize = 16;
 /// Queue depth between async RTP reader and Opus decoder thread.
-const PLAYBACK_OPUS_QUEUE_CAPACITY: usize = 8;
+/// Increased from 8 to 16 (80 ms → 160 ms) to tolerate network jitter better.
+const PLAYBACK_OPUS_QUEUE_CAPACITY: usize = 16;
 /// Queue depth between Opus decoder thread and CPAL output callback.
-const PLAYBACK_PCM_QUEUE_CAPACITY: usize = 8;
+/// Increased from 8 to 16 (80 ms → 160 ms) to reduce underruns on timing jitter.
+const PLAYBACK_PCM_QUEUE_CAPACITY: usize = 16;
 /// Throttled log interval to avoid spamming on sustained frame drops.
 const DROP_LOG_EVERY: u32 = 200;
 /// Periodic interval for latency telemetry logs.

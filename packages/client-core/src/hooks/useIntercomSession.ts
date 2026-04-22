@@ -113,7 +113,7 @@ function getOpusMinPtime(): string {
 const opusSpeechFmtpParams: ReadonlyArray<readonly [string, string]> = [
   ["stereo", "0"],
   ["sprop-stereo", "0"],
-  ["useinbandfec", "0"],
+  ["useinbandfec", "1"],
   ["usedtx", "0"],
   ["cbr", "1"],
   ["ptime", getOpusPtime()],
@@ -317,6 +317,38 @@ export function trySetReceiverPlayoutDelayHint(
   } catch {
     return false;
   }
+}
+
+/**
+ * Calculate adaptive playout delay hint based on network RTT and jitter.
+ * - LAN (RTT < 5ms, jitter < 5ms): 0 ms (aggressive)
+ * - Good network: 20-50 ms
+ * - Moderate: 50-100 ms  
+ * - Poor: up to 150 ms
+ * Returns hint in seconds (0.0–0.15) for setReceiverPlayoutDelayHint().
+ */
+export function getAdaptivePlayoutDelayHint(
+  roundTripMs: number,
+  jitterMs: number,
+): number {
+  if (roundTripMs < 5 && jitterMs < 5) {
+    // LAN: aggressive
+    return 0;
+  }
+  if (roundTripMs < 20 && jitterMs < 10) {
+    // Good network: minimal buffer
+    return 0.02; // 20 ms
+  }
+  if (roundTripMs < 50) {
+    // Moderate RTT: moderate buffer
+    return 0.05; // 50 ms
+  }
+  if (roundTripMs < 100) {
+    // Higher RTT: increase buffer
+    return 0.1; // 100 ms
+  }
+  // Poor network: maximum buffer
+  return 0.15; // 150 ms
 }
 
 function isMobileClient(): boolean {
@@ -883,6 +915,12 @@ export function useIntercomSession({
   });
 
   const { rtpStats, startStatsLoop, stopStatsLoop } = useRtpStats();
+  const currentRtpStatsRef = useRef<RtpStats>(rtpStats);
+
+  // Keep ref in sync with rtpStats for access in ontrack callbacks
+  useEffect(() => {
+    currentRtpStatsRef.current = rtpStats;
+  }, [rtpStats]);
 
   useEffect(() => {
     if (!nativeAudio?.isNative) return;
@@ -1692,7 +1730,13 @@ export function useIntercomSession({
           if (sourceUserID) {
             remote.remoteSourceUserIdRef.current.set(key, sourceUserID);
           }
-          trySetReceiverPlayoutDelayHint(event.receiver, 0);
+          // Set adaptive playout delay based on current network conditions
+          const stats = currentRtpStatsRef.current;
+          const delayHint = getAdaptivePlayoutDelayHint(
+            stats.roundTripMs,
+            stats.jitterMs,
+          );
+          trySetReceiverPlayoutDelayHint(event.receiver, delayHint);
           let audio = remote.remoteAudioRef.current.get(key);
           if (!audio) {
             audio = document.createElement("audio");
