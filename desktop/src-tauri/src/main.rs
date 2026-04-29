@@ -62,6 +62,18 @@ fn set_audio_gate(enabled: bool, threshold_db: f32, state: State<'_, AudioEngine
     audio_engine::set_audio_gate(&state, enabled, threshold_db);
 }
 
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn set_output_gains(gains_by_user_id: std::collections::HashMap<String, f32>, state: State<'_, AudioEngineState>) {
+    audio_engine::set_output_gains(&state, gains_by_user_id);
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn set_output_device(output_device_id: Option<String>, state: State<'_, AudioEngineState>) {
+    audio_engine::set_output_device(&state, output_device_id);
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -81,6 +93,8 @@ pub fn run() {
                 set_ptt,
                 set_input_gain,
                 set_audio_gate,
+                set_output_gains,
+                set_output_device,
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");

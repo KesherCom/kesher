@@ -127,7 +127,7 @@ export type Presence = {
   roleId: string;
   listenRooms: string[];
   talkRooms: string[];
-  voiceMode: string;
+  voiceMode: "ptt" | "always_on";
   micEnabled: boolean;
   broadcastActive: boolean;
 };

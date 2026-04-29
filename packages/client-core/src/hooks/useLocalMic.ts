@@ -444,7 +444,10 @@ export function useLocalMic({
       const elWithSink = el as HTMLAudioElement & {
         setSinkId?: (sinkId: string) => Promise<void>;
       };
-      if (outputDeviceId && typeof elWithSink.setSinkId === "function") {
+      if (outputDeviceId) {
+        if (typeof elWithSink.setSinkId !== "function") {
+          throw new Error("Output device selection is not supported");
+        }
         await elWithSink.setSinkId(outputDeviceId);
       }
       await el.play();

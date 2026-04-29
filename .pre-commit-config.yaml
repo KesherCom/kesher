@@ -22,26 +22,26 @@ repos:
     rev: v0.5.1
     hooks:
       - id: go-fmt
-    # JS/TS/React formatting
-    - repo: https://github.com/pre-commit/mirrors-prettier
-      rev: v4.0.0-alpha.8
-      hooks:
-        - id: prettier
-          files: ^(packages/client-core/src/.*\.(js|jsx|ts|tsx|css)|web/.*\.(js|jsx|ts|tsx|css)|.*\.(json|md|yml|yaml))$
 
-    # Project-specific builds/type checks
-    - repo: local
-      hooks:
-        - id: client-core-tests
-          name: client-core-tests
-          entry: npm --prefix packages/client-core run test
-          language: system
-          pass_filenames: false
-          files: ^packages/client-core/
-        - id: web-typescript-build
-          name: web-typescript-build
-          entry: npm --prefix web run build
-          language: system
-          pass_filenames: false
-          files: ^(web/|packages/client-core/)
-        files: ^web/
+  # JS/TS/React formatting
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        files: ^(packages/client-core/src/.*\.(js|jsx|ts|tsx|css)|web/.*\.(js|jsx|ts|tsx|css)|.*\.(json|md|yml|yaml))$
+
+  # Project-specific builds/type checks
+  - repo: local
+    hooks:
+      - id: client-core-tests
+        name: client-core-tests
+        entry: npm --prefix packages/client-core run test
+        language: system
+        pass_filenames: false
+        files: ^packages/client-core/
+      - id: web-typescript-build
+        name: web-typescript-build
+        entry: npm --prefix web run build
+        language: system
+        pass_filenames: false
+        files: ^(web/|packages/client-core/)

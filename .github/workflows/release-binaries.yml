@@ -121,7 +121,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -182,10 +182,31 @@ jobs:
           echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
 
+      - name: Configure macOS signing
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            echo "APPLE_CERTIFICATE=$APPLE_CERTIFICATE" >> "$GITHUB_ENV"
+            echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD" >> "$GITHUB_ENV"
+            echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
+            if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+              echo "APPLE_ID=$APPLE_ID" >> "$GITHUB_ENV"
+              echo "APPLE_PASSWORD=$APPLE_PASSWORD" >> "$GITHUB_ENV"
+              echo "APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
+            fi
+          else
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+          fi
+
       - name: Build
         run: |
           npm install
-          # Tauri baut die App jetzt automatisch unsigniert, da keine Secrets vorhanden sind
           npm --prefix desktop run tauri build -- --target aarch64-apple-darwin
 
       - name: Prepare release assets
@@ -231,6 +252,28 @@ jobs:
           echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
 
+      - name: Configure macOS signing
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            echo "APPLE_CERTIFICATE=$APPLE_CERTIFICATE" >> "$GITHUB_ENV"
+            echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD" >> "$GITHUB_ENV"
+            echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
+            if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+              echo "APPLE_ID=$APPLE_ID" >> "$GITHUB_ENV"
+              echo "APPLE_PASSWORD=$APPLE_PASSWORD" >> "$GITHUB_ENV"
+              echo "APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
+            fi
+          else
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+          fi
+
       - name: Build
         run: |
           npm install
@@ -252,12 +295,18 @@ jobs:
           name: desktop-macos-amd64
           path: dist/release/*
           if-no-files-found: error
-          
+
   # 5. Release (Nur bei Tags!)
   release:
     name: Publish Release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build, build-desktop-windows, build-desktop-macos-arm64, build-desktop-macos-amd64]
+    needs:
+      [
+        build,
+        build-desktop-windows,
+        build-desktop-macos-arm64,
+        build-desktop-macos-amd64,
+      ]
     runs-on: ubuntu-latest
     steps:
       - name: Download All

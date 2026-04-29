@@ -21,6 +21,7 @@ export function normalizePresenceList(value: unknown): Presence[] {
   if (!Array.isArray(value)) return [];
   return value.map((entry) => {
     const record = (entry ?? {}) as Record<string, unknown>;
+    const voiceMode = record.voiceMode === "always_on" ? "always_on" : "ptt";
     return {
       ...record,
       userId: typeof record.userId === "string" ? record.userId : "",
@@ -28,8 +29,7 @@ export function normalizePresenceList(value: unknown): Presence[] {
       roleId: typeof record.roleId === "string" ? record.roleId : "",
       listenRooms: toStringArray(record.listenRooms),
       talkRooms: toStringArray(record.talkRooms),
-      voiceMode:
-        typeof record.voiceMode === "string" ? record.voiceMode : "ptt",
+      voiceMode,
       micEnabled: Boolean(record.micEnabled),
       broadcastActive: Boolean(record.broadcastActive),
     };

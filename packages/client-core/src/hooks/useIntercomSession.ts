@@ -113,7 +113,7 @@ function getOpusMinPtime(): string {
 const opusSpeechFmtpParams: ReadonlyArray<readonly [string, string]> = [
   ["stereo", "0"],
   ["sprop-stereo", "0"],
-  ["useinbandfec", "0"],
+  ["useinbandfec", "1"],
   ["usedtx", "0"],
   ["cbr", "1"],
   ["ptime", getOpusPtime()],
@@ -147,6 +147,97 @@ function clampPriorityLevel(value: number | undefined): number {
     return defaultRoutePriorityLevel;
   }
   return Math.max(0, Math.min(3, Math.trunc(value)));
+}
+
+type GainRoute = {
+  senderUserID: string;
+  scope: "direct" | "room" | "broadcast";
+  targetID: string;
+};
+
+type GainPresence = {
+  userId: string;
+  voiceMode?: "ptt" | "always_on";
+  micEnabled?: boolean;
+  talkRooms?: string[];
+};
+
+type ResolveUnknownSourceGainOptions = {
+  routes: GainRoute[];
+  selfUserID: string;
+  listenRoomIDs: string[];
+  talkRoomIDs: string[];
+  roomGainById: Record<string, number>;
+  directGainByUserId: Record<string, number>;
+  presence: GainPresence[];
+  clampGain: (value: number) => number;
+};
+
+export function resolveUnknownSourceGain({
+  routes,
+  selfUserID,
+  listenRoomIDs,
+  talkRoomIDs,
+  roomGainById,
+  directGainByUserId,
+  presence,
+  clampGain,
+}: ResolveUnknownSourceGainOptions): number {
+  const directToSelfRoutes = routes.filter(
+    (route) => route.scope === "direct" && route.targetID === selfUserID,
+  );
+  if (directToSelfRoutes.length > 0) {
+    let maxDirectGain = 0;
+    for (const route of directToSelfRoutes) {
+      maxDirectGain = Math.max(
+        maxDirectGain,
+        clampGain(directGainByUserId[route.senderUserID] ?? 1),
+      );
+    }
+    if (maxDirectGain > 0) return maxDirectGain;
+  }
+
+  let maxRoomGain = 0;
+  let sawRoomCandidate = false;
+  for (const route of routes) {
+    if (route.scope !== "room") continue;
+    if (!listenRoomIDs.includes(route.targetID)) continue;
+    sawRoomCandidate = true;
+    maxRoomGain = Math.max(
+      maxRoomGain,
+      clampGain(roomGainById[route.targetID] ?? 1),
+    );
+  }
+  if (sawRoomCandidate) return maxRoomGain;
+
+  for (const p of presence) {
+    if (p.userId === selfUserID) continue;
+    if (p.voiceMode !== "always_on" || !p.micEnabled) continue;
+    for (const roomId of p.talkRooms || []) {
+      if (!listenRoomIDs.includes(roomId)) continue;
+      sawRoomCandidate = true;
+      maxRoomGain = Math.max(maxRoomGain, clampGain(roomGainById[roomId] ?? 1));
+    }
+  }
+  if (sawRoomCandidate) return maxRoomGain;
+
+  const anchorRoomID = matrixAnchorRoomId(listenRoomIDs, talkRoomIDs);
+  if (anchorRoomID) {
+    return clampGain(roomGainById[anchorRoomID] ?? 1);
+  }
+
+  if (listenRoomIDs.length > 0) {
+    let fallbackRoomGain = 0;
+    for (const roomID of listenRoomIDs) {
+      fallbackRoomGain = Math.max(
+        fallbackRoomGain,
+        clampGain(roomGainById[roomID] ?? 1),
+      );
+    }
+    if (fallbackRoomGain > 0) return fallbackRoomGain;
+  }
+
+  return 1;
 }
 
 export function upsertFmtpParams(existing: string): string {
@@ -226,6 +317,38 @@ export function trySetReceiverPlayoutDelayHint(
   } catch {
     return false;
   }
+}
+
+/**
+ * Calculate adaptive playout delay hint based on network RTT and jitter.
+ * - LAN (RTT < 5ms, jitter < 5ms): 0 ms (aggressive)
+ * - Good network: 20-50 ms
+ * - Moderate: 50-100 ms  
+ * - Poor: up to 150 ms
+ * Returns hint in seconds (0.0–0.15) for setReceiverPlayoutDelayHint().
+ */
+export function getAdaptivePlayoutDelayHint(
+  roundTripMs: number,
+  jitterMs: number,
+): number {
+  if (roundTripMs < 5 && jitterMs < 5) {
+    // LAN: aggressive
+    return 0;
+  }
+  if (roundTripMs < 20 && jitterMs < 10) {
+    // Good network: minimal buffer
+    return 0.02; // 20 ms
+  }
+  if (roundTripMs < 50) {
+    // Moderate RTT: moderate buffer
+    return 0.05; // 50 ms
+  }
+  if (roundTripMs < 100) {
+    // Higher RTT: increase buffer
+    return 0.1; // 100 ms
+  }
+  // Poor network: maximum buffer
+  return 0.15; // 150 ms
 }
 
 function isMobileClient(): boolean {
@@ -702,62 +825,16 @@ export function useIntercomSession({
     };
 
     if (!sourceUserID) {
-      const directToSelfRoutes = routes.filter(
-        (route) => route.scope === "direct" && route.targetID === ad.self.id,
-      );
-      if (directToSelfRoutes.length > 0) {
-        let gain = 1;
-        for (const route of directToSelfRoutes) {
-          gain = Math.max(
-            gain,
-            clampGainValue(
-              directGainByUserIdRef.current[route.senderUserID] ?? 1,
-            ),
-          );
-        }
-        return gain;
-      }
-      let roomGain = 1;
-      for (const route of routes) {
-        if (route.scope !== "room") continue;
-        if (!listenRoomIdsRef.current.includes(route.targetID)) continue;
-        roomGain = Math.max(
-          roomGain,
-          clampGainValue(roomGainByIdRef.current[route.targetID] ?? 1),
-        );
-      }
-      if (roomGain !== 1) return roomGain;
-      for (const p of presenceRef.current) {
-        if (p.userId === ad.self.id) continue;
-        if (p.voiceMode !== "always_on" || !p.micEnabled) continue;
-        for (const roomId of p.talkRooms || []) {
-          if (!listenRoomIdsRef.current.includes(roomId)) continue;
-          roomGain = Math.max(
-            roomGain,
-            clampGainValue(roomGainByIdRef.current[roomId] ?? 1),
-          );
-        }
-      }
-      const anchorRoomID = matrixAnchorRoomId(
-        listenRoomIdsRef.current,
-        talkRoomIdsRef.current,
-      );
-      if (anchorRoomID) {
-        return clampGainValue(
-          roomGainByIdRef.current[anchorRoomID] ?? roomGain,
-        );
-      }
-      if (listenRoomIdsRef.current.length > 0) {
-        let fallbackRoomGain = roomGain;
-        for (const roomID of listenRoomIdsRef.current) {
-          fallbackRoomGain = Math.max(
-            fallbackRoomGain,
-            clampGainValue(roomGainByIdRef.current[roomID] ?? 1),
-          );
-        }
-        return fallbackRoomGain;
-      }
-      return roomGain;
+      return resolveUnknownSourceGain({
+        routes,
+        selfUserID: ad.self.id,
+        listenRoomIDs: listenRoomIdsRef.current,
+        talkRoomIDs: talkRoomIdsRef.current,
+        roomGainById: roomGainByIdRef.current,
+        directGainByUserId: directGainByUserIdRef.current,
+        presence: presenceRef.current,
+        clampGain: clampGainValue,
+      });
     }
     const directToSelf = routes.some(
       (route) =>
@@ -838,6 +915,12 @@ export function useIntercomSession({
   });
 
   const { rtpStats, startStatsLoop, stopStatsLoop } = useRtpStats();
+  const currentRtpStatsRef = useRef<RtpStats>(rtpStats);
+
+  // Keep ref in sync with rtpStats for access in ontrack callbacks
+  useEffect(() => {
+    currentRtpStatsRef.current = rtpStats;
+  }, [rtpStats]);
 
   useEffect(() => {
     if (!nativeAudio?.isNative) return;
@@ -859,6 +942,31 @@ export function useIntercomSession({
     if (!nativeAudio?.isNative) return;
     nativeAudio.setAudioGate(audioGateEnabled, audioGateThresholdDb);
   }, [nativeAudio, audioGateEnabled, audioGateThresholdDb]);
+
+  useEffect(() => {
+    if (!nativeAudio?.isNative) return;
+    if (!appDataRef.current) {
+      nativeAudio.setOutputGains({});
+      return;
+    }
+
+    const gainsByUserId: Record<string, number> = {};
+    for (const user of appDataRef.current.users) {
+      if (user.id === appDataRef.current.self.id) continue;
+      gainsByUserId[user.id] = resolveGainForSourceUser(user.id);
+    }
+    nativeAudio.setOutputGains(gainsByUserId);
+  }, [
+    nativeAudio,
+    appData,
+    roomGainById,
+    directGainByUserId,
+    presence,
+    activeVoiceRoutes,
+    listenRoomIds,
+    talkRoomIds,
+    resolveGainForSourceUser,
+  ]);
 
   const remote = useRemoteAudio({
     selectedOutputDeviceId,
@@ -1622,7 +1730,13 @@ export function useIntercomSession({
           if (sourceUserID) {
             remote.remoteSourceUserIdRef.current.set(key, sourceUserID);
           }
-          trySetReceiverPlayoutDelayHint(event.receiver, 0);
+          // Set adaptive playout delay based on current network conditions
+          const stats = currentRtpStatsRef.current;
+          const delayHint = getAdaptivePlayoutDelayHint(
+            stats.roundTripMs,
+            stats.jitterMs,
+          );
+          trySetReceiverPlayoutDelayHint(event.receiver, delayHint);
           let audio = remote.remoteAudioRef.current.get(key);
           if (!audio) {
             audio = document.createElement("audio");
@@ -1655,23 +1769,25 @@ export function useIntercomSession({
           }
           audio.srcObject = stream;
           remote.applyVolumeToRemoteAudio(key);
-          const reapplyOutputDevice = () => {
-            void remote.applyOutputDeviceToAudio(
+          void (async () => {
+            const outputDeviceId = selectedOutputDeviceIdRef.current;
+            const sinkApplied = await remote.applyOutputDeviceToAudio(
               audio,
-              selectedOutputDeviceIdRef.current,
+              outputDeviceId,
             );
-          };
-          reapplyOutputDevice();
-          void audio
-            .play()
-            .then(() => {
-              reapplyOutputDevice();
-            })
-            .catch((err) => {
-              setAudioError(
-                `Remote audio playback blocked: ${err instanceof Error ? err.message : "unknown error"}`,
-              );
-            });
+            // Fail closed: with an explicit output selection, never leak to default.
+            if (outputDeviceId && !sinkApplied) {
+              audio.pause();
+              audio.muted = true;
+              return;
+            }
+            audio.muted = false;
+            await audio.play();
+          })().catch((err) => {
+            setAudioError(
+              `Remote audio playback blocked: ${err instanceof Error ? err.message : "unknown error"}`,
+            );
+          });
           pushDebugEvent("system · webrtc · remote audio track attached");
         };
         try {

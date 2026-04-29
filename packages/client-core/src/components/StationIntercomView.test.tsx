@@ -360,7 +360,7 @@ describe("StationIntercomView", () => {
     );
   });
 
-  it("does not offer unsupported stream deck functions in user settings", async () => {
+  it("offers stream deck navigation and folder functions in user settings", async () => {
     const user = userEvent.setup();
     render(
       <StationIntercomView
@@ -372,14 +372,17 @@ describe("StationIntercomView", () => {
     await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
 
     expect(
-      screen.queryByRole("option", { name: "Volume +/-" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("option", { name: "Volume +/-" }),
+    ).toBeInTheDocument();
     expect(
-      screen.queryByRole("option", { name: "Page up" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("option", { name: "Page up" }),
+    ).toBeInTheDocument();
     expect(
-      screen.queryByRole("option", { name: "Page down" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("option", { name: "Page down" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Open page / folder" }),
+    ).toBeInTheDocument();
   });
 
   it("copies and pastes a stream deck button configuration", async () => {

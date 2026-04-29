@@ -267,6 +267,8 @@ export function App() {
   const audioDevices = useAudioDevices({
     setSelectedInputDeviceId: settings.setSelectedInputDeviceId,
     setSelectedOutputDeviceId: settings.setSelectedOutputDeviceId,
+    isNative: nativeAudio.isNative,
+    listNativeAudioDevices: nativeAudio.listDevices,
   });
 
   // Load initial room matrix from session storage (only once at mount)
@@ -1138,7 +1140,7 @@ export function App() {
   // ── Output device change (guarded) ──
   async function changeOutputDevice(outputDeviceId: string) {
     if (outputDeviceId === settings.selectedOutputDeviceIdRef.current) return;
-    if (outputDeviceId !== "") {
+    if (!nativeAudio.isNative && outputDeviceId !== "") {
       type AudioWithSinkId = HTMLAudioElement & {
         setSinkId?: (sinkId: string) => Promise<void>;
       };
@@ -1152,6 +1154,9 @@ export function App() {
     }
     settings.setSelectedOutputDeviceId(outputDeviceId);
     settings.selectedOutputDeviceIdRef.current = outputDeviceId;
+    if (nativeAudio.isNative) {
+      nativeAudio.setOutputDevice(outputDeviceId);
+    }
   }
 
   // ── Keyboard shortcuts ──

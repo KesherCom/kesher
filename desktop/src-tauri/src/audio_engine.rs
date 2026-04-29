@@ -2,7 +2,7 @@
 ///
 /// Architecture:
 ///   Capture:  CPAL input → raw PCM f32 mono 48 kHz
-///             → Opus encode (2.5 ms frames, CBR 24 kbps)
+///             → Opus encode (10 ms frames, CBR 48 kbps, in-band FEC)
 ///             → webrtc-rs RTP → UDP to Go SFU
 ///
 ///   Playback: UDP from Go SFU → webrtc-rs RTP
@@ -14,9 +14,11 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use opus::{Application, Channels, Decoder, Encoder};
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
-    Arc, Mutex,
+    atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering},
+    Arc, Mutex, RwLock,
 };
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -40,6 +42,7 @@ use webrtc::{
         rtp_transceiver_direction::RTCRtpTransceiverDirection,
         RTCRtpTransceiverInit,
     },
+    stats::{StatsReport, StatsReportType},
     track::{
         track_local::{track_local_static_sample::TrackLocalStaticSample, TrackLocal},
         track_remote::TrackRemote,
@@ -50,17 +53,108 @@ use webrtc::{
 
 /// 48 kHz mono – same as the SFU
 const SAMPLE_RATE: u32 = 48_000;
-/// 2.5 ms frames at 48 kHz = 120 samples
-const OPUS_FRAME_SIZE: usize = 120;
+/// 10 ms frames at 48 kHz = 480 samples
+const OPUS_FRAME_SIZE: usize = 480;
 /// Maximum encoded Opus packet size (bytes)
 const MAX_OPUS_PACKET: usize = 256;
 /// Default target bitrate in bits/s
-const OPUS_BITRATE: i32 = 24_000;
+const OPUS_BITRATE: i32 = 48_000;
+/// Adaptive bitrate bounds and steps in bits/s.
+const OPUS_BITRATE_MIN: i32 = 32_000;
+const OPUS_BITRATE_MAX: i32 = 56_000;
+const OPUS_BITRATE_STEP_DOWN: i32 = 8_000;
+const OPUS_BITRATE_STEP_UP: i32 = 4_000;
+const OPUS_ADAPT_GOOD_INTERVALS_FOR_STEP_UP: u32 = 2;
+const STATS_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+#[derive(Clone, Copy)]
+struct AudioAdaptConfig {
+    name: &'static str,
+    initial_bitrate: i32,
+    bitrate_min: i32,
+    bitrate_max: i32,
+    step_down: i32,
+    step_up: i32,
+    stable_intervals_for_step_up: u32,
+    congested_raw_max_ms: f64,
+    congested_raw_avg_ms: f64,
+    stable_raw_max_ms: f64,
+    stable_raw_avg_ms: f64,
+    stats_loss_warn: f64,
+    stats_loss_bad: f64,
+    stats_loss_severe: f64,
+    stats_rtt_warn_s: f64,
+    stats_rtt_bad_s: f64,
+    stats_rtt_severe_s: f64,
+}
+
+const AUDIO_ADAPT_BALANCED: AudioAdaptConfig = AudioAdaptConfig {
+    name: "balanced",
+    initial_bitrate: OPUS_BITRATE,
+    bitrate_min: OPUS_BITRATE_MIN,
+    bitrate_max: OPUS_BITRATE_MAX,
+    step_down: OPUS_BITRATE_STEP_DOWN,
+    step_up: OPUS_BITRATE_STEP_UP,
+    stable_intervals_for_step_up: OPUS_ADAPT_GOOD_INTERVALS_FOR_STEP_UP,
+    congested_raw_max_ms: 20.0,
+    congested_raw_avg_ms: 8.0,
+    stable_raw_max_ms: 8.0,
+    stable_raw_avg_ms: 3.0,
+    stats_loss_warn: 0.01,
+    stats_loss_bad: 0.03,
+    stats_loss_severe: 0.08,
+    stats_rtt_warn_s: 0.12,
+    stats_rtt_bad_s: 0.20,
+    stats_rtt_severe_s: 0.35,
+};
+
+const AUDIO_ADAPT_ULTRA_LOW_LATENCY: AudioAdaptConfig = AudioAdaptConfig {
+    name: "ultra-low-latency",
+    initial_bitrate: 44_000,
+    bitrate_min: 28_000,
+    bitrate_max: 52_000,
+    step_down: 8_000,
+    step_up: 4_000,
+    stable_intervals_for_step_up: 3,
+    congested_raw_max_ms: 14.0,
+    congested_raw_avg_ms: 6.0,
+    stable_raw_max_ms: 6.0,
+    stable_raw_avg_ms: 2.5,
+    stats_loss_warn: 0.015,
+    stats_loss_bad: 0.04,
+    stats_loss_severe: 0.10,
+    stats_rtt_warn_s: 0.10,
+    stats_rtt_bad_s: 0.16,
+    stats_rtt_severe_s: 0.30,
+};
+
+const AUDIO_ADAPT_ROBUST_WLAN: AudioAdaptConfig = AudioAdaptConfig {
+    name: "robust-wlan",
+    initial_bitrate: 40_000,
+    bitrate_min: 24_000,
+    bitrate_max: 52_000,
+    step_down: 6_000,
+    step_up: 3_000,
+    stable_intervals_for_step_up: 4,
+    congested_raw_max_ms: 24.0,
+    congested_raw_avg_ms: 10.0,
+    stable_raw_max_ms: 10.0,
+    stable_raw_avg_ms: 4.0,
+    stats_loss_warn: 0.008,
+    stats_loss_bad: 0.025,
+    stats_loss_severe: 0.06,
+    stats_rtt_warn_s: 0.14,
+    stats_rtt_bad_s: 0.24,
+    stats_rtt_severe_s: 0.45,
+};
 /// Input mic gain range: 1.0 = unity, 2.0 = +6 dB, 8.0 = +18 dB,
 /// 16.0 = +24 dB (global +6 dB base boost plus +18 dB slider).
 const MIN_INPUT_GAIN: f32 = 0.0;
 const MAX_INPUT_GAIN: f32 = 16.0;
 const DEFAULT_INPUT_GAIN: f32 = 1.0;
+const MIN_OUTPUT_GAIN: f32 = 0.0;
+const MAX_OUTPUT_GAIN: f32 = 2.0;
+const DEFAULT_OUTPUT_GAIN: f32 = 1.0;
 const DEFAULT_AUDIO_GATE_ENABLED: bool = false;
 const MIN_AUDIO_GATE_THRESHOLD_DB: f32 = -72.0;
 const MAX_AUDIO_GATE_THRESHOLD_DB: f32 = -12.0;
@@ -74,9 +168,11 @@ const CAPTURE_RAW_QUEUE_CAPACITY: usize = 4;
 /// Queue depth between Opus encoder thread and async WebRTC sender.
 const CAPTURE_ENCODED_QUEUE_CAPACITY: usize = 16;
 /// Queue depth between async RTP reader and Opus decoder thread.
-const PLAYBACK_OPUS_QUEUE_CAPACITY: usize = 8;
+/// Increased from 8 to 16 (80 ms → 160 ms) to tolerate network jitter better.
+const PLAYBACK_OPUS_QUEUE_CAPACITY: usize = 16;
 /// Queue depth between Opus decoder thread and CPAL output callback.
-const PLAYBACK_PCM_QUEUE_CAPACITY: usize = 8;
+/// Increased from 8 to 16 (80 ms → 160 ms) to reduce underruns on timing jitter.
+const PLAYBACK_PCM_QUEUE_CAPACITY: usize = 16;
 /// Throttled log interval to avoid spamming on sustained frame drops.
 const DROP_LOG_EVERY: u32 = 200;
 /// Periodic interval for latency telemetry logs.
@@ -146,6 +242,7 @@ pub struct StartEngineParams {
     pub input_gain: Option<f32>,
     pub audio_gate_enabled: Option<bool>,
     pub audio_gate_threshold_db: Option<f32>,
+    pub adaptation_profile: Option<String>,
 }
 
 /// Answer SDP + ICE candidates emitted back to JavaScript.
@@ -182,6 +279,8 @@ pub struct RunningEngine {
     pub peer_connection: Arc<RTCPeerConnection>,
     pub ptt_active: Arc<AtomicBool>,
     pub audio_processing: Arc<AudioProcessingState>,
+    pub output_routing: Arc<OutputRoutingState>,
+    pub output_device_id: Arc<RwLock<Option<String>>>,
     /// Dropping this sender shuts down the capture/encode/send loop.
     _shutdown: mpsc::Sender<()>,
 }
@@ -190,6 +289,44 @@ pub struct AudioProcessingState {
     input_gain_bits: AtomicU32,
     audio_gate_enabled: AtomicBool,
     audio_gate_threshold_bits: AtomicU32,
+}
+
+pub struct OutputRoutingState {
+    output_gain_by_user_id: RwLock<HashMap<String, f32>>,
+}
+
+impl OutputRoutingState {
+    fn new() -> Self {
+        Self {
+            output_gain_by_user_id: RwLock::new(HashMap::new()),
+        }
+    }
+
+    fn set_output_gains(&self, gains_by_user_id: HashMap<String, f32>) {
+        let mut next = HashMap::with_capacity(gains_by_user_id.len());
+        for (user_id, gain) in gains_by_user_id {
+            if user_id.trim().is_empty() {
+                continue;
+            }
+            next.insert(user_id, clamp_output_gain(gain));
+        }
+        if let Ok(mut map) = self.output_gain_by_user_id.write() {
+            *map = next;
+        }
+    }
+
+    fn gain_for_user(&self, user_id: &str) -> f32 {
+        if user_id.is_empty() {
+            return DEFAULT_OUTPUT_GAIN;
+        }
+        if let Ok(map) = self.output_gain_by_user_id.read() {
+            return map
+                .get(user_id)
+                .copied()
+                .unwrap_or(DEFAULT_OUTPUT_GAIN);
+        }
+        DEFAULT_OUTPUT_GAIN
+    }
 }
 
 impl AudioProcessingState {
@@ -246,6 +383,134 @@ fn clamp_audio_gate_threshold_db(threshold_db: f32) -> f32 {
         .min(MAX_AUDIO_GATE_THRESHOLD_DB)
 }
 
+fn clamp_output_gain(gain: f32) -> f32 {
+    if !gain.is_finite() {
+        return DEFAULT_OUTPUT_GAIN;
+    }
+    gain.max(MIN_OUTPUT_GAIN).min(MAX_OUTPUT_GAIN)
+}
+
+fn source_user_id_from_track_id(track_id: &str) -> Option<String> {
+    const PREFIX: &str = "audio-user-";
+    track_id
+        .strip_prefix(PREFIX)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn packet_loss_hint_for_bitrate(bitrate: i32) -> i32 {
+    if bitrate <= 36_000 {
+        15
+    } else if bitrate <= 44_000 {
+        10
+    } else {
+        5
+    }
+}
+
+fn adapt_config_from_name(name: &str) -> AudioAdaptConfig {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "ultra" | "ultralowlatency" | "ultra-low-latency" | "low-latency" => {
+            AUDIO_ADAPT_ULTRA_LOW_LATENCY
+        }
+        "robust" | "robust-wlan" | "wlan" | "wifi" => AUDIO_ADAPT_ROBUST_WLAN,
+        _ => AUDIO_ADAPT_BALANCED,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct DesktopAudioYamlConfig {
+    desktop_audio_adaptation_profile: Option<String>,
+}
+
+fn parse_audio_profile_from_yaml(raw: &str) -> Option<String> {
+    let parsed: DesktopAudioYamlConfig = serde_yaml::from_str(raw).ok()?;
+    parsed
+        .desktop_audio_adaptation_profile
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn resolve_yaml_config_path() -> Option<String> {
+    let from_env = std::env::var("APP_CONFIG_FILE")
+        .ok()
+        .or_else(|| std::env::var("CONFIG_FILE").ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if from_env.is_some() {
+        return from_env;
+    }
+
+    for candidate in ["config.yaml", "config.yml"] {
+        if std::path::Path::new(candidate).exists() {
+            return Some(candidate.to_string());
+        }
+    }
+
+    None
+}
+
+fn resolve_audio_profile_from_yaml() -> Option<String> {
+    let path = resolve_yaml_config_path()?;
+    let raw = fs::read_to_string(path).ok()?;
+    parse_audio_profile_from_yaml(&raw)
+}
+
+fn resolve_adapt_config(requested_profile: Option<&str>) -> AudioAdaptConfig {
+    if let Some(value) = requested_profile {
+        return adapt_config_from_name(value);
+    }
+    if let Ok(value) = std::env::var("KESHER_AUDIO_PROFILE") {
+        return adapt_config_from_name(&value);
+    }
+    if let Some(value) = resolve_audio_profile_from_yaml() {
+        return adapt_config_from_name(&value);
+    }
+    AUDIO_ADAPT_BALANCED
+}
+
+fn normalize_fraction_lost(raw_fraction_lost: f64) -> f64 {
+    if raw_fraction_lost > 1.0 {
+        (raw_fraction_lost / 256.0).clamp(0.0, 1.0)
+    } else {
+        raw_fraction_lost.clamp(0.0, 1.0)
+    }
+}
+
+fn pressure_from_remote_inbound_stats(stats: &StatsReport, cfg: AudioAdaptConfig) -> u8 {
+    let mut max_loss = 0.0_f64;
+    let mut max_rtt_s = 0.0_f64;
+    let mut seen_audio = false;
+
+    for report in stats.reports.values() {
+        if let StatsReportType::RemoteInboundRTP(remote) = report {
+            if remote.kind != "audio" {
+                continue;
+            }
+            seen_audio = true;
+            max_loss = max_loss.max(normalize_fraction_lost(remote.fraction_lost));
+            if let Some(rtt) = remote.round_trip_time {
+                max_rtt_s = max_rtt_s.max(rtt.max(0.0));
+            }
+        }
+    }
+
+    if !seen_audio {
+        return 0;
+    }
+
+    if max_loss >= cfg.stats_loss_severe || max_rtt_s >= cfg.stats_rtt_severe_s {
+        3
+    } else if max_loss >= cfg.stats_loss_bad || max_rtt_s >= cfg.stats_rtt_bad_s {
+        2
+    } else if max_loss >= cfg.stats_loss_warn || max_rtt_s >= cfg.stats_rtt_warn_s {
+        1
+    } else {
+        0
+    }
+}
+
 fn dbfs_to_linear_amplitude(dbfs: f32) -> f32 {
     10.0f32.powf(clamp_audio_gate_threshold_db(dbfs) / 20.0)
 }
@@ -262,9 +527,11 @@ fn compute_gate_coefficient(sample_rate: f32, time_ms: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_audio_gate_threshold_db, clamp_input_gain, dbfs_to_linear_amplitude,
+        clamp_audio_gate_threshold_db, clamp_input_gain, clamp_output_gain,
+        dbfs_to_linear_amplitude, parse_audio_profile_from_yaml,
         DEFAULT_AUDIO_GATE_THRESHOLD_DB, DEFAULT_INPUT_GAIN, MAX_AUDIO_GATE_THRESHOLD_DB,
-        MAX_INPUT_GAIN, MIN_AUDIO_GATE_THRESHOLD_DB, MIN_INPUT_GAIN,
+        MAX_INPUT_GAIN, MAX_OUTPUT_GAIN, MIN_AUDIO_GATE_THRESHOLD_DB, MIN_INPUT_GAIN,
+        MIN_OUTPUT_GAIN,
     };
 
     #[test]
@@ -318,6 +585,26 @@ mod tests {
         assert!(attack > 0.0 && attack <= 1.0, "Attack coefficient should be in [0,1]");
         assert!(release > 0.0 && release <= 1.0, "Release coefficient should be in [0,1]");
         assert!(attack > release, "Attack should be faster (higher coeff) than release");
+    }
+
+    #[test]
+    fn clamp_output_gain_bounds() {
+        assert_eq!(clamp_output_gain(-1.0), MIN_OUTPUT_GAIN);
+        assert_eq!(clamp_output_gain(0.5), 0.5);
+        assert_eq!(clamp_output_gain(1.0), 1.0);
+        assert_eq!(clamp_output_gain(99.0), MAX_OUTPUT_GAIN);
+    }
+
+    #[test]
+    fn parses_audio_profile_from_yaml() {
+        let yaml = "desktop_audio_adaptation_profile: robust-wlan\n";
+        assert_eq!(parse_audio_profile_from_yaml(yaml).as_deref(), Some("robust-wlan"));
+    }
+
+    #[test]
+    fn parses_audio_profile_from_yaml_returns_none_when_missing() {
+        let yaml = "app_addr: \":8080\"\n";
+        assert!(parse_audio_profile_from_yaml(yaml).is_none());
     }
 }
 
@@ -373,7 +660,7 @@ pub async fn start_engine(
                 clock_rate: 48_000,
                 channels: 1,
                 sdp_fmtp_line:
-                    "minptime=2;useinbandfec=0;usedtx=0;stereo=0;cbr=1;maxaveragebitrate=24000"
+                    "minptime=10;useinbandfec=1;usedtx=0;stereo=0;cbr=1;maxaveragebitrate=48000"
                         .to_owned(),
                 ..Default::default()
             },
@@ -490,17 +777,6 @@ pub async fn start_engine(
 
     let collected_candidates = ice_candidates.lock().unwrap().clone();
 
-    // ── 7. Wire up incoming tracks for playback ───────────────────────────
-    let output_device_id = params.output_device_id.clone();
-    let app_clone = app.clone();
-    pc.on_track(Box::new(move |track, _receiver, _transceiver| {
-        let output_device_id = output_device_id.clone();
-        let app_clone = app_clone.clone();
-        Box::pin(async move {
-            tokio::spawn(playback_loop(track, output_device_id, app_clone));
-        })
-    }));
-
     // ── 8. Wire up capture → encode → send ───────────────────────────────
     let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>(1);
     let ptt_active = Arc::new(AtomicBool::new(false));
@@ -519,12 +795,46 @@ pub async fn start_engine(
         audio_gate_enabled,
         audio_gate_threshold_db,
     ));
+    let output_routing = Arc::new(OutputRoutingState::new());
+    let output_device_id = Arc::new(RwLock::new(params.output_device_id.clone()));
+    let adapt_config = resolve_adapt_config(params.adaptation_profile.as_deref());
+    log::info!("[audio][adapt] profile={}", adapt_config.name);
+    let network_stress_playback = Arc::new(AtomicU8::new(0));
+    let network_stress_stats = Arc::new(AtomicU8::new(0));
+
+    // ── 7. Wire up incoming tracks for playback ───────────────────────────
+    let app_clone = app.clone();
+    let output_routing_for_track = Arc::clone(&output_routing);
+    let output_device_id_for_track = Arc::clone(&output_device_id);
+    let network_stress_for_track = Arc::clone(&network_stress_playback);
+    pc.on_track(Box::new(move |track, _receiver, _transceiver| {
+        let app_clone = app_clone.clone();
+        let output_routing_for_track = Arc::clone(&output_routing_for_track);
+        let output_device_id_for_track = Arc::clone(&output_device_id_for_track);
+        let network_stress_for_track = Arc::clone(&network_stress_for_track);
+        Box::pin(async move {
+            let track_id = track.id();
+            let source_user_id = source_user_id_from_track_id(&track_id);
+            tokio::spawn(playback_loop(
+                track,
+                source_user_id,
+                output_routing_for_track,
+                output_device_id_for_track,
+                network_stress_for_track,
+                app_clone,
+            ));
+        })
+    }));
 
     tokio::spawn(capture_loop(
+        Arc::clone(&pc),
         audio_track,
         Arc::clone(&ptt_active),
         params.input_device_id,
         Arc::clone(&audio_processing),
+        Arc::clone(&network_stress_playback),
+        Arc::clone(&network_stress_stats),
+        adapt_config,
         app.clone(),
         shutdown_rx,
     ));
@@ -535,6 +845,8 @@ pub async fn start_engine(
             peer_connection: Arc::clone(&pc),
             ptt_active: Arc::clone(&ptt_active),
             audio_processing: Arc::clone(&audio_processing),
+            output_routing: Arc::clone(&output_routing),
+            output_device_id: Arc::clone(&output_device_id),
             _shutdown: shutdown_tx,
         };
         *state.engine.lock().unwrap() = Some(engine);
@@ -551,10 +863,14 @@ pub async fn start_engine(
 /// Reads PCM from the CPAL input device, Opus-encodes it, and writes
 /// samples to the WebRTC send track.  Respects the PTT gate.
 async fn capture_loop(
+    peer_connection: Arc<RTCPeerConnection>,
     track: Arc<TrackLocalStaticSample>,
     ptt_active: Arc<AtomicBool>,
     device_id: Option<String>,
     audio_processing: Arc<AudioProcessingState>,
+    network_stress_playback: Arc<AtomicU8>,
+    network_stress_stats: Arc<AtomicU8>,
+    adapt_config: AudioAdaptConfig,
     app: AppHandle,
     mut shutdown: mpsc::Receiver<()>,
 ) {
@@ -565,6 +881,8 @@ async fn capture_loop(
     let stop_clone = Arc::clone(&stop_flag);
     let ptt_clone = Arc::clone(&ptt_active);
     let app_clone = app.clone();
+    let network_stress_playback_for_thread = Arc::clone(&network_stress_playback);
+    let network_stress_stats_for_thread = Arc::clone(&network_stress_stats);
 
     std::thread::spawn(move || {
         let host = cpal::default_host();
@@ -607,9 +925,14 @@ async fn capture_loop(
             Ok(e) => e,
             Err(e) => { log::error!("[audio] create encoder: {e}"); return; }
         };
-        let _ = encoder.set_bitrate(opus::Bitrate::Bits(OPUS_BITRATE));
-        let _ = encoder.set_inband_fec(false);
+        let _ = encoder.set_bitrate(opus::Bitrate::Bits(adapt_config.initial_bitrate));
+        let _ = encoder.set_vbr(false);
+        let _ = encoder.set_inband_fec(true);
+        let _ = encoder.set_packet_loss_perc(packet_loss_hint_for_bitrate(adapt_config.initial_bitrate));
         let _ = encoder.set_dtx(false);
+        let mut current_bitrate = adapt_config.initial_bitrate;
+        let mut stable_intervals: u32 = 0;
+        let mut last_dropped_encoded_frames: u32 = 0;
 
         let mut pcm_accum: Vec<f32> = Vec::with_capacity(OPUS_FRAME_SIZE * 4);
         let mut buf = [0u8; MAX_OPUS_PACKET];
@@ -706,6 +1029,58 @@ async fn capture_loop(
                         } else {
                             0.0
                         };
+                        let dropped_encoded_delta = dropped_encoded_frames
+                            .saturating_sub(last_dropped_encoded_frames);
+                        last_dropped_encoded_frames = dropped_encoded_frames;
+                        let network_pressure = network_stress_playback_for_thread
+                            .load(Ordering::Relaxed)
+                            .max(network_stress_stats_for_thread.load(Ordering::Relaxed));
+
+                        let congested = dropped_encoded_delta > 0
+                            || raw_queue_max_ms > adapt_config.congested_raw_max_ms
+                            || raw_avg_ms > adapt_config.congested_raw_avg_ms
+                            || network_pressure >= 2;
+                        let very_stable = dropped_encoded_delta == 0
+                            && raw_avg_ms < adapt_config.stable_raw_avg_ms
+                            && raw_queue_max_ms < adapt_config.stable_raw_max_ms
+                            && network_pressure == 0;
+
+                        let mut next_bitrate = current_bitrate;
+                        if congested {
+                            stable_intervals = 0;
+                            next_bitrate = (current_bitrate - adapt_config.step_down)
+                                .max(adapt_config.bitrate_min);
+                        } else if very_stable {
+                            stable_intervals = stable_intervals.saturating_add(1);
+                            if stable_intervals >= adapt_config.stable_intervals_for_step_up {
+                                next_bitrate = (current_bitrate + adapt_config.step_up)
+                                    .min(adapt_config.bitrate_max);
+                                stable_intervals = 0;
+                            }
+                        } else {
+                            stable_intervals = 0;
+                        }
+
+                        if next_bitrate != current_bitrate {
+                            let loss_hint = packet_loss_hint_for_bitrate(next_bitrate);
+                            if encoder
+                                .set_bitrate(opus::Bitrate::Bits(next_bitrate))
+                                .is_ok()
+                            {
+                                current_bitrate = next_bitrate;
+                                let _ = encoder.set_packet_loss_perc(loss_hint);
+                                log::info!(
+                                    "[audio][adapt] bitrate={} loss_hint={} net_pressure={} dropped_encoded_delta={} raw_avg_ms={:.2} raw_max_ms={:.2}",
+                                    current_bitrate,
+                                    loss_hint,
+                                    network_pressure,
+                                    dropped_encoded_delta,
+                                    raw_avg_ms,
+                                    raw_queue_max_ms
+                                );
+                            }
+                        }
+
                         log::info!(
                             "[audio][latency] capture_raw_queue avg_ms={:.2} max_ms={:.2} samples={} dropped_raw={} dropped_encoded={}",
                             raw_avg_ms,
@@ -734,11 +1109,18 @@ async fn capture_loop(
     let mut encoded_queue_sum_ms: f64 = 0.0;
     let mut encoded_queue_max_ms: f64 = 0.0;
     let mut next_encoded_log = Instant::now() + LATENCY_LOG_INTERVAL;
+    let mut stats_tick = tokio::time::interval(STATS_POLL_INTERVAL);
+    stats_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             _ = shutdown.recv() => {
                 stop_flag.store(true, Ordering::Relaxed);
                 break;
+            }
+            _ = stats_tick.tick() => {
+                let stats = peer_connection.get_stats().await;
+                let stats_pressure = pressure_from_remote_inbound_stats(&stats, adapt_config);
+                network_stress_stats.store(stats_pressure, Ordering::Relaxed);
             }
             maybe = encoded_rx.recv() => {
                 match maybe {
@@ -752,7 +1134,7 @@ async fn capture_loop(
 
                         let sample = Sample {
                             data: frame.data,
-                            duration: std::time::Duration::from_millis(3),
+                            duration: std::time::Duration::from_millis(10),
                             ..Default::default()
                         };
                         if let Err(e) = track.write_sample(&sample).await {
@@ -790,23 +1172,27 @@ async fn capture_loop(
 /// Reads RTP from an incoming track, Opus-decodes it, and pushes PCM to CPAL output.
 async fn playback_loop(
     track: Arc<TrackRemote>,
-    device_id: Option<String>,
+    source_user_id: Option<String>,
+    output_routing: Arc<OutputRoutingState>,
+    output_device_id: Arc<RwLock<Option<String>>>,
+    network_stress: Arc<AtomicU8>,
     app: AppHandle,
 ) {
     // opus payload bytes: async WebRTC reader → sync decoder thread
     let (opus_tx, opus_rx) =
         std::sync::mpsc::sync_channel::<OpusFrame>(PLAYBACK_OPUS_QUEUE_CAPACITY);
+    let dropped_opus_counter = Arc::new(AtomicU64::new(0));
+    let decode_error_counter = Arc::new(AtomicU64::new(0));
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_clone = Arc::clone(&stop_flag);
     let app_clone = app.clone();
+    let dropped_opus_counter_for_thread = Arc::clone(&dropped_opus_counter);
+    let decode_error_counter_for_thread = Arc::clone(&decode_error_counter);
+    let network_stress_for_thread = Arc::clone(&network_stress);
 
     // ── Sync thread: owns !Send cpal::Stream + Opus decoder ─────────────
     std::thread::spawn(move || {
         let host = cpal::default_host();
-        let device = match find_output_device(&host, device_id.as_deref()) {
-            Some(d) => d,
-            None => { log::error!("[audio] playback: no output device"); return; }
-        };
         let config = cpal::StreamConfig {
             channels: 1,
             sample_rate: cpal::SampleRate(SAMPLE_RATE),
@@ -815,31 +1201,66 @@ async fn playback_loop(
         // PCM ring: decoder → CPAL output callback
         let (pcm_tx, pcm_rx) =
             std::sync::mpsc::sync_channel::<PcmFrame>(PLAYBACK_PCM_QUEUE_CAPACITY);
+        let pcm_rx = Arc::new(Mutex::new(pcm_rx));
         let pcm_queue_latency = Arc::new(AtomicLatencyStats::default());
-        let pcm_queue_latency_cb = Arc::clone(&pcm_queue_latency);
         let output_drop_counter = Arc::new(AtomicU64::new(0));
-        let output_drop_counter_cb = Arc::clone(&output_drop_counter);
-        let stream = match device.build_output_stream(
-            &config,
-            move |output: &mut [f32], _| {
-                if let Ok(frame) = pcm_rx.try_recv() {
-                    pcm_queue_latency_cb.record(frame.decoded_at.elapsed());
-                    let n = output.len().min(frame.samples.len());
-                    output[..n].copy_from_slice(&frame.samples[..n]);
-                    if n < output.len() { output[n..].fill(0.0); }
-                } else {
-                    output_drop_counter_cb.fetch_add(1, Ordering::Relaxed);
-                    output.fill(0.0);
+
+        let build_output_stream = |selected_device: Option<&str>| -> Option<cpal::Stream> {
+            let device = match find_output_device(&host, selected_device) {
+                Some(d) => d,
+                None => {
+                    log::error!(
+                        "[audio] playback: no output device for selection={}",
+                        selected_device.unwrap_or("default")
+                    );
+                    return None;
                 }
-            },
-            |err| log::error!("[audio] output stream error: {err}"),
-            None,
-        ) {
-            Ok(s) => s,
-            Err(e) => { log::error!("[audio] build output stream: {e}"); return; }
+            };
+
+            let pcm_rx_cb = Arc::clone(&pcm_rx);
+            let pcm_queue_latency_cb = Arc::clone(&pcm_queue_latency);
+            let output_drop_counter_cb = Arc::clone(&output_drop_counter);
+            let stream = match device.build_output_stream(
+                &config,
+                move |output: &mut [f32], _| {
+                    let next_frame = pcm_rx_cb.lock().ok().and_then(|rx| rx.try_recv().ok());
+                    if let Some(frame) = next_frame {
+                        pcm_queue_latency_cb.record(frame.decoded_at.elapsed());
+                        let n = output.len().min(frame.samples.len());
+                        output[..n].copy_from_slice(&frame.samples[..n]);
+                        if n < output.len() {
+                            output[n..].fill(0.0);
+                        }
+                    } else {
+                        output_drop_counter_cb.fetch_add(1, Ordering::Relaxed);
+                        output.fill(0.0);
+                    }
+                },
+                |err| log::error!("[audio] output stream error: {err}"),
+                None,
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("[audio] build output stream: {e}");
+                    return None;
+                }
+            };
+
+            if let Err(e) = stream.play() {
+                log::error!("[audio] start output stream: {e}");
+                return None;
+            }
+
+            Some(stream)
         };
-        if let Err(e) = stream.play() {
-            log::error!("[audio] start output stream: {e}"); return;
+
+        let mut active_device_id = output_device_id
+            .read()
+            .ok()
+            .and_then(|v| v.clone());
+        let mut output_stream = build_output_stream(active_device_id.as_deref());
+        if output_stream.is_none() {
+            log::warn!("[audio] playback: stream unavailable until output device becomes valid");
         }
         let mut decoder = match Decoder::new(SAMPLE_RATE, Channels::Mono) {
             Ok(d) => d,
@@ -849,6 +1270,8 @@ async fn playback_loop(
         let mut output_peak = 0.0f32;
         let mut meter_frames: u32 = 0;
         let mut dropped_pcm_frames: u32 = 0;
+        let mut last_dropped_opus: u64 = 0;
+        let mut last_decode_errors: u64 = 0;
         let mut rtp_queue_count: u64 = 0;
         let mut rtp_queue_sum_ms: f64 = 0.0;
         let mut rtp_queue_max_ms: f64 = 0.0;
@@ -856,6 +1279,29 @@ async fn playback_loop(
 
         loop {
             if stop_clone.load(Ordering::Relaxed) { break; }
+
+            let desired_device_id = output_device_id
+                .read()
+                .ok()
+                .and_then(|v| v.clone());
+            if desired_device_id != active_device_id {
+                // Drop first to guarantee no audio leaks on the previous device.
+                drop(output_stream.take());
+                active_device_id = desired_device_id;
+                output_stream = build_output_stream(active_device_id.as_deref());
+                if output_stream.is_some() {
+                    log::info!(
+                        "[audio] playback output switched to {}",
+                        active_device_id.as_deref().unwrap_or("default")
+                    );
+                } else {
+                    log::warn!(
+                        "[audio] playback output switch failed for {}",
+                        active_device_id.as_deref().unwrap_or("default")
+                    );
+                }
+            }
+
             match opus_rx.recv_timeout(std::time::Duration::from_millis(100)) {
                 Ok(frame) => {
                     let rtp_queue_ms = frame.received_at.elapsed().as_secs_f64() * 1000.0;
@@ -867,7 +1313,16 @@ async fn playback_loop(
 
                     match decoder.decode_float(&frame.payload, &mut decode_buf, false) {
                         Ok(n) => {
-                            let pcm = decode_buf[..n].to_vec();
+                            let user_gain = source_user_id
+                                .as_deref()
+                                .map(|user_id| output_routing.gain_for_user(user_id))
+                                .unwrap_or(DEFAULT_OUTPUT_GAIN);
+                            let mut pcm = decode_buf[..n].to_vec();
+                            if user_gain != DEFAULT_OUTPUT_GAIN {
+                                for sample in &mut pcm {
+                                    *sample = (*sample * user_gain).clamp(-1.0, 1.0);
+                                }
+                            }
                             for &s in &pcm {
                                 if s.abs() > output_peak { output_peak = s.abs(); }
                             }
@@ -894,7 +1349,10 @@ async fn playback_loop(
                                 }
                             }
                         }
-                        Err(e) => log::warn!("[audio] opus decode: {e}"),
+                        Err(e) => {
+                            decode_error_counter_for_thread.fetch_add(1, Ordering::Relaxed);
+                            log::warn!("[audio] opus decode: {e}");
+                        }
                     }
 
                     if Instant::now() >= next_latency_log {
@@ -906,8 +1364,36 @@ async fn playback_loop(
                         let (pcm_avg_ms, pcm_max_ms, pcm_samples) =
                             pcm_queue_latency.snapshot_and_reset().unwrap_or((0.0, 0.0, 0));
                         let output_underruns = output_drop_counter.swap(0, Ordering::Relaxed);
+                        let dropped_opus_total =
+                            dropped_opus_counter_for_thread.load(Ordering::Relaxed);
+                        let dropped_opus_delta =
+                            dropped_opus_total.saturating_sub(last_dropped_opus);
+                        last_dropped_opus = dropped_opus_total;
+                        let decode_errors_total =
+                            decode_error_counter_for_thread.load(Ordering::Relaxed);
+                        let decode_errors_delta =
+                            decode_errors_total.saturating_sub(last_decode_errors);
+                        last_decode_errors = decode_errors_total;
+
+                        let net_pressure: u8 = if dropped_opus_delta > 4
+                            || decode_errors_delta > 2
+                            || rtp_queue_max_ms > 120.0
+                        {
+                            3
+                        } else if dropped_opus_delta > 0
+                            || decode_errors_delta > 0
+                            || rtp_queue_max_ms > 60.0
+                        {
+                            2
+                        } else if rtp_queue_max_ms > 30.0 || output_underruns > 50 {
+                            1
+                        } else {
+                            0
+                        };
+                        network_stress_for_thread.store(net_pressure, Ordering::Relaxed);
+
                         log::info!(
-                            "[audio][latency] playback_rtp_queue avg_ms={:.2} max_ms={:.2} samples={} | playback_pcm_queue avg_ms={:.2} max_ms={:.2} samples={} | pcm_drops={} underruns={}",
+                            "[audio][latency] playback_rtp_queue avg_ms={:.2} max_ms={:.2} samples={} | playback_pcm_queue avg_ms={:.2} max_ms={:.2} samples={} | pcm_drops={} underruns={} | net_pressure={} dropped_opus_delta={} decode_errors_delta={}",
                             rtp_avg_ms,
                             rtp_queue_max_ms,
                             rtp_queue_count,
@@ -915,7 +1401,10 @@ async fn playback_loop(
                             pcm_max_ms,
                             pcm_samples,
                             dropped_pcm_frames,
-                            output_underruns
+                            output_underruns,
+                            net_pressure,
+                            dropped_opus_delta,
+                            decode_errors_delta
                         );
                         rtp_queue_count = 0;
                         rtp_queue_sum_ms = 0.0;
@@ -927,7 +1416,7 @@ async fn playback_loop(
                 Err(_) => break,
             }
         }
-        drop(stream);
+        drop(output_stream);
         log::info!("[audio] playback thread terminated");
     });
 
@@ -946,6 +1435,7 @@ async fn playback_loop(
                     .is_err()
                 {
                     dropped_opus_frames = dropped_opus_frames.saturating_add(1);
+                    dropped_opus_counter.fetch_add(1, Ordering::Relaxed);
                     if dropped_opus_frames % DROP_LOG_EVERY == 0 {
                         log::warn!(
                             "[audio] playback opus queue full, dropped frames={} (queue={})",
@@ -1008,6 +1498,20 @@ pub fn set_audio_gate(state: &AudioEngineState, enabled: bool, threshold_db: f32
         engine
             .audio_processing
             .set_audio_gate_threshold_db(threshold_db);
+    }
+}
+
+pub fn set_output_gains(state: &AudioEngineState, gains_by_user_id: HashMap<String, f32>) {
+    if let Some(engine) = state.engine.lock().unwrap().as_ref() {
+        engine.output_routing.set_output_gains(gains_by_user_id);
+    }
+}
+
+pub fn set_output_device(state: &AudioEngineState, output_device_id: Option<String>) {
+    if let Some(engine) = state.engine.lock().unwrap().as_ref() {
+        if let Ok(mut selected) = engine.output_device_id.write() {
+            *selected = output_device_id;
+        }
     }
 }
 

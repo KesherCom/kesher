@@ -42,7 +42,7 @@ help:
 	@echo "  make clean         - remove common build artifacts"
 
 deps:
-	@npm ci
+	@npm ci || npm install
 	@cd backend && go mod download && go mod tidy
 
 dev-backend:
@@ -136,8 +136,7 @@ build-web:
 	@cd web && npm run build
 
 sync-embedded-web: build-web
-	@mkdir -p backend/internal/app/embedded_web
-	@cp -R web/dist/. backend/internal/app/embedded_web/
+	@node -e "const fs=require('fs');const path=require('path');const src=path.join('web','dist');const dst=path.join('backend','internal','app','embedded_web');fs.mkdirSync(dst,{recursive:true});for(const name of fs.readdirSync(src)){fs.cpSync(path.join(src,name),path.join(dst,name),{recursive:true,force:true});}"
 
 build-backend: sync-embedded-web
 	@mkdir -p backend/bin
@@ -186,9 +185,7 @@ local-smoke: deps test desktop-check
 
 ci-backend-test: sync-embedded-web
 	@echo "Building backend binaries (Windows + Linux)..."
-	@mkdir -p dist/bin
-	@cd backend && go build -trimpath -ldflags="-s -w" -o "../dist/bin/kesher-windows-amd64.exe" ./cmd/server
-	@cd backend && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "../dist/bin/kesher-linux-amd64" ./cmd/server
+	@node -e "const fs=require('fs');const cp=require('child_process');fs.mkdirSync('dist/bin',{recursive:true});const run=(args,env)=>{const r=cp.spawnSync('go',args,{cwd:'backend',stdio:'inherit',env:{...process.env,...env}});if(r.status!==0)process.exit(r.status??1);};run(['build','-trimpath','-ldflags=-s -w','-o','../dist/bin/kesher-windows-amd64.exe','./cmd/server'],{});run(['build','-trimpath','-ldflags=-s -w','-o','../dist/bin/kesher-linux-amd64','./cmd/server'],{GOOS:'linux',GOARCH:'amd64',CGO_ENABLED:'0'});"
 	@echo "✓ Backend builds complete!"
 
 ci-desktop-test: ci-backend-test build-desktop-windows
