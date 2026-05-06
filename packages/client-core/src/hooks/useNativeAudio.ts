@@ -52,6 +52,16 @@ export type NativeAudioLevelEvent = {
   output_peak: number;
 };
 
+export type NativeAudioEndpoint = {
+  host: string;
+  port: number;
+  token: string;
+  tokenHash: number;
+  frameDurationMs: number;
+  sampleRate: number;
+  channels: number;
+};
+
 export type NativeAudioHook = {
   /** True if running inside Tauri with the native audio engine available. */
   isNative: boolean;
@@ -81,6 +91,20 @@ export type NativeAudioHook = {
   setOutputDevice: (outputDeviceId: string) => void;
   /** Tear down the native engine (call on disconnect). */
   stopEngine: () => Promise<void>;
+  // ── Performance Mode (UDP) ────────────────────────────────────────────
+  /**
+   * Start the native UDP performance pipeline. Called after the server WS
+   * sends a `native_audio_endpoint` message announcing it expects native
+   * transport. No-op in browser mode.
+   */
+  startPerformanceEngine: (
+    endpoint: NativeAudioEndpoint,
+    devices?: { inputDeviceId?: string; outputDeviceId?: string },
+  ) => Promise<void>;
+  /** Tear down the performance engine. */
+  stopPerformanceEngine: () => Promise<void>;
+  /** Mic gate for the performance pipeline (mirrors `setPtt` semantics). */
+  setPerformanceMic: (active: boolean) => void;
 };
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -232,6 +256,52 @@ export function useNativeAudio(
     }
   }, [isNative]);
 
+  // ── Performance-Mode (UDP) bindings ────────────────────────────────────
+
+  const startPerformanceEngine = useCallback(
+    async (
+      endpoint: NativeAudioEndpoint,
+      devices?: { inputDeviceId?: string; outputDeviceId?: string },
+    ): Promise<void> => {
+      if (!isNative) return;
+      try {
+        await tauriInvoke("start_native_audio", {
+          params: {
+            server_host: endpoint.host,
+            server_port: endpoint.port,
+            session_token: endpoint.token,
+            token_hash: endpoint.tokenHash,
+            input_device_id: devices?.inputDeviceId ?? null,
+            output_device_id: devices?.outputDeviceId ?? null,
+          },
+        });
+      } catch (err) {
+        console.error("[native-audio] start_native_audio failed:", err);
+        throw err;
+      }
+    },
+    [isNative],
+  );
+
+  const stopPerformanceEngine = useCallback(async () => {
+    if (!isNative) return;
+    try {
+      await tauriInvoke("stop_native_audio");
+    } catch (err) {
+      console.error("[native-audio] stop_native_audio failed:", err);
+    }
+  }, [isNative]);
+
+  const setPerformanceMic = useCallback(
+    (active: boolean) => {
+      if (!isNative) return;
+      tauriInvoke("set_native_mic", { active }).catch((err) =>
+        console.error("[native-audio] set_native_mic failed:", err),
+      );
+    },
+    [isNative],
+  );
+
   return {
     isNative,
     listDevices,
@@ -242,5 +312,8 @@ export function useNativeAudio(
     setOutputGains,
     setOutputDevice,
     stopEngine,
+    startPerformanceEngine,
+    stopPerformanceEngine,
+    setPerformanceMic,
   };
 }

@@ -18,10 +18,17 @@ tokio = { version = "1", features = ["full"] }
 log = "0.4"
 env_logger = "0.11"
 
-[target.'cfg(target_os = "windows")'.dependencies]
-# Native audio pipeline dependencies are compiled only on Windows.
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+# Native audio pipeline dependencies (CPAL + Opus) are needed on Windows
+# (WASAPI) and macOS (Core Audio). webrtc-rs is currently only used by the
+# Windows pipeline; the native UDP performance path on macOS uses raw
+# tokio::net::UdpSocket and does not require webrtc-rs.
 cpal = "0.15"
 opus = "0.3"
-webrtc = "0.12"
 bytes = "1"
 serde_yaml = "0.9"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# WebRTC stack remains Windows-only for now; macOS uses the native UDP
+# pipeline plus the existing browser fallback.
+webrtc = "0.12"

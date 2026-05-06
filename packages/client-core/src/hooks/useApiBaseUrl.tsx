@@ -112,7 +112,7 @@ export function ApiBaseUrlProvider({ children }: { children: React.ReactNode }) 
     // Persist to Tauri if on desktop
     if (isDesktop) {
       try {
-        invokeTauri("set_server_url", { serverUrl: normalized }).catch((error: unknown) => {
+        invokeTauri("set_server_url", { server_url: normalized }).catch((error: unknown) => {
           console.error("Failed to persist server URL to Tauri:", error);
         });
       } catch (error) {

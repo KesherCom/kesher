@@ -65,6 +65,7 @@ type Server struct {
 	companionImageEffectMapModTime   time.Time
 	companionImageEffectMapChecked   time.Time
 	companionImageEffectMapErr       string
+	udpAudio                         *UDPAudioRelay
 }
 
 type tlsProvider interface {
@@ -3251,6 +3252,49 @@ func (s *Server) handleHTTPRedirectToHTTPS(w http.ResponseWriter, r *http.Reques
 	http.Redirect(w, r, "https://"+host+r.URL.RequestURI(), http.StatusMovedPermanently)
 }
 
+// sendNativeAudioEndpoint emits the native_audio_endpoint WS message to a
+// connecting native client so it can REGISTER with the UDP relay and start
+// sending Opus frames immediately. The host is derived from the explicit
+// UDPAudioAdvertiseIP config when set, otherwise from the request's Host
+// header so LAN clients reach the same address they used for HTTP.
+func (s *Server) sendNativeAudioEndpoint(token string, r *http.Request) {
+	if s.udpAudio == nil {
+		return
+	}
+	local := s.udpAudio.LocalAddr()
+	if local == nil {
+		return
+	}
+	udpAddr, ok := local.(*net.UDPAddr)
+	if !ok {
+		return
+	}
+	host := strings.TrimSpace(s.cfg.UDPAudioAdvertiseIP)
+	if host == "" {
+		if h, _, err := net.SplitHostPort(r.Host); err == nil && h != "" {
+			host = h
+		} else {
+			host = r.Host
+		}
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	s.hub.SendToToken(token, WSOutbound{Type: "audio_mode", Data: AudioModeInfo{Mode: "native"}})
+	s.hub.SendToToken(token, WSOutbound{
+		Type: "native_audio_endpoint",
+		Data: NativeAudioEndpoint{
+			Host:          host,
+			Port:          udpAddr.Port,
+			Token:         token,
+			TokenHash:     HashSessionToken(token),
+			FrameDuration: 5,
+			SampleRate:    48000,
+			Channels:      1,
+		},
+	})
+}
+
 func (s *Server) filterAllowedRoomsForRole(ctx context.Context, roleID string, roomIDs []string, forSend bool) []string {
 	normalized := normalizeIDs(roomIDs)
 	out := make([]string, 0, len(normalized))
@@ -3340,6 +3384,19 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 	s.media = NewMediaManager(s.hub, logger)
 	s.hub.SetMediaManager(s.media)
+	// Native UDP audio relay (performance mode). When the listen address is
+	// empty in config, we skip relay startup; native clients then transparently
+	// fall back to the WebRTC pipeline.
+	if strings.TrimSpace(cfg.UDPAudioAddr) != "" {
+		s.udpAudio = NewUDPAudioRelay(s.hub, logger)
+		if err := s.udpAudio.Start(cfg.UDPAudioAddr); err != nil {
+			logger.Warn("udp audio relay failed to start, falling back to webrtc-only", "error", err)
+			s.udpAudio = nil
+		} else {
+			s.media.SetUDPAudioRelay(s.udpAudio)
+			s.hub.SetUDPAudioRelay(s.udpAudio)
+		}
+	}
 	if cfg.TelegramBotToken != "" {
 		s.telegram = NewTelegramBot(cfg.TelegramBotToken, cfg.TelegramWebhookSecret, cfg.TelegramMode, store, s.hub, logger)
 	}
@@ -5297,6 +5354,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	listenRooms = s.filterAllowedRoomsForRole(r.Context(), session.RoleID, listenRooms, false)
 	talkRooms = s.filterAllowedRoomsForRole(r.Context(), session.RoleID, talkRooms, true)
+	// Transport selection: native Tauri clients pass ?transport=native in the
+	// WS URL when they want the low-latency UDP relay. Browsers (or native
+	// clients with the relay disabled) keep the WebRTC pipeline.
+	requestedTransport := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("transport")))
+	transport := "webrtc"
+	if requestedTransport == "native" && s.udpAudio != nil {
+		transport = "native"
+	}
 	c := &client{
 		session:         session,
 		user:            user,
@@ -5308,12 +5373,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		broadcastGroups: make(map[string]struct{}),
 		send:            make(chan WSOutbound, 512),
 		sendPriority:    make(chan WSOutbound, 512),
+		transport:       transport,
 	}
 	s.hub.Add(c)
 	// Send current presence snapshot to newly connected client so they see all other users
 	s.hub.SendPresenceSnapshot(session.Token)
 	s.hub.SendChatHistorySnapshot(session.Token)
-	if err := s.media.EnsurePeer(session.Token, user); err != nil {
+	if transport == "native" {
+		s.sendNativeAudioEndpoint(session.Token, r)
+	} else if err := s.media.EnsurePeer(session.Token, user); err != nil {
 		s.logger.Error("failed to initialize media peer", "error", err)
 	}
 	defer func() {

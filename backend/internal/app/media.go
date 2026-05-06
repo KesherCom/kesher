@@ -13,7 +13,13 @@ import (
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
 )
+
+// mediaSample is a package-local alias for the Pion sample type, used by
+// the native UDP bridge in media_native.go to avoid a second package import
+// path there.
+type mediaSample = media.Sample
 
 // routedDest holds a per-destination local track and an atomic routing gate.
 // The gate is flipped by recomputeSourceRoutingLocked; the RTP forwarding loop
@@ -106,6 +112,12 @@ type MediaManager struct {
 	renegotiationTotalNanos    atomic.Uint64
 	renegotiationMaxNanos      atomic.Uint64
 	webrtcAPI                  *webrtc.API
+	// Native UDP audio bridge (see media_native.go). nativeMu guards both
+	// fields and is held only briefly during registration / routing recompute;
+	// the WebRTC fast path never touches it.
+	nativeMu      sync.RWMutex
+	nativeSources map[string]*nativeMediaSource
+	udpAudio      *UDPAudioRelay
 }
 
 const syncRoutingDebounce = 1 * time.Millisecond
@@ -463,6 +475,7 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 		// RLock allows concurrent forwarding from multiple sources while
 		// routing changes (which need a full Lock) remain infrequent.
 		m.mu.RLock()
+		hasNativeDest := false
 		if s := m.sources[sourcePeer.token]; s != nil {
 			for destToken, dest := range s.dests {
 				if dest.gate.Load() {
@@ -470,10 +483,18 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 						// Log RTP write failures for diagnostics; may indicate full send buffer or peer disconnection
 						m.logger.Debug("rtp forward write failed", "dest_token", destToken, "error", err)
 					}
+					if !hasNativeDest && m.hub != nil && m.hub.IsNativeTransport(destToken) {
+						hasNativeDest = true
+					}
 				}
 			}
 		}
 		m.mu.RUnlock()
+		// Stage-1 native bridge: when at least one native (UDP) destination is
+		// open for this WebRTC source, also push the Opus payload to the relay.
+		if hasNativeDest {
+			m.forwardOpusToNativeDests(sourcePeer.token, buf[:n])
+		}
 	}
 
 	m.mu.Lock()
@@ -484,6 +505,8 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 		}
 	}
 	m.mu.Unlock()
+	// Tear down any native-bridge state for this token as well.
+	m.removeNativeSource(sourcePeer.token)
 }
 
 func (m *MediaManager) SetBroadcastGroupActive(sourceToken, groupID string, enabled bool) {
