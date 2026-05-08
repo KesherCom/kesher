@@ -88,7 +88,16 @@ export function buildApiUrl(path: string): string {
   if (!base) {
     return normalizedPath;
   }
-  return `${base}${normalizedPath}`;
+  
+  // Strip any pathname from base URL to ensure we only use protocol://host:port
+  try {
+    const parsed = new URL(base);
+    const cleanBase = `${parsed.protocol}//${parsed.host}`;
+    return `${cleanBase}${normalizedPath}`;
+  } catch {
+    // Fallback if URL parsing fails
+    return `${base}${normalizedPath}`;
+  }
 }
 
 /**
@@ -98,7 +107,13 @@ export function buildAbsoluteApiUrl(path: string): string {
   const normalizedPath = normalizeApiPath(path);
   const base = getGlobalApiBaseUrl();
   if (base) {
-    return `${base}${normalizedPath}`;
+    try {
+      const parsed = new URL(base);
+      const cleanBase = `${parsed.protocol}//${parsed.host}`;
+      return `${cleanBase}${normalizedPath}`;
+    } catch {
+      return `${base}${normalizedPath}`;
+    }
   }
   if (typeof window !== "undefined" && window.location.origin) {
     return `${window.location.origin}${normalizedPath}`;
@@ -121,7 +136,15 @@ export function buildWebSocketUrl(
     throw new Error("Unable to resolve websocket origin.");
   }
 
-  const parsedBase = new URL(base);
+  let parsedBase: URL;
+  try {
+    parsedBase = new URL(base);
+  } catch {
+    throw new Error("Invalid base URL for websocket.");
+  }
+  
+  // Strip pathname to ensure clean origin
+  const cleanOrigin = `${parsedBase.protocol}//${parsedBase.host}`;
   const wsProtocol = parsedBase.protocol === "https:" ? "wss:" : "ws:";
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
