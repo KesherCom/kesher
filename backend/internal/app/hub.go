@@ -33,6 +33,10 @@ type client struct {
 	broadcastGroups  map[string]struct{}
 	send             chan WSOutbound
 	sendPriority     chan WSOutbound
+	// transport is "webrtc" (browsers + native fallback) or "native" (Tauri
+	// performance mode using the UDP relay). It is set at WS-handshake time
+	// and never changes for the lifetime of the connection.
+	transport string
 }
 
 const incomingSignalAttentionWindow = 2200 * time.Millisecond
@@ -159,6 +163,7 @@ type Hub struct {
 	store               *Store
 	logger              *slog.Logger
 	media               *MediaManager
+	udpAudio            *UDPAudioRelay
 	chatHistory         *ChatHistory
 	presenceSubscribers map[chan []PresenceState]struct{}
 	chatHook            func(eventType string, e RoutedEvent)
@@ -504,6 +509,38 @@ func (h *Hub) SetMediaManager(m *MediaManager) {
 	h.media = m
 }
 
+// SetUDPAudioRelay registers the native-audio relay so that disconnected
+// sessions are also unbound from the relay's peer registry.
+func (h *Hub) SetUDPAudioRelay(r *UDPAudioRelay) {
+	h.udpAudio = r
+}
+
+// userIDForToken returns the user ID associated with a session token, or the
+// empty string if the token is not currently connected. Used by the UDP
+// audio relay during REGISTER to validate that an incoming UDP source
+// corresponds to an authenticated session.
+func (h *Hub) userIDForToken(token string) string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	c, ok := h.clients[token]
+	if !ok {
+		return ""
+	}
+	return c.user.ID
+}
+
+// IsNativeTransport reports whether the session uses the native UDP transport
+// (performance mode). Browser clients always return false.
+func (h *Hub) IsNativeTransport(token string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	c, ok := h.clients[token]
+	if !ok {
+		return false
+	}
+	return c.transport == "native"
+}
+
 func (h *Hub) SetChatHook(fn func(eventType string, e RoutedEvent)) {
 	h.mu.Lock()
 	h.chatHook = fn
@@ -687,6 +724,9 @@ func (h *Hub) removeToken(token string, reason string) {
 	}
 	if h.media != nil {
 		h.media.RemovePeer(token)
+	}
+	if h.udpAudio != nil {
+		h.udpAudio.RemovePeer(token)
 	}
 	h.broadcastPresence()
 }

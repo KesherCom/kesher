@@ -322,6 +322,27 @@ type WebRTCIceCandidate struct {
 	SDPMLineIndex uint16 `json:"sdpMLineIndex,omitempty"`
 }
 
+// NativeAudioEndpoint is sent over the WebSocket to native (Tauri) clients
+// that requested the performance transport. It contains the UDP relay address
+// the client should send Opus frames to, plus the session token (echoed back
+// for the REGISTER packet). Browser clients never receive this message.
+type NativeAudioEndpoint struct {
+	Host          string `json:"host"`
+	Port          int    `json:"port"`
+	Token         string `json:"token"`
+	TokenHash     uint32 `json:"tokenHash"`
+	FrameDuration int    `json:"frameDurationMs"`
+	SampleRate    int    `json:"sampleRate"`
+	Channels      int    `json:"channels"`
+}
+
+// AudioModeInfo tells the client which transport the server expects. "native"
+// instructs Tauri clients to skip WebRTC and use the native UDP pipeline;
+// "webrtc" is the fallback (browser, or native when relay is unavailable).
+type AudioModeInfo struct {
+	Mode string `json:"mode"`
+}
+
 type CompanionCommand struct {
 	CommandID     string   `json:"commandId,omitempty"`
 	Command       string   `json:"command"`

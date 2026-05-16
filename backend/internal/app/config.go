@@ -42,6 +42,10 @@ type Config struct {
 	CompanionAllowedUsernames   []string
 	CompanionImageEffectMapFile string
 	CompanionDynamicPaging      bool
+	// Native low-latency UDP audio relay (performance mode). Empty UDPAudioAddr
+	// disables the relay; native clients then fall back to the WebRTC pipeline.
+	UDPAudioAddr        string
+	UDPAudioAdvertiseIP string
 }
 type fileConfig struct {
 	Addr                               string   `yaml:"app_addr"`
@@ -74,6 +78,8 @@ type fileConfig struct {
 	CompanionAllowedUsernames          []string `yaml:"companion_allowed_usernames"`
 	CompanionImageEffectMapFile        string   `yaml:"companion_image_effect_map_file"`
 	CompanionDynamicPaging             *bool    `yaml:"companion_dynamic_paging"`
+	UDPAudioAddr                       string   `yaml:"udp_audio_addr"`
+	UDPAudioAdvertiseIP                string   `yaml:"udp_audio_advertise_ip"`
 }
 
 func getEnvWithPresence(k, fallback string) (string, bool) {
@@ -116,6 +122,8 @@ func defaultConfig() Config {
 		CompanionAllowedUsernames:   nil,
 		CompanionImageEffectMapFile: "image-effect-map.json",
 		CompanionDynamicPaging:      false,
+		UDPAudioAddr:                ":8081",
+		UDPAudioAdvertiseIP:         "",
 	}
 }
 
@@ -255,6 +263,12 @@ func loadConfigFromFile(path string) (Config, error) {
 	if fileCfg.CompanionDynamicPaging != nil {
 		cfg.CompanionDynamicPaging = *fileCfg.CompanionDynamicPaging
 	}
+	if strings.TrimSpace(fileCfg.UDPAudioAddr) != "" {
+		cfg.UDPAudioAddr = strings.TrimSpace(fileCfg.UDPAudioAddr)
+	}
+	if strings.TrimSpace(fileCfg.UDPAudioAdvertiseIP) != "" {
+		cfg.UDPAudioAdvertiseIP = strings.TrimSpace(fileCfg.UDPAudioAdvertiseIP)
+	}
 	return cfg, nil
 }
 
@@ -297,6 +311,8 @@ func loadConfigFromEnv() Config {
 			"image-effect-map.json",
 		),
 		CompanionDynamicPaging: getEnv("COMPANION_DYNAMIC_PAGING", "false") == "true",
+		UDPAudioAddr:           getEnv("UDP_AUDIO_ADDR", ":8081"),
+		UDPAudioAdvertiseIP:    getEnv("UDP_AUDIO_ADVERTISE_IP", ""),
 	}
 }
 

@@ -203,13 +203,22 @@ async function fillStreamDeckControlFromDataUrl(
   await deck.fillKeyCanvas(control.index, canvas);
 }
 
-export function App() {
+type AppProps = {
+  onRequestNetworkSettings?: () => void;
+};
+
+export function App({ onRequestNetworkSettings }: AppProps = {}) {
+  console.debug("[App] Component mounted, initializing...");
   // ── Core auth state ──
-  const [token, setToken] = useState<string | null>(() =>
-    sessionStorage.getItem(tokenStorageKey),
-  );
+  const [token, setToken] = useState<string | null>(() => {
+    const t = sessionStorage.getItem(tokenStorageKey);
+    console.debug("[App] Initial token from session storage:", t ? "exists" : "empty");
+    return t;
+  });
   const [appData, setAppData] = useState<Bootstrap | null>(null);
   const [publicData, setPublicData] = useState<PublicBootstrap | null>(null);
+  const [isPublicBootstrapLoading, setIsPublicBootstrapLoading] = useState(true);
+  const [publicBootstrapError, setPublicBootstrapError] = useState("");
   const [authMode, setAuthMode] = useState<"operator" | "admin">(() =>
     isAdminPathname(window.location.pathname) ? "admin" : "operator",
   );
@@ -821,11 +830,29 @@ export function App() {
     };
   }, [disconnectStreamDeckWebHid]);
 
+  const loadPublicBootstrap = useCallback(async () => {
+    setIsPublicBootstrapLoading(true);
+    setPublicBootstrapError("");
+    try {
+      const data = await getPublicBootstrap();
+      setPublicData(data);
+    } catch (error) {
+      setPublicData(null);
+      setPublicBootstrapError(
+        error instanceof Error
+          ? error.message
+          : "Server nicht erreichbar. Bitte Adresse pruefen oder erneut versuchen.",
+      );
+    } finally {
+      setIsPublicBootstrapLoading(false);
+    }
+  }, []);
+
   // ── Initial load: public bootstrap ──
   useEffect(() => {
     localStorage.removeItem(tokenStorageKey);
-    getPublicBootstrap().then(setPublicData).catch(console.error);
-  }, []);
+    void loadPublicBootstrap();
+  }, [loadPublicBootstrap]);
 
   // ── Bootstrap on login ──
   useEffect(() => {
@@ -1673,7 +1700,35 @@ export function App() {
   }, [token]);
 
   // ── Early returns ──
-  if (!publicData) return <div className="root">Loading configuration...</div>;
+  if (!publicData) {
+    if (isPublicBootstrapLoading && !publicBootstrapError) {
+      return <div className="root">Loading configuration...</div>;
+    }
+
+    return (
+      <div className="root">
+        <div className="birthday-gate-card">
+          <p className="birthday-gate-kicker">Server offline</p>
+          <h1>Keine Verbindung zum Backend</h1>
+          <p>
+            Die App kann ohne Backend keine Rollen, Rooms oder Login-Daten laden.
+            Pruefe die Server-Adresse oder versuche es erneut.
+          </p>
+          {publicBootstrapError ? <p>{publicBootstrapError}</p> : null}
+          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+            <button type="button" onClick={() => void loadPublicBootstrap()}>
+              Erneut versuchen
+            </button>
+            {onRequestNetworkSettings ? (
+              <button type="button" onClick={onRequestNetworkSettings}>
+                Server-Adresse aendern
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!token) {
     return (

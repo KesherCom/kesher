@@ -96,10 +96,6 @@ export function DesktopConnectionSetup({
     onContinue();
   };
 
-  if (!isReady) {
-    return <div className="desktop-connection-loading">Lade lokale Server-Konfiguration ...</div>;
-  }
-
   return (
     <div className={`desktop-connection-root${compact ? " compact" : ""}`}>
       <section className="desktop-connection-card" aria-label="Desktop connection setup">

@@ -1,14 +1,15 @@
 SHELL := /bin/bash
 LAN_IP ?= 127.0.0.1
 
-.PHONY: help deps dev-backend dev-web run-backend run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build-desktop-web build-desktop-windows dev-desktop desktop-web-check desktop-rust-check desktop-check local-smoke build test ci-test ci-backend-test ci-desktop-test loadtest loadtest-20 docker-build docker-up docker-down clean
+.PHONY: help deps dev-backend dev-web run-backend run-backend-no-udp run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build-desktop-web build-desktop-windows build-desktop-release run-desktop-release dev-desktop desktop-web-check desktop-rust-check desktop-rust-test desktop-check local-smoke build test ci-test ci-backend-test ci-desktop-test loadtest loadtest-20 docker-build docker-up docker-down clean
 
 help:
 	@echo "Available targets:"
 	@echo "  make deps          - install backend/web dependencies"
 	@echo "  make dev-backend   - run Go backend in dev mode"
 	@echo "  make dev-web       - run React frontend dev server"
-	@echo "  make run-backend   - run backend serving built frontend assets"
+	@echo "  make run-backend   - run backend serving built frontend assets (UDP audio relay :8081 ON)"
+	@echo "  make run-backend-no-udp - run backend with the native UDP audio relay disabled (WebRTC only)"
 	@echo "  make run-backend-https - run backend with HTTPS using internal self-signed certificates"
 	@echo "  make run-backend-le DOMAIN=... - run backend with HTTPS using Let's Encrypt certs from /etc/letsencrypt/live/\$$DOMAIN/"
 	@echo "  make run-backend-certmagic DOMAIN=... DNS_PROVIDER=... - run backend with CertMagic ACME DNS-01 automation"
@@ -25,10 +26,13 @@ help:
 	@echo "  make build-desktop-web     - build web bundle for desktop"
 	@echo "  make build-desktop-windows - build Windows app (MSI + NSIS)"
 	@echo "  make build-desktop-macos   - build macOS app (DMG + universal)"
+	@echo "  make build-desktop-release - tauri build --no-bundle (raw kesher_desktop.exe, no installer)"
+	@echo "  make run-desktop-release   - run the previously built release binary directly"
 	@echo "  make dev-desktop           - run Tauri dev server"
 	@echo "  make desktop-web-check     - TypeScript + Vite build check for desktop web shell"
 	@echo "  make desktop-rust-check    - cargo check for desktop native (Tauri/Rust)"
-	@echo "  make desktop-check         - run desktop web + native checks"
+	@echo "  make desktop-rust-test     - cargo test for the desktop crate (incl. native audio)"
+	@echo "  make desktop-check         - run desktop web + native checks + tests"
 	@echo "  make local-smoke           - run complete local smoke checks (deps, tests, desktop checks)"
 	@echo "  make ci-test               - run full CI test suite"
 	@echo "  make ci-backend-test       - test backend builds"
@@ -53,10 +57,17 @@ dev-web:
 
 run-web: dev-web
 
+# Default: native UDP audio relay listens on :8081 alongside HTTP :8080.
+# Override with UDP_AUDIO_ADDR=":9000" make run-backend, or disable via the
+# `run-backend-no-udp` target.
 run-backend: build-web
-	@cd backend && STATIC_DIR=../web/dist go run ./cmd/server
+	@node -e "const cp=require('child_process');const path=require('path');const env={...process.env,STATIC_DIR:path.join('..','web','dist'),UDP_AUDIO_ADDR:process.env.UDP_AUDIO_ADDR||':8081'};const child=cp.spawn('go',['run','./cmd/server'],{cwd:path.join('backend'),stdio:'inherit',env});child.on('exit',(code)=>process.exit(code??0));child.on('error',(err)=>{console.error('Failed to start backend:',err.message);process.exit(1);});"
+
+run-backend-no-udp: build-web
+	@node -e "const cp=require('child_process');const path=require('path');const env={...process.env,STATIC_DIR:path.join('..','web','dist'),UDP_AUDIO_ADDR:''};const child=cp.spawn('go',['run','./cmd/server'],{cwd:path.join('backend'),stdio:'inherit',env});child.on('exit',(code)=>process.exit(code??0));child.on('error',(err)=>{console.error('Failed to start backend:',err.message);process.exit(1);});"
+
 run-backend-https: build-web
-	@cd backend && STATIC_DIR=../web/dist TRUSTED_LAN_HTTP=false TLS_MODE=internal go run ./cmd/server
+	@node -e "const cp=require('child_process');const path=require('path');const env={...process.env,STATIC_DIR:path.join('..','web','dist'),TRUSTED_LAN_HTTP:'false',TLS_MODE:'internal'};const child=cp.spawn('go',['run','./cmd/server'],{cwd:path.join('backend'),stdio:'inherit',env});child.on('exit',(code)=>process.exit(code??0));child.on('error',(err)=>{console.error('Failed to start backend:',err.message);process.exit(1);});"
 
 run-backend-le: build-web
 	@if [[ -z "$(DOMAIN)" ]]; then \
@@ -165,6 +176,15 @@ build-desktop-macos: build-desktop-web
 	@echo "Building macOS desktop app (DMG + universal)..."
 	@cd desktop && npm run tauri build -- --target universal-apple-darwin
 
+# Fast iteration target: produce just the raw kesher_desktop.exe (no MSI/NSIS).
+build-desktop-release: build-desktop-web
+	@echo "Building desktop release binary (tauri build --no-bundle)..."
+	@cd desktop && npm run tauri build -- --no-bundle
+
+run-desktop-release:
+	@echo "Running pre-built desktop release binary..."
+	@node -e "const fs=require('fs');const cp=require('child_process');const path=require('path');const candidates=['desktop/src-tauri/target/release/kesher_desktop.exe','desktop/src-tauri/target/release/kesher_desktop'];const bin=candidates.find((p)=>fs.existsSync(p));if(!bin){console.error('No release binary found. Run: make build-desktop-release');process.exit(1);}const child=cp.spawn(path.resolve(bin),[],{stdio:'inherit'});child.on('exit',(code)=>process.exit(code??0));child.on('error',(err)=>{console.error('Failed to start release binary:',err.message);process.exit(1);});"
+
 dev-desktop:
 	@echo "Starting Tauri dev server..."
 	@cd desktop && npm run tauri dev
@@ -177,7 +197,11 @@ desktop-rust-check:
 	@echo "Running desktop Rust check..."
 	@cd desktop/src-tauri && cargo check
 
-desktop-check: desktop-web-check desktop-rust-check
+desktop-rust-test:
+	@echo "Running desktop Rust tests (incl. native audio)..."
+	@cd desktop/src-tauri && cargo test --bin kesher_desktop
+
+desktop-check: desktop-web-check desktop-rust-check desktop-rust-test
 	@echo "✓ Desktop checks passed!"
 
 local-smoke: deps test desktop-check
