@@ -155,60 +155,45 @@ jobs:
           path: dist/release/*
           if-no-files-found: error
 
-  # 3. macOS Desktop (Apple Silicon)
+# 3. macOS Desktop (Apple Silicon)
   build-desktop-macos-arm64:
     name: Build Desktop (macOS arm64)
-    runs-on: macos-15
-    # env: Block wurde komplett entfernt!
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
-
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri -> target
-
       - name: Install Opus toolchain
         run: |
           brew install opus pkg-config
-          echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
-
       - name: Configure macOS signing
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
             echo "APPLE_CERTIFICATE=$APPLE_CERTIFICATE" >> "$GITHUB_ENV"
             echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD" >> "$GITHUB_ENV"
             echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
-            if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
-              echo "APPLE_ID=$APPLE_ID" >> "$GITHUB_ENV"
-              echo "APPLE_PASSWORD=$APPLE_PASSWORD" >> "$GITHUB_ENV"
-              echo "APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
-            fi
           else
             echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
           fi
-
       - name: Build
         run: |
           npm install
           npm --prefix desktop run tauri build -- --target aarch64-apple-darwin
-
       - name: Prepare release assets
         run: |
           mkdir -p dist/release
@@ -218,7 +203,6 @@ jobs:
             exit 1
           fi
           cp "$dmg" dist/release/kesher-desktop-macos-arm64.dmg
-
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
@@ -229,56 +213,42 @@ jobs:
   # 4. macOS Desktop (Intel)
   build-desktop-macos-amd64:
     name: Build Desktop (macOS amd64)
-    runs-on: macos-15-intel
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-apple-darwin
-
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri -> target
-
       - name: Install Opus toolchain
         run: |
           brew install opus pkg-config
-          echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
-
       - name: Configure macOS signing
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
             echo "APPLE_CERTIFICATE=$APPLE_CERTIFICATE" >> "$GITHUB_ENV"
             echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD" >> "$GITHUB_ENV"
             echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
-            if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
-              echo "APPLE_ID=$APPLE_ID" >> "$GITHUB_ENV"
-              echo "APPLE_PASSWORD=$APPLE_PASSWORD" >> "$GITHUB_ENV"
-              echo "APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
-            fi
           else
             echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
           fi
-
       - name: Build
         run: |
           npm install
           npm --prefix desktop run tauri build -- --target x86_64-apple-darwin
-
       - name: Prepare release assets
         run: |
           mkdir -p dist/release
@@ -288,7 +258,6 @@ jobs:
             exit 1
           fi
           cp "$dmg" dist/release/kesher-desktop-macos-amd64.dmg
-
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
