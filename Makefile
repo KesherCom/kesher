@@ -26,7 +26,7 @@ help:
 	@echo "  make build-desktop-web     - build web bundle for desktop"
 	@echo "  make build-desktop-windows - build Windows app (MSI + NSIS)"
 	@echo "  make build-desktop-macos   - build macOS app (DMG + universal)"
-	@echo "  make build-desktop-release - cargo build --release (raw kesher_desktop.exe, no installer)"
+	@echo "  make build-desktop-release - tauri build --no-bundle (raw kesher_desktop.exe, no installer)"
 	@echo "  make run-desktop-release   - run the previously built release binary directly"
 	@echo "  make dev-desktop           - run Tauri dev server"
 	@echo "  make desktop-web-check     - TypeScript + Vite build check for desktop web shell"
@@ -178,8 +178,8 @@ build-desktop-macos: build-desktop-web
 
 # Fast iteration target: produce just the raw kesher_desktop.exe (no MSI/NSIS).
 build-desktop-release: build-desktop-web
-	@echo "Building desktop release binary (cargo build --release)..."
-	@cd desktop/src-tauri && cargo build --release
+	@echo "Building desktop release binary (tauri build --no-bundle)..."
+	@cd desktop && npm run tauri build -- --no-bundle
 
 run-desktop-release:
 	@echo "Running pre-built desktop release binary..."
