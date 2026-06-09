@@ -201,6 +201,11 @@ export function resolveUnknownSourceGain({
   let sawRoomCandidate = false;
   for (const route of routes) {
     if (route.scope !== "room") continue;
+    // Ignore room routes emitted by ourselves — hearing our own mic routed
+    // back through the SFU introduces an audible network delay. If the
+    // route's sender matches `selfUserID` we skip it here so remote gain
+    // decisions prefer other participants or direct routes.
+    if (route.senderUserID === selfUserID) continue;
     if (!listenRoomIDs.includes(route.targetID)) continue;
     sawRoomCandidate = true;
     maxRoomGain = Math.max(
