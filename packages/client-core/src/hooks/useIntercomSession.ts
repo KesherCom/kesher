@@ -7,7 +7,12 @@ import {
   roleAllowed,
   toggleRoomSelectionState,
 } from "../lib/intercom";
-import { normalizePresenceList, samePresenceList } from "../lib/presence";
+import {
+  meterDbFsFloor,
+  normalizePresenceList,
+  peakAmplitudeToDbFs,
+  samePresenceList,
+} from "../lib/presence";
 import {
   clampGainValue,
   clampInputGainValue,
@@ -32,7 +37,35 @@ import { useLocalMic } from "./useLocalMic";
 import { useRemoteAudio } from "./useRemoteAudio";
 import { useRtpStats } from "./useRtpStats";
 import type { RtpStats } from "./useRtpStats";
-import type { NativeAudioHook } from "./useNativeAudio";
+import {
+  nativeAudioBackendStorageKey,
+  type NativeAudioBackend,
+  type NativeAudioEndpoint,
+  type NativeAudioHook,
+  type NativeEngineStartInfo,
+} from "./useNativeAudio";
+
+/** State and controls of the desktop performance engine, for settings UI. */
+export type PerformanceAudioControls = {
+  info: NativeEngineStartInfo | null;
+  backend: NativeAudioBackend;
+  setBackend: (backend: NativeAudioBackend) => void;
+  /** Mouth-to-ear latency in ms, or null when the click was not heard. */
+  measureLatency: () => Promise<number | null>;
+};
+
+function readNativeAudioBackend(): NativeAudioBackend {
+  try {
+    const v = localStorage.getItem(nativeAudioBackendStorageKey);
+    if (v === "exclusive" || v === "shared" || v === "system") return v;
+  } catch {
+    /* ignore */
+  }
+  return "auto";
+}
+
+/** Incoming-audio indicator threshold, matches the browser RMS meter. */
+const performanceIncomingPeakThreshold = 0.03;
 
 type WakeLockSentinelLike = {
   released: boolean;
@@ -80,6 +113,7 @@ type WsMessage =
       };
     }
   | { type: "webrtc_offer"; data: { sdp: string } }
+  | { type: "native_audio_endpoint"; data: NativeAudioEndpoint }
   | {
       type: "webrtc_ice_candidate";
       data: { candidate: string; sdpMid?: string; sdpMLineIndex?: number };
@@ -499,6 +533,8 @@ export type UseIntercomSessionResult = {
   setMessage: (v: string) => void;
   inputLevelDbFs: number;
   displayedInputClipping: boolean;
+  /** Present while the desktop performance (UDP) engine is in use. */
+  performanceAudio: PerformanceAudioControls | null;
   isLocalMonitorActive: boolean;
   toggleLocalMonitor: () => Promise<void>;
   mediaSessionSupported: boolean;
@@ -653,6 +689,24 @@ export function useIntercomSession({
   // ── Refs ──
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  /** True while this session uses the native UDP performance pipeline. */
+  const performanceModeActiveRef = useRef(false);
+  const [performanceModeActive, setPerformanceModeActive] = useState(false);
+  const [performanceEngineInfo, setPerformanceEngineInfo] =
+    useState<NativeEngineStartInfo | null>(null);
+  const [nativeAudioBackend, setNativeAudioBackendState] =
+    useState<NativeAudioBackend>(readNativeAudioBackend);
+  const nativeAudioBackendRef = useRef(nativeAudioBackend);
+  const [performanceInputLevelDbFs, setPerformanceInputLevelDbFs] =
+    useState(meterDbFsFloor);
+  const [performanceInputClipping, setPerformanceInputClipping] =
+    useState(false);
+  const [performanceIncomingActive, setPerformanceIncomingActive] =
+    useState(false);
+  /** Last endpoint from the server, so the engine can restart on changes. */
+  const performanceEndpointRef = useRef<NativeAudioEndpoint | null>(null);
+  /** Serializes engine stop/start so restarts never overlap. */
+  const performanceEngineOpRef = useRef<Promise<void>>(Promise.resolve());
   const reconnectTimeoutRef = useRef<number | null>(null);
   const connectRealtimeRef = useRef<(() => Promise<void>) | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -961,6 +1015,18 @@ export function useIntercomSession({
       gainsByUserId[user.id] = resolveGainForSourceUser(user.id);
     }
     nativeAudio.setOutputGains(gainsByUserId);
+
+    // The performance engine knows sources, not users: map via presence.
+    const gainsBySourceId: Record<string, number> = {};
+    for (const entry of presence) {
+      if (!entry.audioSourceId || entry.userId === appDataRef.current.self.id) {
+        continue;
+      }
+      gainsBySourceId[String(entry.audioSourceId)] = resolveGainForSourceUser(
+        entry.userId,
+      );
+    }
+    nativeAudio.setPerformanceOutputGains(gainsBySourceId);
   }, [
     nativeAudio,
     appData,
@@ -1118,6 +1184,15 @@ export function useIntercomSession({
 
   function cleanupRealtimeResources() {
     mic.micReinitGenerationRef.current += 1;
+    if (performanceModeActiveRef.current) {
+      performanceModeActiveRef.current = false;
+      performanceEndpointRef.current = null;
+      setPerformanceModeActive(false);
+      setPerformanceEngineInfo(null);
+      performanceEngineOpRef.current = performanceEngineOpRef.current.then(
+        () => nativeAudio?.stopPerformanceEngine(),
+      );
+    }
     restoreAlwaysOnAfterDirectPttRef.current = false;
     if (wsRef.current) {
       wsRef.current.close();
@@ -1311,6 +1386,15 @@ export function useIntercomSession({
         }
       }
     }
+    if (performanceModeActiveRef.current) {
+      if (state === "always_on" || state === "ptt_start") {
+        nativeAudio?.setPerformanceMic(true);
+      } else if (state === "always_off") {
+        nativeAudio?.setPerformanceMic(false);
+      } else if (state === "ptt_stop") {
+        nativeAudio?.setPerformanceMic(voiceModeRef.current === "always_on");
+      }
+    }
     wsRef.current.send(
       JSON.stringify({
         type: "voice_state",
@@ -1445,6 +1529,107 @@ export function useIntercomSession({
   function handleEnableDirectPptChange(enabled: boolean) {
     if (enabled) setAlwaysOn(false);
   }
+
+  // ── Performance engine (desktop UDP) ──
+  function restartPerformanceEngine() {
+    if (!nativeAudio) return;
+    performanceEngineOpRef.current = performanceEngineOpRef.current.then(
+      async () => {
+        const endpoint = performanceEndpointRef.current;
+        await nativeAudio.stopPerformanceEngine();
+        if (!endpoint || !performanceModeActiveRef.current) return;
+        try {
+          const info = await nativeAudio.startPerformanceEngine(
+            endpoint,
+            {
+              inputDeviceId: selectedInputDeviceIdRef.current || undefined,
+              outputDeviceId: selectedOutputDeviceIdRef.current || undefined,
+            },
+            nativeAudioBackendRef.current,
+          );
+          setPerformanceEngineInfo(info);
+          // A fresh engine starts muted; restore always-on talk.
+          nativeAudio.setPerformanceMic(voiceModeRef.current === "always_on");
+          setAudioError("");
+          pushDebugEvent(
+            info
+              ? `system · native audio · in: ${info.input.backend} ${info.input.periodMs ?? "?"} ms, out: ${info.output.backend} ${info.output.periodMs ?? "?"} ms`
+              : "system · native audio · performance engine started",
+          );
+        } catch (err) {
+          setPerformanceEngineInfo(null);
+          setAudioError(
+            `Native audio engine failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      },
+    );
+  }
+
+  function setNativeAudioBackend(backend: NativeAudioBackend) {
+    try {
+      localStorage.setItem(nativeAudioBackendStorageKey, backend);
+    } catch {
+      /* ignore */
+    }
+    nativeAudioBackendRef.current = backend;
+    setNativeAudioBackendState(backend);
+  }
+
+  // Device or driver-mode changes need a new engine.
+  useEffect(() => {
+    if (!performanceModeActiveRef.current || !performanceEndpointRef.current) {
+      return;
+    }
+    restartPerformanceEngine();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedInputDeviceId, selectedOutputDeviceId, nativeAudioBackend]);
+
+  // Level meters from the engine. The input meter only updates while the
+  // settings are open; the incoming indicator only on changes.
+  useEffect(() => {
+    if (!performanceModeActive || !nativeAudio) return;
+    let offTimer: number | null = null;
+    let incoming = false;
+    let clipTimer: number | null = null;
+    const unsubscribe = nativeAudio.subscribePerformanceLevels((event) => {
+      if (isUserSettingsOpenRef.current) {
+        setPerformanceInputLevelDbFs(peakAmplitudeToDbFs(event.inputPeak));
+        if (event.inputPeak >= 1) {
+          setPerformanceInputClipping(true);
+          if (clipTimer !== null) window.clearTimeout(clipTimer);
+          clipTimer = window.setTimeout(() => {
+            clipTimer = null;
+            setPerformanceInputClipping(false);
+          }, 2000);
+        }
+      }
+      if (event.outputPeak >= performanceIncomingPeakThreshold) {
+        if (offTimer !== null) {
+          window.clearTimeout(offTimer);
+          offTimer = null;
+        }
+        if (!incoming) {
+          incoming = true;
+          setPerformanceIncomingActive(true);
+        }
+      } else if (incoming && offTimer === null) {
+        offTimer = window.setTimeout(() => {
+          offTimer = null;
+          incoming = false;
+          setPerformanceIncomingActive(false);
+        }, 1000);
+      }
+    });
+    return () => {
+      unsubscribe();
+      if (offTimer !== null) window.clearTimeout(offTimer);
+      if (clipTimer !== null) window.clearTimeout(clipTimer);
+      setPerformanceIncomingActive(false);
+      setPerformanceInputLevelDbFs(meterDbFsFloor);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [performanceModeActive, nativeAudio]);
 
   // ── PTT actions ──
   function startPtt() {
@@ -1693,8 +1878,18 @@ export function useIntercomSession({
         reconnectAttemptsRef.current > 0 ? "reconnecting" : "connecting",
       );
       pendingInitialRoomRestoreRef.current = true;
+      // Desktop app: prefer the native UDP performance pipeline; the server
+      // then skips WebRTC for this session and sends native_audio_endpoint.
+      const usePerformanceMode =
+        (await nativeAudio?.probePerformanceMode()) ?? false;
+      if (cancelled) return;
+      performanceModeActiveRef.current = usePerformanceMode;
+      setPerformanceModeActive(usePerformanceMode);
       const ws = new WebSocket(
-        buildWebSocketUrl("/ws", { token }),
+        buildWebSocketUrl("/ws", {
+          token,
+          transport: usePerformanceMode ? "native" : undefined,
+        }),
       );
       wsRef.current = ws;
 
@@ -1795,35 +1990,39 @@ export function useIntercomSession({
           });
           pushDebugEvent("system · webrtc · remote audio track attached");
         };
-        try {
-          const captureStream = await mic.getMicStream(
-            selectedInputDeviceIdRef.current,
-          );
-          mic.stopInputProcessing();
-          mic.inputCaptureStreamRef.current = captureStream;
-          const stream = mic.buildOutgoingMicStream(
-            captureStream,
-            selectedInputGainFor(selectedInputDeviceIdRef.current),
-          );
-          mic.localStreamRef.current = stream;
-          if (isUserSettingsOpenRef.current) {
-            mic.startLevelMeter(captureStream);
-          } else {
-            mic.stopLevelMeter();
+        // Performance mode captures and plays audio in the Rust engine; a
+        // browser mic capture would only compete for the device.
+        if (!performanceModeActiveRef.current) {
+          try {
+            const captureStream = await mic.getMicStream(
+              selectedInputDeviceIdRef.current,
+            );
+            mic.stopInputProcessing();
+            mic.inputCaptureStreamRef.current = captureStream;
+            const stream = mic.buildOutgoingMicStream(
+              captureStream,
+              selectedInputGainFor(selectedInputDeviceIdRef.current),
+            );
+            mic.localStreamRef.current = stream;
+            if (isUserSettingsOpenRef.current) {
+              mic.startLevelMeter(captureStream);
+            } else {
+              mic.stopLevelMeter();
+            }
+            void onRefreshAudioDevices();
+            const initialEnabled = voiceModeRef.current === "always_on";
+            for (const track of stream.getAudioTracks()) {
+              track.enabled = initialEnabled;
+              pc.addTrack(track, stream);
+            }
+            await applyOutgoingAudioSenderBitrate(pc);
+            mic.applyVoiceModeToLocalTracks(voiceModeRef.current);
+          } catch (e) {
+            setAudioError(
+              `Failed to access microphone: ${e instanceof Error ? e.message : "unknown error"}`,
+            );
+            pushDebugEvent("system · local/mic · capture failed (receive-only)");
           }
-          void onRefreshAudioDevices();
-          const initialEnabled = voiceModeRef.current === "always_on";
-          for (const track of stream.getAudioTracks()) {
-            track.enabled = initialEnabled;
-            pc.addTrack(track, stream);
-          }
-          await applyOutgoingAudioSenderBitrate(pc);
-          mic.applyVoiceModeToLocalTracks(voiceModeRef.current);
-        } catch (e) {
-          setAudioError(
-            `Failed to access microphone: ${e instanceof Error ? e.message : "unknown error"}`,
-          );
-          pushDebugEvent("system · local/mic · capture failed (receive-only)");
         }
         ws.send(JSON.stringify({ type: "webrtc_ready", data: {} }));
         sendRoomMatrix(listenRoomIdsRef.current, talkRoomIdsRef.current, true);
@@ -2053,6 +2252,12 @@ export function useIntercomSession({
             return;
           }
           ackFailed("unsupported command");
+          return;
+        }
+        if (msg.type === "native_audio_endpoint") {
+          if (!performanceModeActiveRef.current || !nativeAudio) return;
+          performanceEndpointRef.current = msg.data;
+          restartPerformanceEngine();
           return;
         }
         if (msg.type === "webrtc_offer") {
@@ -2541,7 +2746,9 @@ export function useIntercomSession({
     chatMessages,
     events,
     rtpStats,
-    incomingAudioActive: remote.incomingAudioActive,
+    incomingAudioActive: performanceModeActive
+      ? performanceIncomingActive
+      : remote.incomingAudioActive,
     activeVoiceRoutes,
     incomingAttention,
     lastCompanionCommand,
@@ -2560,8 +2767,21 @@ export function useIntercomSession({
     viewMode,
     message,
     setMessage,
-    inputLevelDbFs: mic.inputLevelDbFs,
-    displayedInputClipping: mic.displayedInputClipping,
+    inputLevelDbFs: performanceModeActive
+      ? performanceInputLevelDbFs
+      : mic.inputLevelDbFs,
+    displayedInputClipping: performanceModeActive
+      ? performanceInputClipping
+      : mic.displayedInputClipping,
+    performanceAudio:
+      performanceModeActive && nativeAudio
+        ? {
+            info: performanceEngineInfo,
+            backend: nativeAudioBackend,
+            setBackend: setNativeAudioBackend,
+            measureLatency: () => nativeAudio.measurePerformanceLatency(),
+          }
+        : null,
     isLocalMonitorActive: mic.isLocalMonitorActive,
     toggleLocalMonitor: async () => {
       if (mic.isLocalMonitorActive) {

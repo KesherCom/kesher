@@ -15,6 +15,8 @@ import { createHoldButtonProps } from "../lib/holdButton";
 import { withResolvedStreamDeckButtonLabel } from "../lib/streamDeckLabels";
 import { sortDirectUsersByRoleAndUsername } from "../lib/users";
 import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
+import { PerformanceAudioSettings } from "./panels/PerformanceAudioSettings";
+import type { PerformanceAudioControls } from "../hooks/useIntercomSession";
 
 const DB_MIN = -60;
 const OUTPUT_DB_MAX = 6; // +6 dB ~ gain 2.0
@@ -390,6 +392,8 @@ type StationIntercomViewProps = {
   selectedOutputLabel: string;
   outputSelectionSupported: boolean;
   setSelectedOutputDeviceId: (value: string) => void;
+  /** Desktop performance engine controls; null in the browser. */
+  performanceAudio?: PerformanceAudioControls | null;
   streamDeckSettings: StreamDeckSettings | null;
   streamDeckBusy: boolean;
   streamDeckError: string;
@@ -503,6 +507,7 @@ export function StationIntercomView({
   selectedOutputDeviceId,
   selectedOutputLabel,
   outputSelectionSupported,
+  performanceAudio,
   setSelectedOutputDeviceId,
   streamDeckSettings,
   streamDeckBusy,
@@ -2998,6 +3003,15 @@ export function StationIntercomView({
                             Explicit speaker selection is not supported by this
                             browser; using system default output.
                           </small>
+                        ) : null}
+                        {performanceAudio ? (
+                          <PerformanceAudioSettings
+                            performanceAudio={performanceAudio}
+                            showBackendChoice={
+                              typeof navigator !== "undefined" &&
+                              /Windows/i.test(navigator.userAgent)
+                            }
+                          />
                         ) : null}
                       </div>
                     </div>

@@ -4,6 +4,8 @@
 mod audio_engine;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 mod audio_native;
+#[cfg(target_os = "windows")]
+mod audio_wasapi;
 mod config;
 
 #[cfg(target_os = "windows")]
@@ -87,10 +89,15 @@ fn set_output_device(output_device_id: Option<String>, state: State<'_, AudioEng
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 #[tauri::command]
 async fn start_native_audio(
+    app: tauri::AppHandle,
     params: StartNativeParams,
     state: State<'_, NativeAudioState>,
-) -> Result<(), String> {
-    audio_native::start_engine(params, state).await
+) -> Result<audio_native::EngineStartInfo, String> {
+    use tauri::Emitter;
+    let sink: audio_native::LevelSink = Box::new(move |event| {
+        let _ = app.emit("native_audio_level", event);
+    });
+    audio_native::start_engine(params, &state, Some(sink)).await
 }
 
 /// Stop the native engine (called on logout / disconnect or fallback to
@@ -108,6 +115,47 @@ async fn stop_native_audio(state: State<'_, NativeAudioState>) -> Result<(), Str
 #[tauri::command]
 fn set_native_mic(active: bool, state: State<'_, NativeAudioState>) {
     audio_native::set_mic_active(&state, active);
+}
+
+/// Outgoing mic gain for the performance engine (linear).
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[tauri::command]
+fn set_native_input_gain(gain: f32, state: State<'_, NativeAudioState>) {
+    audio_native::set_input_gain(&state, gain);
+}
+
+/// Mic noise gate for the performance engine.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[tauri::command]
+fn set_native_audio_gate(enabled: bool, threshold_db: f32, state: State<'_, NativeAudioState>) {
+    audio_native::set_audio_gate(&state, enabled, threshold_db);
+}
+
+/// Per-user output volume for the performance engine, keyed by the native
+/// source ID from presence (`audioSourceId`).
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[tauri::command]
+fn set_native_output_gains(
+    gains_by_source_id: std::collections::HashMap<String, f32>,
+    state: State<'_, NativeAudioState>,
+) {
+    audio_native::set_output_gains(&state, &gains_by_source_id);
+}
+
+/// Reports the native engine's capabilities so the WebView can choose the
+/// UDP performance transport.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[tauri::command]
+fn native_audio_info() -> audio_native::NativeAudioInfo {
+    audio_native::info()
+}
+
+/// Measures mouth-to-ear latency through the relay with a loopback click.
+/// Resolves to milliseconds, or null when the click was not detected.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[tauri::command]
+async fn native_latency_test(state: State<'_, NativeAudioState>) -> Result<Option<f64>, String> {
+    audio_native::run_latency_test(&state).await
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -135,6 +183,11 @@ pub fn run() {
                 start_native_audio,
                 stop_native_audio,
                 set_native_mic,
+                native_audio_info,
+                native_latency_test,
+                set_native_input_gain,
+                set_native_audio_gate,
+                set_native_output_gains,
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");
@@ -150,6 +203,11 @@ pub fn run() {
                 start_native_audio,
                 stop_native_audio,
                 set_native_mic,
+                native_audio_info,
+                native_latency_test,
+                set_native_input_gain,
+                set_native_audio_gate,
+                set_native_output_gains,
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");

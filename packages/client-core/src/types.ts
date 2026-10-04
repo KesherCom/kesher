@@ -130,6 +130,8 @@ export type Presence = {
   voiceMode: "ptt" | "always_on";
   micEnabled: boolean;
   broadcastActive: boolean;
+  /** Source ID of this session on the native UDP audio transport. */
+  audioSourceId?: number;
 };
 
 export type PublicBootstrap = {

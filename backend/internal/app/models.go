@@ -137,9 +137,9 @@ const (
 )
 
 const (
-	StreamDeckPageTypeManual         StreamDeckPageType = "manual"
-	StreamDeckPageTypeAllRoles       StreamDeckPageType = "all_roles"
-	StreamDeckPageTypeAllPartyLines  StreamDeckPageType = "all_party_lines"
+	StreamDeckPageTypeManual        StreamDeckPageType = "manual"
+	StreamDeckPageTypeAllRoles      StreamDeckPageType = "all_roles"
+	StreamDeckPageTypeAllPartyLines StreamDeckPageType = "all_party_lines"
 )
 
 const (
@@ -270,6 +270,10 @@ type PresenceState struct {
 	VoiceMode       string   `json:"voiceMode"`
 	MicEnabled      bool     `json:"micEnabled"`
 	BroadcastActive bool     `json:"broadcastActive"`
+	// AudioSourceID is the session's source ID on the native UDP transport
+	// (see NativeSourceID). Native receivers map it to the user for
+	// per-user volume and activity display.
+	AudioSourceID uint32 `json:"audioSourceId,omitempty"`
 }
 
 type RoutedEvent struct {
@@ -327,13 +331,16 @@ type WebRTCIceCandidate struct {
 // the client should send Opus frames to, plus the session token (echoed back
 // for the REGISTER packet). Browser clients never receive this message.
 type NativeAudioEndpoint struct {
-	Host          string `json:"host"`
-	Port          int    `json:"port"`
-	Token         string `json:"token"`
-	TokenHash     uint32 `json:"tokenHash"`
-	FrameDuration int    `json:"frameDurationMs"`
-	SampleRate    int    `json:"sampleRate"`
-	Channels      int    `json:"channels"`
+	Host          string  `json:"host"`
+	Port          int     `json:"port"`
+	Token         string  `json:"token"`
+	TokenHash     uint32  `json:"tokenHash"`
+	FrameDuration float64 `json:"frameDurationMs"`
+	SampleRate    int     `json:"sampleRate"`
+	Channels      int     `json:"channels"`
+	// ProtocolVersion is the highest KSHR version the relay speaks; clients
+	// that support it register with it (see udp_audio.go).
+	ProtocolVersion int `json:"protocolVersion"`
 }
 
 // AudioModeInfo tells the client which transport the server expects. "native"

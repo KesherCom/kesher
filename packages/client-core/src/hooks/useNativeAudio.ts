@@ -60,6 +60,42 @@ export type NativeAudioEndpoint = {
   frameDurationMs: number;
   sampleRate: number;
   channels: number;
+  /** KSHR wire protocol version the relay speaks (absent = 1). */
+  protocolVersion?: number;
+};
+
+/** localStorage switch to force the WebRTC fallback in the desktop app. */
+export const performanceModeStorageKey = "kesher_performance_mode";
+
+/** localStorage key for the preferred device access mode (Windows). */
+export const nativeAudioBackendStorageKey = "kesher_native_audio_backend";
+
+/**
+ * Device access for the performance engine. Windows: "auto" tries WASAPI
+ * exclusive, then low-latency shared, then the system default path.
+ * Other platforms always use the system path.
+ */
+export type NativeAudioBackend = "auto" | "exclusive" | "shared" | "system";
+
+export type NativeStreamReport = {
+  backend: string;
+  device: string;
+  periodMs: number | null;
+};
+
+/** What the performance engine actually opened. */
+export type NativeEngineStartInfo = {
+  input: NativeStreamReport;
+  output: NativeStreamReport;
+  frameMs: number;
+  protocolVersion: number;
+};
+
+/** Emitted ~20x per second by the performance engine. Peaks are 0..1. */
+export type NativePerformanceLevelEvent = {
+  inputPeak: number;
+  outputPeak: number;
+  sources: Array<{ sourceId: number; peak: number }>;
 };
 
 export type NativeAudioHook = {
@@ -100,11 +136,30 @@ export type NativeAudioHook = {
   startPerformanceEngine: (
     endpoint: NativeAudioEndpoint,
     devices?: { inputDeviceId?: string; outputDeviceId?: string },
-  ) => Promise<void>;
+    backend?: NativeAudioBackend,
+  ) => Promise<NativeEngineStartInfo | null>;
+  /** Per-user volume in the performance engine, keyed by audioSourceId. */
+  setPerformanceOutputGains: (gainsBySourceId: Record<string, number>) => void;
+  /** Subscribes to level events; returns an unsubscribe function. */
+  subscribePerformanceLevels: (
+    onLevels: (event: NativePerformanceLevelEvent) => void,
+  ) => () => void;
   /** Tear down the performance engine. */
   stopPerformanceEngine: () => Promise<void>;
   /** Mic gate for the performance pipeline (mirrors `setPtt` semantics). */
   setPerformanceMic: (active: boolean) => void;
+  /**
+   * Resolves to true when the desktop build ships the UDP performance engine
+   * and it is not disabled via localStorage. The WebSocket must then connect
+   * with `transport=native`.
+   */
+  probePerformanceMode: () => Promise<boolean>;
+  /**
+   * Measures mouth-to-ear latency through the server with a loopback click.
+   * Needs an acoustic or cable path from output to input. Resolves to
+   * milliseconds, or null when the click was not detected.
+   */
+  measurePerformanceLatency: () => Promise<number | null>;
 };
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -206,6 +261,7 @@ export function useNativeAudio(
       tauriInvoke("set_input_gain", { gain }).catch((err) =>
         console.error("[native-audio] set_input_gain failed:", err),
       );
+      tauriInvoke("set_native_input_gain", { gain }).catch(() => {});
     },
     [isNative],
   );
@@ -219,6 +275,10 @@ export function useNativeAudio(
       }).catch((err) =>
         console.error("[native-audio] set_audio_gate failed:", err),
       );
+      tauriInvoke("set_native_audio_gate", {
+        enabled,
+        threshold_db: thresholdDb,
+      }).catch(() => {});
     },
     [isNative],
   );
@@ -262,10 +322,11 @@ export function useNativeAudio(
     async (
       endpoint: NativeAudioEndpoint,
       devices?: { inputDeviceId?: string; outputDeviceId?: string },
-    ): Promise<void> => {
-      if (!isNative) return;
+      backend?: NativeAudioBackend,
+    ): Promise<NativeEngineStartInfo | null> => {
+      if (!isNative) return null;
       try {
-        await tauriInvoke("start_native_audio", {
+        return await tauriInvoke<NativeEngineStartInfo>("start_native_audio", {
           params: {
             server_host: endpoint.host,
             server_port: endpoint.port,
@@ -273,6 +334,9 @@ export function useNativeAudio(
             token_hash: endpoint.tokenHash,
             input_device_id: devices?.inputDeviceId ?? null,
             output_device_id: devices?.outputDeviceId ?? null,
+            protocol_version: endpoint.protocolVersion ?? 1,
+            frame_duration_ms: endpoint.frameDurationMs || null,
+            audio_backend: backend ?? "auto",
           },
         });
       } catch (err) {
@@ -302,8 +366,74 @@ export function useNativeAudio(
     [isNative],
   );
 
+  const setPerformanceOutputGains = useCallback(
+    (gainsBySourceId: Record<string, number>) => {
+      if (!isNative) return;
+      tauriInvoke("set_native_output_gains", {
+        gains_by_source_id: gainsBySourceId,
+      }).catch((err) =>
+        console.error("[native-audio] set_native_output_gains failed:", err),
+      );
+    },
+    [isNative],
+  );
+
+  const subscribePerformanceLevels = useCallback(
+    (onLevels: (event: NativePerformanceLevelEvent) => void) => {
+      if (!isNative) return () => {};
+      let unlisten: (() => void) | null = null;
+      let cancelled = false;
+      void tauriListen<NativePerformanceLevelEvent>(
+        "native_audio_level",
+        onLevels,
+      ).then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      });
+      return () => {
+        cancelled = true;
+        unlisten?.();
+      };
+    },
+    [isNative],
+  );
+
+  const performanceProbeRef = useRef<Promise<boolean> | null>(null);
+  const probePerformanceMode = useCallback((): Promise<boolean> => {
+    if (!isNative) return Promise.resolve(false);
+    try {
+      if (localStorage.getItem(performanceModeStorageKey) === "off") {
+        return Promise.resolve(false);
+      }
+    } catch {
+      /* ignore */
+    }
+    if (!performanceProbeRef.current) {
+      performanceProbeRef.current = tauriInvoke<{ protocolVersion: number }>(
+        "native_audio_info",
+      )
+        .then((info) => (info?.protocolVersion ?? 0) >= 2)
+        .catch(() => false);
+    }
+    return performanceProbeRef.current;
+  }, [isNative]);
+
+  const measurePerformanceLatency = useCallback(async (): Promise<
+    number | null
+  > => {
+    if (!isNative) return null;
+    try {
+      return await tauriInvoke<number | null>("native_latency_test");
+    } catch (err) {
+      console.error("[native-audio] native_latency_test failed:", err);
+      return null;
+    }
+  }, [isNative]);
+
   return {
     isNative,
+    probePerformanceMode,
+    measurePerformanceLatency,
     listDevices,
     handleOffer,
     setPtt,
@@ -315,5 +445,7 @@ export function useNativeAudio(
     startPerformanceEngine,
     stopPerformanceEngine,
     setPerformanceMic,
+    setPerformanceOutputGains,
+    subscribePerformanceLevels,
   };
 }

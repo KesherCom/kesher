@@ -3285,13 +3285,14 @@ func (s *Server) sendNativeAudioEndpoint(token string, r *http.Request) {
 	s.hub.SendToToken(token, WSOutbound{
 		Type: "native_audio_endpoint",
 		Data: NativeAudioEndpoint{
-			Host:          host,
-			Port:          udpAddr.Port,
-			Token:         token,
-			TokenHash:     HashSessionToken(token),
-			FrameDuration: 5,
-			SampleRate:    48000,
-			Channels:      1,
+			Host:            host,
+			Port:            udpAddr.Port,
+			Token:           token,
+			TokenHash:       HashSessionToken(token),
+			FrameDuration:   5,
+			SampleRate:      48000,
+			Channels:        1,
+			ProtocolVersion: udpAudioVersion2,
 		},
 	})
 }
@@ -5397,6 +5398,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	s.hub.SendChatHistorySnapshot(session.Token)
 	if transport == "native" {
 		s.sendNativeAudioEndpoint(session.Token, r)
+		// Native sessions never send webrtc_ready; publish routing for them
+		// right away so existing sources start reaching this listener.
+		s.media.SyncRouting()
 	} else if err := s.media.EnsurePeer(session.Token, user); err != nil {
 		s.logger.Error("failed to initialize media peer", "error", err)
 	}
@@ -5404,7 +5408,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		s.hub.Remove(session.Token)
 		s.sessions.ScheduleDisconnectLogout(session.Token, s.cfg.DisconnectLogoutDelay)
 	}()
-	mediaReady := false
+	// Native (UDP) sessions have no WebRTC negotiation; their routing must
+	// follow matrix changes from the start.
+	mediaReady := transport == "native"
 	var connMu sync.Mutex
 
 	go func() {

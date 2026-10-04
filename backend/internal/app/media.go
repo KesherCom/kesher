@@ -35,11 +35,17 @@ type mediaSourceTrack struct {
 	codec  webrtc.RTPCodecCapability
 	userID string
 	dests  map[string]*routedDest // key: destination peer token
+	// sourceID identifies this source on native (UDP v2) destinations.
+	sourceID uint32
+	// nativeDests is the immutable list of native (UDP) destination tokens
+	// that currently hear this source. Read lock-free per RTP packet.
+	nativeDests atomic.Pointer[[]string]
 }
 
 type mediaSnapshotClient struct {
 	userID      string
 	roleID      string
+	native      bool // uses the UDP relay instead of a WebRTC peer
 	listenRooms map[string]struct{}
 	talkRooms   map[string]struct{}
 }
@@ -262,9 +268,11 @@ func (m *MediaManager) EnsurePeer(token string, user User) error {
 
 	// Pre-attach existing source tracks to this new peer so audio can flow
 	// instantly when routing gates open (no renegotiation needed later).
+	snapshot := m.buildHubSnapshotLocked()
 	for sourceToken := range m.sources {
-		m.recomputeSourceRoutingLocked(sourceToken)
+		m.recomputeSourceRoutingWithSnapshotLocked(sourceToken, snapshot)
 	}
+	m.recomputeAllNativeSourcesLocked(snapshot)
 
 	return nil
 }
@@ -427,18 +435,26 @@ func (m *MediaManager) HandleICECandidate(token string, c WebRTCIceCandidate) er
 }
 
 func (m *MediaManager) RemovePeer(token string) {
+	m.removePeerLocked(token)
+	// Native sessions have no mediaPeer but may own a native source.
+	m.removeNativeSource(token)
+}
+
+func (m *MediaManager) removePeerLocked(token string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	peer, ok := m.peers[token]
-	if !ok {
-		return
+	var userID string
+	if peer, ok := m.peers[token]; ok {
+		userID = peer.userID
+		if peer.renegotiateTimer != nil {
+			peer.renegotiateTimer.Stop()
+			peer.renegotiateTimer = nil
+		}
+		_ = peer.pc.Close()
+		delete(m.peers, token)
+	} else if m.hub != nil {
+		userID = m.hub.userIDForToken(token)
 	}
-	if peer.renegotiateTimer != nil {
-		peer.renegotiateTimer.Stop()
-		peer.renegotiateTimer = nil
-	}
-	_ = peer.pc.Close()
-	delete(m.peers, token)
 	delete(m.broadcastActive, token)
 	delete(m.directActive, token)
 	delete(m.idleRoomFallbackSuppressed, token)
@@ -449,14 +465,14 @@ func (m *MediaManager) RemovePeer(token string) {
 		delete(src.dests, token)
 	}
 
-	var affectedSources []string
-	for sourceToken, targetUserID := range m.directActive {
-		if targetUserID == peer.userID {
-			delete(m.directActive, sourceToken)
-			if !m.sourceMicEnabledLocked(sourceToken) {
-				m.idleRoomFallbackSuppressed[sourceToken] = struct{}{}
+	if userID != "" {
+		for sourceToken, targetUserID := range m.directActive {
+			if targetUserID == userID {
+				delete(m.directActive, sourceToken)
+				if !m.sourceMicEnabledLocked(sourceToken) {
+					m.idleRoomFallbackSuppressed[sourceToken] = struct{}{}
+				}
 			}
-			affectedSources = append(affectedSources, sourceToken)
 		}
 	}
 
@@ -465,8 +481,16 @@ func (m *MediaManager) RemovePeer(token string) {
 			m.requestRenegotiationLocked(p)
 		}
 	}
-	for _, sourceToken := range affectedSources {
-		m.recomputeSourceRoutingLocked(sourceToken)
+	// The leaving session may have been a destination of any source (browser
+	// or native), so refresh everything. Session churn is rare.
+	snapshot := m.buildHubSnapshotLocked()
+	for sourceToken := range m.sources {
+		m.recomputeSourceRoutingWithSnapshotLocked(sourceToken, snapshot)
+	}
+	for nativeToken, src := range m.nativeSourcesSnapshot() {
+		if nativeToken != token {
+			m.recomputeNativeSourceRoutingLocked(nativeToken, src, snapshot)
+		}
 	}
 }
 
@@ -475,10 +499,13 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 
 	m.mu.Lock()
 	src := &mediaSourceTrack{
-		codec:  codec,
-		userID: sourcePeer.userID,
-		dests:  make(map[string]*routedDest),
+		codec:    codec,
+		userID:   sourcePeer.userID,
+		dests:    make(map[string]*routedDest),
+		sourceID: NativeSourceID(sourcePeer.token),
 	}
+	noNativeDests := []string{}
+	src.nativeDests.Store(&noNativeDests)
 	m.sources[sourcePeer.token] = src
 	m.recomputeSourceRoutingLocked(sourcePeer.token)
 	m.mu.Unlock()
@@ -492,7 +519,7 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 		// RLock allows concurrent forwarding from multiple sources while
 		// routing changes (which need a full Lock) remain infrequent.
 		m.mu.RLock()
-		hasNativeDest := false
+		var nativeDests []string
 		if s := m.sources[sourcePeer.token]; s != nil {
 			for destToken, dest := range s.dests {
 				if dest.gate.Load() {
@@ -500,17 +527,15 @@ func (m *MediaManager) handleRemoteTrack(sourcePeer *mediaPeer, remote *webrtc.T
 						// Log RTP write failures for diagnostics; may indicate full send buffer or peer disconnection
 						m.logger.Debug("rtp forward write failed", "dest_token", destToken, "error", err)
 					}
-					if !hasNativeDest && m.hub != nil && m.hub.IsNativeTransport(destToken) {
-						hasNativeDest = true
-					}
 				}
 			}
+			nativeDests = *s.nativeDests.Load()
 		}
 		m.mu.RUnlock()
-		// Stage-1 native bridge: when at least one native (UDP) destination is
-		// open for this WebRTC source, also push the Opus payload to the relay.
-		if hasNativeDest {
-			m.forwardOpusToNativeDests(sourcePeer.token, buf[:n])
+		// Native (UDP) destinations have no WebRTC peer; their routing is
+		// precomputed by recomputeSourceRoutingWithSnapshotLocked.
+		if len(nativeDests) > 0 {
+			m.forwardOpusToNativeDests(src.sourceID, nativeDests, buf[:n])
 		}
 	}
 
@@ -605,6 +630,7 @@ func (m *MediaManager) recomputePendingSourcesLocked() int {
 		for sourceToken := range m.sources {
 			m.recomputeSourceRoutingWithSnapshotLocked(sourceToken, snapshot)
 		}
+		m.recomputeAllNativeSourcesLocked(snapshot)
 		for sourceToken := range m.dirtySources {
 			delete(m.dirtySources, sourceToken)
 		}
@@ -612,6 +638,12 @@ func (m *MediaManager) recomputePendingSourcesLocked() int {
 	}
 	recomputed := 0
 	for sourceToken := range m.dirtySources {
+		if src, ok := m.nativeSource(sourceToken); ok {
+			m.recomputeNativeSourceRoutingLocked(sourceToken, src, snapshot)
+			recomputed++
+			delete(m.dirtySources, sourceToken)
+			continue
+		}
 		if _, ok := m.sources[sourceToken]; !ok {
 			delete(m.dirtySources, sourceToken)
 			continue
@@ -625,7 +657,13 @@ func (m *MediaManager) recomputePendingSourcesLocked() int {
 
 func (m *MediaManager) recomputeSourceRoutingLocked(sourceToken string) {
 	snapshot := m.buildHubSnapshotLocked()
-	m.recomputeSourceRoutingWithSnapshotLocked(sourceToken, snapshot)
+	if _, ok := m.sources[sourceToken]; ok {
+		m.recomputeSourceRoutingWithSnapshotLocked(sourceToken, snapshot)
+		return
+	}
+	if src, ok := m.nativeSource(sourceToken); ok {
+		m.recomputeNativeSourceRoutingLocked(sourceToken, src, snapshot)
+	}
 }
 
 func (m *MediaManager) recomputeSourceRoutingWithSnapshotLocked(sourceToken string, snapshot mediaHubSnapshot) {
@@ -691,6 +729,27 @@ func (m *MediaManager) recomputeSourceRoutingWithSnapshotLocked(sourceToken stri
 			delete(src.dests, destToken)
 		}
 	}
+
+	// Native (UDP) destinations have no mediaPeer; publish them as a list
+	// the forwarding loop reads without locks.
+	nativeDests := []string{}
+	for destToken, destClient := range snapshot.clients {
+		if !destClient.native || destToken == sourceToken {
+			continue
+		}
+		shouldReceive := false
+		if directTargetUserID != "" {
+			shouldReceive = destClient.userID == directTargetUserID
+		} else if len(broadcastRooms) > 0 {
+			shouldReceive = m.peerListensToAnyRoomInSnapshotLocked(destToken, broadcastRooms, snapshot)
+		} else if !idleRoomFallbackSuppressed {
+			shouldReceive = m.peerListensToAnyRoomInSnapshotLocked(destToken, talkRooms, snapshot)
+		}
+		if shouldReceive {
+			nativeDests = append(nativeDests, destToken)
+		}
+	}
+	src.nativeDests.Store(&nativeDests)
 }
 
 func (m *MediaManager) buildHubSnapshotLocked() mediaHubSnapshot {
@@ -701,6 +760,7 @@ func (m *MediaManager) buildHubSnapshotLocked() mediaHubSnapshot {
 		snapshot.clients[token] = mediaSnapshotClient{
 			userID:      c.user.ID,
 			roleID:      c.session.RoleID,
+			native:      c.transport == "native",
 			listenRooms: cloneRoomSet(c.listenRooms),
 			talkRooms:   cloneRoomSet(c.talkRooms),
 		}

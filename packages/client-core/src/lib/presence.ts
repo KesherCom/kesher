@@ -32,6 +32,10 @@ export function normalizePresenceList(value: unknown): Presence[] {
       voiceMode,
       micEnabled: Boolean(record.micEnabled),
       broadcastActive: Boolean(record.broadcastActive),
+      audioSourceId:
+        typeof record.audioSourceId === "number"
+          ? record.audioSourceId
+          : undefined,
     };
   });
 }
@@ -47,7 +51,8 @@ export function samePresenceList(a: Presence[], b: Presence[]): boolean {
       left.roleId !== right.roleId ||
       left.voiceMode !== right.voiceMode ||
       left.micEnabled !== right.micEnabled ||
-      left.broadcastActive !== right.broadcastActive
+      left.broadcastActive !== right.broadcastActive ||
+      left.audioSourceId !== right.audioSourceId
     )
       return false;
     if (

@@ -1087,6 +1087,7 @@ func (h *Hub) PresenceForUsername(username string) (PresenceState, bool) {
 		VoiceMode:       selected.voiceMode,
 		MicEnabled:      selected.micEnabled,
 		BroadcastActive: len(selected.broadcastGroups) > 0,
+		AudioSourceID:   NativeSourceID(selected.session.Token),
 	}, true
 }
 
@@ -1128,6 +1129,7 @@ func (h *Hub) broadcastPresence() {
 			VoiceMode:       c.voiceMode,
 			MicEnabled:      c.micEnabled,
 			BroadcastActive: len(c.broadcastGroups) > 0,
+			AudioSourceID:   NativeSourceID(c.session.Token),
 		})
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -1179,6 +1181,7 @@ func (h *Hub) broadcastPresenceForced() {
 			VoiceMode:       c.voiceMode,
 			MicEnabled:      c.micEnabled,
 			BroadcastActive: len(c.broadcastGroups) > 0,
+			AudioSourceID:   NativeSourceID(c.session.Token),
 		})
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -1230,6 +1233,7 @@ func (h *Hub) SendPresenceSnapshot(token string) {
 			VoiceMode:       c.voiceMode,
 			MicEnabled:      c.micEnabled,
 			BroadcastActive: len(c.broadcastGroups) > 0,
+			AudioSourceID:   NativeSourceID(c.session.Token),
 		})
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -1279,6 +1283,7 @@ func hashPresenceSnapshot(list []PresenceState) uint64 {
 		writePresenceHashString(h, state.Username)
 		writePresenceHashString(h, state.RoleID)
 		writePresenceHashString(h, state.VoiceMode)
+		_, _ = h.Write([]byte{byte(state.AudioSourceID >> 24), byte(state.AudioSourceID >> 16), byte(state.AudioSourceID >> 8), byte(state.AudioSourceID)})
 		if state.MicEnabled {
 			_, _ = h.Write([]byte{1})
 		} else {

@@ -2081,6 +2081,7 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
         selectedOutputLabel={selectedOutputLabel}
         outputSelectionSupported={outputSelectionSupported}
         setSelectedOutputDeviceId={(id) => void changeOutputDevice(id)}
+        performanceAudio={session.performanceAudio}
         streamDeckSettings={streamDeckSettings}
         streamDeckBusy={streamDeckBusy}
         streamDeckError={streamDeckError}
