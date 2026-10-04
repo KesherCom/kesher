@@ -66,6 +66,7 @@ type Server struct {
 	companionImageEffectMapChecked   time.Time
 	companionImageEffectMapErr       string
 	udpAudio                         *UDPAudioRelay
+	netem                            *netemConfig
 }
 
 type tlsProvider interface {
@@ -3364,6 +3365,7 @@ func NewServer(cfg Config) (*Server, error) {
 		store:                            store,
 		sessions:                         NewSessionManager(cfg.SessionTTL),
 		hub:                              NewHub(store, logger),
+		netem:                            netemFromEnv(),
 		companionWS:                      make(map[string]map[chan CompanionCommandResult]struct{}),
 		companionState:                   make(map[string]map[chan struct{}]struct{}),
 		companionPageByRole:              make(map[string]int),
@@ -3389,6 +3391,11 @@ func NewServer(cfg Config) (*Server, error) {
 	// fall back to the WebRTC pipeline.
 	if strings.TrimSpace(cfg.UDPAudioAddr) != "" {
 		s.udpAudio = NewUDPAudioRelay(s.hub, logger)
+		if s.netem != nil {
+			// In the netlab, native UDP audio must travel through the same
+			// emulated network as the WebRTC path.
+			s.udpAudio.SetNetem(s.netem)
+		}
 		if err := s.udpAudio.Start(cfg.UDPAudioAddr); err != nil {
 			logger.Warn("udp audio relay failed to start, falling back to webrtc-only", "error", err)
 			s.udpAudio = nil
@@ -3525,7 +3532,16 @@ func (s *Server) ListenAndServe() error {
 	s.logger.Info("starting server", "addr", s.cfg.Addr, "dbPath", s.cfg.DBPath)
 	var err error
 	if s.cfg.TrustedLANHTTP {
-		err = s.httpSrv.ListenAndServe()
+		if s.netem != nil {
+			s.logger.Info("netlab netem active", "delay", s.netem.delay, "jitter", s.netem.jitter, "lossPct", s.netem.lossPct, "duplicatePct", s.netem.duplicatePct, "reorderPct", s.netem.reorderPct)
+			ln, lerr := net.Listen("tcp", s.httpSrv.Addr)
+			if lerr != nil {
+				return lerr
+			}
+			err = s.httpSrv.Serve(&netemListener{Listener: ln, cfg: s.netem})
+		} else {
+			err = s.httpSrv.ListenAndServe()
+		}
 	} else {
 		err = s.listenAndServeHTTPS()
 	}
@@ -3650,7 +3666,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
-	if existing, conflict := s.sessions.LatestForRole(req.RoleID); conflict {
+	if existing, conflict := s.sessions.LatestForRole(req.RoleID); conflict && !labMultiSession() {
 		s.writeJSON(w, http.StatusConflict, LoginConflictResponse{
 			RequiresTakeover: true,
 			ConflictRoleID:   req.RoleID,

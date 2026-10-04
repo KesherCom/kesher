@@ -120,7 +120,7 @@ type udpPeer struct {
 	tokenHash  uint32
 	userID     string
 	mu         sync.Mutex
-	addr       *net.UDPAddr
+	addr       net.Addr
 	lastSeen   time.Time
 	rxFrames   atomic.Uint64
 	txFrames   atomic.Uint64
@@ -146,7 +146,8 @@ type UDPAudioRelay struct {
 	logger *slog.Logger
 	hub    *Hub
 	bridge MediaBridge
-	conn   *net.UDPConn
+	conn   net.PacketConn
+	netem  *netemConfig
 
 	mu         sync.RWMutex
 	peers      map[string]*udpPeer // by session token
@@ -175,6 +176,13 @@ func (r *UDPAudioRelay) SetMediaBridge(b MediaBridge) {
 	r.mu.Unlock()
 }
 
+// SetNetem routes this relay's socket through the userspace netlab network
+// emulator so native UDP audio is shaped exactly like the WebRTC path.
+// Must be called before Start. A nil config leaves the socket unwrapped.
+func (r *UDPAudioRelay) SetNetem(cfg *netemConfig) {
+	r.netem = cfg
+}
+
 // Start binds to addr and launches the receive loop in a goroutine. addr
 // must be in net.ListenPacket form (e.g. ":8081" or "0.0.0.0:8081").
 func (r *UDPAudioRelay) Start(addr string) error {
@@ -182,9 +190,13 @@ func (r *UDPAudioRelay) Start(addr string) error {
 	if err != nil {
 		return err
 	}
-	conn, err := net.ListenUDP("udp", udpAddr)
+	var conn net.PacketConn
+	conn, err = net.ListenUDP("udp", udpAddr)
 	if err != nil {
 		return err
+	}
+	if r.netem != nil {
+		conn = &emuPacketConn{PacketConn: conn, cfg: r.netem}
 	}
 	r.conn = conn
 
@@ -216,7 +228,7 @@ func (r *UDPAudioRelay) recvLoop(ctx context.Context) {
 			return
 		}
 		_ = r.conn.SetReadDeadline(time.Now().Add(udpAudioReadTimeout))
-		n, addr, err := r.conn.ReadFromUDP(buf)
+		n, addr, err := r.conn.ReadFrom(buf)
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
 				continue
@@ -236,7 +248,7 @@ func (r *UDPAudioRelay) recvLoop(ctx context.Context) {
 	}
 }
 
-func (r *UDPAudioRelay) handlePacket(addr *net.UDPAddr, pkt UDPAudioPacket) {
+func (r *UDPAudioRelay) handlePacket(addr net.Addr, pkt UDPAudioPacket) {
 	switch {
 	case pkt.Flags&udpFlagRegister != 0:
 		token := string(pkt.Payload)
@@ -268,7 +280,7 @@ func (r *UDPAudioRelay) handlePacket(addr *net.UDPAddr, pkt UDPAudioPacket) {
 // registerPeer is invoked when a native client sends a REGISTER packet.
 // We resolve the token through the hub to ensure it maps to a connected
 // session, then bind it to the source address.
-func (r *UDPAudioRelay) registerPeer(token string, addr *net.UDPAddr) {
+func (r *UDPAudioRelay) registerPeer(token string, addr net.Addr) {
 	if r.hub == nil {
 		return
 	}
@@ -420,7 +432,7 @@ func (r *UDPAudioRelay) sendOpusLocked(peer *udpPeer, opus []byte) {
 	}); err != nil {
 		return
 	}
-	if _, err := r.conn.WriteToUDP(buf, addr); err != nil {
+	if _, err := r.conn.WriteTo(buf, addr); err != nil {
 		r.logger.Debug("udp audio send failed", "token_hash", peer.tokenHash, "error", err)
 		return
 	}

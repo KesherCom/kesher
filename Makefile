@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 LAN_IP ?= 127.0.0.1
 
-.PHONY: help deps dev-backend dev-web run-backend run-backend-no-udp run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build-desktop-web build-desktop-windows build-desktop-release run-desktop-release dev-desktop desktop-web-check desktop-rust-check desktop-rust-test desktop-check local-smoke build test ci-test ci-backend-test ci-desktop-test loadtest loadtest-20 docker-build docker-up docker-down clean
+.PHONY: help deps dev-backend dev-web run-backend run-backend-no-udp run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build-desktop-web build-desktop-windows build-desktop-release run-desktop-release dev-desktop desktop-web-check desktop-rust-check desktop-rust-test desktop-check local-smoke build test ci-test ci-backend-test ci-desktop-test loadtest loadtest-20 nettest netlab-up netlab-report netlab-down docker-build docker-up docker-down clean
 
 help:
 	@echo "Available targets:"
@@ -40,6 +40,22 @@ help:
 	@echo ""
 	@echo "  make loadtest      - run staged backend load test with non-ideal network simulation"
 	@echo "  make loadtest-20   - run staged backend load test profile that ramps to 20 clients"
+	@echo ""
+	@echo "  NetLab (multi-instance local network test lab, Docker):"
+	@echo "  make nettest       - one-shot: N kesher instances + headless audio-quality probes"
+	@echo "                       over a simulated network, prints report, tears down"
+	@echo "  make netlab-up     - start the lab and keep it running (Tauri/browser manual testing)"
+	@echo "  make netlab-report - show probe results from the running lab"
+	@echo "  make netlab-down   - stop the lab"
+	@echo ""
+	@echo "  NetLab tuning (env vars, all optional; emulation is userspace,"
+	@echo "  in-process on the instances — no kernel tc support required):"
+	@echo "    NETLAB_INSTANCES=3 NETLAB_DURATION_SECONDS=30 NETLAB_PORT_BASE=39080"
+	@echo "    NETLAB_PROFILE=lan|wifi|wan|worst"
+	@echo "    NETLAB_LATENCY_MS / NETLAB_JITTER_MS / NETLAB_LOSS_PCT / NETLAB_REORDER_PCT"
+	@echo "    NETLAB_DUPLICATE_PCT / NETLAB_BITRATE_KBIT"
+	@echo "    per-instance override: NETLAB_INSTANCE_1_LATENCY_MS=... etc."
+	@echo ""
 	@echo "  make docker-build  - build Docker image via compose"
 	@echo "  make docker-up     - run app via Docker compose"
 	@echo "  make docker-down   - stop Docker compose app"
@@ -223,6 +239,23 @@ loadtest:
 
 loadtest-20:
 	@cd backend && LOADTEST_RUN=1 LOADTEST_PROFILE=20clients go test -tags=loadtest -run TestRealWorldLoadRamp -count=1 -v -timeout 30m ./internal/app
+
+# === NetLab: multi-instance test lab with simulated network (userspace) ===
+# Each instance runs two isolated probe pairs so the WebRTC (browser) and
+# native UDP relay (Tauri) audio paths can be compared under identical
+# emulated network conditions (delay/loss/jitter applied in-process).
+
+nettest:
+	@node scripts/netlab/run.mjs run
+
+netlab-up:
+	@node scripts/netlab/run.mjs up
+
+netlab-report:
+	@node scripts/netlab/run.mjs report
+
+netlab-down:
+	@node scripts/netlab/run.mjs down
 
 docker-build:
 	@docker compose -f deploy/compose/docker-compose.yml build

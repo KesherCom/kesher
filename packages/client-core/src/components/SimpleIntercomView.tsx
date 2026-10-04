@@ -4,6 +4,7 @@ import { createHoldButtonProps } from "../lib/holdButton";
 type DirectReplyTarget = {
   userId: string;
   username: string;
+  roleName: string;
 };
 
 type SimpleIntercomViewProps = {
@@ -118,7 +119,9 @@ export function SimpleIntercomView({
         >
           Reply to caller
           <small>
-            {replyTarget ? replyTarget.username : "No active caller"}
+            {replyTarget
+              ? `${replyTarget.username} (${replyTarget.roleName})`
+              : "No active caller"}
           </small>
         </button>
 

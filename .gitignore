@@ -60,3 +60,5 @@ desktop/dist/
 .vscode-test/
 temp/
 *.log
+netlab-results/
+deploy/compose/docker-compose.netlab.yml

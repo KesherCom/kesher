@@ -1841,7 +1841,7 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
             roleName: roleNameById.get(p.roleId) || p.roleId,
             isWebOnline: true,
           })),
-      ].map((u) => [u.username.toLowerCase(), u]),
+      ].map((u) => [u.userId, u]),
     ).values(),
   ).sort((a, b) => a.username.localeCompare(b.username));
 
@@ -1947,7 +1947,12 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
           onStopPpt={session.stopPtt}
           replyTarget={
             replyTarget
-              ? { userId: replyTarget.userId, username: replyTarget.username }
+              ? {
+                  userId: replyTarget.userId,
+                  username: replyTarget.username,
+                  roleName:
+                    roleNameById.get(replyTarget.roleId) || replyTarget.roleId,
+                }
               : null
           }
           selectedInputDeviceId={settings.selectedInputDeviceId}

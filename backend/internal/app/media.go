@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log/slog"
+	"net"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/pion/ice/v4"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/webrtc/v4"
@@ -159,6 +161,21 @@ func buildWebRTCAPI(logger *slog.Logger) (*webrtc.API, error) {
 	// Increased replay window to tolerate more packet reordering on jittery networks
 	se.SetSRTPReplayProtectionWindow(128)
 	se.SetReceiveMTU(1200)
+
+	// Lab-only userspace network emulation: route all ICE traffic (DTLS,
+	// STUN, RTCP, RTP) through a single UDP mux wrapped in a delay/loss
+	// shaper. Only active when NETLAB_* env vars are set (see emu_net.go).
+	if cfg := netemFromEnv(); cfg != nil {
+		conn, err := net.ListenPacket("udp", ":"+cfg.udpPort)
+		if err != nil {
+			logger.Warn("netlab netem: cannot bind UDP mux port, continuing without media emulation", "port", cfg.udpPort, "error", err)
+		} else {
+			conn = &emuPacketConn{PacketConn: conn, cfg: cfg}
+			udpMux := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn})
+			se.SetICEUDPMux(udpMux)
+			logger.Info("netlab netem: media emulation via UDP mux", "port", cfg.udpPort, "delay", cfg.delay, "jitter", cfg.jitter, "lossPct", cfg.lossPct)
+		}
+	}
 
 	api := webrtc.NewAPI(
 		webrtc.WithMediaEngine(me),

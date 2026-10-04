@@ -493,7 +493,19 @@ func NewStore(dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", dbPath)
+	// modernc.org/sqlite defaults to busy_timeout=0, so concurrent readers
+	// can fail with SQLITE_BUSY while a write holds the lock (observable as
+	// transient 500s / dropped WS conns under simultaneous logins). Wait up
+	// to 10s for locks instead of erroring out immediately.
+	dsn := dbPath
+	if dbPath != ":memory:" && !strings.Contains(dbPath, "mode=memory") {
+		sep := "?"
+		if strings.Contains(dbPath, "?") {
+			sep = "&"
+		}
+		dsn = dbPath + sep + "_pragma=busy_timeout(10000)"
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}

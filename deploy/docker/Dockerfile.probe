@@ -1,0 +1,17 @@
+# Probe image for the kesher netlab test lab (make nettest).
+# Builds the headless audio-quality probe (backend/cmd/audioprobe) without
+# the web frontend for fast iteration. Network emulation runs in-process on
+# the instance (see internal/app/emu_net.go), so no kernel tc support or
+# extra packages are needed in the probe image.
+FROM golang:1.25-alpine AS build
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+WORKDIR /src
+COPY backend/go.mod backend/go.sum* ./
+RUN go mod download
+COPY backend/ .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/probe ./cmd/audioprobe
+
+FROM alpine:3.21
+COPY --from=build /out/probe /app/probe
+CMD ["/app/probe"]

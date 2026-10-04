@@ -48,6 +48,8 @@ type nativeMediaSource struct {
 	// webrtcDests records the destination tokens we currently have a sender
 	// attached to. Used to diff against the latest routing snapshot.
 	webrtcDests map[string]struct{}
+	// lastRecompute throttles RoutingForSource on the 200 Hz frame path.
+	lastRecompute time.Time
 }
 
 // initNativeBridge is called once during MediaManager construction. It is
@@ -243,8 +245,20 @@ func (m *MediaManager) RoutingForSource(sourceToken string) map[string]bool {
 	m.nativeMu.RUnlock()
 	if ok {
 		// Recompute lazily to pick up routing changes that arrived via
-		// SyncRouting; the snapshot is cheap.
-		m.recomputeNativeSourceRouting(sourceToken)
+		// SyncRouting, but throttle it: this runs on the hot path (every
+		// native audio frame at 200/s), and the recompute takes MediaManager
+		// locks that would starve the WebRTC forwarding loop. Routing changes
+		// are rare, so a 100 ms staleness bound is plenty.
+		now := time.Now()
+		m.nativeMu.Lock()
+		stale := now.Sub(src.lastRecompute) > 100*time.Millisecond
+		if stale {
+			src.lastRecompute = now
+		}
+		m.nativeMu.Unlock()
+		if stale {
+			m.recomputeNativeSourceRouting(sourceToken)
+		}
 		m.nativeMu.RLock()
 		out := make(map[string]bool, len(src.nativeDests))
 		for destToken := range src.nativeDests {

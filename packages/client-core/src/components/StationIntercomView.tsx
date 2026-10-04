@@ -1447,7 +1447,7 @@ export function StationIntercomView({
       Reply to caller
       <small>
         {replyTarget
-          ? replyTarget.username
+          ? `${replyTarget.username} (${roleNameById.get(replyTarget.roleId) || replyTarget.roleId || "Unknown role"})`
           : replyTargetUserId
             ? "Recent caller"
             : "No active caller"}
