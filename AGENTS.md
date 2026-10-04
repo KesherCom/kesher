@@ -21,8 +21,18 @@ make test
 make docker-build
 make docker-up
 make docker-down
+make lab          # one command: build, 4 servers behind emulated networks, desktop audio bench + browser matrix
+make lab-desktop  # desktop native-engine latency/quality per network vs baseline (make lab-desktop-baseline)
+make lab-up      # test lab: 4 servers behind emulated networks, kept running (native processes; LAB_RUNTIME=docker for containers)
+make lab-test    # Playwright: browsers x network profiles + audio quality table
+make lab-open    # logged-in browser windows for manual testing
+make lab-down
 make clean
 ```
+
+Docker: one image `deploy/docker/Dockerfile` (targets `runtime`, `selfsigned`); compose files and `.env.example` in `deploy/compose/`.
+WebRTC in containers needs `WEBRTC_UDP_PORT` (single UDP mux port, published 1:1) and `WEBRTC_PUBLIC_IPS` (host LAN IP).
+Test lab lives in `testlab/` (own `package.json`, Playwright); see `testlab/README.md`. The desktop benchmark binary is `desktop/src-tauri/src/bin/kesher_audio_bench.rs` (cargo feature `bench`, never bundled); it drives the real `audio_native.rs` engine through `VirtualDevice`.
 
 Useful direct commands:
 

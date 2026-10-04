@@ -1,40 +1,42 @@
+# kesher — HTTPS with a self-signed certificate (LAN, no domain needed).
+#
+#   cp deploy/compose/.env.example deploy/compose/.env   # set KESHER_PUBLIC_IP!
+#   docker compose -f deploy/compose/docker-compose.selfsigned.yml up -d --build
+#
+# Open https://<KESHER_PUBLIC_IP>:8443 and accept the certificate warning once
+# per device. The certificate is generated on first start and kept in the
+# kesher_certs volume (delete the volume to regenerate it, e.g. after changing
+# KESHER_PUBLIC_IP).
+name: kesher-selfsigned
+
 services:
-  intercom:
+  kesher:
+    image: ${KESHER_IMAGE_SELFSIGNED:-kesher:local-selfsigned}
     build:
       context: ../../
-      dockerfile: deploy/docker/Dockerfile.selfsigned
+      dockerfile: deploy/docker/Dockerfile
+      target: selfsigned
       args:
-        TARGETOS: ${TARGETOS:-linux}
-        TARGETARCH: ${TARGETARCH:-amd64}
+        VERSION: ${KESHER_VERSION:-dev}
     container_name: kesher-selfsigned
     ports:
-      - "${INTERCOM_HTTPS_PORT:-8443}:8443"
+      - "${KESHER_HTTPS_PORT:-8443}:8443/tcp"
+      - "${KESHER_NATIVE_UDP_PORT:-8081}:${KESHER_NATIVE_UDP_PORT:-8081}/udp"
+      - "${KESHER_WEBRTC_UDP_PORT:-8082}:${KESHER_WEBRTC_UDP_PORT:-8082}/udp"
     environment:
-      APP_HTTPS_PORT: ${APP_HTTPS_PORT:-8443}
-      APP_ADDR: ${APP_ADDR:-:8443}
-      DB_PATH: ${DB_PATH:-/app/data/intercom.db}
-      ALLOW_CORS: ${ALLOW_CORS:-false}
-      TRUSTED_LAN_HTTP: ${TRUSTED_LAN_HTTP:-false}
-      TLS_CERT_FILE: ${TLS_CERT_FILE:-/app/certs/tls.crt}
-      TLS_KEY_FILE: ${TLS_KEY_FILE:-/app/certs/tls.key}
-      CERT_HOST: ${CERT_HOST:-localhost}
-      CERT_DAYS: ${CERT_DAYS:-365}
-      # Optional: append SAN entries like "IP:192.168.1.50,DNS:intercom.local"
-      CERT_EXTRA_SAN: ${CERT_EXTRA_SAN:-}
+      ADMIN_PIN: ${ADMIN_PIN:-123456}
       SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-720}
+      CERT_HOST: ${KESHER_PUBLIC_IP:-localhost}
+      # Extra SAN entries, e.g. "DNS:intercom.local,IP:10.0.0.5"
+      CERT_EXTRA_SAN: ${CERT_EXTRA_SAN:-}
+      CERT_DAYS: ${CERT_DAYS:-825}
+      UDP_AUDIO_ADDR: ":${KESHER_NATIVE_UDP_PORT:-8081}"
+      UDP_AUDIO_ADVERTISE_IP: ${KESHER_PUBLIC_IP:-}
+      WEBRTC_UDP_PORT: ${KESHER_WEBRTC_UDP_PORT:-8082}
+      WEBRTC_PUBLIC_IPS: ${KESHER_PUBLIC_IP:-127.0.0.1}
     volumes:
-      - intercom_data:/app/data
-      - intercom_certs:/app/certs
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget --no-check-certificate -qO- https://127.0.0.1:8443/api/healthz >/dev/null 2>&1 || exit 1",
-        ]
-      interval: 15s
-      timeout: 3s
-      retries: 5
-      start_period: 20s
+      - kesher_data:/app/data
+      - kesher_certs:/app/certs
     init: true
     stop_grace_period: 20s
     logging:
@@ -45,5 +47,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  intercom_data:
-  intercom_certs:
+  kesher_data:
+  kesher_certs:

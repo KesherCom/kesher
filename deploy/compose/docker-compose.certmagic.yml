@@ -1,32 +1,50 @@
+# kesher — production HTTPS with a trusted Let's Encrypt certificate obtained
+# in-app via ACME DNS-01 (CertMagic). HTTPS on :443, HTTP :80 redirects.
+#
+#   cp deploy/compose/.env.example deploy/compose/.env
+#   # set KESHER_PUBLIC_IP, CERTMAGIC_DOMAINS, CERTMAGIC_EMAIL,
+#   # CERTMAGIC_DNS_PROVIDER and the matching provider token
+#   docker compose -f deploy/compose/docker-compose.certmagic.yml up -d --build
+#
+# Clients must resolve CERTMAGIC_DOMAINS to KESHER_PUBLIC_IP (local DNS
+# override / split DNS). The server itself never needs to be reachable from
+# the internet: DNS-01 only talks to your DNS provider's API.
+name: kesher-certmagic
+
 services:
-  intercom:
+  kesher:
+    image: ${KESHER_IMAGE:-kesher:local}
     build:
       context: ../../
-      dockerfile: backend/Dockerfile
+      dockerfile: deploy/docker/Dockerfile
+      target: runtime
       args:
-        TARGETOS: ${TARGETOS:-linux}
-        TARGETARCH: ${TARGETARCH:-amd64}
+        VERSION: ${KESHER_VERSION:-dev}
     container_name: kesher-certmagic
     ports:
-      - "80:80"
-      - "443:443"
+      - "80:80/tcp"
+      - "443:443/tcp"
+      - "${KESHER_NATIVE_UDP_PORT:-8081}:${KESHER_NATIVE_UDP_PORT:-8081}/udp"
+      - "${KESHER_WEBRTC_UDP_PORT:-8082}:${KESHER_WEBRTC_UDP_PORT:-8082}/udp"
     environment:
-      APP_ADDR: ${APP_ADDR:-:8080}
-      STATIC_DIR: ${STATIC_DIR:-/app/web-dist}
-      DB_PATH: ${DB_PATH:-/app/data/intercom.db}
-      ALLOW_CORS: ${ALLOW_CORS:-false}
+      ADMIN_PIN: ${ADMIN_PIN:-123456}
       SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-720}
-      TRUSTED_LAN_HTTP: ${TRUSTED_LAN_HTTP:-false}
-      PRODUCTION_MODE: ${PRODUCTION_MODE:-true}
-      PRODUCTION_HTTP_REDIRECT_ADDR: ${PRODUCTION_HTTP_REDIRECT_ADDR:-:80}
-      PRODUCTION_HTTPS_ADDR: ${PRODUCTION_HTTPS_ADDR:-:443}
-      TLS_MODE: ${TLS_MODE:-certmagic}
-      CERTMAGIC_DOMAINS: ${CERTMAGIC_DOMAINS:-}
+      TRUSTED_LAN_HTTP: "false"
+      PRODUCTION_MODE: "true"
+      PRODUCTION_HTTPS_ADDR: ":443"
+      PRODUCTION_HTTP_REDIRECT_ADDR: ":80"
+      UDP_AUDIO_ADDR: ":${KESHER_NATIVE_UDP_PORT:-8081}"
+      UDP_AUDIO_ADVERTISE_IP: ${KESHER_PUBLIC_IP:-}
+      WEBRTC_UDP_PORT: ${KESHER_WEBRTC_UDP_PORT:-8082}
+      WEBRTC_PUBLIC_IPS: ${KESHER_PUBLIC_IP:?set KESHER_PUBLIC_IP in deploy/compose/.env}
+
+      TLS_MODE: certmagic
+      CERTMAGIC_DOMAINS: ${CERTMAGIC_DOMAINS:?set CERTMAGIC_DOMAINS in deploy/compose/.env}
       CERTMAGIC_EMAIL: ${CERTMAGIC_EMAIL:-}
       CERTMAGIC_CA: ${CERTMAGIC_CA:-https://acme-v02.api.letsencrypt.org/directory}
-      CERTMAGIC_STORAGE_PATH: ${CERTMAGIC_STORAGE_PATH:-/app/certmagic}
-      CERTMAGIC_CHALLENGE: ${CERTMAGIC_CHALLENGE:-dns-01}
-      CERTMAGIC_DNS_PROVIDER: ${CERTMAGIC_DNS_PROVIDER:-}
+      CERTMAGIC_STORAGE_PATH: /app/certmagic
+      CERTMAGIC_CHALLENGE: dns-01
+      CERTMAGIC_DNS_PROVIDER: ${CERTMAGIC_DNS_PROVIDER:?set CERTMAGIC_DNS_PROVIDER in deploy/compose/.env}
       CERTMAGIC_PROPAGATION_DELAY_SECONDS: ${CERTMAGIC_PROPAGATION_DELAY_SECONDS:-0}
       CERTMAGIC_PROPAGATION_TIMEOUT_SECONDS: ${CERTMAGIC_PROPAGATION_TIMEOUT_SECONDS:-120}
       CERTMAGIC_DNS_RESOLVERS: ${CERTMAGIC_DNS_RESOLVERS:-}
@@ -42,18 +60,15 @@ services:
       CERTMAGIC_ROUTE53_SESSION_TOKEN: ${CERTMAGIC_ROUTE53_SESSION_TOKEN:-}
       CERTMAGIC_ROUTE53_HOSTED_ZONE_ID: ${CERTMAGIC_ROUTE53_HOSTED_ZONE_ID:-}
     volumes:
-      - intercom_data:/app/data
-      - intercom_certmagic:/app/certmagic
+      - kesher_data:/app/data
+      - kesher_certmagic:/app/certmagic
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget -qO- http://127.0.0.1:80/api/healthz >/dev/null 2>&1 || exit 1",
-        ]
+      # TLS needs the real hostname (SNI), so only check that :443 accepts.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 443 || exit 1"]
       interval: 15s
       timeout: 3s
       retries: 5
-      start_period: 20s
+      start_period: 120s
     init: true
     stop_grace_period: 20s
     logging:
@@ -64,5 +79,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  intercom_data:
-  intercom_certmagic:
+  kesher_data:
+  kesher_certmagic:

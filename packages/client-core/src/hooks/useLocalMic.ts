@@ -132,7 +132,13 @@ export function buildLowLatencyMicConstraintCandidates(
 export async function requestLowLatencyMicStream(
   deviceId: string,
   getUserMedia: GetUserMediaFn = (constraints) =>
-    navigator.mediaDevices.getUserMedia(constraints),
+    navigator.mediaDevices
+      ? navigator.mediaDevices.getUserMedia(constraints)
+      : Promise.reject(
+          new Error(
+            "microphone API unavailable — open kesher via https:// or localhost, or use the desktop app",
+          ),
+        ),
 ): Promise<MediaStream> {
   const candidates = buildLowLatencyMicConstraintCandidates(deviceId);
   let lastError: unknown = null;

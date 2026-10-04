@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -131,10 +132,23 @@ type MediaManager struct {
 const syncRoutingDebounce = 1 * time.Millisecond
 const renegotiationDebounce = 5 * time.Millisecond
 
+// WebRTCOptions controls how the SFU exposes its ICE candidates. Zero values
+// keep Pion's defaults (one ephemeral UDP port per peer, host candidates from
+// the local interfaces), which is fine on bare metal but unreachable from
+// behind Docker port publishing or a strict firewall.
+type WebRTCOptions struct {
+	// UDPPort > 0 multiplexes all WebRTC media over this single UDP port so it
+	// can be published (`-p 8443:8443/udp`) or opened in a firewall.
+	UDPPort int
+	// PublicIPs replace the advertised host candidate addresses (1:1 NAT),
+	// e.g. the Docker host's LAN IP or 127.0.0.1 for single-PC testing.
+	PublicIPs []string
+}
+
 // buildWebRTCAPI creates a Pion webrtc.API tuned for low-latency audio-only SFU.
 // It registers only the Opus codec, disables mDNS for faster ICE, and uses a
 // minimal interceptor set (NACK generator only, no responder/TWCC).
-func buildWebRTCAPI(logger *slog.Logger) (*webrtc.API, error) {
+func buildWebRTCAPI(logger *slog.Logger, opts WebRTCOptions) (*webrtc.API, error) {
 	// ── MediaEngine: Opus only ─────────────────────────────────────────────
 	me := &webrtc.MediaEngine{}
 	if err := me.RegisterCodec(webrtc.RTPCodecParameters{
@@ -166,21 +180,44 @@ func buildWebRTCAPI(logger *slog.Logger) (*webrtc.API, error) {
 	se.SetICEMulticastDNSMode(0) // ice.MulticastDNSModeDisabled == 0
 	// Increased replay window to tolerate more packet reordering on jittery networks
 	se.SetSRTPReplayProtectionWindow(128)
-	se.SetReceiveMTU(1200)
+	// Read buffer size only (no latency impact). Must fit the largest DTLS
+	// handshake datagram: Firefox's post-quantum ClientHello exceeds 1200
+	// bytes, and a smaller buffer fails the handshake ("short buffer").
+	se.SetReceiveMTU(1500)
 
-	// Lab-only userspace network emulation: route all ICE traffic (DTLS,
-	// STUN, RTCP, RTP) through a single UDP mux wrapped in a delay/loss
-	// shaper. Only active when NETLAB_* env vars are set (see emu_net.go).
-	if cfg := netemFromEnv(); cfg != nil {
-		conn, err := net.ListenPacket("udp", ":"+cfg.udpPort)
+	// Single-port UDP mux: all ICE traffic (DTLS, STUN, RTCP, RTP) shares one
+	// socket. Enabled by WEBRTC_UDP_PORT, or implicitly by the lab-only
+	// userspace network emulation (NETLAB_* env vars, see emu_net.go), which
+	// wraps the socket in a delay/loss shaper.
+	netem := netemFromEnv()
+	muxPort := ""
+	if opts.UDPPort > 0 {
+		muxPort = strconv.Itoa(opts.UDPPort)
+	} else if netem != nil {
+		muxPort = netem.udpPort
+	}
+	if muxPort != "" {
+		conn, err := net.ListenPacket("udp", ":"+muxPort)
 		if err != nil {
-			logger.Warn("netlab netem: cannot bind UDP mux port, continuing without media emulation", "port", cfg.udpPort, "error", err)
+			logger.Warn("webrtc: cannot bind UDP mux port, falling back to ephemeral ports", "port", muxPort, "error", err)
 		} else {
-			conn = &emuPacketConn{PacketConn: conn, cfg: cfg}
-			udpMux := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn})
-			se.SetICEUDPMux(udpMux)
-			logger.Info("netlab netem: media emulation via UDP mux", "port", cfg.udpPort, "delay", cfg.delay, "jitter", cfg.jitter, "lossPct", cfg.lossPct)
+			if netem != nil {
+				conn = &emuPacketConn{PacketConn: conn, cfg: netem}
+				logger.Info("netlab netem: media emulation via UDP mux", "port", muxPort, "delay", netem.delay, "jitter", netem.jitter, "lossPct", netem.lossPct)
+			}
+			se.SetICEUDPMux(ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn}))
+			logger.Info("webrtc: media multiplexed on single UDP port", "port", muxPort)
 		}
+	}
+	if len(opts.PublicIPs) > 0 {
+		if err := se.SetICEAddressRewriteRules(webrtc.ICEAddressRewriteRule{
+			External:        opts.PublicIPs,
+			AsCandidateType: webrtc.ICECandidateTypeHost,
+			Mode:            webrtc.ICEAddressRewriteReplace,
+		}); err != nil {
+			return nil, fmt.Errorf("webrtc public ips %v: %w", opts.PublicIPs, err)
+		}
+		logger.Info("webrtc: advertising public ICE host addresses", "ips", opts.PublicIPs)
 	}
 
 	api := webrtc.NewAPI(
@@ -193,7 +230,11 @@ func buildWebRTCAPI(logger *slog.Logger) (*webrtc.API, error) {
 }
 
 func NewMediaManager(hub *Hub, logger *slog.Logger) *MediaManager {
-	api, err := buildWebRTCAPI(logger)
+	return NewMediaManagerWithOptions(hub, logger, WebRTCOptions{})
+}
+
+func NewMediaManagerWithOptions(hub *Hub, logger *slog.Logger, opts WebRTCOptions) *MediaManager {
+	api, err := buildWebRTCAPI(logger, opts)
 	if err != nil {
 		logger.Error("failed to build low-latency webrtc API, falling back to defaults", "error", err)
 		api = webrtc.NewAPI()

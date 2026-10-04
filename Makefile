@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 LAN_IP ?= 127.0.0.1
 
-.PHONY: help deps dev-backend dev-web run-backend run-backend-no-udp run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build-desktop-web build-desktop-windows build-desktop-release run-desktop-release dev-desktop desktop-web-check desktop-rust-check desktop-rust-test desktop-check local-smoke build test ci-test ci-backend-test ci-desktop-test loadtest loadtest-20 nettest netlab-up netlab-report netlab-down docker-build docker-up docker-down clean
+.PHONY: help deps dev-backend dev-web run-backend run-backend-no-udp run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build-desktop-web build-desktop-windows build-desktop-release run-desktop-release dev-desktop desktop-web-check desktop-rust-check desktop-rust-test desktop-check local-smoke build test ci-test ci-backend-test ci-desktop-test loadtest loadtest-20 nettest netlab-up netlab-report netlab-down lab lab-desktop lab-desktop-baseline lab-desktop-hw lab-up lab-status lab-test lab-open lab-down docker-build docker-up docker-up-https docker-logs docker-down clean
 
 help:
 	@echo "Available targets:"
@@ -56,9 +56,28 @@ help:
 	@echo "    NETLAB_DUPLICATE_PCT / NETLAB_BITRATE_KBIT"
 	@echo "    per-instance override: NETLAB_INSTANCE_1_LATENCY_MS=... etc."
 	@echo ""
-	@echo "  make docker-build  - build Docker image via compose"
-	@echo "  make docker-up     - run app via Docker compose"
-	@echo "  make docker-down   - stop Docker compose app"
+	@echo "  Test lab (one PC, real browsers, emulated networks; see testlab/README.md):"
+	@echo "  make lab           - EVERYTHING in one go: build, start servers, desktop audio benchmark,"
+	@echo "                       browser x network matrix, stop (no Docker needed)"
+	@echo "  make lab-desktop   - desktop app latency + audio quality per network (compared to baseline)"
+	@echo "                       (LAB_FRAME_MS=2.5,5,10 LAB_PROFILES=lan,wan LAB_DESKTOP_SECONDS=30)"
+	@echo "  make lab-desktop-baseline - same, and save the result as the new baseline"
+	@echo "  make lab-desktop-hw - additionally measure real mouth-to-ear with your sound card (needs a"
+	@echo "                       cable or speaker->mic path from output to input)"
+	@echo "  make lab-up        - start 4 kesher servers (lan / wifi / wan / worst network) and keep them running"
+	@echo "  make lab-status    - show lab URLs and health"
+	@echo "  make lab-test      - Playwright: chromium/firefox/webkit x lan/wifi/wan/worst + audio report"
+	@echo "                       (LAB_BROWSERS=chromium,firefox,chrome,msedge LAB_PROFILES=lan,wan)"
+	@echo "  make lab-open      - open logged-in browser windows for manual testing"
+	@echo "                       (LAB_OPEN_ARGS=\"--browsers chromium,firefox --profile wan --real-mic\")"
+	@echo "  make lab-down      - stop the lab and delete its data"
+	@echo ""
+	@echo "  Docker deployment (see README 'Docker'; config in deploy/compose/.env):"
+	@echo "  make docker-build  - build the Docker image"
+	@echo "  make docker-up     - run kesher via Docker (HTTP :8080, detached)"
+	@echo "  make docker-up-https - run kesher via Docker with self-signed HTTPS (:8443)"
+	@echo "  make docker-logs   - follow container logs"
+	@echo "  make docker-down   - stop the Docker deployment"
 	@echo "  make clean         - remove common build artifacts"
 
 deps:
@@ -257,14 +276,55 @@ netlab-report:
 netlab-down:
 	@node scripts/netlab/run.mjs down
 
+# === Test lab: full kesher instances behind emulated networks + Playwright ===
+
+lab:
+	@node testlab/lab.mjs all
+
+lab-desktop:
+	@node testlab/lab.mjs desktop
+
+lab-desktop-baseline:
+	@node testlab/lab.mjs desktop --save-baseline
+
+lab-desktop-hw:
+	@node testlab/lab.mjs desktop --hardware
+
+lab-up:
+	@node testlab/lab.mjs up
+
+lab-status:
+	@node testlab/lab.mjs status
+
+lab-test:
+	@node testlab/lab.mjs test
+
+lab-open:
+	@node testlab/lab.mjs open $(LAB_OPEN_ARGS)
+
+lab-down:
+	@node testlab/lab.mjs down
+
+# === Docker deployment ===
+
+COMPOSE_FILE ?= deploy/compose/docker-compose.yml
+
 docker-build:
-	@docker compose -f deploy/compose/docker-compose.yml build
+	@docker compose -f $(COMPOSE_FILE) build
 
 docker-up:
-	@docker compose -f deploy/compose/docker-compose.yml up --build
+	@docker compose -f $(COMPOSE_FILE) up -d --build
+	@docker compose -f $(COMPOSE_FILE) ps
+
+docker-up-https:
+	@docker compose -f deploy/compose/docker-compose.selfsigned.yml up -d --build
+	@docker compose -f deploy/compose/docker-compose.selfsigned.yml ps
+
+docker-logs:
+	@docker compose -f $(COMPOSE_FILE) logs -f
 
 docker-down:
-	@docker compose -f deploy/compose/docker-compose.yml down
+	@docker compose -f $(COMPOSE_FILE) down
 
 clean:
 	@rm -rf backend/bin

@@ -46,6 +46,10 @@ type Config struct {
 	// disables the relay; native clients then fall back to the WebRTC pipeline.
 	UDPAudioAddr        string
 	UDPAudioAdvertiseIP string
+	// WebRTC ICE exposure (see WebRTCOptions). WebRTCUDPPort 0 keeps Pion's
+	// ephemeral per-peer ports; set it (plus WebRTCPublicIPs) in Docker.
+	WebRTCUDPPort   int
+	WebRTCPublicIPs []string
 }
 type fileConfig struct {
 	Addr                               string   `yaml:"app_addr"`
@@ -80,6 +84,8 @@ type fileConfig struct {
 	CompanionDynamicPaging             *bool    `yaml:"companion_dynamic_paging"`
 	UDPAudioAddr                       string   `yaml:"udp_audio_addr"`
 	UDPAudioAdvertiseIP                string   `yaml:"udp_audio_advertise_ip"`
+	WebRTCUDPPort                      *int     `yaml:"webrtc_udp_port"`
+	WebRTCPublicIPs                    []string `yaml:"webrtc_public_ips"`
 }
 
 func getEnvWithPresence(k, fallback string) (string, bool) {
@@ -124,6 +130,8 @@ func defaultConfig() Config {
 		CompanionDynamicPaging:      false,
 		UDPAudioAddr:                ":8081",
 		UDPAudioAdvertiseIP:         "",
+		WebRTCUDPPort:               0,
+		WebRTCPublicIPs:             nil,
 	}
 }
 
@@ -269,6 +277,12 @@ func loadConfigFromFile(path string) (Config, error) {
 	if strings.TrimSpace(fileCfg.UDPAudioAdvertiseIP) != "" {
 		cfg.UDPAudioAdvertiseIP = strings.TrimSpace(fileCfg.UDPAudioAdvertiseIP)
 	}
+	if fileCfg.WebRTCUDPPort != nil {
+		cfg.WebRTCUDPPort = *fileCfg.WebRTCUDPPort
+	}
+	if len(fileCfg.WebRTCPublicIPs) > 0 {
+		cfg.WebRTCPublicIPs = splitCSV(strings.Join(fileCfg.WebRTCPublicIPs, ","))
+	}
 	return cfg, nil
 }
 
@@ -313,6 +327,8 @@ func loadConfigFromEnv() Config {
 		CompanionDynamicPaging: getEnv("COMPANION_DYNAMIC_PAGING", "false") == "true",
 		UDPAudioAddr:           getEnv("UDP_AUDIO_ADDR", ":8081"),
 		UDPAudioAdvertiseIP:    getEnv("UDP_AUDIO_ADVERTISE_IP", ""),
+		WebRTCUDPPort:          getEnvInt("WEBRTC_UDP_PORT", 0),
+		WebRTCPublicIPs:        splitCSV(getEnv("WEBRTC_PUBLIC_IPS", "")),
 	}
 }
 

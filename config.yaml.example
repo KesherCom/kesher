@@ -32,3 +32,6 @@ certmagic_dns_resolvers:
 telegram_bot_token: ""
 telegram_webhook_secret: ""
 telegram_mode: "polling"
+# WebRTC behind Docker/NAT/firewall: one UDP port for all media + advertised IP
+webrtc_udp_port: 0
+webrtc_public_ips: []

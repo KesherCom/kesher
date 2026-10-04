@@ -70,20 +70,85 @@ make run-production-le DOMAIN=intercom.example.org
 make run-production-certmagic DOMAIN=intercom.example.org DNS_PROVIDER=cloudflare
 ```
 
-## Production with Docker Compose
+## Docker
+
+One image (`deploy/docker/Dockerfile`) contains the Go server with the web UI
+embedded. Three ready-made compose files cover the usual setups:
+
+| Setup | Compose file | URL | Microphone works on |
+| --- | --- | --- | --- |
+| HTTP on a trusted LAN | `docker-compose.yml` | `http://<ip>:8080` | the server PC itself (localhost) and the desktop app |
+| Self-signed HTTPS | `docker-compose.selfsigned.yml` | `https://<ip>:8443` | every device, after accepting the certificate once |
+| Trusted HTTPS (Let's Encrypt, DNS-01) | `docker-compose.certmagic.yml` | `https://<your-domain>` | every device, no warning |
+
+### 1. Configure
 
 ```sh
-make docker-up     # builds image and starts on :8080
-make docker-down   # stop
+cp deploy/compose/.env.example deploy/compose/.env
 ```
 
-For HTTPS with CertMagic:
+Set at least:
+
+- `KESHER_PUBLIC_IP`: the **LAN IP of the Docker host**, i.e. the address
+  clients use to reach it. The server advertises it for audio, so leaving it
+  at `127.0.0.1` means only the host PC itself gets audio.
+- `ADMIN_PIN`: change it from the default `123456`.
+
+Docker Compose reads `deploy/compose/.env` automatically.
+
+### 2. Start
 
 ```sh
-cp deploy/compose/.env.certmagic.example deploy/compose/.env.certmagic
-# edit deploy/compose/.env.certmagic with your domain + DNS provider credentials
-docker compose -f deploy/compose/docker-compose.certmagic.yml --env-file deploy/compose/.env.certmagic up -d --build
+make docker-up          # HTTP on :8080        (docker-compose.yml)
+make docker-up-https    # self-signed on :8443 (docker-compose.selfsigned.yml)
+make docker-logs        # follow logs
+make docker-down        # stop (data stays in the Docker volume)
 ```
+
+Or call compose directly, e.g. for CertMagic (fill in the `CERTMAGIC_*` values in `.env` first):
+
+```sh
+docker compose -f deploy/compose/docker-compose.certmagic.yml up -d --build
+```
+
+### Ports and firewall
+
+| Port | Protocol | Purpose |
+| --- | --- | --- |
+| 8080 / 8443 / 80+443 | TCP | web UI, API, WebSocket (depends on the setup) |
+| 8082 (`KESHER_WEBRTC_UDP_PORT`) | UDP | **browser audio** (WebRTC, all peers multiplexed on one port) |
+| 8081 (`KESHER_NATIVE_UDP_PORT`) | UDP | low-latency audio of the desktop app |
+
+The UDP ports are published 1:1, so the host port equals the container port.
+The server tells clients which port to use, so the two must not differ.
+Open all of these ports in the host firewall.
+
+**No audio but the UI works?** Check these in order:
+
+1. `KESHER_PUBLIC_IP` must be the IP the clients use.
+2. The UDP ports must be open.
+3. The container log should show
+   `webrtc: advertising public ICE host addresses`.
+
+### Data, updates, backups
+
+- The SQLite DB lives in the volume `kesher_data` (`/app/data/intercom.db`).
+  Certificates live in `kesher_certs` (self-signed) or `kesher_certmagic`.
+- To update: `git pull && make docker-up` rebuilds the image and recreates the
+  container. Data is kept.
+- To back up the DB:
+  `docker compose -f deploy/compose/docker-compose.yml cp kesher:/app/data/intercom.db ./intercom-backup.db`
+- The self-signed certificate is generated once for `localhost` and
+  `KESHER_PUBLIC_IP` (`CERT_EXTRA_SAN` adds more names). After the IP changes,
+  regenerate it:
+  `docker compose -f deploy/compose/docker-compose.selfsigned.yml down && docker volume rm kesher-selfsigned_kesher_certs`
+
+### Linux alternative: host networking
+
+On a Linux host you can skip the port mapping and the public IP. Add
+`network_mode: host` to the service and remove its `ports:` section. The
+server then sees the real interfaces. This does not work with Docker Desktop
+(Windows/macOS).
 
 ## LAN deployment with trusted HTTPS (no browser warnings)
 
@@ -132,20 +197,46 @@ If one or more secrets are missing, macOS builds continue in unsigned mode.
 
 If you are not part of the Apple Developer Program yet, you can still ship unsigned test artifacts. Users may need to open the app manually via Finder context menu (Open) or allow it in Privacy & Security.
 
-````
-
 ## Single-binary build (embedded UI)
 
 ```sh
 make build-backend   # builds frontend into the Go binary
 ./backend/bin/server # serves UI + API from one binary, no STATIC_DIR needed
-````
+```
 
 ## Tests
 
 ```sh
-make test   # backend go tests + frontend TypeScript/Vite build check
+make test   # backend go tests + frontend build + client-core unit tests
 ```
+
+### Test lab: everything in one command
+
+```sh
+make lab
+```
+
+`make lab` builds everything and starts four servers locally, each behind a
+different emulated network: lan, wifi, wan and worst. No Docker is needed.
+Then it measures two things:
+
+- **Desktop app:** latency and audio quality of the app's real native audio
+  engine for every network, compared with your saved baseline.
+- **Browsers:** Chromium, Firefox and WebKit against every network (login,
+  WebRTC, audio from talker to listener).
+
+At the end it stops the servers and prints `PASS`/`FAIL` for each part.
+
+While working on the desktop audio path:
+
+```sh
+make lab-desktop-baseline          # save a reference measurement
+make lab-desktop                   # after each change: shows Δ latency / Δ distortion per network
+LAB_FRAME_MS=2.5,5,10 make lab-desktop
+make lab-desktop-hw                # real mouth-to-ear with your sound card (cable/speaker loopback)
+```
+
+See [testlab/README.md](testlab/README.md) for all details and options.
 
 ## Load testing (real-world style)
 
@@ -227,6 +318,8 @@ telegram_mode: "polling"
 companion_shared_secret: ""
 companion_allowed_usernames: []
 desktop_audio_adaptation_profile: "balanced"
+webrtc_udp_port: 0
+webrtc_public_ips: []
 ```
 
 | Variable                        | Default       | Description                                                                          |
@@ -243,6 +336,11 @@ desktop_audio_adaptation_profile: "balanced"
 | `PRODUCTION_MODE`               | `false`       | HTTPS on `:443` + HTTP redirect on `:80`                                             |
 | `PRODUCTION_HTTPS_ADDR`         | `:443`        | HTTPS listen address in production mode                                              |
 | `PRODUCTION_HTTP_REDIRECT_ADDR` | `:80`         | HTTP redirect address in production mode                                             |
+| `ADMIN_PIN`                     | `123456`      | PIN for the admin area — change it                                                   |
+| `WEBRTC_UDP_PORT`               | `0`           | Multiplex all WebRTC media on this single UDP port (`0` = random port per peer). Set in Docker/behind firewalls |
+| `WEBRTC_PUBLIC_IPS`             | _(empty)_     | IP advertised to browsers instead of the local interface IPs (Docker host LAN IP)    |
+| `UDP_AUDIO_ADDR`                | `:8081`       | Native (desktop app) UDP audio relay listen address; empty disables it               |
+| `UDP_AUDIO_ADVERTISE_IP`        | _(empty)_     | IP advertised to the desktop app for the UDP relay (default: host from the request)  |
 | `COMPANION_SHARED_SECRET`       | _(empty)_     | Optional shared secret required by Companion discovery and bridge endpoints           |
 | `COMPANION_ALLOWED_USERNAMES`   | _(empty)_     | Optional comma-separated allowlist of usernames that may be controlled by Companion   |
 

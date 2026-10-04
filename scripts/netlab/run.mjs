@@ -31,6 +31,9 @@ const PORT_BASE = envNum("NETLAB_PORT_BASE", 39080);
 
 const mode = process.argv[2] || "run";
 
+// Cross-platform blocking sleep (the old PowerShell call only worked on Windows).
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
 function run(cmd, args, opts = {}) {
   const res = spawnSync(cmd, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...opts });
   if (res.error) {
@@ -53,6 +56,7 @@ function printUrls() {
   console.log("");
   console.log("Tauri/manual testing: point the app's server URL at one of the");
   console.log("addresses above. Traffic is emulated in-process by the instances (delay/loss/jitter).");
+  console.log("These instances have no web UI — for browsers use the test lab: make lab-up / make lab-open.");
   console.log("Headless probes measure the WebRTC (browser) and native UDP (Tauri) audio paths");
   console.log("side by side; `make netlab-report` shows their results.");
 }
@@ -84,7 +88,7 @@ function waitInstancesHealthy(timeoutSec = 300) {
       instances.every((e) => e.Health === "healthy" || e.State === "running");
     if (allHealthy) return entries;
     process.stdout.write(`netlab: waiting for ${instances.length}/${INSTANCES} instances healthy...\r`);
-    spawnSync("powershell", ["-NoProfile", "-Command", "Start-Sleep -Milliseconds 2500"], { stdio: "ignore" });
+    sleepSync(2500);
   }
   console.error("\nnetlab: timeout waiting for instances to become healthy");
   process.exit(1);
@@ -109,7 +113,7 @@ function waitProbesExited(timeoutSec = 600) {
       return `${n}=${e ? e.State || "?" : "?"}`;
     });
     process.stdout.write(`netlab: waiting for probes (${missing.length}/${expected.size} running)... [${states.join(", ")}]\r`);
-    spawnSync("powershell", ["-NoProfile", "-Command", "Start-Sleep -Milliseconds 2500"], { stdio: "ignore" });
+    sleepSync(2500);
   }
   console.error("\nnetlab: timeout waiting for probes to finish");
   return false;

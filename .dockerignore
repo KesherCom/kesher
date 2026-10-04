@@ -1,0 +1,29 @@
+# Keep the Docker build context small: dependencies are installed and
+# artifacts are built inside the image.
+**/node_modules
+**/dist
+**/test-results
+**/playwright-report
+**/*.tsbuildinfo
+**/.DS_Store
+.git
+.github
+.vscode
+.VSCodeCounter
+.idea
+desktop
+dist
+netlab-results
+backend/bin
+backend/*.exe
+backend/*.db
+backend/*.db-*
+backend/certmagic-data
+backend/internal/app/embedded_web
+*.db
+*.db-*
+config.yaml
+config.yml
+.env
+.env.*
+deploy/compose/.env*

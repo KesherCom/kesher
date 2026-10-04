@@ -246,6 +246,8 @@ struct Stats {
     fec_recovered: AtomicU64,
     late_packets: AtomicU64,
     latency_trims: AtomicU64,
+    /// Virtual device only: ticks that ran more than one period late.
+    virtual_late_ticks: AtomicU64,
 }
 
 /// User settings read lock-free by the audio callbacks.
@@ -1391,6 +1393,103 @@ where
     Err(format!("no input device could be opened ({})", errors.join("; ")))
 }
 
+// ── Virtual device (benchmarks) ──────────────────────────────────────────
+
+/// Fills one period of mono input. The `Instant` is when the first sample
+/// of the period was "recorded".
+pub type VirtualInput = Box<dyn FnMut(&mut [f32], Instant) + Send>;
+/// Receives one period of mono output. The `Instant` is when its first
+/// sample "plays".
+pub type VirtualOutput = Box<dyn FnMut(&[f32], Instant) + Send>;
+
+/// A clocked stand-in for a duplex sound card. It drives the engine's real
+/// capture and playback callbacks, so a benchmark measures exactly the app's
+/// audio path (framing, Opus, network, jitter buffer, FEC/PLC, mixing)
+/// without device drivers. Like a device, each tick delivers the period
+/// recorded during [t - period, t) and asks for the period played from t.
+pub struct VirtualDevice {
+    pub period_frames: usize,
+    pub input: VirtualInput,
+    pub output: VirtualOutput,
+}
+
+fn open_virtual<M>(device: VirtualDevice, shared: &Arc<Shared>, slot: &QueueSlot, make: M) -> Result<(StreamReport, StreamReport), String>
+where
+    M: Fn(usize) -> Result<Capture, String>,
+{
+    let VirtualDevice {
+        period_frames,
+        mut input,
+        mut output,
+    } = device;
+    let period_frames = period_frames.clamp(16, 4096);
+    let mut playback = new_playback(1, shared, slot)?;
+    let mut capture = make(1)?;
+    let period = Duration::from_secs_f64(period_frames as f64 / NATIVE_SAMPLE_RATE as f64);
+    let shared = Arc::clone(shared);
+    std::thread::Builder::new()
+        .name("kesher-native-virtual".into())
+        .spawn(move || {
+            raise_virtual_thread_priority();
+            let mut in_buf = vec![0.0f32; period_frames];
+            let mut out_buf = vec![0.0f32; period_frames];
+            // Ideal device clock: timestamps come from `tick`, not from when
+            // the thread actually woke up.
+            let mut tick = Instant::now() + period;
+            while !shared.stop.load(Ordering::Acquire) {
+                sleep_until(tick);
+                let late = Instant::now().saturating_duration_since(tick);
+                if late > period {
+                    // A real device would have glitched here; counted so a
+                    // benchmark can tell an overloaded machine from the engine.
+                    shared.stats.virtual_late_ticks.fetch_add(1, Ordering::Relaxed);
+                    if late > period * 8 {
+                        tick = Instant::now();
+                    }
+                }
+                input(&mut in_buf, tick - period);
+                capture.on_input(&in_buf);
+                out_buf.fill(0.0);
+                playback.on_output(&mut out_buf);
+                output(&out_buf, tick);
+                tick += period;
+            }
+        })
+        .map_err(|e| format!("spawn virtual device: {e}"))?;
+    let report = || StreamReport {
+        backend: "virtual".to_string(),
+        device: "virtual".to_string(),
+        period_ms: Some(period_frames as f32 / SAMPLES_PER_MS),
+    };
+    Ok((report(), report()))
+}
+
+/// Sleeps coarsely, then spins for the last stretch: OS sleeps overshoot by
+/// up to a millisecond, more than a short device period tolerates.
+fn sleep_until(deadline: Instant) {
+    const SPIN: Duration = Duration::from_micros(1500);
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            return;
+        }
+        let left = deadline - now;
+        if left > SPIN {
+            std::thread::sleep(left - SPIN);
+        } else {
+            std::hint::spin_loop();
+        }
+    }
+}
+
+fn raise_virtual_thread_priority() {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL};
+        let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    }
+}
+
 // ── Network receive thread ───────────────────────────────────────────────
 
 fn run_network_rx(
@@ -1415,6 +1514,7 @@ fn run_network_rx(
     let mut beats: u32 = 0;
     let mut last_beat = Instant::now();
     let mut last_stats = Instant::now();
+    let mut logged_stats = NativeStatsSnapshot::default();
     let mut buf = [0u8; 1500];
 
     while !shared.stop.load(Ordering::Acquire) {
@@ -1428,7 +1528,7 @@ fn run_network_rx(
             last_beat = Instant::now();
         }
         if last_stats.elapsed() >= STATS_LOG_INTERVAL {
-            log_stats(&shared.stats, last_stats.elapsed());
+            log_stats(&shared.stats, &mut logged_stats, last_stats.elapsed());
             last_stats = Instant::now();
         }
         if let Some(sink) = &level_sink {
@@ -1469,30 +1569,80 @@ fn run_network_rx(
     log::info!("[native][udp] receive thread exit");
 }
 
-fn log_stats(stats: &Stats, elapsed: Duration) {
-    let ms = |samples: u32| samples as f32 / SAMPLES_PER_MS;
+/// Cumulative engine counters since start (see `stats_snapshot`).
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeStatsSnapshot {
+    pub tx_packets: u64,
+    pub tx_errors: u64,
+    pub rx_packets: u64,
+    pub rx_queue_full: u64,
+    pub jitter_underruns: u64,
+    /// PLC events: lost packets plus output underruns stretched by PLC.
+    pub concealed: u64,
+    pub fec_recovered: u64,
+    pub late_packets: u64,
+    pub latency_trims: u64,
+    pub virtual_late_ticks: u64,
+    pub active_sources: u32,
+    /// Current jitter-buffer target of the deepest source.
+    pub target_ms: f32,
+    pub capture_callback_ms: f32,
+    pub output_callback_ms: f32,
+}
+
+impl Stats {
+    fn snapshot(&self) -> NativeStatsSnapshot {
+        let ms = |a: &AtomicU32| a.load(Ordering::Relaxed) as f32 / SAMPLES_PER_MS;
+        NativeStatsSnapshot {
+            tx_packets: self.tx_packets.load(Ordering::Relaxed),
+            tx_errors: self.tx_errors.load(Ordering::Relaxed),
+            rx_packets: self.rx_packets.load(Ordering::Relaxed),
+            rx_queue_full: self.rx_queue_full.load(Ordering::Relaxed),
+            jitter_underruns: self.jitter_underruns.load(Ordering::Relaxed),
+            concealed: self.concealed.load(Ordering::Relaxed),
+            fec_recovered: self.fec_recovered.load(Ordering::Relaxed),
+            late_packets: self.late_packets.load(Ordering::Relaxed),
+            latency_trims: self.latency_trims.load(Ordering::Relaxed),
+            virtual_late_ticks: self.virtual_late_ticks.load(Ordering::Relaxed),
+            active_sources: self.active_sources.load(Ordering::Relaxed),
+            target_ms: ms(&self.max_target_samples),
+            capture_callback_ms: ms(&self.capture_callback_frames),
+            output_callback_ms: ms(&self.output_callback_frames),
+        }
+    }
+}
+
+/// Counters are cumulative; the log prints the change since the last line.
+fn log_stats(stats: &Stats, prev: &mut NativeStatsSnapshot, elapsed: Duration) {
+    let now = stats.snapshot();
     let secs = elapsed.as_secs_f32().max(0.001);
     log::info!(
-        "[native][stats] tx={:.0}/s rx={:.0}/s cb_in={} cb_out={} ({:.2}/{:.2} ms) sources={} \
+        "[native][stats] tx={:.0}/s rx={:.0}/s cb_in={:.2}ms cb_out={:.2}ms sources={} \
          target={:.1}ms queued_max={:.1}ms jitter_underruns={} concealed={} fec={} late={} trims={} \
          rxq_full={} tx_err={}",
-        stats.tx_packets.swap(0, Ordering::Relaxed) as f32 / secs,
-        stats.rx_packets.swap(0, Ordering::Relaxed) as f32 / secs,
-        stats.capture_callback_frames.load(Ordering::Relaxed),
-        stats.output_callback_frames.load(Ordering::Relaxed),
-        ms(stats.capture_callback_frames.load(Ordering::Relaxed)),
-        ms(stats.output_callback_frames.load(Ordering::Relaxed)),
-        stats.active_sources.load(Ordering::Relaxed),
-        ms(stats.max_target_samples.load(Ordering::Relaxed)),
-        ms(stats.max_queued_samples.swap(0, Ordering::Relaxed)),
-        stats.jitter_underruns.swap(0, Ordering::Relaxed),
-        stats.concealed.swap(0, Ordering::Relaxed),
-        stats.fec_recovered.swap(0, Ordering::Relaxed),
-        stats.late_packets.swap(0, Ordering::Relaxed),
-        stats.latency_trims.swap(0, Ordering::Relaxed),
-        stats.rx_queue_full.swap(0, Ordering::Relaxed),
-        stats.tx_errors.swap(0, Ordering::Relaxed),
+        (now.tx_packets - prev.tx_packets) as f32 / secs,
+        (now.rx_packets - prev.rx_packets) as f32 / secs,
+        now.capture_callback_ms,
+        now.output_callback_ms,
+        now.active_sources,
+        now.target_ms,
+        stats.max_queued_samples.swap(0, Ordering::Relaxed) as f32 / SAMPLES_PER_MS,
+        now.jitter_underruns - prev.jitter_underruns,
+        now.concealed - prev.concealed,
+        now.fec_recovered - prev.fec_recovered,
+        now.late_packets - prev.late_packets,
+        now.latency_trims - prev.latency_trims,
+        now.rx_queue_full - prev.rx_queue_full,
+        now.tx_errors - prev.tx_errors,
     );
+    *prev = now;
+}
+
+/// Cumulative counters of the running engine, or None when it is stopped.
+#[allow(dead_code)] // used by src/bin/kesher_audio_bench.rs
+pub fn stats_snapshot(state: &NativeAudioState) -> Option<NativeStatsSnapshot> {
+    state.engine.lock().unwrap().as_ref().map(|e| e.shared.stats.snapshot())
 }
 
 // ── Engine lifecycle (Tauri commands call into this) ─────────────────────
@@ -1503,6 +1653,26 @@ pub async fn start_engine(
     params: StartNativeParams,
     state: &NativeAudioState,
     level_sink: Option<LevelSink>,
+) -> Result<EngineStartInfo, String> {
+    start_engine_with(params, state, level_sink, None)
+}
+
+/// Like `start_engine`, but with a `VirtualDevice` instead of sound cards
+/// (benchmarks; see `src/bin/kesher_audio_bench.rs`).
+#[allow(dead_code)] // used by src/bin/kesher_audio_bench.rs
+pub fn start_engine_virtual(
+    params: StartNativeParams,
+    state: &NativeAudioState,
+    device: VirtualDevice,
+) -> Result<EngineStartInfo, String> {
+    start_engine_with(params, state, None, Some(device))
+}
+
+fn start_engine_with(
+    params: StartNativeParams,
+    state: &NativeAudioState,
+    level_sink: Option<LevelSink>,
+    virtual_device: Option<VirtualDevice>,
 ) -> Result<EngineStartInfo, String> {
     if state.engine.lock().unwrap().is_some() {
         return Err("native engine already running".to_string());
@@ -1531,29 +1701,39 @@ pub async fn start_engine(
     };
     let preference = params.audio_backend.as_deref();
 
+    let rx_socket = socket.try_clone().map_err(|e| format!("socket clone: {e}"))?;
+    let make = {
+        let socket = Arc::new(socket);
+        let shared_cb = Arc::clone(&shared);
+        let token_hash = params.token_hash;
+        move |channels: usize| new_capture(&socket, version, token_hash, frame_samples, channels, &shared_cb)
+    };
+
     let slot: QueueSlot = Arc::new(Mutex::new(None));
-    let output = open_output(preference, params.output_device_id.clone(), &shared, &slot)?;
+    let (output, virtual_input) = match virtual_device {
+        Some(device) => {
+            let (input, output) = open_virtual(device, &shared, &slot, make.clone())?;
+            (output, Some(input))
+        }
+        None => (open_output(preference, params.output_device_id.clone(), &shared, &slot)?, None),
+    };
     let packet_tx = slot
         .lock()
         .unwrap()
         .take()
         .ok_or_else(|| "playback queue not available".to_string())?;
     {
-        let socket = socket.try_clone().map_err(|e| format!("socket clone: {e}"))?;
         let shared = Arc::clone(&shared);
         let token = params.session_token.clone();
         let token_hash = params.token_hash;
         std::thread::Builder::new()
             .name("kesher-native-udp".into())
-            .spawn(move || run_network_rx(socket, packet_tx, shared, token, token_hash, version, level_sink))
+            .spawn(move || run_network_rx(rx_socket, packet_tx, shared, token, token_hash, version, level_sink))
             .map_err(|e| format!("spawn udp thread: {e}"))?;
     }
-    let input = {
-        let socket = Arc::new(socket);
-        let shared_cb = Arc::clone(&shared);
-        let token_hash = params.token_hash;
-        let make = move |channels: usize| new_capture(&socket, version, token_hash, frame_samples, channels, &shared_cb);
-        open_input(preference, params.input_device_id.clone(), &shared, make)?
+    let input = match virtual_input {
+        Some(report) => report,
+        None => open_input(preference, params.input_device_id.clone(), &shared, make)?,
     };
 
     let mut guard = state.engine.lock().unwrap();

@@ -32,11 +32,14 @@ if [ ! -f "$TLS_CERT_FILE" ] || [ ! -f "$TLS_KEY_FILE" ]; then
     -out "$TLS_CERT_FILE" \
     -subj "/CN=$CERT_HOST" \
     -addext "subjectAltName=$SAN"
+  echo "kesher: generated self-signed certificate for $SAN (valid $CERT_DAYS days)"
 fi
 
 export APP_ADDR="${APP_ADDR:-:$APP_HTTPS_PORT}"
 export DB_PATH="${DB_PATH:-/app/data/intercom.db}"
 export TRUSTED_LAN_HTTP="${TRUSTED_LAN_HTTP:-false}"
+# The server defaults to TLS_MODE=internal (ephemeral cert); use our file.
+export TLS_MODE=file
 export TLS_CERT_FILE
 export TLS_KEY_FILE
 

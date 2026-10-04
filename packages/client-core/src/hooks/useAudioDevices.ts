@@ -46,7 +46,11 @@ export function useAudioDevices({
     const devices =
       isNative && listNativeAudioDevices
         ? (await listNativeAudioDevices()).map(mapNativeDevice)
-        : await navigator.mediaDevices.enumerateDevices();
+        : navigator.mediaDevices
+          ? await navigator.mediaDevices.enumerateDevices()
+          : // Undefined outside secure contexts (http:// on a LAN IP) and in
+            // browsers without media support: show no devices, don't crash.
+            [];
     const inputs = devices.filter((d) => d.kind === "audioinput");
     const outputs = devices.filter((d) => d.kind === "audiooutput");
     setInputDevices(inputs);
@@ -68,7 +72,7 @@ export function useAudioDevices({
 
   useEffect(() => {
     void refreshAudioDevices();
-    if (isNative) return;
+    if (isNative || !navigator.mediaDevices) return;
     navigator.mediaDevices.addEventListener("devicechange", refreshAudioDevices);
     return () =>
       navigator.mediaDevices.removeEventListener(

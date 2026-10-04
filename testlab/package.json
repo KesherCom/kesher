@@ -1,0 +1,19 @@
+{
+  "name": "kesher-testlab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Single-PC test lab: kesher instances behind emulated networks + multi-browser Playwright tests",
+  "scripts": {
+    "lab": "node lab.mjs",
+    "up": "node lab.mjs up",
+    "down": "node lab.mjs down",
+    "status": "node lab.mjs status",
+    "test": "node lab.mjs test",
+    "open": "node lab.mjs open",
+    "report": "playwright show-report playwright-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0"
+  }
+}

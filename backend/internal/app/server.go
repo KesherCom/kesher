@@ -3385,7 +3385,10 @@ func NewServer(cfg Config) (*Server, error) {
 			HandshakeTimeout: 10 * time.Second,
 		},
 	}
-	s.media = NewMediaManager(s.hub, logger)
+	s.media = NewMediaManagerWithOptions(s.hub, logger, WebRTCOptions{
+		UDPPort:   cfg.WebRTCUDPPort,
+		PublicIPs: cfg.WebRTCPublicIPs,
+	})
 	s.hub.SetMediaManager(s.media)
 	// Native UDP audio relay (performance mode). When the listen address is
 	// empty in config, we skip relay startup; native clients then transparently

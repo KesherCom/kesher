@@ -62,3 +62,9 @@ temp/
 *.log
 netlab-results/
 deploy/compose/docker-compose.netlab.yml
+
+# ─── Test lab ───
+testlab/.cache/
+testlab/results/
+testlab/test-results/
+testlab/playwright-report/

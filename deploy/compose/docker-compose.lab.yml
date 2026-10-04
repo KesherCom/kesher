@@ -1,0 +1,123 @@
+# kesher test lab — one PC, several full kesher instances (UI included), each
+# behind a different emulated network. Driven by `make lab-*` / testlab/lab.mjs;
+# see testlab/README.md.
+#
+# Network emulation (delay/jitter/loss/reorder) runs in-process on the server
+# for HTTP, WebSocket, WebRTC and native UDP audio, in both directions
+# (backend/internal/app/emu_net.go). Every value can be overridden via env,
+# e.g. LAB_WAN_LATENCY_MS=120 make lab-up.
+#
+# Port scheme per profile (UDP ports are published 1:1):
+#   lan   http 8180  webrtc 18180/udp  native 18280/udp
+#   wifi  http 8181  webrtc 18181/udp  native 18281/udp
+#   wan   http 8182  webrtc 18182/udp  native 18282/udp
+#   worst http 8183  webrtc 18183/udp  native 18283/udp
+name: kesher-lab
+
+x-kesher: &kesher
+  image: kesher:lab
+  # Same build for every service: built once, the rest are cache hits.
+  build:
+    context: ../../
+    dockerfile: deploy/docker/Dockerfile
+    target: runtime
+    args:
+      VERSION: lab
+  init: true
+  restart: "no"
+  healthcheck:
+    test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/healthz >/dev/null 2>&1 || exit 1"]
+    interval: 3s
+    timeout: 2s
+    retries: 60
+    start_period: 5s
+
+x-env: &env
+  TRUSTED_LAN_HTTP: "true"
+  ALLOW_CORS: "false"
+  ADMIN_PIN: ${ADMIN_PIN:-123456}
+  # Lab only: several sessions may share a role (parallel test users).
+  LAB_MULTI_SESSION: "true"
+  DISCONNECT_LOGOUT_DELAY_SECONDS: "5"
+  # LAN IP of this PC (lab.mjs detects it), so other devices can join too.
+  WEBRTC_PUBLIC_IPS: ${LAB_PUBLIC_IP:-127.0.0.1}
+  UDP_AUDIO_ADVERTISE_IP: ${LAB_PUBLIC_IP:-}
+
+services:
+  lan:
+    <<: *kesher
+    environment:
+      <<: *env
+      UDP_AUDIO_ADDR: ":18280"
+      WEBRTC_UDP_PORT: "18180"
+      NETLAB_LATENCY_MS: ${LAB_LAN_LATENCY_MS:-0}
+      NETLAB_JITTER_MS: ${LAB_LAN_JITTER_MS:-0}
+      NETLAB_LOSS_PCT: ${LAB_LAN_LOSS_PCT:-0}
+      NETLAB_REORDER_PCT: ${LAB_LAN_REORDER_PCT:-0}
+      NETLAB_DUPLICATE_PCT: ${LAB_LAN_DUPLICATE_PCT:-0}
+    ports:
+      - "8180:8080/tcp"
+      - "18180:18180/udp"
+      - "18280:18280/udp"
+    volumes:
+      - lab-lan:/app/data
+
+  wifi:
+    <<: *kesher
+    environment:
+      <<: *env
+      UDP_AUDIO_ADDR: ":18281"
+      WEBRTC_UDP_PORT: "18181"
+      NETLAB_LATENCY_MS: ${LAB_WIFI_LATENCY_MS:-15}
+      NETLAB_JITTER_MS: ${LAB_WIFI_JITTER_MS:-6}
+      NETLAB_LOSS_PCT: ${LAB_WIFI_LOSS_PCT:-0.5}
+      NETLAB_REORDER_PCT: ${LAB_WIFI_REORDER_PCT:-0}
+      NETLAB_DUPLICATE_PCT: ${LAB_WIFI_DUPLICATE_PCT:-0}
+    ports:
+      - "8181:8080/tcp"
+      - "18181:18181/udp"
+      - "18281:18281/udp"
+    volumes:
+      - lab-wifi:/app/data
+
+  wan:
+    <<: *kesher
+    environment:
+      <<: *env
+      UDP_AUDIO_ADDR: ":18282"
+      WEBRTC_UDP_PORT: "18182"
+      NETLAB_LATENCY_MS: ${LAB_WAN_LATENCY_MS:-60}
+      NETLAB_JITTER_MS: ${LAB_WAN_JITTER_MS:-15}
+      NETLAB_LOSS_PCT: ${LAB_WAN_LOSS_PCT:-1}
+      NETLAB_REORDER_PCT: ${LAB_WAN_REORDER_PCT:-0.5}
+      NETLAB_DUPLICATE_PCT: ${LAB_WAN_DUPLICATE_PCT:-0}
+    ports:
+      - "8182:8080/tcp"
+      - "18182:18182/udp"
+      - "18282:18282/udp"
+    volumes:
+      - lab-wan:/app/data
+
+  worst:
+    <<: *kesher
+    environment:
+      <<: *env
+      UDP_AUDIO_ADDR: ":18283"
+      WEBRTC_UDP_PORT: "18183"
+      NETLAB_LATENCY_MS: ${LAB_WORST_LATENCY_MS:-150}
+      NETLAB_JITTER_MS: ${LAB_WORST_JITTER_MS:-40}
+      NETLAB_LOSS_PCT: ${LAB_WORST_LOSS_PCT:-5}
+      NETLAB_REORDER_PCT: ${LAB_WORST_REORDER_PCT:-2}
+      NETLAB_DUPLICATE_PCT: ${LAB_WORST_DUPLICATE_PCT:-0.5}
+    ports:
+      - "8183:8080/tcp"
+      - "18183:18183/udp"
+      - "18283:18283/udp"
+    volumes:
+      - lab-worst:/app/data
+
+volumes:
+  lab-lan:
+  lab-wifi:
+  lab-wan:
+  lab-worst:

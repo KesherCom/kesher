@@ -1,6 +1,10 @@
 package app
 
 import (
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -198,5 +202,56 @@ companion_dynamic_paging: true
 	}
 	if !cfg.CompanionDynamicPaging {
 		t.Fatal("expected companion dynamic paging to be enabled from yaml")
+	}
+}
+
+func TestLoadConfigReadsWebRTCExposureFromEnv(t *testing.T) {
+	t.Setenv("WEBRTC_UDP_PORT", "8443")
+	t.Setenv("WEBRTC_PUBLIC_IPS", " 192.168.1.50 , 127.0.0.1")
+
+	cfg := loadConfigFromEnv()
+	if cfg.WebRTCUDPPort != 8443 {
+		t.Fatalf("expected webrtc udp port 8443, got %d", cfg.WebRTCUDPPort)
+	}
+	if want := []string{"192.168.1.50", "127.0.0.1"}; !reflect.DeepEqual(cfg.WebRTCPublicIPs, want) {
+		t.Fatalf("expected public ips %v, got %v", want, cfg.WebRTCPublicIPs)
+	}
+}
+
+func TestLoadConfigReadsWebRTCExposureFromYAML(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+	content := []byte(`
+webrtc_udp_port: 8443
+webrtc_public_ips: ["10.0.0.5"]
+`)
+	if err := os.WriteFile(configPath, content, 0o644); err != nil {
+		t.Fatalf("failed to write temp config: %v", err)
+	}
+
+	cfg, err := loadConfigFromFile(configPath)
+	if err != nil {
+		t.Fatalf("expected config load to succeed, got: %v", err)
+	}
+	if cfg.WebRTCUDPPort != 8443 || !reflect.DeepEqual(cfg.WebRTCPublicIPs, []string{"10.0.0.5"}) {
+		t.Fatalf("unexpected webrtc exposure config: port=%d ips=%v", cfg.WebRTCUDPPort, cfg.WebRTCPublicIPs)
+	}
+}
+
+func TestBuildWebRTCAPIBindsSingleUDPPort(t *testing.T) {
+	probe, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free udp port: %v", err)
+	}
+	port := probe.LocalAddr().(*net.UDPAddr).Port
+	_ = probe.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if _, err := buildWebRTCAPI(logger, WebRTCOptions{UDPPort: port, PublicIPs: []string{"127.0.0.1"}}); err != nil {
+		t.Fatalf("expected api to build, got: %v", err)
+	}
+	if conn, err := net.ListenPacket("udp", fmt.Sprintf(":%d", port)); err == nil {
+		_ = conn.Close()
+		t.Fatalf("expected webrtc mux to hold udp port %d", port)
 	}
 }

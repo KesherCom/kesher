@@ -2,6 +2,17 @@
 name = "kesher_desktop"
 version = "0.1.0"
 edition = "2021"
+# src/bin/kesher_audio_bench.rs is a test tool (feature "bench"), not the app.
+default-run = "kesher_desktop"
+
+[features]
+# Builds the headless audio benchmark used by `make lab-desktop`.
+bench = []
+
+[[bin]]
+name = "kesher_audio_bench"
+path = "src/bin/kesher_audio_bench.rs"
+required-features = ["bench"]
 
 [build-dependencies]
 tauri-build = { version = "2.0.2", features = [] }
