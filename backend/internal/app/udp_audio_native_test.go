@@ -260,3 +260,20 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 	t.Fatal("condition not met within 1s")
 }
+
+func TestUDPRelayRecordsInboundGaps(t *testing.T) {
+	r := NewUDPAudioRelay(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	peer := &udpPeer{tokenHash: 1}
+	base := time.Now()
+	r.noteInboundGap(peer, base)                            // first frame: no gap yet
+	r.noteInboundGap(peer, base.Add(5*time.Millisecond))    // normal cadence
+	r.noteInboundGap(peer, base.Add(55*time.Millisecond))   // 50 ms stall
+	r.noteInboundGap(peer, base.Add(2055*time.Millisecond)) // talk pause, ignored
+	stats := r.Stats()
+	if stats.InboundGapsOver20ms != 1 {
+		t.Fatalf("gaps over 20ms = %d, want 1", stats.InboundGapsOver20ms)
+	}
+	if stats.MaxInboundGapMs < 49 || stats.MaxInboundGapMs > 51 {
+		t.Fatalf("max gap = %.1f ms, want ~50", stats.MaxInboundGapMs)
+	}
+}

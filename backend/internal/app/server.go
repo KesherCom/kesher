@@ -3393,6 +3393,9 @@ func NewServer(cfg Config) (*Server, error) {
 	// Native UDP audio relay (performance mode). When the listen address is
 	// empty in config, we skip relay startup; native clients then transparently
 	// fall back to the WebRTC pipeline.
+	// The SFU and the UDP relay forward audio in real time; keep Windows
+	// from throttling the process (no-op elsewhere).
+	tuneProcessForRealtimeAudio(logger)
 	if strings.TrimSpace(cfg.UDPAudioAddr) != "" {
 		s.udpAudio = NewUDPAudioRelay(s.hub, logger)
 		if s.netem != nil {

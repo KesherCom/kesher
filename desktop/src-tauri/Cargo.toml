@@ -47,6 +47,7 @@ webrtc = "0.12"
 # low-latency shared mode (IAudioClient3), which cpal 0.15 does not offer.
 windows = { version = "0.62", features = [
     "Win32_Foundation",
+    "Win32_Media",
     "Win32_Media_Audio",
     "Win32_Media_KernelStreaming",
     "Win32_Media_Multimedia",

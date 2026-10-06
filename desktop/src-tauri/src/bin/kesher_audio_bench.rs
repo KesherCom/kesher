@@ -207,6 +207,11 @@ fn diff(a: &NativeStatsSnapshot, b: &NativeStatsSnapshot) -> serde_json::Value {
         "rxQueueFull": b.rx_queue_full - a.rx_queue_full,
         "txErrors": b.tx_errors - a.tx_errors,
         "virtualLateTicks": b.virtual_late_ticks - a.virtual_late_ticks,
+        "txGapsOver20ms": b.tx_gaps_over_20ms - a.tx_gaps_over_20ms,
+        "rxGapsOver20ms": b.rx_gaps_over_20ms - a.rx_gaps_over_20ms,
+        "txMaxGapMs": b.tx_max_gap_ms,
+        "rxMaxGapMs": b.rx_max_gap_ms,
+        "txSendMaxMs": b.tx_send_max_ms,
     })
 }
 

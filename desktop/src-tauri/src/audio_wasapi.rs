@@ -447,10 +447,10 @@ unsafe fn open_stream(flow: EDataFlow, device_name: Option<&str>, mode: WasapiMo
 }
 
 /// Raises the calling thread to MMCSS "Pro Audio" for its lifetime.
-struct ProAudioPriority(Option<HANDLE>);
+pub struct ProAudioPriority(Option<HANDLE>);
 
 impl ProAudioPriority {
-    fn enter() -> Self {
+    pub fn enter() -> Self {
         let mut task_index = 0u32;
         let handle = unsafe { AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_index) };
         if let Err(e) = &handle {
@@ -468,6 +468,42 @@ impl Drop for ProAudioPriority {
             }
         }
     }
+}
+
+/// Keeps Windows from throttling the engine when the app is not in the
+/// foreground. Windows 11 power throttling (EcoQoS) moves such processes to
+/// efficiency cores and coalesces their timers; on the lab machine that
+/// stalled the relay process for 40-100 ms at a time, and the engine's
+/// network thread is exposed the same way. Also asks for 1 ms timers.
+/// Idempotent; failures are logged and ignored.
+pub fn tune_process_for_realtime() {
+    use windows::Win32::Media::timeBeginPeriod;
+    use windows::Win32::System::Threading::{
+        GetCurrentProcess, ProcessPowerThrottling, SetPriorityClass, SetProcessInformation,
+        ABOVE_NORMAL_PRIORITY_CLASS, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+        PROCESS_POWER_THROTTLING_STATE,
+    };
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| unsafe {
+        let state = PROCESS_POWER_THROTTLING_STATE {
+            Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+            ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+            StateMask: 0,
+        };
+        if let Err(e) = SetProcessInformation(
+            GetCurrentProcess(),
+            ProcessPowerThrottling,
+            &state as *const _ as *const core::ffi::c_void,
+            std::mem::size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32,
+        ) {
+            log::warn!("[wasapi] could not disable power throttling: {e}");
+        }
+        timeBeginPeriod(1);
+        if let Err(e) = SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS) {
+            log::warn!("[wasapi] could not raise priority class: {e}");
+        }
+    });
 }
 
 /// Runs `body` on a COM (MTA) thread and waits until it reports that the

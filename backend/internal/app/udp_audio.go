@@ -180,6 +180,9 @@ type udpPeer struct {
 	rxFrames   atomic.Uint64
 	txFrames   atomic.Uint64
 	txSequence atomic.Uint32
+	// lastAudioNanos is when the previous audio frame from this peer
+	// arrived; only the receive loop touches it.
+	lastAudioNanos int64
 }
 
 // MediaBridge is the slim contract MediaManager (or any future SFU) implements
@@ -205,12 +208,15 @@ type UDPAudioRelay struct {
 	conn   net.PacketConn
 	netem  *netemConfig
 
-	mu         sync.RWMutex
-	peers      map[string]*udpPeer // by session token
-	peersByH   map[uint32]*udpPeer // by token hash (for fast inbound lookup)
-	closeOnce  sync.Once
-	closed     atomic.Bool
-	cancelLoop context.CancelFunc
+	mu                 sync.RWMutex
+	peers              map[string]*udpPeer // by session token
+	peersByH           map[uint32]*udpPeer // by token hash (for fast inbound lookup)
+	inboundGaps        atomic.Uint64
+	maxInboundGapNanos atomic.Uint64
+	maxRouteNanos      atomic.Uint64
+	closeOnce          sync.Once
+	closed             atomic.Bool
+	cancelLoop         context.CancelFunc
 }
 
 // NewUDPAudioRelay creates the relay but does not start listening. Call
@@ -330,7 +336,15 @@ func (r *UDPAudioRelay) handlePacket(addr net.Addr, pkt UDPAudioPacket) {
 		peer.lastSeen = time.Now()
 		peer.mu.Unlock()
 		peer.rxFrames.Add(1)
+		start := time.Now()
+		r.noteInboundGap(peer, start)
 		r.routeNativeAudio(peer, pkt)
+		if took := time.Since(start); took > 0 {
+			updateMax(&r.maxRouteNanos, uint64(took))
+			if took > 10*time.Millisecond {
+				r.logger.Warn("udp audio slow fan-out", "token_hash", peer.tokenHash, "took_ms", float64(took)/1e6)
+			}
+		}
 	}
 }
 
@@ -531,6 +545,39 @@ type UDPAudioStats struct {
 	Peers    int    `json:"peers"`
 	RxFrames uint64 `json:"rxFrames"`
 	TxFrames uint64 `json:"txFrames"`
+	// Diagnostics for latency spikes: inbound gaps during continuous audio
+	// and the slowest single frame fan-out.
+	InboundGapsOver20ms uint64  `json:"inboundGapsOver20ms"`
+	MaxInboundGapMs     float64 `json:"maxInboundGapMs"`
+	MaxRouteMs          float64 `json:"maxRouteMs"`
+}
+
+// relayGapLogThreshold: inbound gaps longer than this are logged. Native
+// clients send a frame every 2.5-10 ms while talking and nothing while
+// silent, so gaps up to one second are stalls rather than talk pauses.
+const (
+	relayGapLogThreshold = 40 * time.Millisecond
+	relayGapPauseCutoff  = time.Second
+)
+
+func (r *UDPAudioRelay) noteInboundGap(peer *udpPeer, now time.Time) {
+	nowNanos := now.UnixNano()
+	prev := peer.lastAudioNanos
+	peer.lastAudioNanos = nowNanos
+	if prev == 0 {
+		return
+	}
+	gap := time.Duration(nowNanos - prev)
+	if gap >= relayGapPauseCutoff {
+		return // talk pause
+	}
+	updateMax(&r.maxInboundGapNanos, uint64(gap))
+	if gap > 20*time.Millisecond {
+		r.inboundGaps.Add(1)
+	}
+	if gap > relayGapLogThreshold {
+		r.logger.Warn("udp audio inbound gap", "token_hash", peer.tokenHash, "gap_ms", float64(gap)/1e6)
+	}
 }
 
 // Stats returns aggregated counters for monitoring.
@@ -542,5 +589,12 @@ func (r *UDPAudioRelay) Stats() UDPAudioStats {
 		rx += p.rxFrames.Load()
 		tx += p.txFrames.Load()
 	}
-	return UDPAudioStats{Peers: len(r.peers), RxFrames: rx, TxFrames: tx}
+	return UDPAudioStats{
+		Peers:               len(r.peers),
+		RxFrames:            rx,
+		TxFrames:            tx,
+		InboundGapsOver20ms: r.inboundGaps.Load(),
+		MaxInboundGapMs:     float64(r.maxInboundGapNanos.Load()) / 1e6,
+		MaxRouteMs:          float64(r.maxRouteNanos.Load()) / 1e6,
+	}
 }

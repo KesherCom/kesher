@@ -81,12 +81,25 @@ const RX_QUEUE_DEPTH: usize = 256;
 /// Consecutive output callbacks we may conceal an underrun before treating
 /// the source as silent (end of talk spurt).
 const MAX_EXPAND_RUN: u32 = 4;
-/// Window over which the jitter buffer must stay above target before we
-/// trim one frame of latency.
-const LATENCY_WINDOW_SAMPLES: u64 = 24_000;
+/// Window over which the jitter buffer must stay above target + one frame
+/// before the persistent excess is dropped (bursts after a stall, clock
+/// drift). Short, because the excess is real delay every listener hears.
+const LATENCY_WINDOW_SAMPLES: u64 = 12_000;
 /// Time without a jitter underrun before the target shrinks by 0.5 ms.
-const TARGET_DECAY_SAMPLES: u64 = 10 * 48_000;
+const TARGET_DECAY_SAMPLES: u64 = 3 * 48_000;
 const TARGET_DECAY_STEP: usize = 24;
+/// Smallest target increase after a jitter underrun (1 ms).
+const TARGET_MIN_STEP: usize = 48;
+/// Lowest jitter-buffer target (2 ms). On a wired LAN the only jitter is
+/// device-period quantization, so the target may sit below one frame.
+const TARGET_FLOOR_SAMPLES: usize = 96;
+/// Excess over the target tolerated for a whole window before trimming.
+const TRIM_MARGIN_SAMPLES: usize = 48;
+/// Crossfade length when cutting decoded audio (about 0.7 ms).
+const TRIM_CROSSFADE: usize = 32;
+/// At most this many packets are decoded in one callback to trim smoothly;
+/// a larger backlog is skipped undecoded.
+const TRIM_MAX_DECODES: usize = 8;
 const MAX_TARGET_SAMPLES: usize = 4_800;
 /// Free a source slot after this long without packets.
 const SOURCE_RELEASE_IDLE_SAMPLES: u64 = 5 * 48_000;
@@ -248,6 +261,25 @@ struct Stats {
     latency_trims: AtomicU64,
     /// Virtual device only: ticks that ran more than one period late.
     virtual_late_ticks: AtomicU64,
+    /// Stalls on the wire: gaps between consecutive sent / received audio
+    /// packets during continuous audio (diagnostics for latency spikes).
+    tx_gaps_over_20ms: AtomicU64,
+    rx_gaps_over_20ms: AtomicU64,
+    tx_max_gap_us: AtomicU64,
+    rx_max_gap_us: AtomicU64,
+    /// Longest single socket.send() call in the capture path.
+    tx_send_max_us: AtomicU64,
+}
+
+/// Records the gap since `last` into the max/over-20ms counters.
+fn record_gap(last: &mut Option<Instant>, now: Instant, max_us: &AtomicU64, over: &AtomicU64) -> Duration {
+    let gap = last.map_or(Duration::ZERO, |prev| now.saturating_duration_since(prev));
+    *last = Some(now);
+    max_us.fetch_max(gap.as_micros() as u64, Ordering::Relaxed);
+    if gap > Duration::from_millis(20) {
+        over.fetch_add(1, Ordering::Relaxed);
+    }
+    gap
 }
 
 /// User settings read lock-free by the audio callbacks.
@@ -586,6 +618,8 @@ struct Capture {
     /// Absolute index of the next captured sample.
     position: u64,
     was_sending: bool,
+    /// When the previous packet of the current talk spurt was sent.
+    last_send: Option<Instant>,
     test_frames: usize,
     test_click_at: Option<u64>,
     /// Noise-gate envelope, 0 (closed) .. 1 (open).
@@ -687,6 +721,7 @@ impl Capture {
         };
         if !send {
             self.was_sending = false;
+            self.last_send = None;
             self.timestamp = self.timestamp.wrapping_add(self.frame_samples as u32);
             return;
         }
@@ -706,10 +741,17 @@ impl Capture {
                     self.timestamp,
                     self.token_hash,
                 );
+                let stats = &self.shared.stats;
+                let before = Instant::now();
                 match self.socket.send(&self.packet[..header + n]) {
-                    Ok(_) => self.shared.stats.tx_packets.fetch_add(1, Ordering::Relaxed),
-                    Err(_) => self.shared.stats.tx_errors.fetch_add(1, Ordering::Relaxed),
+                    Ok(_) => stats.tx_packets.fetch_add(1, Ordering::Relaxed),
+                    Err(_) => stats.tx_errors.fetch_add(1, Ordering::Relaxed),
                 };
+                let after = Instant::now();
+                stats
+                    .tx_send_max_us
+                    .fetch_max(after.duration_since(before).as_micros() as u64, Ordering::Relaxed);
+                record_gap(&mut self.last_send, after, &stats.tx_max_gap_us, &stats.tx_gaps_over_20ms);
             }
             Err(_) => {
                 self.shared.stats.tx_errors.fetch_add(1, Ordering::Relaxed);
@@ -746,6 +788,7 @@ fn new_capture(
         timestamp: 0,
         position: 0,
         was_sending: false,
+        last_send: None,
         test_frames: 0,
         test_click_at: None,
         gate_envelope: 0.0,
@@ -853,6 +896,23 @@ impl PcmRing {
         }
         self.discard(n);
         peak
+    }
+
+    /// Removes `n` samples from the front and crossfades across the cut so
+    /// the jump does not click. Falls back to a plain cut if too short.
+    fn discard_crossfade(&mut self, n: usize) {
+        let cap = self.buf.len();
+        if n == 0 || self.len < n + TRIM_CROSSFADE {
+            self.discard(n);
+            return;
+        }
+        for i in 0..TRIM_CROSSFADE {
+            let w = (i + 1) as f32 / (TRIM_CROSSFADE + 1) as f32;
+            let old = self.buf[(self.read + i) % cap];
+            let new_idx = (self.read + n + i) % cap;
+            self.buf[new_idx] = old * (1.0 - w) + self.buf[new_idx] * w;
+        }
+        self.discard(n);
     }
 
     fn discard(&mut self, n: usize) {
@@ -984,18 +1044,13 @@ impl Source {
             self.buffering = true;
             self.expand_run = 0;
         } else if self.expand_run > 0 && pkt.sequence == self.next_seq {
-            // The packet we were concealing arrived late: real jitter. Give
-            // the buffer more headroom.
-            let step = (self.frame_samples / 2).max(48);
-            self.target = (self.target + step).min(MAX_TARGET_SAMPLES);
-            self.since_jitter_underrun = 0;
-            stats.jitter_underruns.fetch_add(1, Ordering::Relaxed);
+            // The packet we were concealing arrived late: real jitter.
+            self.raise_target(stats);
         }
         let payload = &pkt.data[..pkt.len as usize];
         if let Ok(n) = self.decoder.get_nb_samples(payload) {
             if n > 0 && n <= MAX_DECODED_SAMPLES {
                 self.frame_samples = n;
-                self.target = self.target.max(n);
             }
         }
         let slot = &mut self.slots[pkt.sequence as usize % JITTER_SLOTS];
@@ -1027,7 +1082,9 @@ impl Source {
             return true;
         }
         if seq_diff(self.highest_seq, self.next_seq) > 0 {
-            // A later packet exists, so this one is lost.
+            // A later packet exists, so this one is lost. (Waiting for it
+            // with PLC was measured in the lab: it lowered speech MOS on
+            // jittery links, so a gap is filled from FEC/PLC right away.)
             let frame = self.frame_samples.min(scratch.len());
             let next = self.next_seq.wrapping_add(1);
             let next_idx = next as usize % JITTER_SLOTS;
@@ -1050,6 +1107,57 @@ impl Source {
         false
     }
 
+    /// Gives the buffer more headroom after a packet missed its playout time.
+    fn raise_target(&mut self, stats: &Stats) {
+        let step = (self.frame_samples / 4).max(TARGET_MIN_STEP);
+        self.target = (self.target + step).min(MAX_TARGET_SAMPLES);
+        self.since_jitter_underrun = 0;
+        stats.jitter_underruns.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Removes `samples` of queued audio to cut latency. With `smooth`, up
+    /// to TRIM_MAX_DECODES packets are decoded so the cut happens inside
+    /// decoded audio with a crossfade (keeps decoder state continuous);
+    /// otherwise, and for any larger backlog, whole packets are skipped
+    /// undecoded (used while the source is silent anyway).
+    fn drop_samples(&mut self, samples: usize, scratch: &mut [f32], stats: &Stats, smooth: bool) {
+        let frame = self.frame_samples.max(1);
+        let mut left = samples;
+        if smooth {
+            // Skip whole packets beyond what we are willing to decode.
+            let decodable = TRIM_MAX_DECODES * frame;
+            while left > decodable + self.pcm.len && self.skip_packet() {
+                left -= frame;
+            }
+            let mut decodes = 0;
+            while self.pcm.len < left + TRIM_CROSSFADE && decodes < TRIM_MAX_DECODES {
+                if !self.decode_next(scratch, stats) {
+                    break;
+                }
+                decodes += 1;
+            }
+            self.pcm.discard_crossfade(left.min(self.pcm.len));
+        } else {
+            let from_pcm = left.min(self.pcm.len);
+            self.pcm.discard(from_pcm);
+            left -= from_pcm;
+            while left >= frame && self.skip_packet() {
+                left -= frame;
+            }
+        }
+    }
+
+    /// Drops the next packet undecoded. False when none is buffered.
+    fn skip_packet(&mut self) -> bool {
+        if !self.have_any || seq_diff(self.highest_seq, self.next_seq) < 0 {
+            return false;
+        }
+        let idx = self.next_seq as usize % JITTER_SLOTS;
+        self.slots[idx].present = false;
+        self.next_seq = self.next_seq.wrapping_add(1);
+        true
+    }
+
     /// Renders this source into `mix`; returns the peak it contributed.
     fn render(&mut self, mix: &mut [f32], scratch: &mut [f32], stats: &Stats, settings: &Settings) -> f32 {
         let frames = mix.len();
@@ -1068,6 +1176,13 @@ impl Source {
                 self.buffering = false;
                 self.window_min = usize::MAX;
                 self.window_elapsed = 0;
+                // After a stall the backlog arrives as one burst; start at
+                // the target instead of playing the whole backlog late.
+                let excess = self.queued().saturating_sub(self.target);
+                if excess >= self.frame_samples {
+                    self.drop_samples(excess, scratch, stats, false);
+                    stats.latency_trims.fetch_add(1, Ordering::Relaxed);
+                }
             } else {
                 return 0.0;
             }
@@ -1105,18 +1220,18 @@ impl Source {
         self.window_elapsed += frames as u64;
         self.since_jitter_underrun += frames as u64;
         if self.window_elapsed >= LATENCY_WINDOW_SAMPLES {
-            if !self.buffering && self.window_min > self.target + self.frame_samples {
-                if self.pcm.len < self.frame_samples {
-                    self.decode_next(scratch, stats);
-                }
-                self.pcm.discard(self.frame_samples);
+            if !self.buffering && self.window_min > self.target + TRIM_MARGIN_SAMPLES {
+                // The buffer never came near the target for a whole window:
+                // that much delay is persistent, drop all of it at once.
+                let excess = self.window_min - self.target;
+                self.drop_samples(excess, scratch, stats, true);
                 stats.latency_trims.fetch_add(1, Ordering::Relaxed);
             }
             self.window_min = usize::MAX;
             self.window_elapsed = 0;
         }
         if self.since_jitter_underrun >= TARGET_DECAY_SAMPLES {
-            self.target = self.target.saturating_sub(TARGET_DECAY_STEP).max(self.frame_samples);
+            self.target = self.target.saturating_sub(TARGET_DECAY_STEP).max(TARGET_FLOOR_SAMPLES);
             self.since_jitter_underrun = 0;
         }
         peak
@@ -1502,6 +1617,10 @@ fn run_network_rx(
     level_sink: Option<LevelSink>,
 ) {
     let _ = socket.set_read_timeout(Some(RECV_TIMEOUT));
+    // Packets wait in the socket until this thread runs; give it the same
+    // scheduling class as the audio threads.
+    #[cfg(target_os = "windows")]
+    let _priority = crate::audio_wasapi::ProAudioPriority::enter();
     let mut last_levels = Instant::now();
     let mut register = vec![0u8; UDP_HEADER_LEN_V2 + session_token.len()];
     let register_len = write_header(&mut register, version, UDP_FLAG_REGISTER, 0, 0, token_hash);
@@ -1517,6 +1636,7 @@ fn run_network_rx(
     let mut logged_stats = NativeStatsSnapshot::default();
     let mut buf = [0u8; 1500];
 
+    let mut last_rx: Option<Instant> = None;
     while !shared.stop.load(Ordering::Acquire) {
         if last_beat.elapsed() >= HEARTBEAT_INTERVAL {
             beats = beats.wrapping_add(1);
@@ -1555,6 +1675,14 @@ fn run_network_rx(
             continue;
         }
         shared.stats.rx_packets.fetch_add(1, Ordering::Relaxed);
+        let gap = record_gap(&mut last_rx, Instant::now(), &shared.stats.rx_max_gap_us, &shared.stats.rx_gaps_over_20ms);
+        if gap > Duration::from_millis(40) {
+            log::warn!(
+                "[native][udp] {:.1} ms without audio packets (at {:?})",
+                gap.as_secs_f64() * 1000.0,
+                std::time::SystemTime::now()
+            );
+        }
         let mut rx = RxPacket {
             source_id: pkt.source_id,
             sequence: pkt.sequence,
@@ -1584,6 +1712,11 @@ pub struct NativeStatsSnapshot {
     pub late_packets: u64,
     pub latency_trims: u64,
     pub virtual_late_ticks: u64,
+    pub tx_gaps_over_20ms: u64,
+    pub rx_gaps_over_20ms: u64,
+    pub tx_max_gap_ms: f32,
+    pub rx_max_gap_ms: f32,
+    pub tx_send_max_ms: f32,
     pub active_sources: u32,
     /// Current jitter-buffer target of the deepest source.
     pub target_ms: f32,
@@ -1605,6 +1738,11 @@ impl Stats {
             late_packets: self.late_packets.load(Ordering::Relaxed),
             latency_trims: self.latency_trims.load(Ordering::Relaxed),
             virtual_late_ticks: self.virtual_late_ticks.load(Ordering::Relaxed),
+            tx_gaps_over_20ms: self.tx_gaps_over_20ms.load(Ordering::Relaxed),
+            rx_gaps_over_20ms: self.rx_gaps_over_20ms.load(Ordering::Relaxed),
+            tx_max_gap_ms: self.tx_max_gap_us.load(Ordering::Relaxed) as f32 / 1000.0,
+            rx_max_gap_ms: self.rx_max_gap_us.load(Ordering::Relaxed) as f32 / 1000.0,
+            tx_send_max_ms: self.tx_send_max_us.load(Ordering::Relaxed) as f32 / 1000.0,
             active_sources: self.active_sources.load(Ordering::Relaxed),
             target_ms: ms(&self.max_target_samples),
             capture_callback_ms: ms(&self.capture_callback_frames),
@@ -1677,6 +1815,8 @@ fn start_engine_with(
     if state.engine.lock().unwrap().is_some() {
         return Err("native engine already running".to_string());
     }
+    #[cfg(target_os = "windows")]
+    crate::audio_wasapi::tune_process_for_realtime();
     let server_addr: SocketAddr = (params.server_host.as_str(), params.server_port)
         .to_socket_addrs()
         .map_err(|e| format!("invalid server addr: {e}"))?
@@ -1972,6 +2112,95 @@ mod tests {
         src.insert(&rx(1, 3, &frames[3]), &stats);
         assert_eq!(stats.jitter_underruns.load(Ordering::Relaxed), 1);
         assert!(src.target > target_before);
+    }
+
+    #[test]
+    fn burst_after_stall_starts_at_target_not_backlog() {
+        let stats = Stats::default();
+        let settings = Settings::default();
+        let mut src = Source::new().unwrap();
+        src.activate(1);
+        let frames = encode_frames(30, 240);
+        let mut scratch = vec![0.0; MAX_DECODED_SAMPLES];
+        // 150 ms of backlog lands in one go while the source is buffering.
+        for (i, f) in frames.iter().enumerate() {
+            src.insert(&rx(1, i as u16, f), &stats);
+        }
+        let mut mix = vec![0.0; 128];
+        src.render(&mut mix, &mut scratch, &stats, &settings);
+        assert!(!src.buffering);
+        assert!(
+            src.queued() <= src.target + src.frame_samples,
+            "queued {} target {}",
+            src.queued(),
+            src.target
+        );
+        assert_eq!(stats.latency_trims.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn persistent_excess_is_dropped_within_two_windows() {
+        let stats = Stats::default();
+        let settings = Settings::default();
+        let mut src = Source::new().unwrap();
+        src.activate(1);
+        let frames = encode_frames(200, 240);
+        let mut scratch = vec![0.0; MAX_DECODED_SAMPLES];
+        let mut mix = vec![0.0; 240];
+        src.insert(&rx(1, 0, &frames[0]), &stats);
+        src.render(&mut mix, &mut scratch, &stats, &settings);
+        // A 100 ms backlog builds up while playing, then packets keep
+        // arriving at the playback rate, so the excess would never drain.
+        let mut seq = 1u16;
+        for _ in 0..20 {
+            src.insert(&rx(1, seq, &frames[seq as usize]), &stats);
+            seq += 1;
+        }
+        // The backlog appears mid-window, so the next full window drops it.
+        let window_callbacks = 2 * LATENCY_WINDOW_SAMPLES as usize / 240 + 2;
+        for _ in 0..window_callbacks {
+            src.insert(&rx(1, seq, &frames[seq as usize % 200]), &stats);
+            seq += 1;
+            mix.fill(0.0);
+            src.render(&mut mix, &mut scratch, &stats, &settings);
+        }
+        assert!(
+            src.queued() <= src.target + src.frame_samples,
+            "queued {} target {}",
+            src.queued(),
+            src.target
+        );
+    }
+
+    #[test]
+    fn crossfade_cut_is_continuous() {
+        let mut ring = PcmRing::new(1024);
+        let ramp: Vec<f32> = (0..400).map(|i| i as f32 / 400.0).collect();
+        ring.push(&ramp);
+        ring.discard_crossfade(100);
+        let mut out = vec![0.0; 300];
+        ring.mix_into(&mut out, 1.0);
+        // The first sample after the cut stays close to the old head instead
+        // of jumping 100 samples ahead.
+        assert!(out[0] < 0.05, "{}", out[0]);
+        assert!((out[299] - 399.0 / 400.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn target_decays_below_one_frame() {
+        let stats = Stats::default();
+        let settings = Settings::default();
+        let mut src = Source::new().unwrap();
+        src.activate(1);
+        let frames = encode_frames(1, 240);
+        let mut scratch = vec![0.0; MAX_DECODED_SAMPLES];
+        let mut mix = vec![0.0; 240];
+        src.insert(&rx(1, 0, &frames[0]), &stats);
+        for _ in 0..20 {
+            src.since_jitter_underrun = TARGET_DECAY_SAMPLES;
+            src.render(&mut mix, &mut scratch, &stats, &settings);
+        }
+        assert_eq!(src.target, TARGET_FLOOR_SAMPLES);
     }
 
     #[test]
