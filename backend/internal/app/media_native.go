@@ -107,10 +107,13 @@ func (m *MediaManager) EnsureNativeSource(sourceToken string, userID string) err
 		return nil
 	}
 	track, err := webrtc.NewTrackLocalStaticSample(
+		// Opus is always signalled as opus/48000/2 in SDP (RFC 7587), also
+		// for mono content; a 1-channel capability fails to bind ("codec
+		// is not supported by remote") and breaks the browser's answer.
 		webrtc.RTPCodecCapability{
 			MimeType:  webrtc.MimeTypeOpus,
 			ClockRate: 48000,
-			Channels:  1,
+			Channels:  2,
 		},
 		fmt.Sprintf("audio-user-%s", userID),
 		"intercom-native",
@@ -153,6 +156,7 @@ func (m *MediaManager) removeNativeSource(sourceToken string) {
 		_ = sender.ReplaceTrack(nil)
 		if peer, ok := m.peers[destToken]; ok {
 			_ = peer.pc.RemoveTrack(sender)
+			delete(peer.senders, nativeSenderKey(sourceToken))
 			m.requestRenegotiationLocked(peer)
 		}
 	}
@@ -160,6 +164,12 @@ func (m *MediaManager) removeNativeSource(sourceToken string) {
 	src.hasWebRTCDests.Store(false)
 	empty := []string{}
 	src.nativeDests.Store(&empty)
+}
+
+// nativeSenderKey is the key of a native source's track in a WebRTC peer's
+// sender set (peer.senders is otherwise keyed by WebRTC source tokens).
+func nativeSenderKey(sourceToken string) string {
+	return "native:" + sourceToken
 }
 
 // recomputeAllNativeSourcesLocked refreshes routing for every native source.
@@ -201,6 +211,9 @@ func (m *MediaManager) recomputeNativeSourceRoutingLocked(sourceToken string, sr
 			continue
 		}
 		src.senders[destToken] = sender
+		// Renegotiation only fires when the peer's sender set changes, so
+		// the native track must be part of it.
+		peer.senders[nativeSenderKey(sourceToken)] = sender
 		m.requestRenegotiationLocked(peer)
 	}
 	// Remove senders for dests that should no longer hear this source.
@@ -210,6 +223,7 @@ func (m *MediaManager) recomputeNativeSourceRoutingLocked(sourceToken string, sr
 		}
 		if peer, ok := m.peers[destToken]; ok {
 			_ = peer.pc.RemoveTrack(sender)
+			delete(peer.senders, nativeSenderKey(sourceToken))
 			m.requestRenegotiationLocked(peer)
 		}
 		delete(src.senders, destToken)
@@ -333,9 +347,7 @@ func (m *MediaManager) forwardOpusToNativeDests(sourceID uint32, dests []string,
 	if err := pkt.Unmarshal(rtpBytes); err != nil {
 		return
 	}
-	for _, destToken := range dests {
-		relay.SendOpus(destToken, sourceID, pkt.SequenceNumber, pkt.Timestamp, pkt.Payload)
-	}
+	relay.SendOpusToMany(dests, sourceID, pkt.SequenceNumber, pkt.Timestamp, pkt.Payload)
 }
 
 // opusPacketDuration returns the audio duration of an Opus packet from its

@@ -61,3 +61,15 @@ func tuneProcessForRealtimeAudio(logger *slog.Logger) {
 	}
 	logger.Info("realtime: power throttling off, 1 ms timers, above-normal priority")
 }
+
+// processCPUSeconds is the user+kernel CPU time this process has used.
+func processCPUSeconds() float64 {
+	var creation, exit, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(windows.CurrentProcess(), &creation, &exit, &kernel, &user); err != nil {
+		return 0
+	}
+	ticks := func(f windows.Filetime) float64 {
+		return float64(uint64(f.HighDateTime)<<32|uint64(f.LowDateTime)) / 1e7 // 100 ns units
+	}
+	return ticks(kernel) + ticks(user)
+}

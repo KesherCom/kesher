@@ -47,6 +47,7 @@ import (
 	"hash/fnv"
 	"log/slog"
 	"net"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,8 +62,22 @@ const (
 	udpAudioMaxPacket   = 1200
 	udpAudioPeerExpiry  = 8 * time.Second
 	udpAudioReapEvery   = 1 * time.Second
-	// udpAudioSocketBuffer is the requested socket buffer size (4 MiB).
-	udpAudioSocketBuffer = 4 << 20
+	// Send buffer: fan-out leaves in bursts (one inbound frame -> one packet
+	// per listener), so allow plenty of room.
+	udpAudioSendBuffer = 4 << 20
+	// Receive buffer: kept small on purpose. If the relay ever falls behind,
+	// a large inbound queue turns overload into seconds of delay for
+	// everyone (seen in the 50-client load test); dropping is better for
+	// live audio. 256 KiB is ~1 s at 3000 frames/s.
+	udpAudioRecvBuffer = 256 << 10
+	// Per-worker queue of inbound frames waiting for fan-out (~40 ms at
+	// 200 frames/s for 5 talkers per worker); full = drop + count.
+	udpAudioWorkerQueue = 256
+	udpAudioMaxWorkers  = 16
+	// Frames that waited longer than this for their worker are dropped: a
+	// listener's jitter buffer cannot use them anyway, and forwarding them
+	// would only keep the relay behind (bounded delay under overload).
+	udpAudioMaxQueueAge = 100 * time.Millisecond
 )
 
 const (
@@ -210,11 +225,21 @@ type UDPAudioRelay struct {
 	conn   net.PacketConn
 	netem  *netemConfig
 
-	mu                 sync.RWMutex
-	peers              map[string]*udpPeer // by session token
-	peersByH           map[uint32]*udpPeer // by token hash (for fast inbound lookup)
-	inboundGaps        atomic.Uint64
-	txErrors           atomic.Uint64
+	mu          sync.RWMutex
+	peers       map[string]*udpPeer // by session token
+	peersByH    map[uint32]*udpPeer // by token hash (for fast inbound lookup)
+	inboundGaps atomic.Uint64
+	txErrors    atomic.Uint64
+	rxTotal     atomic.Uint64
+	txTotal     atomic.Uint64
+	queueDrops  atomic.Uint64
+	// workers fan out inbound frames; a source always maps to the same
+	// worker, so its frames stay in order.
+	workers []chan relayJob
+	// batch sends one frame's copies with one syscall (Linux); nil = one
+	// write per packet.
+	batch              batchWriter
+	batchFailed        atomic.Bool
 	maxInboundGapNanos atomic.Uint64
 	maxRouteNanos      atomic.Uint64
 	closeOnce          sync.Once
@@ -264,13 +289,16 @@ func (r *UDPAudioRelay) Start(addr string) error {
 	// such bursts instead of dropping them (a safety margin; the defaults
 	// were enough on an idle lab machine with 8 talkers). Linux caps this at
 	// net.core.rmem_max / wmem_max.
-	if err := udpConn.SetReadBuffer(udpAudioSocketBuffer); err != nil {
-		r.logger.Warn("udp audio: could not enlarge receive buffer", "error", err)
+	if err := udpConn.SetReadBuffer(udpAudioRecvBuffer); err != nil {
+		r.logger.Warn("udp audio: could not set receive buffer", "error", err)
 	}
-	if err := udpConn.SetWriteBuffer(udpAudioSocketBuffer); err != nil {
+	if err := udpConn.SetWriteBuffer(udpAudioSendBuffer); err != nil {
 		r.logger.Warn("udp audio: could not enlarge send buffer", "error", err)
 	}
 	var conn net.PacketConn = udpConn
+	if r.netem == nil {
+		r.batch = newBatchWriter(udpConn)
+	}
 	if r.netem != nil {
 		conn = &emuPacketConn{PacketConn: conn, cfg: r.netem}
 	}
@@ -278,6 +306,15 @@ func (r *UDPAudioRelay) Start(addr string) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	r.cancelLoop = cancel
+	n := runtime.GOMAXPROCS(0)
+	if n > udpAudioMaxWorkers {
+		n = udpAudioMaxWorkers
+	}
+	r.workers = make([]chan relayJob, n)
+	for i := range r.workers {
+		r.workers[i] = make(chan relayJob, udpAudioWorkerQueue)
+		go r.fanOutWorker(ctx, r.workers[i])
+	}
 	go r.recvLoop(ctx)
 	go r.reaper(ctx)
 	r.logger.Info("udp audio relay listening", "addr", conn.LocalAddr().String())
@@ -350,13 +387,67 @@ func (r *UDPAudioRelay) handlePacket(addr net.Addr, pkt UDPAudioPacket) {
 		peer.lastSeen = time.Now()
 		peer.mu.Unlock()
 		peer.rxFrames.Add(1)
-		start := time.Now()
-		r.noteInboundGap(peer, start)
-		r.routeNativeAudio(peer, pkt)
-		if took := time.Since(start); took > 0 {
+		r.rxTotal.Add(1)
+		now := time.Now()
+		r.noteInboundGap(peer, now)
+		r.dispatch(peer, pkt, now)
+	}
+}
+
+// relayJob is one inbound audio frame waiting for fan-out. The payload is
+// copied into a pooled buffer because the receive buffer is reused.
+type relayJob struct {
+	src      *udpPeer
+	pkt      UDPAudioPacket
+	buf      *[]byte
+	received time.Time
+}
+
+var relayPayloadPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, udpAudioMaxPacket)
+		return &b
+	},
+}
+
+// dispatch hands a frame to its source's worker. A full queue means the
+// relay is overloaded; the frame is dropped (and counted) rather than
+// delayed.
+func (r *UDPAudioRelay) dispatch(src *udpPeer, pkt UDPAudioPacket, now time.Time) {
+	if len(r.workers) == 0 { // not started (tests)
+		r.routeNativeAudio(src, pkt)
+		return
+	}
+	buf := relayPayloadPool.Get().(*[]byte)
+	n := copy(*buf, pkt.Payload)
+	pkt.Payload = (*buf)[:n]
+	job := relayJob{src: src, pkt: pkt, buf: buf, received: now}
+	select {
+	case r.workers[src.tokenHash%uint32(len(r.workers))] <- job:
+	default:
+		r.queueDrops.Add(1)
+		relayPayloadPool.Put(buf)
+	}
+}
+
+func (r *UDPAudioRelay) fanOutWorker(ctx context.Context, jobs <-chan relayJob) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case job := <-jobs:
+			if time.Since(job.received) > udpAudioMaxQueueAge {
+				r.queueDrops.Add(1)
+				relayPayloadPool.Put(job.buf)
+				continue
+			}
+			r.routeNativeAudio(job.src, job.pkt)
+			relayPayloadPool.Put(job.buf)
+			// From receipt to the last copy sent: queueing + fan-out.
+			took := time.Since(job.received)
 			updateMax(&r.maxRouteNanos, uint64(took))
 			if took > 10*time.Millisecond {
-				r.logger.Warn("udp audio slow fan-out", "token_hash", peer.tokenHash, "took_ms", float64(took)/1e6)
+				r.logger.Warn("udp audio slow fan-out", "token_hash", job.src.tokenHash, "took_ms", float64(took)/1e6)
 			}
 		}
 	}
@@ -478,10 +569,9 @@ func (r *UDPAudioRelay) routeNativeAudio(src *udpPeer, pkt UDPAudioPacket) {
 		return
 	}
 	// Native -> Native fan-out, preserving the source's own sequence and
-	// timestamp so receivers can run a per-source jitter buffer.
-	for _, destToken := range r.bridge.NativeDestsForSource(src.token) {
-		r.SendOpus(destToken, src.sourceID, pkt.Sequence, pkt.Timestamp, pkt.Payload)
-	}
+	// timestamp so receivers can run a per-source jitter buffer. All copies
+	// leave in one batched send (udp_audio_batch.go).
+	r.SendOpusToMany(r.bridge.NativeDestsForSource(src.token), src.sourceID, pkt.Sequence, pkt.Timestamp, pkt.Payload)
 
 	// Native -> WebRTC bridge. The MediaManager handles per-destination
 	// gating and RTP repacking on its side.
@@ -544,6 +634,7 @@ func (r *UDPAudioRelay) sendOpusToPeer(peer *udpPeer, sourceID uint32, sequence 
 		return
 	}
 	peer.txFrames.Add(1)
+	r.txTotal.Add(1)
 }
 
 // LocalAddr exposes the bound listen address (mainly for tests and for the
@@ -566,6 +657,10 @@ type UDPAudioStats struct {
 	MaxInboundGapMs     float64 `json:"maxInboundGapMs"`
 	MaxRouteMs          float64 `json:"maxRouteMs"`
 	TxErrors            uint64  `json:"txErrors"`
+	// QueueDrops counts inbound frames dropped because their fan-out worker
+	// was backed up (relay overloaded).
+	QueueDrops uint64 `json:"queueDrops"`
+	Workers    int    `json:"workers"`
 }
 
 // relayGapLogThreshold: inbound gaps longer than this are logged. Native
@@ -599,16 +694,16 @@ func (r *UDPAudioRelay) noteInboundGap(peer *udpPeer, now time.Time) {
 // Stats returns aggregated counters for monitoring.
 func (r *UDPAudioRelay) Stats() UDPAudioStats {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-	var rx, tx uint64
-	for _, p := range r.peers {
-		rx += p.rxFrames.Load()
-		tx += p.txFrames.Load()
-	}
+	peers := len(r.peers)
+	r.mu.RUnlock()
+	// Totals are kept relay-wide (not summed over current peers) so they
+	// never go backwards when a peer leaves.
 	return UDPAudioStats{
-		Peers:               len(r.peers),
-		RxFrames:            rx,
-		TxFrames:            tx,
+		Peers:               peers,
+		RxFrames:            r.rxTotal.Load(),
+		TxFrames:            r.txTotal.Load(),
+		QueueDrops:          r.queueDrops.Load(),
+		Workers:             len(r.workers),
 		InboundGapsOver20ms: r.inboundGaps.Load(),
 		MaxInboundGapMs:     float64(r.maxInboundGapNanos.Load()) / 1e6,
 		MaxRouteMs:          float64(r.maxRouteNanos.Load()) / 1e6,

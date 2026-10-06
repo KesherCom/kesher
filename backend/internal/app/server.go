@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -3585,7 +3586,28 @@ type RealtimeStatsResponse struct {
 	StorePolicyCache PolicyCacheStats   `json:"storePolicyCache"`
 	// UDPAudio is present when the native UDP relay is running.
 	UDPAudio        *UDPAudioStats `json:"udpAudio,omitempty"`
+	Process         ProcessStats   `json:"process"`
 	TimestampUnixMs int64          `json:"timestampUnixMs"`
+}
+
+// ProcessStats is a cheap resource snapshot of the server process, for load
+// tests and monitoring (CPU% = delta cpuSeconds / delta wall time).
+type ProcessStats struct {
+	CPUSeconds float64 `json:"cpuSeconds"`
+	NumCPU     int     `json:"numCpu"`
+	Goroutines int     `json:"goroutines"`
+	HeapMB     float64 `json:"heapMb"`
+}
+
+func currentProcessStats() ProcessStats {
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	return ProcessStats{
+		CPUSeconds: processCPUSeconds(),
+		NumCPU:     runtime.NumCPU(),
+		Goroutines: runtime.NumGoroutine(),
+		HeapMB:     float64(ms.HeapAlloc) / (1 << 20),
+	}
 }
 
 func (s *Server) handleRealtimeStats(w http.ResponseWriter, r *http.Request, session Session) {
@@ -3618,6 +3640,7 @@ func (s *Server) handleRealtimeStats(w http.ResponseWriter, r *http.Request, ses
 		Media:            mediaStats,
 		StorePolicyCache: storeCacheStats,
 		UDPAudio:         udpStats,
+		Process:          currentProcessStats(),
 		TimestampUnixMs:  time.Now().UnixMilli(),
 	})
 }

@@ -6,6 +6,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/pion/webrtc/v4"
 )
 
 func TestUDPAudioPacketV2RoundTrip(t *testing.T) {
@@ -275,5 +277,85 @@ func TestUDPRelayRecordsInboundGaps(t *testing.T) {
 	}
 	if stats.MaxInboundGapMs < 49 || stats.MaxInboundGapMs > 51 {
 		t.Fatalf("max gap = %.1f ms, want ~50", stats.MaxInboundGapMs)
+	}
+}
+
+// A browser must get a new offer when a desktop-app (native) talker starts
+// sending into a room it listens to; otherwise it never hears that talker.
+func TestNativeSourceTriggersBrowserRenegotiation(t *testing.T) {
+	hub, media, cleanup := newNativeTestHub(t)
+	defer cleanup()
+	addTestClient(hub, "n", "un", "native", []string{"foh"})
+	browser := &client{
+		session:     Session{Token: "b", RoleID: "audio"},
+		user:        User{ID: "ub", Username: "b", RoleID: "audio"},
+		send:        make(chan WSOutbound, 64),
+		listenRooms: toRoomSet([]string{"foh"}),
+		talkRooms:   toRoomSet([]string{"foh"}),
+		transport:   "webrtc",
+	}
+	hub.Add(browser)
+	if err := media.EnsurePeer("b", browser.user); err != nil {
+		t.Fatal(err)
+	}
+	media.EnsureNegotiation("b")
+	waitOffer := func() bool {
+		deadline := time.After(time.Second)
+		for {
+			select {
+			case msg := <-browser.send:
+				if msg.Type == "webrtc_offer" {
+					return true
+				}
+			case <-deadline:
+				return false
+			}
+		}
+	}
+	if !waitOffer() {
+		t.Fatal("no initial offer")
+	}
+	// Answer so the peer is stable again.
+	media.mu.Lock()
+	peer := media.peers["b"]
+	media.mu.Unlock()
+	answerer, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer answerer.Close()
+	if err := answerer.SetRemoteDescription(*peer.pc.LocalDescription()); err != nil {
+		t.Fatal(err)
+	}
+	answer, err := answerer.CreateAnswer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := answerer.SetLocalDescription(answer); err != nil {
+		t.Fatal(err)
+	}
+	if err := media.HandleAnswer("b", answer.SDP); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := media.EnsureNativeSource("n", "un"); err != nil {
+		t.Fatal(err)
+	}
+	if !waitOffer() {
+		t.Fatal("browser got no offer for the native talker's track")
+	}
+	// The browser must be able to accept that offer (codec must bind).
+	if err := answerer.SetRemoteDescription(*peer.pc.LocalDescription()); err != nil {
+		t.Fatal(err)
+	}
+	answer, err = answerer.CreateAnswer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := answerer.SetLocalDescription(answer); err != nil {
+		t.Fatal(err)
+	}
+	if err := media.HandleAnswer("b", answer.SDP); err != nil {
+		t.Fatalf("answer with the native track rejected: %v", err)
 	}
 }
