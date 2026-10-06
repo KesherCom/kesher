@@ -1,9 +1,16 @@
 name: Release binaries
 
+# Builds everything (server, Pi/Linux node, Windows and macOS desktop):
+# - tag v*: build and publish a GitHub release
+# - manual run (Actions -> Release binaries -> Run workflow): build only
+# - push with "[full-build]" in the commit message: build only, so a branch
+#   can be checked end to end without releasing (artifacts on the run page)
 on:
   push:
     tags:
       - "v*"
+    branches:
+      - "**"
   workflow_dispatch:
 permissions:
   contents: write
@@ -11,6 +18,7 @@ permissions:
 jobs:
   # 1. Backend & Web CI/Release
   build:
+    if: ${{ github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || contains(github.event.head_commit.message, '[full-build]') }}
     name: Build Backend ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
     strategy:
@@ -87,6 +95,7 @@ jobs:
   # 1a. Raspberry Pi / Linux node (.deb + tar.gz), built in the same
   # container as `make node-deb`.
   build-node:
+    if: ${{ github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || contains(github.event.head_commit.message, '[full-build]') }}
     name: Build Node ${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
@@ -114,6 +123,7 @@ jobs:
 
   # 1b. Fast Desktop Validation (runs on every push/tag/dispatch)
   desktop-check:
+    if: ${{ github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || contains(github.event.head_commit.message, '[full-build]') }}
     name: Desktop Check (Windows)
     runs-on: windows-latest
     steps:
@@ -151,6 +161,7 @@ jobs:
 
   # 2. Windows Desktop
   build-desktop-windows:
+    if: ${{ github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || contains(github.event.head_commit.message, '[full-build]') }}
     name: Build Desktop (Windows)
     runs-on: windows-latest
     steps:
@@ -195,6 +206,7 @@ jobs:
 
 # 3. macOS Desktop (Apple Silicon)
   build-desktop-macos-arm64:
+    if: ${{ github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || contains(github.event.head_commit.message, '[full-build]') }}
     name: Build Desktop (macOS arm64)
     runs-on: macos-14
     steps:
@@ -251,6 +263,7 @@ jobs:
 
   # 4. macOS Desktop (Intel)
   build-desktop-macos-amd64:
+    if: ${{ github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || contains(github.event.head_commit.message, '[full-build]') }}
     name: Build Desktop (macOS amd64)
     runs-on: macos-13
     steps:

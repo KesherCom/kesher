@@ -42,6 +42,8 @@ Rust code is one Cargo workspace at the repo root (`Cargo.toml`, committed `Carg
 
 Design decisions are recorded in `docs/decisions/` (add a numbered file for new ones).
 
+CI: `.github/workflows/ci.yml` runs on every push (Go tests, web build, Rust tests on Linux, arm64 node package). `release-binaries.yml` builds everything (server, node, Windows/macOS desktop) on tags `v*` (and publishes the release), on manual runs, and on pushes whose commit message contains `[full-build]` (build only, no release).
+
 ```sh
 cargo test -p kesher-audio -p kesher-node
 make node-deb            # arm64 .deb into dist/node/ (NODE_ARCH=amd64 for x86)
