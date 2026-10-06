@@ -27,10 +27,10 @@ jobs:
       NODE_VERSION: "22"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -51,7 +51,7 @@ jobs:
           cp -R web/dist/. backend/internal/app/embedded_web/
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
@@ -79,7 +79,7 @@ jobs:
           fi
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/packages/*
@@ -95,7 +95,7 @@ jobs:
         arch: [arm64, amd64]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Build package
         run: |
@@ -105,7 +105,7 @@ jobs:
           docker run --rm -v "$PWD:/src" -e KESHER_VERSION="$version" kesher-node-build ${{ matrix.arch }}
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: node-${{ matrix.arch }}
           path: |
@@ -117,9 +117,9 @@ jobs:
     name: Desktop Check (Windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -154,8 +154,8 @@ jobs:
     name: Build Desktop (Windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -187,7 +187,7 @@ jobs:
           Copy-Item $exe.FullName "dist/release/kesher-desktop-windows-amd64-setup.exe"
 
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-windows
           path: dist/release/*
@@ -198,8 +198,8 @@ jobs:
     name: Build Desktop (macOS arm64)
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Install Rust
@@ -243,7 +243,7 @@ jobs:
           fi
           cp "$dmg" dist/release/kesher-desktop-macos-arm64.dmg
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-macos-arm64
           path: dist/release/*
@@ -254,8 +254,8 @@ jobs:
     name: Build Desktop (macOS amd64)
     runs-on: macos-13
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Install Rust
@@ -299,7 +299,7 @@ jobs:
           fi
           cp "$dmg" dist/release/kesher-desktop-macos-amd64.dmg
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-macos-amd64
           path: dist/release/*
@@ -320,7 +320,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download All
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: all-assets
           merge-multiple: true
