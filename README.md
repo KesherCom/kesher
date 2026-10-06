@@ -4,6 +4,20 @@ On-prem, web-based intercom for church live productions. Built for 30–50 concu
 
 **Features:** WebRTC voice (always-on + push-to-talk), party‑lines with listen/talk matrix, broadcast groups spanning multiple party‑lines, direct PTT between users, real-time presence, role-based access, admin CRUD for roles/party‑lines/broadcasts, SQLite persistence.
 
+## Components
+
+| Part | What it is | Where | Start / build | Docs |
+| --- | --- | --- | --- | --- |
+| Server | Go API, WebSocket hub, WebRTC SFU, UDP audio relay, embedded web UI | `backend/` | `make run-backend`, `make docker-up` | this README |
+| Browser client | React SPA (fallback audio path via WebRTC) | `web/`, `packages/client-core/` | `make dev-web` | [AGENTS.md](AGENTS.md) |
+| Desktop app | Tauri app for Windows/macOS with the low-latency native audio path | `desktop/` | `make dev-desktop`, `make build-desktop-windows` | [AGENTS.md](AGENTS.md) |
+| Audio engine | Shared Rust engine (Opus over KSHR/UDP, jitter buffer, mixing) used by the desktop app and the node | `crates/kesher-audio/` | `make desktop-rust-test` | [docs/decisions/0004](docs/decisions/0004-one-repo-shared-audio-engine.md) |
+| Raspberry Pi node | Headless station for Pi 3/4/5 with a USB headset, runs as a service | `crates/kesher-node/`, `deploy/node/` | `make node-deb` | [docs/hardware/raspberry-pi.md](docs/hardware/raspberry-pi.md) |
+| Test lab | Emulated networks, latency and speech-quality benchmarks | `testlab/` | `make lab` | [testlab/README.md](testlab/README.md) |
+
+Design decisions (Wi-Fi vs. DECT, mixing, silence suppression, repo layout)
+are recorded in [docs/decisions](docs/decisions/README.md).
+
 ## Quick start
 
 **Prerequisites:** Go 1.25+, Node.js 22+, npm
@@ -36,6 +50,9 @@ Release assets are named like:
 - `kesher-windows-arm64.zip`
 
 Each archive contains a single backend binary (`kesher-<os>-<arch>` or `kesher-<os>-<arch>.exe`) with the web UI already embedded.
+
+The Raspberry Pi / Linux node is released alongside as `kesher-node_<version>_arm64.deb`
+(and `amd64`, plus `.tar.gz`); see [docs/hardware/raspberry-pi.md](docs/hardware/raspberry-pi.md).
 
 ### Running unsigned binaries (macOS / Windows)
 

@@ -5,6 +5,7 @@
 resolver = "2"
 members = [
     "crates/kesher-audio",
+    "crates/kesher-node",
     "desktop/src-tauri",
 ]
 

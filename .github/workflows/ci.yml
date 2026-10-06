@@ -1,0 +1,69 @@
+name: CI
+
+# Fast checks on every push and pull request; releases are built by
+# release-binaries.yml (tags v*).
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache-dependency-path: backend/go.sum
+      - name: Test
+        run: cd backend && go test ./...
+
+  web:
+    name: Web build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Build (TypeScript + Vite)
+        run: npm --prefix web run build
+
+  rust:
+    name: Audio engine + node (Rust, Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libopus-dev pkg-config
+      - name: Test
+        run: cargo test --locked -p kesher-audio -p kesher-node
+
+  node-arm64:
+    name: Node package (Raspberry Pi, arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build .deb
+        run: |
+          docker build -t kesher-node-build -f deploy/node/Dockerfile deploy/node
+          docker run --rm -v "$PWD:/src" kesher-node-build arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kesher-node-arm64-dev
+          path: dist/node/*.deb
+          retention-days: 14

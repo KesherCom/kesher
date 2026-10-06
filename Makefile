@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 LAN_IP ?= 127.0.0.1
 
-.PHONY: help deps dev-backend dev-web run-backend run-backend-no-udp run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build-desktop-web build-desktop-windows build-desktop-release run-desktop-release dev-desktop desktop-web-check desktop-rust-check desktop-rust-test desktop-check local-smoke build test ci-test ci-backend-test ci-desktop-test loadtest loadtest-20 nettest netlab-up netlab-report netlab-down lab lab-desktop lab-desktop-baseline lab-desktop-hw lab-up lab-status lab-test lab-open lab-down docker-build docker-up docker-up-https docker-logs docker-down clean
+.PHONY: help deps dev-backend dev-web run-backend run-backend-no-udp run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build-desktop-web build-desktop-windows build-desktop-release run-desktop-release dev-desktop desktop-web-check desktop-rust-check desktop-rust-test desktop-check local-smoke build test ci-test ci-backend-test ci-desktop-test loadtest loadtest-20 nettest netlab-up netlab-report netlab-down lab lab-desktop lab-desktop-baseline lab-desktop-hw lab-up lab-status lab-test lab-open lab-down docker-build docker-up docker-up-https docker-logs docker-down node-image node-deb node-test clean
 
 help:
 	@echo "Available targets:"
@@ -78,6 +78,11 @@ help:
 	@echo "  make docker-up-https - run kesher via Docker with self-signed HTTPS (:8443)"
 	@echo "  make docker-logs   - follow container logs"
 	@echo "  make docker-down   - stop the Docker deployment"
+	@echo ""
+	@echo "  Raspberry Pi node (crates/kesher-node; see docs/hardware/raspberry-pi.md):"
+	@echo "  make node-deb      - build the .deb for Raspberry Pi 3/4/5 (arm64) into dist/node/, via Docker"
+	@echo "                       (NODE_ARCH=amd64 for x86 Linux)"
+	@echo "  make node-test     - unit tests of the node and the audio engine (host)"
 	@echo "  make clean         - remove common build artifacts"
 
 deps:
@@ -326,6 +331,20 @@ docker-logs:
 
 docker-down:
 	@docker compose -f $(COMPOSE_FILE) down
+
+NODE_ARCH ?= arm64
+NODE_IMAGE := kesher-node-build
+
+node-image:
+	@docker build -t $(NODE_IMAGE) -f deploy/node/Dockerfile deploy/node
+
+# Volumes keep the cargo registry and build cache between runs (much faster
+# than building on the bind-mounted source tree).
+node-deb: node-image
+	@MSYS_NO_PATHCONV=1 docker run --rm -v "$(CURDIR):/src" 		-v kesher-node-cargo:/usr/local/cargo/registry -v kesher-node-target:/target 		-e KESHER_VERSION $(NODE_IMAGE) $(NODE_ARCH)
+
+node-test:
+	@cargo test -p kesher-node -p kesher-audio
 
 clean:
 	@rm -rf backend/bin

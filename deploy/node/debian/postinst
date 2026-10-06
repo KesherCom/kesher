@@ -1,0 +1,30 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+  # Service account with access to sound cards and (on a Pi) GPIO.
+  if ! getent passwd kesher-node >/dev/null; then
+    adduser --system --group --no-create-home --home /var/lib/kesher-node kesher-node >/dev/null
+  fi
+  for group in audio gpio; do
+    if getent group "$group" >/dev/null; then
+      adduser kesher-node "$group" >/dev/null 2>&1 || true
+    fi
+  done
+  chown root:kesher-node /etc/kesher/node.toml
+  chmod 0640 /etc/kesher/node.toml
+
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    systemctl enable kesher-node.service >/dev/null 2>&1 || true
+    # Start once the config was edited; on upgrades restart a running node.
+    if systemctl is-active --quiet kesher-node.service \
+       || ! cmp -s /etc/kesher/node.toml /usr/share/doc/kesher-node/node.toml.example; then
+      systemctl restart kesher-node.service || true
+    else
+      echo "kesher-node: edit /etc/kesher/node.toml, then run: sudo systemctl restart kesher-node"
+    fi
+  fi
+fi
+
+exit 0

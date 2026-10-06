@@ -1,0 +1,31 @@
+[Unit]
+Description=Kesher intercom node
+Documentation=https://github.com/KesherCom/kesher/blob/main/docs/hardware/raspberry-pi.md
+Wants=network-online.target
+After=network-online.target sound.target
+
+[Service]
+Type=simple
+User=kesher-node
+# Pi tuning as root ("+"): CPU governor "performance", Wi-Fi power save off.
+ExecStartPre=+/usr/lib/kesher-node/tune.sh
+ExecStart=/usr/bin/kesher-node run --config /etc/kesher/node.toml
+Restart=always
+RestartSec=2
+# Exit 78 = config error: wait for a fix instead of restarting in a loop.
+RestartPreventExitStatus=78
+StateDirectory=kesher-node
+Environment=RUST_LOG=info
+
+# Real-time audio: the engine switches its audio threads to SCHED_FIFO.
+LimitRTPRIO=95
+Nice=-10
+
+# Hardening (audio and GPIO devices stay accessible).
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

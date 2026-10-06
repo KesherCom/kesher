@@ -1,2 +1,4 @@
 # Shell scripts run inside Linux containers; CRLF breaks /bin/sh.
 *.sh text eol=lf
+# Installed on Linux devices as-is (systemd unit, maintainer scripts, config).
+deploy/node/** text eol=lf

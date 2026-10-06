@@ -80,6 +80,34 @@ jobs:
           name: backend-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/packages/*
 
+  # 1a. Raspberry Pi / Linux node (.deb + tar.gz), built in the same
+  # container as `make node-deb`.
+  build-node:
+    name: Build Node ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, amd64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build package
+        run: |
+          docker build -t kesher-node-build -f deploy/node/Dockerfile deploy/node
+          version="${GITHUB_REF_NAME#v}"
+          case "$version" in [0-9]*) ;; *) version="" ;; esac
+          docker run --rm -v "$PWD:/src" -e KESHER_VERSION="$version" kesher-node-build ${{ matrix.arch }}
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-${{ matrix.arch }}
+          path: |
+            dist/node/*.deb
+            dist/node/*.tar.gz
+
   # 1b. Fast Desktop Validation (runs on every push/tag/dispatch)
   desktop-check:
     name: Desktop Check (Windows)
@@ -273,6 +301,7 @@ jobs:
     needs:
       [
         build,
+        build-node,
         build-desktop-windows,
         build-desktop-macos-arm64,
         build-desktop-macos-amd64,

@@ -1,0 +1,54 @@
+# kesher-node configuration: /etc/kesher/node.toml
+#
+# After editing:  sudo systemctl restart kesher-node
+# Check it:       kesher-node check
+# Logs:           journalctl -u kesher-node -f
+#
+# Full guide: docs/hardware/raspberry-pi.md
+
+# Kesher server: http://<ip>:<port>, or https://<name> with a certificate.
+server = "http://192.168.1.10:8080"
+
+# Role ID from the admin area (Roles). Give every node its own role: a role
+# can only be logged in once.
+role = "stage"
+
+# Name in the user list, without spaces. Default: the Pi's hostname.
+# name = "stage-left"
+
+# "ptt": talk while the talk button is held.
+# "always_on": open mic (sends only while someone speaks); the talk button
+#              mutes and unmutes.
+mode = "ptt"
+
+# If the role is already in use by someone else: false = wait until it is
+# free, true = end that session and take the role.
+takeover = false
+
+# https with a self-signed certificate (LAN): accept it anyway.
+tls_insecure = false
+
+[audio]
+# Sound card: part of its name as shown by `kesher-node devices`,
+# e.g. "USB" or the headset brand. Leave out for the system default.
+input = "USB"
+output = "USB"
+
+# Mic gain in dB (-40 .. +24).
+input_gain_db = 0.0
+
+# Noise gate in dBFS (-72 .. -12); leave out to disable.
+# gate_db = -52.0
+
+# Party lines (room IDs from the admin area). Leave out to use the role's
+# default party line.
+# [rooms]
+# listen = ["foh", "stage"]
+# talk = ["stage"]
+
+# Talk button and LED on the Pi header, by GPIO number (BCM), not pin
+# number: GPIO17 = physical pin 11, GPIO27 = pin 13, GND = pin 9 or 14.
+# Button: between the GPIO and GND. LED: GPIO -> 330 ohm -> LED -> GND.
+# [gpio]
+# talk_button = 17
+# talk_led = 27

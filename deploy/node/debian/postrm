@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+if [ "$1" = "purge" ]; then
+  rm -rf /var/lib/kesher-node
+  if getent passwd kesher-node >/dev/null; then
+    deluser --system kesher-node >/dev/null 2>&1 || true
+  fi
+fi
+
+exit 0

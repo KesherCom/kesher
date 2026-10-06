@@ -32,7 +32,20 @@ make clean
 
 Docker: one image `deploy/docker/Dockerfile` (targets `runtime`, `selfsigned`); compose files and `.env.example` in `deploy/compose/`.
 WebRTC in containers needs `WEBRTC_UDP_PORT` (single UDP mux port, published 1:1) and `WEBRTC_PUBLIC_IPS` (host LAN IP).
-Test lab lives in `testlab/` (own `package.json`, Playwright); see `testlab/README.md`. The desktop benchmark binary is `desktop/src-tauri/src/bin/kesher_audio_bench.rs` (cargo feature `bench`, never bundled); it drives the real `audio_native.rs` engine through `VirtualDevice`.
+Test lab lives in `testlab/` (own `package.json`, Playwright); see `testlab/README.md`. The benchmark binary is `crates/kesher-audio/src/bin/kesher_audio_bench.rs` (cargo feature `bench`, never bundled); it drives the real engine (`crates/kesher-audio/src/native.rs`) through `VirtualDevice`.
+
+Rust code is one Cargo workspace at the repo root (`Cargo.toml`, committed `Cargo.lock`, output in `./target`):
+
+- `crates/kesher-audio`: the native low-latency audio engine (capture -> Opus -> KSHR/UDP -> jitter buffer -> mix), shared by the desktop app and the node. Windows WASAPI in `wasapi.rs`, Linux real-time threads in `realtime_linux.rs`.
+- `desktop/src-tauri`: Tauri app; uses the engine as `kesher_audio::native` (aliased `audio_native` in `main.rs`).
+- `crates/kesher-node`: headless station for Raspberry Pi 3/4/5 (systemd service, `/etc/kesher/node.toml`, GPIO talk button/LED). Speaks the same protocol as the desktop app in performance mode (login, `/ws?transport=native`, `native_audio_endpoint`, `voice_state`). Packaged by `make node-deb` (Docker, `deploy/node/`); user docs in `docs/hardware/raspberry-pi.md`.
+
+Design decisions are recorded in `docs/decisions/` (add a numbered file for new ones).
+
+```sh
+cargo test -p kesher-audio -p kesher-node
+make node-deb            # arm64 .deb into dist/node/ (NODE_ARCH=amd64 for x86)
+```
 
 Useful direct commands:
 

@@ -1,0 +1,14 @@
+Package: kesher-node
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: KesherCom <https://github.com/KesherCom/kesher>
+Installed-Size: @SIZE@
+Depends: libc6 (>= 2.36), libasound2 | libasound2t64, libopus0, adduser
+Recommends: iw
+Section: sound
+Priority: optional
+Homepage: https://github.com/KesherCom/kesher
+Description: Kesher intercom node (headless station)
+ Joins a Kesher intercom server as a station with a USB headset or sound
+ card: low-latency Opus over UDP, talk button and LED on GPIO.
+ Configure /etc/kesher/node.toml, then: sudo systemctl restart kesher-node
