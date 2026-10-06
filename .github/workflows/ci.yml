@@ -26,6 +26,10 @@ jobs:
         with:
           go-version: "1.25.x"
           cache-dependency-path: backend/go.sum
+      # The server embeds the built web UI; go:embed needs at least one file
+      # (the committed _placeholder.txt is ignored because of its "_").
+      - name: Placeholder web UI
+        run: echo '<!doctype html><title>kesher</title>' > backend/internal/app/embedded_web/index.html
       - name: Test
         run: cd backend && go test ./...
 
@@ -37,6 +41,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # npm 10 (bundled with Node 22) crashes on this workspace's peer deps
+      # ("reading 'edgesOut'"); npm 11 resolves them.
+      - run: npm install -g npm@11
       - run: npm install
       - name: Build (TypeScript + Vite)
         run: npm --prefix web run build

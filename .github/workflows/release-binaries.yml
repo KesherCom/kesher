@@ -35,7 +35,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Install Dependencies
-        run: npm install
+        # npm 10 (bundled with Node 22) crashes on this workspace's peer deps
+        # ("reading 'edgesOut'"); npm 11 resolves them.
+        run: |
+          npm install -g npm@11
+          npm install
 
       - name: Build web UI
         run: npm --prefix web run build
@@ -130,7 +134,11 @@ jobs:
           workspaces: . -> target
 
       - name: Install Dependencies
-        run: npm install
+        # npm 10 (bundled with Node 22) crashes on this workspace's peer deps
+        # ("reading 'edgesOut'"); npm 11 resolves them.
+        run: |
+          npm install -g npm@11
+          npm install
 
       - name: Desktop web check
         run: npm --prefix desktop run build:web
@@ -163,6 +171,7 @@ jobs:
 
       - name: Build
         run: |
+          npm install -g npm@11
           npm install
           npm --prefix desktop run tauri build -- --bundles nsis,msi
 
@@ -221,6 +230,7 @@ jobs:
           fi
       - name: Build
         run: |
+          npm install -g npm@11
           npm install
           npm --prefix desktop run tauri build -- --target aarch64-apple-darwin
       - name: Prepare release assets
@@ -276,6 +286,7 @@ jobs:
           fi
       - name: Build
         run: |
+          npm install -g npm@11
           npm install
           npm --prefix desktop run tauri build -- --target x86_64-apple-darwin
       - name: Prepare release assets
