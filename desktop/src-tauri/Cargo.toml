@@ -2,17 +2,6 @@
 name = "kesher_desktop"
 version = "0.1.0"
 edition = "2021"
-# src/bin/kesher_audio_bench.rs is a test tool (feature "bench"), not the app.
-default-run = "kesher_desktop"
-
-[features]
-# Builds the headless audio benchmark used by `make lab-desktop`.
-bench = []
-
-[[bin]]
-name = "kesher_audio_bench"
-path = "src/bin/kesher_audio_bench.rs"
-required-features = ["bench"]
 
 [build-dependencies]
 tauri-build = { version = "2.0.2", features = [] }
@@ -34,10 +23,11 @@ env_logger = "0.11"
 # (WASAPI) and macOS (Core Audio). webrtc-rs is currently only used by the
 # Windows pipeline; the native UDP performance path on macOS uses raw
 # tokio::net::UdpSocket and does not require webrtc-rs.
+# Performance engine (native UDP path), shared with the Raspberry Pi node.
+kesher-audio = { path = "../../crates/kesher-audio" }
+# cpal + Opus are also used directly by the Windows WebRTC pipeline
+# (audio_engine.rs).
 cpal = "0.15"
-# Larger UDP socket buffers for the performance engine (already a
-# transitive dependency via tokio).
-socket2 = "0.5"
 opus = "0.3"
 bytes = "1"
 serde_yaml = "0.9"
@@ -46,19 +36,3 @@ serde_yaml = "0.9"
 # WebRTC stack remains Windows-only for now; macOS uses the native UDP
 # pipeline plus the existing browser fallback.
 webrtc = "0.12"
-# Direct WASAPI access for the performance engine: exclusive mode and
-# low-latency shared mode (IAudioClient3), which cpal 0.15 does not offer.
-windows = { version = "0.62", features = [
-    "Win32_Foundation",
-    "Win32_Media",
-    "Win32_Media_Audio",
-    "Win32_Media_KernelStreaming",
-    "Win32_Media_Multimedia",
-    "Win32_Security",
-    "Win32_System_Com",
-    "Win32_System_Com_StructuredStorage",
-    "Win32_System_Threading",
-    "Win32_System_Variant",
-    "Win32_Devices_FunctionDiscovery",
-    "Win32_UI_Shell_PropertiesSystem",
-] }

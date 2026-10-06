@@ -1,5 +1,5 @@
 // Desktop-app audio benchmark (make lab-desktop): runs the native audio
-// engine of the Tauri app (desktop/src-tauri, via the kesher_audio_bench
+// engine of the Tauri app (crates/kesher-audio, via the kesher_audio_bench
 // tool) against lab servers with emulated networks and reports latency and
 // audio quality, compared with a saved baseline.
 import { spawnSync } from "node:child_process";
@@ -9,8 +9,8 @@ import { LAB_DIR, ROOT_DIR, PROFILES, profileURL, listFromEnv } from "./lab.mjs"
 import { buildServer, startNative, stopNative, LOG_DIR } from "./instances.mjs";
 
 const isWin = process.platform === "win32";
-const TAURI_DIR = path.join(ROOT_DIR, "desktop", "src-tauri");
-const BENCH_BIN = path.join(TAURI_DIR, "target", "release", isWin ? "kesher_audio_bench.exe" : "kesher_audio_bench");
+// Cargo workspace root; the bench is part of crates/kesher-audio.
+const BENCH_BIN = path.join(ROOT_DIR, "target", "release", isWin ? "kesher_audio_bench.exe" : "kesher_audio_bench");
 const RESULTS = path.join(LAB_DIR, "results");
 const BASELINE = path.join(RESULTS, "desktop-baseline.json");
 // Speech-quality pass: the talker plays this clip, pesq_score.py rates what
@@ -31,9 +31,9 @@ function speechAvailable() {
 }
 
 function buildBench() {
-  console.log("lab: building desktop audio bench (desktop/src-tauri, release)...");
-  const res = spawnSync("cargo", ["build", "--release", "--features", "bench", "--bin", "kesher_audio_bench"], {
-    cwd: TAURI_DIR,
+  console.log("lab: building desktop audio bench (crates/kesher-audio, release)...");
+  const res = spawnSync("cargo", ["build", "--release", "-p", "kesher-audio", "--features", "bench", "--bin", "kesher_audio_bench"], {
+    cwd: ROOT_DIR,
     stdio: "inherit",
     shell: isWin,
   });

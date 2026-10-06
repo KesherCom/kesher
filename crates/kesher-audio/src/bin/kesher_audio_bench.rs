@@ -1,7 +1,7 @@
 //! Headless latency / audio-quality benchmark for the native audio engine.
 //!
-//! Built only on request (`cargo build --release --features bench --bin
-//! kesher_audio_bench`), never bundled with the app. Driven by
+//! Built only on request (`cargo build --release -p kesher-audio --features
+//! bench --bin kesher_audio_bench`), never bundled with the app. Driven by
 //! `testlab/desktop.mjs` (`make lab-desktop`), which logs the sessions in and
 //! passes the relay endpoints in a JSON config:
 //!
@@ -33,16 +33,7 @@
 //!
 //! Prints one JSON object on stdout; logs go to stderr (RUST_LOG=info).
 
-#![cfg(any(target_os = "windows", target_os = "macos"))]
-
-#[allow(dead_code)]
-#[path = "../audio_native.rs"]
-mod audio_native;
-#[cfg(target_os = "windows")]
-#[allow(dead_code)]
-#[path = "../audio_wasapi.rs"]
-mod audio_wasapi;
-
+use kesher_audio::native as audio_native;
 use audio_native::{NativeAudioState, NativeStatsSnapshot, StartNativeParams, VirtualClock, VirtualDevice};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};

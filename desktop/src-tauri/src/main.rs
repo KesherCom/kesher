@@ -2,11 +2,12 @@
 
 #[cfg(target_os = "windows")]
 mod audio_engine;
-#[cfg(any(target_os = "windows", target_os = "macos"))]
-mod audio_native;
-#[cfg(target_os = "windows")]
-mod audio_wasapi;
 mod config;
+
+// The performance engine lives in crates/kesher-audio (shared with the
+// Raspberry Pi node).
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+use kesher_audio::native as audio_native;
 
 #[cfg(target_os = "windows")]
 use audio_engine::{

@@ -1,0 +1,51 @@
+[package]
+name = "kesher-audio"
+version = "0.1.0"
+description = "Kesher low-latency audio engine (Opus over KSHR/UDP), shared by the desktop app and kesher-node"
+edition.workspace = true
+repository.workspace = true
+
+[features]
+# Builds the headless audio benchmark used by `make lab-desktop`.
+bench = ["dep:serde_json", "dep:env_logger", "tokio/rt-multi-thread", "tokio/macros"]
+
+[[bin]]
+name = "kesher_audio_bench"
+path = "src/bin/kesher_audio_bench.rs"
+required-features = ["bench"]
+
+[dependencies]
+cpal = "0.15"
+opus = "0.3"
+# Larger UDP socket buffers.
+socket2 = "0.5"
+serde = { version = "1", features = ["derive"] }
+log = "0.4"
+tokio = { version = "1", features = ["time"] }
+serde_json = { version = "1", optional = true }
+env_logger = { version = "0.11", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# SCHED_FIFO for the audio threads (see realtime_linux.rs).
+libc = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Direct WASAPI access: exclusive mode and low-latency shared mode
+# (IAudioClient3), which cpal 0.15 does not offer.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media",
+    "Win32_Media_Audio",
+    "Win32_Media_KernelStreaming",
+    "Win32_Media_Multimedia",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

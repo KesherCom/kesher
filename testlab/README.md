@@ -39,7 +39,7 @@ the containers instead (`deploy/compose/docker-compose.lab.yml`).
 
 ## Requirements
 
-- Go 1.25+, Node.js 22+, Rust (the toolchain for `desktop/src-tauri`)
+- Go 1.25+, Node.js 22+, Rust (the toolchain for the Cargo workspace at the repo root)
 - On the first run, Playwright and its browsers are installed into
   `testlab/node_modules` (about 300 MB, one time only).
 - Docker is **not** required.
@@ -59,8 +59,8 @@ node testlab/lab.mjs desktop --strict     # exit code 1 on a regression vs the b
 
 ### What is measured
 
-The benchmark `kesher_audio_bench` (`desktop/src-tauri/src/bin/`) runs the
-**app's real audio engine** (`audio_native.rs`): framing, Opus, UDP protocol,
+The benchmark `kesher_audio_bench` (`crates/kesher-audio/src/bin/`) runs the
+**app's real audio engine** (`crates/kesher-audio/src/native.rs`): framing, Opus, UDP protocol,
 jitter buffer, FEC/PLC and mixer. It runs two engines in the same process, a
 talker and a listener, both logged in to the server like the app. Instead of
 sound cards they use a virtual audio device: a clocked thread that calls the

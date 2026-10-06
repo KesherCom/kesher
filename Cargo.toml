@@ -1,0 +1,13 @@
+# Rust workspace: the desktop app and the Raspberry Pi node share one audio
+# engine (crates/kesher-audio) and one Cargo.lock. Build output goes to
+# ./target for all members.
+[workspace]
+resolver = "2"
+members = [
+    "crates/kesher-audio",
+    "desktop/src-tauri",
+]
+
+[workspace.package]
+edition = "2021"
+repository = "https://github.com/KesherCom/kesher"

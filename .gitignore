@@ -34,6 +34,8 @@ yarn-error.log
 pnpm-lock.yaml
 package-lock.json
 .npm/
+# Rust workspace (Cargo.toml at the root); Cargo.lock is committed.
+/target/
 desktop/src-tauri/target/
 desktop/src-tauri/Cargo.lock
 desktop/src-tauri/gen/

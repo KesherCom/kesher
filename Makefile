@@ -218,7 +218,7 @@ build-desktop-release: build-desktop-web
 
 run-desktop-release:
 	@echo "Running pre-built desktop release binary..."
-	@node -e "const fs=require('fs');const cp=require('child_process');const path=require('path');const candidates=['desktop/src-tauri/target/release/kesher_desktop.exe','desktop/src-tauri/target/release/kesher_desktop'];const bin=candidates.find((p)=>fs.existsSync(p));if(!bin){console.error('No release binary found. Run: make build-desktop-release');process.exit(1);}const child=cp.spawn(path.resolve(bin),[],{stdio:'inherit'});child.on('exit',(code)=>process.exit(code??0));child.on('error',(err)=>{console.error('Failed to start release binary:',err.message);process.exit(1);});"
+	@node -e "const fs=require('fs');const cp=require('child_process');const path=require('path');const candidates=['target/release/kesher_desktop.exe','target/release/kesher_desktop'];const bin=candidates.find((p)=>fs.existsSync(p));if(!bin){console.error('No release binary found. Run: make build-desktop-release');process.exit(1);}const child=cp.spawn(path.resolve(bin),[],{stdio:'inherit'});child.on('exit',(code)=>process.exit(code??0));child.on('error',(err)=>{console.error('Failed to start release binary:',err.message);process.exit(1);});"
 
 dev-desktop:
 	@echo "Starting Tauri dev server..."
@@ -233,7 +233,8 @@ desktop-rust-check:
 	@cd desktop/src-tauri && cargo check
 
 desktop-rust-test:
-	@echo "Running desktop Rust tests (incl. native audio)..."
+	@echo "Running desktop Rust tests (incl. native audio engine)..."
+	@cargo test -p kesher-audio
 	@cd desktop/src-tauri && cargo test --bin kesher_desktop
 
 desktop-check: desktop-web-check desktop-rust-check desktop-rust-test
@@ -329,6 +330,6 @@ docker-down:
 clean:
 	@rm -rf backend/bin
 	@rm -rf web/dist
-	@rm -rf desktop/src-tauri/target
+	@rm -rf target desktop/src-tauri/target
 	@rm -rf dist/bin dist/packages
 	@echo "✓ Build artifacts cleaned"

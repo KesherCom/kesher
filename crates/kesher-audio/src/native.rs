@@ -30,8 +30,9 @@
 //!
 //! Device access: on Windows the engine prefers WASAPI exclusive mode, then
 //! WASAPI low-latency shared mode (IAudioClient3), then cpal (WASAPI shared
-//! with the engine's default period); see `audio_wasapi.rs`. macOS uses cpal
-//! (Core Audio). The stats log shows the callback sizes actually delivered.
+//! with the engine's default period); see `wasapi.rs`. macOS uses cpal
+//! (Core Audio), Linux uses cpal on ALSA with SCHED_FIFO audio threads
+//! (`realtime_linux.rs`). The stats log shows the callback sizes actually delivered.
 
 #![allow(clippy::too_many_arguments)]
 
@@ -977,7 +978,11 @@ where
         };
         device.build_input_stream(
             config,
-            move |data: &[f32], _| capture.on_input(data),
+            move |data: &[f32], _| {
+                #[cfg(target_os = "linux")]
+                crate::realtime_linux::promote_audio_thread_once();
+                capture.on_input(data)
+            },
             |err| log::warn!("[native][capture] stream error: {err}"),
             None,
         )
@@ -1542,7 +1547,11 @@ fn open_playback_cpal(device_name: Option<String>, shared: Arc<Shared>, slot: Qu
         };
         device.build_output_stream(
             config,
-            move |out: &mut [f32], _| playback.on_output(out),
+            move |out: &mut [f32], _| {
+                #[cfg(target_os = "linux")]
+                crate::realtime_linux::promote_audio_thread_once();
+                playback.on_output(out)
+            },
             |err| log::warn!("[native][playback] stream error: {err}"),
             None,
         )
@@ -1581,7 +1590,7 @@ fn backend_chain(preference: Option<&str>) -> Vec<Backend> {
 }
 
 #[cfg(target_os = "windows")]
-fn wasapi_report(info: crate::audio_wasapi::StreamInfo) -> StreamReport {
+fn wasapi_report(info: crate::wasapi::StreamInfo) -> StreamReport {
     log::info!(
         "[native] {} on {:?}: period {} frames, {} ch, {}",
         info.mode.label(),
@@ -1603,7 +1612,7 @@ fn open_output(preference: Option<&str>, device: Option<String>, shared: &Arc<Sh
         let result = match backend {
             #[cfg(target_os = "windows")]
             Backend::WasapiExclusive | Backend::WasapiShared => {
-                use crate::audio_wasapi::{start_render, RenderCallback, WasapiMode};
+                use crate::wasapi::{start_render, RenderCallback, WasapiMode};
                 let mode = if backend == Backend::WasapiExclusive {
                     WasapiMode::Exclusive
                 } else {
@@ -1652,7 +1661,7 @@ where
         let result = match backend {
             #[cfg(target_os = "windows")]
             Backend::WasapiExclusive | Backend::WasapiShared => {
-                use crate::audio_wasapi::{start_capture, CaptureCallback, WasapiMode};
+                use crate::wasapi::{start_capture, CaptureCallback, WasapiMode};
                 let mode = if backend == Backend::WasapiExclusive {
                     WasapiMode::Exclusive
                 } else {
@@ -1892,7 +1901,9 @@ fn run_network_rx(
     // Packets wait in the socket until this thread runs; give it the same
     // scheduling class as the audio threads.
     #[cfg(target_os = "windows")]
-    let _priority = crate::audio_wasapi::ProAudioPriority::enter();
+    let _priority = crate::wasapi::ProAudioPriority::enter();
+    #[cfg(target_os = "linux")]
+    crate::realtime_linux::promote_audio_thread_once();
     let mut last_levels = Instant::now();
     let mut register = vec![0u8; UDP_HEADER_LEN_V2 + session_token.len()];
     let register_len = write_header(&mut register, version, UDP_FLAG_REGISTER, 0, 0, token_hash);
@@ -2100,7 +2111,7 @@ fn start_engine_with(
         return Err("native engine already running".to_string());
     }
     #[cfg(target_os = "windows")]
-    crate::audio_wasapi::tune_process_for_realtime();
+    crate::wasapi::tune_process_for_realtime();
     let server_addr: SocketAddr = (params.server_host.as_str(), params.server_port)
         .to_socket_addrs()
         .map_err(|e| format!("invalid server addr: {e}"))?
