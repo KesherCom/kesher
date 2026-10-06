@@ -120,6 +120,7 @@ recordings (48 kHz, 16-bit, mono) for a more realistic score.
 | `LAB_MULTI_PROFILES` | `lan` | networks for the party-line runs |
 | `LAB_MULTI_SECONDS` | `15` | length of each party-line phase |
 | `LAB_SPEECH_SECONDS` | `24` | length of the speech pass per scenario |
+| `LAB_SPEECH_VAD` | unset | `1` runs the speech pass with silence suppression (always-on mode); compare MOS and `txPackets` in the JSON with a run without it |
 | `LAB_PYTHON` | `python` / `python3` | interpreter for `lib/pesq_score.py` |
 
 ### Party line: many clients talking at once

@@ -1387,12 +1387,20 @@ export function useIntercomSession({
       }
     }
     if (performanceModeActiveRef.current) {
-      if (state === "always_on" || state === "ptt_start") {
+      // Silence suppression only for an open mic: while PTT is held the
+      // user means to talk, so every frame is sent.
+      if (state === "always_on") {
         nativeAudio?.setPerformanceMic(true);
+        nativeAudio?.setPerformanceVad(true);
+      } else if (state === "ptt_start") {
+        nativeAudio?.setPerformanceMic(true);
+        nativeAudio?.setPerformanceVad(false);
       } else if (state === "always_off") {
         nativeAudio?.setPerformanceMic(false);
       } else if (state === "ptt_stop") {
-        nativeAudio?.setPerformanceMic(voiceModeRef.current === "always_on");
+        const alwaysOn = voiceModeRef.current === "always_on";
+        nativeAudio?.setPerformanceMic(alwaysOn);
+        nativeAudio?.setPerformanceVad(alwaysOn);
       }
     }
     wsRef.current.send(
@@ -1550,6 +1558,7 @@ export function useIntercomSession({
           setPerformanceEngineInfo(info);
           // A fresh engine starts muted; restore always-on talk.
           nativeAudio.setPerformanceMic(voiceModeRef.current === "always_on");
+          nativeAudio.setPerformanceVad(voiceModeRef.current === "always_on");
           setAudioError("");
           pushDebugEvent(
             info

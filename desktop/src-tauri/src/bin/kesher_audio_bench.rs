@@ -132,6 +132,9 @@ struct VirtualConfig {
     /// Speech mode: directory for reference.wav / degraded.wav.
     #[serde(default)]
     record_dir: Option<String>,
+    /// Talker uses silence suppression (as in always-on mode).
+    #[serde(default)]
+    vad: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -232,6 +235,7 @@ fn diff(a: &NativeStatsSnapshot, b: &NativeStatsSnapshot) -> serde_json::Value {
         "txMaxGapMs": b.tx_max_gap_ms,
         "rxMaxGapMs": b.rx_max_gap_ms,
         "txSendMaxMs": b.tx_send_max_ms,
+        "vadSuppressed": b.vad_suppressed - a.vad_suppressed,
         "clippedSamples": b.clipped_samples - a.clipped_samples,
         "mixedSamples": b.mixed_samples - a.mixed_samples,
         "renderAvgUs": if b.render_calls > a.render_calls {
@@ -383,6 +387,7 @@ fn run_speech(cfg: VirtualConfig, wav: &str) -> Result<serde_json::Value, String
         },
     )?;
     audio_native::set_mic_active(&talker, true);
+    audio_native::set_vad(&talker, cfg.vad);
 
     std::thread::sleep(Duration::from_secs_f64(cfg.warmup_seconds));
     let t0 = audio_native::stats_snapshot(&talker).unwrap_or_default();
@@ -406,6 +411,7 @@ fn run_speech(cfg: VirtualConfig, wav: &str) -> Result<serde_json::Value, String
     write_wav_mono16(&deg_path, &degraded.lock().unwrap())?;
     Ok(serde_json::json!({
         "mode": "speech",
+        "vad": cfg.vad,
         "frameMs": talker_info.frame_ms,
         "periodMs": listener_info.output.period_ms,
         "seconds": cfg.duration_seconds,

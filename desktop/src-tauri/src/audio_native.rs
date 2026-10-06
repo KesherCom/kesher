@@ -104,6 +104,26 @@ const MAX_TARGET_SAMPLES: usize = 4_800;
 /// Free a source slot after this long without packets.
 const SOURCE_RELEASE_IDLE_SAMPLES: u64 = 5 * 48_000;
 
+/// Silence suppression (always-on mics): how long to keep sending after the
+/// last speech frame, so word endings and short pauses are not cut.
+const VAD_HANGOVER_MS: u32 = 400;
+/// Audio sent ahead of a detected onset (already encoded), so a soft first
+/// consonant is not clipped. Kept to one 5 ms frame: the pre-roll leaves as
+/// a burst and the listener starts playing on its first packet, so every
+/// pre-roll frame adds its length to that talk spurt's latency (20 ms of
+/// pre-roll measured as +16 ms in the lab).
+const VAD_PREROLL_MS: u32 = 5;
+/// A frame counts as speech this far above the tracked noise floor...
+const VAD_SNR_DB: f32 = 10.0;
+/// ...and above this absolute level; anything louder than VAD_LOUD_DB is
+/// always speech.
+const VAD_MIN_DB: f32 = -60.0;
+const VAD_LOUD_DB: f32 = -30.0;
+/// The noise floor follows quiet frames quickly and loud ones only slowly.
+const VAD_FLOOR_RISE_DB_PER_S: f32 = 1.0;
+/// Encoded frames kept for the pre-roll (covers 20 ms at 2.5 ms frames).
+const ENCODED_RING: usize = 9;
+
 /// UDP socket buffer size. A listener on a busy party line receives
 /// (talkers - 1) x 200 packets/s, and a server hiccup arrives as one burst;
 /// a larger buffer keeps such a burst instead of dropping it. (Safety
@@ -276,6 +296,8 @@ struct Stats {
     rx_max_gap_us: AtomicU64,
     /// Longest single socket.send() call in the capture path.
     tx_send_max_us: AtomicU64,
+    /// Frames not sent because silence suppression judged them silent.
+    vad_suppressed: AtomicU64,
     /// Mix samples that exceeded full scale and were clipped, out of all
     /// mixed samples (several loud talkers at once).
     clipped_samples: AtomicU64,
@@ -303,6 +325,9 @@ struct Settings {
     gate_enabled: AtomicBool,
     /// Linear amplitude.
     gate_threshold_bits: AtomicU32,
+    /// Silence suppression: skip sending while the mic only picks up noise.
+    /// Set by the app for always-on mode (PTT sends everything).
+    vad_enabled: AtomicBool,
     /// Bumped on every gain-table update so sources re-resolve their gain.
     gains_generation: AtomicU32,
     gains: [GainEntry; MAX_GAIN_ENTRIES],
@@ -321,6 +346,7 @@ impl Default for Settings {
             input_gain_bits: AtomicU32::new(1.0f32.to_bits()),
             gate_enabled: AtomicBool::new(false),
             gate_threshold_bits: AtomicU32::new(db_to_amplitude(-52.0).to_bits()),
+            vad_enabled: AtomicBool::new(false),
             gains_generation: AtomicU32::new(0),
             gains: std::array::from_fn(|_| GainEntry::default()),
         }
@@ -635,6 +661,14 @@ struct Capture {
     was_sending: bool,
     /// When the previous packet of the current talk spurt was sent.
     last_send: Option<Instant>,
+    /// Recently encoded frames (for the silence-suppression pre-roll).
+    ring: Vec<EncodedFrame>,
+    ring_pos: usize,
+    vad: Vad,
+    /// Frames left in the hangover after the last speech frame.
+    hangover: u32,
+    /// True while frames are being withheld as silence.
+    suppressing: bool,
     test_frames: usize,
     test_click_at: Option<u64>,
     /// Noise-gate envelope, 0 (closed) .. 1 (open).
@@ -709,14 +743,14 @@ impl Capture {
     fn flush_frame(&mut self) {
         let frame_start = self.position - self.frame_samples as u64;
         let mut flags = UDP_FLAG_AUDIO;
-        let send = match self.shared.test_state.load(Ordering::Acquire) {
+        let (send, testing) = match self.shared.test_state.load(Ordering::Acquire) {
             TEST_ARMED => {
                 self.test_frames = 0;
                 self.test_click_at = None;
                 self.shared.test_state.store(TEST_RUNNING, Ordering::Release);
                 flags |= UDP_FLAG_LOOPBACK;
                 self.accum.fill(0.0);
-                true
+                (true, true)
             }
             TEST_RUNNING => {
                 // The mic is replaced by silence plus one click so the
@@ -730,9 +764,9 @@ impl Capture {
                     self.accum[half..2 * half].fill(-0.9);
                     self.test_click_at = Some(frame_start);
                 }
-                true
+                (true, true)
             }
-            _ => self.shared.mic_active.load(Ordering::Acquire),
+            _ => (self.shared.mic_active.load(Ordering::Acquire), false),
         };
         if !send {
             self.was_sending = false;
@@ -744,36 +778,134 @@ impl Capture {
             // New talk spurt: start the encoder from a clean state.
             let _ = self.encoder.reset_state();
             self.was_sending = true;
+            for f in &mut self.ring {
+                f.pending = false;
+            }
+            self.vad.reset();
+            self.hangover = self.frames_for_ms(VAD_HANGOVER_MS);
+            self.suppressing = false;
         }
-        let header = header_len(self.version);
-        match self.encoder.encode_float(&self.accum, &mut self.packet[header..]) {
+
+        // Every frame is encoded (keeps the encoder state continuous and
+        // fills the pre-roll); whether it is sent is decided below.
+        let slot = self.ring_pos;
+        self.ring_pos = (self.ring_pos + 1) % ENCODED_RING;
+        let timestamp = self.timestamp;
+        self.timestamp = self.timestamp.wrapping_add(self.frame_samples as u32);
+        let frame = &mut self.ring[slot];
+        match self.encoder.encode_float(&self.accum, &mut frame.data) {
             Ok(n) => {
-                write_header(
-                    &mut self.packet,
-                    self.version,
-                    flags,
-                    self.sequence,
-                    self.timestamp,
-                    self.token_hash,
-                );
-                let stats = &self.shared.stats;
-                let before = Instant::now();
-                match self.socket.send(&self.packet[..header + n]) {
-                    Ok(_) => stats.tx_packets.fetch_add(1, Ordering::Relaxed),
-                    Err(_) => stats.tx_errors.fetch_add(1, Ordering::Relaxed),
-                };
-                let after = Instant::now();
-                stats
-                    .tx_send_max_us
-                    .fetch_max(after.duration_since(before).as_micros() as u64, Ordering::Relaxed);
-                record_gap(&mut self.last_send, after, &stats.tx_max_gap_us, &stats.tx_gaps_over_20ms);
+                frame.len = n;
+                frame.timestamp = timestamp;
+                frame.pending = true;
             }
             Err(_) => {
+                frame.pending = false;
                 self.shared.stats.tx_errors.fetch_add(1, Ordering::Relaxed);
+                return;
             }
         }
+
+        if testing || !self.shared.settings.vad_enabled.load(Ordering::Relaxed) {
+            self.suppressing = false;
+            self.send_slot(slot, flags);
+            return;
+        }
+        let frame_ms = self.frame_samples as f32 / SAMPLES_PER_MS;
+        if self.vad.is_speech(&self.accum, frame_ms) {
+            self.hangover = self.frames_for_ms(VAD_HANGOVER_MS);
+        } else {
+            self.hangover = self.hangover.saturating_sub(1);
+        }
+        if self.hangover == 0 {
+            // Silence: withhold the frame (it stays in the ring as pre-roll).
+            self.suppressing = true;
+            self.shared.stats.vad_suppressed.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        if self.suppressing {
+            // Speech onset after silence: send the pre-roll first, oldest
+            // first, then this frame. Sequence numbers stay contiguous, so
+            // the listener sees a normal new talk spurt, not packet loss.
+            let preroll = (self.frames_for_ms(VAD_PREROLL_MS) as usize).min(ENCODED_RING - 1);
+            for back in (1..=preroll).rev() {
+                let idx = (slot + ENCODED_RING - back) % ENCODED_RING;
+                if self.ring[idx].pending {
+                    self.send_slot(idx, flags);
+                }
+            }
+            self.suppressing = false;
+        }
+        self.send_slot(slot, flags);
+    }
+
+    fn frames_for_ms(&self, ms: u32) -> u32 {
+        (ms as f32 * SAMPLES_PER_MS / self.frame_samples as f32).ceil() as u32
+    }
+
+    /// Sends one encoded frame from the ring with the next sequence number.
+    fn send_slot(&mut self, slot: usize, flags: u8) {
+        let header = header_len(self.version);
+        let frame = &mut self.ring[slot];
+        frame.pending = false;
+        let n = frame.len;
+        self.packet[header..header + n].copy_from_slice(&frame.data[..n]);
+        write_header(
+            &mut self.packet,
+            self.version,
+            flags,
+            self.sequence,
+            frame.timestamp,
+            self.token_hash,
+        );
+        let stats = &self.shared.stats;
+        let before = Instant::now();
+        match self.socket.send(&self.packet[..header + n]) {
+            Ok(_) => stats.tx_packets.fetch_add(1, Ordering::Relaxed),
+            Err(_) => stats.tx_errors.fetch_add(1, Ordering::Relaxed),
+        };
+        let after = Instant::now();
+        stats
+            .tx_send_max_us
+            .fetch_max(after.duration_since(before).as_micros() as u64, Ordering::Relaxed);
+        record_gap(&mut self.last_send, after, &stats.tx_max_gap_us, &stats.tx_gaps_over_20ms);
         self.sequence = self.sequence.wrapping_add(1);
-        self.timestamp = self.timestamp.wrapping_add(self.frame_samples as u32);
+    }
+}
+
+/// One encoded Opus frame waiting in the capture ring.
+struct EncodedFrame {
+    data: Vec<u8>,
+    len: usize,
+    timestamp: u32,
+    /// Encoded but not sent yet (candidate for the pre-roll).
+    pending: bool,
+}
+
+/// Energy-based voice activity detection with an adaptive noise floor.
+/// Cheap enough for the audio callback; tuned to keep speech (including
+/// soft onsets, helped by hangover and pre-roll) and drop steady room noise.
+#[derive(Default)]
+struct Vad {
+    noise_db: Option<f32>,
+}
+
+impl Vad {
+    fn reset(&mut self) {
+        self.noise_db = None;
+    }
+
+    fn is_speech(&mut self, frame: &[f32], frame_ms: f32) -> bool {
+        let energy = frame.iter().map(|x| x * x).sum::<f32>() / frame.len().max(1) as f32;
+        let db = 10.0 * (energy + 1e-12).log10();
+        let floor = self.noise_db.get_or_insert(db.min(-50.0));
+        if db < *floor {
+            *floor += (db - *floor) * 0.3;
+        } else {
+            *floor += (db - *floor).min(VAD_FLOOR_RISE_DB_PER_S * frame_ms / 1000.0);
+        }
+        *floor = floor.clamp(-100.0, -30.0);
+        db >= VAD_LOUD_DB || (db >= VAD_MIN_DB && db >= *floor + VAD_SNR_DB)
     }
 }
 
@@ -804,6 +936,18 @@ fn new_capture(
         position: 0,
         was_sending: false,
         last_send: None,
+        ring: (0..ENCODED_RING)
+            .map(|_| EncodedFrame {
+                data: vec![0u8; MAX_OPUS_PACKET],
+                len: 0,
+                timestamp: 0,
+                pending: false,
+            })
+            .collect(),
+        ring_pos: 0,
+        vad: Vad::default(),
+        hangover: 0,
+        suppressing: false,
         test_frames: 0,
         test_click_at: None,
         gate_envelope: 0.0,
@@ -1845,6 +1989,7 @@ pub struct NativeStatsSnapshot {
     pub tx_max_gap_ms: f32,
     pub rx_max_gap_ms: f32,
     pub tx_send_max_ms: f32,
+    pub vad_suppressed: u64,
     pub clipped_samples: u64,
     pub mixed_samples: u64,
     pub render_calls: u64,
@@ -1876,6 +2021,7 @@ impl Stats {
             tx_max_gap_ms: self.tx_max_gap_us.load(Ordering::Relaxed) as f32 / 1000.0,
             rx_max_gap_ms: self.rx_max_gap_us.load(Ordering::Relaxed) as f32 / 1000.0,
             tx_send_max_ms: self.tx_send_max_us.load(Ordering::Relaxed) as f32 / 1000.0,
+            vad_suppressed: self.vad_suppressed.load(Ordering::Relaxed),
             clipped_samples: self.clipped_samples.load(Ordering::Relaxed),
             mixed_samples: self.mixed_samples.load(Ordering::Relaxed),
             render_calls: self.render_calls.load(Ordering::Relaxed),
@@ -2043,6 +2189,11 @@ fn start_engine_with(
 pub fn set_input_gain(state: &NativeAudioState, gain: f32) {
     let gain = if gain.is_finite() { gain.clamp(0.0, MAX_INPUT_GAIN) } else { 1.0 };
     state.settings.input_gain_bits.store(gain.to_bits(), Ordering::Relaxed);
+}
+
+/// Silence suppression for always-on mics (see Capture::flush_frame).
+pub fn set_vad(state: &NativeAudioState, enabled: bool) {
+    state.settings.vad_enabled.store(enabled, Ordering::Relaxed);
 }
 
 /// Configures the mic noise gate (threshold in dBFS, -72..-12).
@@ -2360,6 +2511,78 @@ mod tests {
         assert!(soft_limit(-4.0) >= -1.0);
         // Monotonic, so loud stays louder than less loud.
         assert!(soft_limit(1.2) > soft_limit(1.1));
+    }
+
+    fn tone(freq: f32, amp: f32, n: usize, offset: usize) -> Vec<f32> {
+        (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * (offset + i) as f32 / 48_000.0).sin() * amp)
+            .collect()
+    }
+
+    #[test]
+    fn vad_separates_speech_from_room_noise() {
+        let mut vad = Vad::default();
+        let mut noise = 12345u32;
+        let mut hiss = |n: usize| -> Vec<f32> {
+            (0..n)
+                .map(|_| {
+                    noise = noise.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                    ((noise >> 16) as f32 / 32768.0 - 1.0) * 0.003 // about -55 dBFS
+                })
+                .collect()
+        };
+        // Steady room noise settles as silence.
+        let mut silent = 0;
+        for _ in 0..200 {
+            if !vad.is_speech(&hiss(240), 5.0) {
+                silent += 1;
+            }
+        }
+        assert!(silent > 190, "noise judged speech {} times", 200 - silent);
+        // Normal speech level is detected right away.
+        assert!(vad.is_speech(&tone(300.0, 0.1, 240, 0), 5.0));
+        // So is a soft onset ~15 dB above the noise.
+        assert!(vad.is_speech(&tone(300.0, 0.02, 240, 0), 5.0));
+    }
+
+    #[test]
+    fn silence_suppression_withholds_silence_and_sends_preroll_on_onset() {
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let sink = UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket.connect(sink.local_addr().unwrap()).unwrap();
+        sink.set_nonblocking(true).unwrap();
+        let shared = Arc::new(Shared::default());
+        shared.mic_active.store(true, Ordering::Relaxed);
+        shared.settings.vad_enabled.store(true, Ordering::Relaxed);
+        let mut capture = new_capture(&socket, UDP_VERSION_2, 1, 240, 1, &shared).unwrap();
+        let recv = || {
+            let mut buf = [0u8; 1500];
+            let mut seqs = Vec::new();
+            while let Ok(n) = sink.recv(&mut buf) {
+                seqs.push(parse_header(&buf[..n]).unwrap().sequence);
+            }
+            seqs
+        };
+
+        // 1 s of silence: only the initial hangover goes out.
+        capture.on_input(&vec![0.0; 48_000]);
+        let first = recv();
+        let hangover = (VAD_HANGOVER_MS as usize * 48) / 240;
+        assert!(first.len() <= hangover + 1, "sent {} silent frames", first.len());
+        assert!(shared.stats.vad_suppressed.load(Ordering::Relaxed) > 100);
+
+        // Speech starts: pre-roll + speech frames, sequence contiguous.
+        capture.on_input(&tone(300.0, 0.1, 2_400, 0));
+        let second = recv();
+        let preroll = (VAD_PREROLL_MS as usize * 48) / 240;
+        assert_eq!(second.len(), preroll + 10, "pre-roll + 10 speech frames");
+        let all: Vec<u16> = first.iter().chain(second.iter()).copied().collect();
+        assert!(all.windows(2).all(|w| w[1] == w[0].wrapping_add(1)), "sequence gap: {all:?}");
+
+        // With suppression off (PTT), silence is sent as usual.
+        shared.settings.vad_enabled.store(false, Ordering::Relaxed);
+        capture.on_input(&vec![0.0; 2_400]);
+        assert_eq!(recv().len(), 10);
     }
 
     #[test]

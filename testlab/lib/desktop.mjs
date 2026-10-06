@@ -152,6 +152,8 @@ async function speechScenario(profile, frameMs, opts, runId) {
       frameMs,
       speechWav: SPEECH_WAV,
       recordDir,
+      // LAB_SPEECH_VAD=1: talker in always-on mode with silence suppression.
+      vad: process.env.LAB_SPEECH_VAD === "1",
     });
   } finally {
     talker.close();
@@ -161,7 +163,13 @@ async function speechScenario(profile, frameMs, opts, runId) {
   const res = spawnSync(PYTHON, [PESQ_SCRIPT, bench.referenceWav, bench.degradedWav], { encoding: "utf8" });
   const line = (res.stdout || "").trim().split(/\r?\n/).pop() || "{}";
   try {
-    return { ...JSON.parse(line), recordDir: path.relative(ROOT_DIR, recordDir) };
+    return {
+      ...JSON.parse(line),
+      recordDir: path.relative(ROOT_DIR, recordDir),
+      vad: bench.vad,
+      txPackets: bench.talker?.txPackets,
+      vadSuppressed: bench.talker?.vadSuppressed,
+    };
   } catch {
     return { error: `pesq_score failed: ${(res.stderr || "").trim().split(/\r?\n/).pop()}` };
   }

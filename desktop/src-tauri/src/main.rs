@@ -124,6 +124,13 @@ fn set_native_input_gain(gain: f32, state: State<'_, NativeAudioState>) {
     audio_native::set_input_gain(&state, gain);
 }
 
+/// Silence suppression for the performance engine (always-on mode).
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[tauri::command]
+fn set_native_vad(enabled: bool, state: State<'_, NativeAudioState>) {
+    audio_native::set_vad(&state, enabled);
+}
+
 /// Mic noise gate for the performance engine.
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 #[tauri::command]
@@ -188,6 +195,7 @@ pub fn run() {
                 set_native_input_gain,
                 set_native_audio_gate,
                 set_native_output_gains,
+                set_native_vad,
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");
@@ -208,6 +216,7 @@ pub fn run() {
                 set_native_input_gain,
                 set_native_audio_gate,
                 set_native_output_gains,
+                set_native_vad,
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");

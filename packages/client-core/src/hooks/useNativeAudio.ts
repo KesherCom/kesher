@@ -138,6 +138,8 @@ export type NativeAudioHook = {
     devices?: { inputDeviceId?: string; outputDeviceId?: string },
     backend?: NativeAudioBackend,
   ) => Promise<NativeEngineStartInfo | null>;
+  /** Silence suppression in the performance engine (always-on mode). */
+  setPerformanceVad: (enabled: boolean) => void;
   /** Per-user volume in the performance engine, keyed by audioSourceId. */
   setPerformanceOutputGains: (gainsBySourceId: Record<string, number>) => void;
   /** Subscribes to level events; returns an unsubscribe function. */
@@ -366,6 +368,16 @@ export function useNativeAudio(
     [isNative],
   );
 
+  const setPerformanceVad = useCallback(
+    (enabled: boolean) => {
+      if (!isNative) return;
+      tauriInvoke("set_native_vad", { enabled }).catch((err) =>
+        console.error("[native-audio] set_native_vad failed:", err),
+      );
+    },
+    [isNative],
+  );
+
   const setPerformanceOutputGains = useCallback(
     (gainsBySourceId: Record<string, number>) => {
       if (!isNative) return;
@@ -446,6 +458,7 @@ export function useNativeAudio(
     stopPerformanceEngine,
     setPerformanceMic,
     setPerformanceOutputGains,
+    setPerformanceVad,
     subscribePerformanceLevels,
   };
 }
