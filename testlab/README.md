@@ -116,8 +116,37 @@ recordings (48 kHz, 16-bit, mono) for a more realistic score.
 | `LAB_<PROFILE>_<KEY>` | see table below | override network values, e.g. `LAB_WAN_LATENCY_MS=30` |
 | `LAB_VERBOSE` | unset | show the benchmark's engine log |
 | `LAB_SPEECH` | on | `0` skips the speech-quality pass |
+| `LAB_MULTI` | `4,8` | party-line runs: number of clients talking at once (`0` skips) |
+| `LAB_MULTI_PROFILES` | `lan` | networks for the party-line runs |
+| `LAB_MULTI_SECONDS` | `15` | length of each party-line phase |
 | `LAB_SPEECH_SECONDS` | `24` | length of the speech pass per scenario |
 | `LAB_PYTHON` | `python` / `python3` | interpreter for `lib/pesq_score.py` |
+
+### Party line: many clients talking at once
+
+After the single-talker scenarios, `make lab-desktop` runs N desktop engines
+(default 4 and 8) that all talk and listen on the same party line at once, on
+one shared virtual clock:
+
+1. **Latency phase:** every talker sends a quiet tone (its own frequency)
+   plus loud markers staggered in time, so each listener can tell in its mix
+   which talker a marker came from. Result: a latency distribution per
+   talker → listener pair (`worst pair` = highest p95 of any pair).
+2. **Load phase:** everyone plays the speech clip at normal level at once.
+   Result: how often the mix exceeds full scale (`clip`, before the soft
+   limiter) and the output-callback time per period (`cb avg` / `cb max`:
+   decoding N-1 sources, jitter buffers and mixing, which must stay well
+   below the device period).
+
+`relay gaps` / `relay max` come from the server (`/api/realtime-stats`,
+`udpAudio`): inbound gaps > 20 ms and the slowest single fan-out. When
+`heard` drops below the expected count, compare the engines' received
+packets with the relay's sent packets in the saved JSON (`rxPackets`,
+`relay.txFrames`) to see where packets went missing.
+
+All engines, the clock and the server share one machine here. On a small
+laptop, other load (another lab run, a build, a browser) makes the 8-talker
+numbers noticeably worse; repeat a run before drawing conclusions.
 
 ### Real mouth-to-ear latency with your sound card (`make lab-desktop-hw`)
 

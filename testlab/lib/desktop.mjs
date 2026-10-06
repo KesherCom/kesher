@@ -167,6 +167,61 @@ async function speechScenario(profile, frameMs, opts, runId) {
   }
 }
 
+/** Relay counters from /api/realtime-stats (lab servers do not gate admin). */
+async function relayStats(baseURL, token) {
+  try {
+    const res = await fetch(`${baseURL}/api/realtime-stats`, {
+      headers: { Authorization: `Bearer ${token}`, "X-Admin-Pin": process.env.ADMIN_PIN || "123456" },
+      signal: AbortSignal.timeout(2000),
+    });
+    return res.ok ? (await res.json()).udpAudio || null : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * N desktop clients on one party line, all talking and listening at once:
+ * per-pair latency, clipping in the mix and callback time under load, plus
+ * the relay's own stall counters.
+ */
+async function multiScenario(profile, talkers, frameMs, opts) {
+  const baseURL = profileURL(profile);
+  const id = `${Date.now() % 100000}${userSeq++}`;
+  const sessions = [];
+  try {
+    for (let i = 0; i < talkers; i++) {
+      sessions.push(
+        await nativeSession(baseURL, { username: `benchmulti${id}x${i}`, role: "audio", listen: ["foh"], talk: ["foh"], ptt: true }),
+      );
+    }
+    const token = sessions[0].endpoint.token;
+    const before = await relayStats(baseURL, token);
+    const r = runBench("multi", {
+      endpoints: sessions.map((s) => s.endpoint),
+      durationSeconds: opts.multiSeconds,
+      speechSeconds: opts.multiSeconds,
+      periodFrames: opts.periodFrames,
+      frameMs,
+      speechWav: existsSync(SPEECH_WAV) ? SPEECH_WAV : null,
+    });
+    const after = await relayStats(baseURL, token);
+    if (before && after) {
+      r.relay = {
+        rxFrames: after.rxFrames - before.rxFrames,
+        txFrames: after.txFrames - before.txFrames,
+        txErrors: (after.txErrors || 0) - (before.txErrors || 0),
+        inboundGapsOver20ms: after.inboundGapsOver20ms - before.inboundGapsOver20ms,
+        maxInboundGapMs: after.maxInboundGapMs,
+        maxRouteMs: after.maxRouteMs,
+      };
+    }
+    return r;
+  } finally {
+    for (const s of sessions) s.close();
+  }
+}
+
 async function hardwareScenario(profile, frameMs, opts) {
   const baseURL = profileURL(profile);
   const id = `${Date.now() % 100000}${userSeq++}`;
@@ -249,6 +304,58 @@ function printTable(rows, baseline) {
       ].join(" "),
     );
   }
+  const multi = rows.filter((x) => x.mode === "multi");
+  if (multi.length) {
+    console.log("");
+    console.log("Party line: N desktop clients talking and listening at once (virtual devices, shared clock)");
+    const mhead = [
+      ["scenario", 18],
+      ["p50", 8],
+      ["p95", 8],
+      ["worst pair", 11],
+      ["Δp95", 7],
+      ["heard", 11],
+      ["clip", 7],
+      ["Δclip", 6],
+      ["cb avg", 8],
+      ["cb max", 8],
+      ["PLC", 5],
+      ["late", 5],
+      ["rx gaps", 8],
+      ["relay gaps", 11],
+      ["relay max", 9],
+    ];
+    console.log(mhead.map(([n, w]) => n.padEnd(w)).join(" "));
+    console.log(mhead.map(([, w]) => "-".repeat(w)).join(" "));
+    for (const r of multi) {
+      const b = base.get(r.key);
+      if (r.error) {
+        console.log(`${r.key.padEnd(18)} ERROR: ${r.error}`);
+        continue;
+      }
+      const L = r.latencyMs || {};
+      console.log(
+        [
+          fmt(r.key, 18),
+          fmt(L.p50, 8, "ms"),
+          fmt(L.p95, 8, "ms"),
+          fmt(r.worstPairP95Ms, 11, "ms"),
+          delta(L.p95, b?.latencyMs?.p95, 7),
+          fmt(`${r.markersHeard}/${r.markersExpected}`, 11),
+          fmt(r.clippedPct, 7, "%"),
+          delta(r.clippedPct, b?.clippedPct, 6),
+          fmt(r.renderAvgUs != null ? Math.round(r.renderAvgUs) : null, 8, "µs"),
+          fmt(r.renderMaxMs != null ? Math.round(r.renderMaxMs * 100) / 100 : null, 8, "ms"),
+          fmt(r.concealed, 5),
+          fmt(r.latePackets, 5),
+          fmt(r.rxGapsOver20ms, 8),
+          fmt(r.relay?.inboundGapsOver20ms, 11),
+          fmt(r.relay?.maxRouteMs != null ? Math.round(r.relay.maxRouteMs * 10) / 10 : null, 9, "ms"),
+        ].join(" "),
+      );
+    }
+  }
+
   const hw = rows.filter((x) => x.mode === "hardware");
   if (hw.length) {
     console.log("");
@@ -276,6 +383,12 @@ function printTable(rows, baseline) {
   console.log("MOS         speech quality of a voice clip sent through the same path: wideband PESQ (ITU-T P.862.2),");
   console.log("             1.0 bad .. 4.64 perfect; mean and worst 8 s segment. Recordings in testlab/results/speech/.");
   console.log("Δ            difference to the baseline (save one with: make lab-desktop-baseline).");
+  if (multi.length) {
+    console.log("party line   worst pair = highest p95 of any talker → listener pair; heard = markers attributed /");
+    console.log("             expected; clip = mixed samples over full scale while everyone speaks at once;");
+    console.log("             cb = output-callback time (decode + jitter buffers + mix) per period; rx gaps = engine");
+    console.log("             receive gaps > 20 ms; relay gaps / max = server inbound gaps > 20 ms / slowest fan-out.");
+  }
 }
 
 function compareRegressions(rows, baseline) {
@@ -287,6 +400,10 @@ function compareRegressions(rows, baseline) {
   const out = [];
   for (const r of rows) {
     const b = base.get(r.key);
+    if (b && !r.error && r.mode === "multi") {
+      if (r.latencyMs?.p95 - b.latencyMs?.p95 > tolMs) out.push(`${r.key}: p95 ${b.latencyMs.p95} → ${r.latencyMs.p95} ms`);
+      continue;
+    }
     if (!b || r.error || r.mode !== "virtual") continue;
     if (r.latencyMs?.p95 - b.latencyMs?.p95 > tolMs) out.push(`${r.key}: p95 ${b.latencyMs.p95} → ${r.latencyMs.p95} ms`);
     if (r.distortedPct - b.distortedPct > tolDist) out.push(`${r.key}: distortion ${b.distortedPct} → ${r.distortedPct} %`);
@@ -306,7 +423,14 @@ export async function runDesktop(flags) {
     periodFrames: Number(flags.period || process.env.LAB_DESKTOP_PERIOD || 128),
     runs: Number(flags.runs || process.env.LAB_HW_RUNS || 10),
     speechSeconds: Number(flags["speech-seconds"] || process.env.LAB_SPEECH_SECONDS || 24),
+    multiSeconds: Number(process.env.LAB_MULTI_SECONDS || 15),
   };
+  // Party-line runs: talker counts, on these profiles (LAB_MULTI=0 skips).
+  const multiCounts = String(flags.multi ?? process.env.LAB_MULTI ?? "4,8")
+    .split(",")
+    .map(Number)
+    .filter((x) => x >= 2);
+  const multiProfiles = String(process.env.LAB_MULTI_PROFILES || "lan").split(",").filter(Boolean);
   const speech = speechAvailable();
   if (!speech.ok) console.log(`lab: speech-quality pass skipped: ${speech.why}`);
   const runId = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -366,6 +490,20 @@ export async function runDesktop(flags) {
           rows.push({ key: hkey, profile, frameMs, ...h, mode: "hardware" });
           console.log(h.error ? `error: ${h.error}` : `p50 ${h.latencyMs?.p50} ms (${h.latencyMs?.count}/${h.runs} detected)`);
         }
+      }
+    }
+    for (const profile of profiles.filter((p) => multiProfiles.includes(p))) {
+      for (const talkers of multiCounts) {
+        const key = `${profile} ${talkers} talkers`;
+        process.stdout.write(`lab: party line ${key} (${opts.multiSeconds}s latency + ${opts.multiSeconds}s speech)... `);
+        let r;
+        try {
+          r = await multiScenario(profile, talkers, frames[0], opts);
+        } catch (err) {
+          r = { error: String(err.message || err) };
+        }
+        rows.push({ key, profile, frameMs: frames[0], ...r, mode: "multi" });
+        console.log(r.error ? `error: ${r.error}` : `p95 ${r.latencyMs?.p95} ms, clipping ${r.clippedPct} %`);
       }
     }
   } finally {

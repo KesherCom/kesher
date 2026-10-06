@@ -3583,7 +3583,9 @@ type RealtimeStatsResponse struct {
 	Hub              HubRealtimeStats   `json:"hub"`
 	Media            MediaRealtimeStats `json:"media"`
 	StorePolicyCache PolicyCacheStats   `json:"storePolicyCache"`
-	TimestampUnixMs  int64              `json:"timestampUnixMs"`
+	// UDPAudio is present when the native UDP relay is running.
+	UDPAudio        *UDPAudioStats `json:"udpAudio,omitempty"`
+	TimestampUnixMs int64          `json:"timestampUnixMs"`
 }
 
 func (s *Server) handleRealtimeStats(w http.ResponseWriter, r *http.Request, session Session) {
@@ -3606,10 +3608,16 @@ func (s *Server) handleRealtimeStats(w http.ResponseWriter, r *http.Request, ses
 	if s.store != nil {
 		storeCacheStats = s.store.PolicyCacheStats()
 	}
+	var udpStats *UDPAudioStats
+	if s.udpAudio != nil {
+		st := s.udpAudio.Stats()
+		udpStats = &st
+	}
 	s.writeJSON(w, http.StatusOK, RealtimeStatsResponse{
 		Hub:              hubStats,
 		Media:            mediaStats,
 		StorePolicyCache: storeCacheStats,
+		UDPAudio:         udpStats,
 		TimestampUnixMs:  time.Now().UnixMilli(),
 	})
 }

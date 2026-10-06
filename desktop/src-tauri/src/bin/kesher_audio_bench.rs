@@ -17,6 +17,15 @@
 //!       (reference.wav) and what the listener heard (degraded.wav) for
 //!       speech-quality scoring (testlab/lib/pesq_score.py).
 //!
+//!   kesher_audio_bench multi <config.json>
+//!       N engines that all talk and listen at once (a full intercom
+//!       party line), on one shared virtual clock. Phase 1: each talker
+//!       sends a quiet tone plus loud markers staggered in time, so every
+//!       listener can attribute a marker in its mix to its talker -> one
+//!       latency distribution per talker/listener pair. Phase 2 (with
+//!       `speechWav`): everyone speaks at once at normal level -> clipping
+//!       in the mix and output-callback time under load.
+//!
 //!   kesher_audio_bench hardware <config.json>
 //!       One engine on real devices; repeats the app's built-in loopback
 //!       click test (relay echoes the click, it must reach the input via a
@@ -34,9 +43,9 @@ mod audio_native;
 #[path = "../audio_wasapi.rs"]
 mod audio_wasapi;
 
-use audio_native::{NativeAudioState, NativeStatsSnapshot, StartNativeParams, VirtualDevice};
+use audio_native::{NativeAudioState, NativeStatsSnapshot, StartNativeParams, VirtualClock, VirtualDevice};
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -223,6 +232,14 @@ fn diff(a: &NativeStatsSnapshot, b: &NativeStatsSnapshot) -> serde_json::Value {
         "txMaxGapMs": b.tx_max_gap_ms,
         "rxMaxGapMs": b.rx_max_gap_ms,
         "txSendMaxMs": b.tx_send_max_ms,
+        "clippedSamples": b.clipped_samples - a.clipped_samples,
+        "mixedSamples": b.mixed_samples - a.mixed_samples,
+        "renderAvgUs": if b.render_calls > a.render_calls {
+            (b.render_total_us - a.render_total_us) / (b.render_calls - a.render_calls)
+        } else {
+            0
+        },
+        "renderMaxMs": b.render_max_ms,
     })
 }
 
@@ -352,6 +369,7 @@ fn run_speech(cfg: VirtualConfig, wav: &str) -> Result<serde_json::Value, String
             period_frames: cfg.period_frames,
             input: Box::new(|buf: &mut [f32], _| buf.fill(0.0)),
             output: listener_output,
+            clock: None,
         },
     )?;
     let talker_info = audio_native::start_engine_virtual(
@@ -361,6 +379,7 @@ fn run_speech(cfg: VirtualConfig, wav: &str) -> Result<serde_json::Value, String
             period_frames: cfg.period_frames,
             input: talker_input,
             output: Box::new(|_: &[f32], _| {}),
+            clock: None,
         },
     )?;
     audio_native::set_mic_active(&talker, true);
@@ -503,6 +522,7 @@ fn run_virtual(cfg: VirtualConfig) -> Result<serde_json::Value, String> {
             period_frames: cfg.period_frames,
             input: Box::new(|buf: &mut [f32], _| buf.fill(0.0)),
             output: listener_output,
+            clock: None,
         },
     )?;
     let talker_info = audio_native::start_engine_virtual(
@@ -512,6 +532,7 @@ fn run_virtual(cfg: VirtualConfig) -> Result<serde_json::Value, String> {
             period_frames: cfg.period_frames,
             input: talker_input,
             output: Box::new(|_: &[f32], _| {}),
+            clock: None,
         },
     )?;
     audio_native::set_mic_active(&talker, true);
@@ -561,6 +582,253 @@ fn run_virtual(cfg: VirtualConfig) -> Result<serde_json::Value, String> {
         "jitterBufferTargetMs": dist(targets),
         "talker": diff(&t0, &t1),
         "listener": diff(&l0, &l1),
+    }))
+}
+
+// ── Multi-talker mode ───────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MultiConfig {
+    endpoints: Vec<Endpoint>,
+    #[serde(default = "default_duration")]
+    duration_seconds: f64,
+    #[serde(default = "default_warmup")]
+    warmup_seconds: f64,
+    #[serde(default = "default_period")]
+    period_frames: usize,
+    #[serde(default = "default_marker_interval")]
+    marker_interval_ms: f64,
+    #[serde(default)]
+    frame_ms: Option<f32>,
+    #[serde(default)]
+    speech_wav: Option<String>,
+    #[serde(default = "default_speech_load")]
+    speech_seconds: f64,
+}
+
+fn default_speech_load() -> f64 {
+    15.0
+}
+
+/// Quiet enough that the summed tones of 15 talkers stay below the marker
+/// threshold.
+const MULTI_TONE_AMPLITUDE: f32 = 0.03;
+const MULTI_DETECT_THRESHOLD: f32 = 0.6;
+
+const PHASE_WARMUP: u8 = 0;
+const PHASE_LATENCY: u8 = 1;
+const PHASE_SPEECH: u8 = 2;
+const PHASE_DONE: u8 = 3;
+
+#[derive(Default)]
+struct MultiHeard {
+    /// latencies[talker][listener]
+    latencies: Vec<Vec<Vec<f64>>>,
+    unmatched: usize,
+}
+
+fn sum_diff(a: &[NativeStatsSnapshot], b: &[NativeStatsSnapshot], f: impl Fn(&NativeStatsSnapshot) -> u64) -> u64 {
+    a.iter().zip(b).map(|(x, y)| f(y).saturating_sub(f(x))).sum()
+}
+
+fn run_multi(cfg: MultiConfig) -> Result<serde_json::Value, String> {
+    let n = cfg.endpoints.len();
+    if n < 2 {
+        return Err("multi mode needs at least two endpoints".into());
+    }
+    let clip: Option<Arc<Vec<f32>>> = match &cfg.speech_wav {
+        Some(path) => Some(Arc::new(read_wav_mono16(path)?)),
+        None => None,
+    };
+    let interval = (cfg.marker_interval_ms / 1000.0 * RATE) as u64;
+    // Talkers' markers are spread evenly over the interval; a listener
+    // attributes a marker to the newest one sent before it heard it, which
+    // is unambiguous while latency < slot.
+    let slot = interval / n as u64;
+    let slot_ms = slot as f64 / RATE * 1000.0;
+    let phase = Arc::new(AtomicU8::new(PHASE_WARMUP));
+    let emitted: Arc<Mutex<Vec<(usize, Instant)>>> = Arc::default();
+    let heard = Arc::new(Mutex::new(MultiHeard {
+        latencies: vec![vec![Vec::new(); n]; n],
+        unmatched: 0,
+    }));
+
+    let clock = VirtualClock::start(cfg.period_frames);
+    let mut engines = Vec::with_capacity(n);
+    let mut infos = Vec::with_capacity(n);
+    for (i, ep) in cfg.endpoints.iter().enumerate() {
+        let input = {
+            let phase = Arc::clone(&phase);
+            let emitted = Arc::clone(&emitted);
+            let clip = clip.clone();
+            let freq = 200.0 + 97.0 * i as f64;
+            let offset = i as u64 * slot;
+            let mut k: u64 = 0;
+            let mut marker_left = 0usize;
+            let mut speech_pos = clip.as_ref().map_or(0, |c| i * c.len() / n);
+            Box::new(move |buf: &mut [f32], first: Instant| {
+                let ph = phase.load(Ordering::Relaxed);
+                for (j, s) in buf.iter_mut().enumerate() {
+                    if ph == PHASE_SPEECH {
+                        if let Some(c) = &clip {
+                            *s = c[speech_pos];
+                            speech_pos = (speech_pos + 1) % c.len();
+                            k += 1;
+                            continue;
+                        }
+                    }
+                    if ph == PHASE_LATENCY && (k + offset) % interval == 0 {
+                        marker_left = MARKER_SAMPLES;
+                        emitted.lock().unwrap().push((i, first + Duration::from_secs_f64(j as f64 / RATE)));
+                    }
+                    *s = if marker_left > 0 {
+                        let m = MARKER_SAMPLES - marker_left;
+                        marker_left -= 1;
+                        if (m / 24) % 2 == 0 {
+                            MARKER_AMPLITUDE
+                        } else {
+                            -MARKER_AMPLITUDE
+                        }
+                    } else {
+                        (2.0 * std::f64::consts::PI * freq * k as f64 / RATE).sin() as f32 * MULTI_TONE_AMPLITUDE
+                    };
+                    k += 1;
+                }
+            }) as audio_native::VirtualInput
+        };
+        let output = {
+            let phase = Arc::clone(&phase);
+            let emitted = Arc::clone(&emitted);
+            let heard = Arc::clone(&heard);
+            let refractory = Duration::from_millis(30);
+            let mut last: Option<Instant> = None;
+            Box::new(move |buf: &[f32], first: Instant| {
+                if phase.load(Ordering::Relaxed) != PHASE_LATENCY {
+                    return;
+                }
+                for (j, &x) in buf.iter().enumerate() {
+                    if x.abs() < MULTI_DETECT_THRESHOLD {
+                        continue;
+                    }
+                    let t = first + Duration::from_secs_f64(j as f64 / RATE);
+                    if last.is_some_and(|d| t.duration_since(d) <= refractory) {
+                        continue;
+                    }
+                    last = Some(t);
+                    let sent = emitted
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .rev()
+                        .find(|&&(talker, e)| talker != i && e <= t)
+                        .copied();
+                    let mut h = heard.lock().unwrap();
+                    match sent {
+                        Some((talker, e)) if t.duration_since(e).as_secs_f64() * 1000.0 < 0.9 * slot_ms => {
+                            h.latencies[talker][i].push(t.duration_since(e).as_secs_f64() * 1000.0);
+                        }
+                        _ => h.unmatched += 1,
+                    }
+                }
+            }) as audio_native::VirtualOutput
+        };
+        let state = NativeAudioState::default();
+        let info = audio_native::start_engine_virtual(
+            params(ep, cfg.frame_ms),
+            &state,
+            VirtualDevice {
+                period_frames: cfg.period_frames,
+                input,
+                output,
+                clock: Some(Arc::clone(&clock)),
+            },
+        );
+        match info {
+            Ok(info) => infos.push(info),
+            Err(e) => {
+                clock.stop();
+                return Err(format!("engine {i}: {e}"));
+            }
+        }
+        audio_native::set_mic_active(&state, true);
+        engines.push(state);
+    }
+
+    let snap = |engines: &[NativeAudioState]| -> Vec<NativeStatsSnapshot> {
+        engines.iter().map(|e| audio_native::stats_snapshot(e).unwrap_or_default()).collect()
+    };
+    std::thread::sleep(Duration::from_secs_f64(cfg.warmup_seconds));
+    let s0 = snap(&engines);
+    phase.store(PHASE_LATENCY, Ordering::Relaxed);
+    std::thread::sleep(Duration::from_secs_f64(cfg.duration_seconds));
+    // Let markers in flight arrive before switching the signal.
+    phase.store(PHASE_WARMUP, Ordering::Relaxed);
+    std::thread::sleep(Duration::from_millis(500));
+    let s1 = snap(&engines);
+    let mut s2 = s1.clone();
+    if clip.is_some() {
+        phase.store(PHASE_SPEECH, Ordering::Relaxed);
+        std::thread::sleep(Duration::from_secs_f64(cfg.speech_seconds));
+        s2 = snap(&engines);
+    }
+    phase.store(PHASE_DONE, Ordering::Relaxed);
+    for e in &engines {
+        e.engine.lock().unwrap().take();
+    }
+    clock.stop();
+    std::thread::sleep(Duration::from_millis(300));
+
+    let markers_per_talker = (cfg.duration_seconds * 1000.0 / cfg.marker_interval_ms).floor() as usize;
+    let h = heard.lock().unwrap();
+    let mut all = Vec::new();
+    let mut worst_pair_p95 = 0.0f64;
+    let mut pairs_silent = 0usize;
+    let mut heard_count = 0usize;
+    for (talker, row) in h.latencies.iter().enumerate() {
+        for (listener, v) in row.iter().enumerate() {
+            if talker == listener {
+                continue;
+            }
+            if v.is_empty() {
+                pairs_silent += 1;
+                continue;
+            }
+            heard_count += v.len();
+            all.extend_from_slice(v);
+            worst_pair_p95 = worst_pair_p95.max(dist(v.clone()).p95);
+        }
+    }
+    let clipped = sum_diff(&s1, &s2, |x| x.clipped_samples);
+    let mixed = sum_diff(&s1, &s2, |x| x.mixed_samples);
+    let render_calls = sum_diff(&s1, &s2, |x| x.render_calls);
+    let render_total = sum_diff(&s1, &s2, |x| x.render_total_us);
+    Ok(serde_json::json!({
+        "mode": "multi",
+        "talkers": n,
+        "frameMs": infos[0].frame_ms,
+        "periodMs": infos[0].output.period_ms,
+        "latencyMs": dist(all),
+        "worstPairP95Ms": (worst_pair_p95 * 100.0).round() / 100.0,
+        "pairs": n * (n - 1),
+        "pairsSilent": pairs_silent,
+        "markersExpected": markers_per_talker * n * (n - 1),
+        "markersHeard": heard_count,
+        "markersUnmatched": h.unmatched,
+        "speechSeconds": if clip.is_some() { cfg.speech_seconds } else { 0.0 },
+        "clippedPct": if mixed > 0 { (100_000.0 * clipped as f64 / mixed as f64).round() / 1000.0 } else { 0.0 },
+        "renderAvgUs": if render_calls > 0 { render_total / render_calls } else { 0 },
+        "renderMaxMs": s2.iter().map(|x| x.render_max_ms).fold(0.0f32, f32::max),
+        "txPackets": sum_diff(&s0, &s1, |x| x.tx_packets),
+        "rxPackets": sum_diff(&s0, &s1, |x| x.rx_packets),
+        "concealed": sum_diff(&s0, &s1, |x| x.concealed),
+        "fecRecovered": sum_diff(&s0, &s1, |x| x.fec_recovered),
+        "latePackets": sum_diff(&s0, &s1, |x| x.late_packets),
+        "jitterUnderruns": sum_diff(&s0, &s1, |x| x.jitter_underruns),
+        "latencyTrims": sum_diff(&s0, &s1, |x| x.latency_trims),
+        "rxGapsOver20ms": sum_diff(&s0, &s2, |x| x.rx_gaps_over_20ms),
+        "rxQueueFull": sum_diff(&s0, &s2, |x| x.rx_queue_full),
+        "virtualLateTicks": sum_diff(&s0, &s2, |x| x.virtual_late_ticks),
     }))
 }
 
@@ -615,11 +883,15 @@ async fn main() {
             Ok(cfg) => tokio::task::spawn_blocking(move || run_virtual(cfg)).await.map_err(|e| e.to_string()).and_then(|r| r),
             Err(e) => Err(e),
         },
+        (Some("multi"), Some(path)) => match read_config::<MultiConfig>(path) {
+            Ok(cfg) => tokio::task::spawn_blocking(move || run_multi(cfg)).await.map_err(|e| e.to_string()).and_then(|r| r),
+            Err(e) => Err(e),
+        },
         (Some("hardware"), Some(path)) => match read_config::<HardwareConfig>(path) {
             Ok(cfg) => run_hardware(cfg).await,
             Err(e) => Err(e),
         },
-        _ => Err("usage: kesher_audio_bench <virtual|hardware> <config.json>".to_string()),
+        _ => Err("usage: kesher_audio_bench <virtual|multi|hardware> <config.json>".to_string()),
     };
     match result {
         Ok(json) => println!("{json}"),

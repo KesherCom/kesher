@@ -61,6 +61,8 @@ const (
 	udpAudioMaxPacket   = 1200
 	udpAudioPeerExpiry  = 8 * time.Second
 	udpAudioReapEvery   = 1 * time.Second
+	// udpAudioSocketBuffer is the requested socket buffer size (4 MiB).
+	udpAudioSocketBuffer = 4 << 20
 )
 
 const (
@@ -212,6 +214,7 @@ type UDPAudioRelay struct {
 	peers              map[string]*udpPeer // by session token
 	peersByH           map[uint32]*udpPeer // by token hash (for fast inbound lookup)
 	inboundGaps        atomic.Uint64
+	txErrors           atomic.Uint64
 	maxInboundGapNanos atomic.Uint64
 	maxRouteNanos      atomic.Uint64
 	closeOnce          sync.Once
@@ -252,11 +255,22 @@ func (r *UDPAudioRelay) Start(addr string) error {
 	if err != nil {
 		return err
 	}
-	var conn net.PacketConn
-	conn, err = net.ListenUDP("udp", udpAddr)
+	udpConn, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
 		return err
 	}
+	// The relay fans every frame out to all listeners; after a scheduling
+	// hiccup the backlog arrives and leaves as a burst. Larger buffers keep
+	// such bursts instead of dropping them (a safety margin; the defaults
+	// were enough on an idle lab machine with 8 talkers). Linux caps this at
+	// net.core.rmem_max / wmem_max.
+	if err := udpConn.SetReadBuffer(udpAudioSocketBuffer); err != nil {
+		r.logger.Warn("udp audio: could not enlarge receive buffer", "error", err)
+	}
+	if err := udpConn.SetWriteBuffer(udpAudioSocketBuffer); err != nil {
+		r.logger.Warn("udp audio: could not enlarge send buffer", "error", err)
+	}
+	var conn net.PacketConn = udpConn
 	if r.netem != nil {
 		conn = &emuPacketConn{PacketConn: conn, cfg: r.netem}
 	}
@@ -525,6 +539,7 @@ func (r *UDPAudioRelay) sendOpusToPeer(peer *udpPeer, sourceID uint32, sequence 
 		return
 	}
 	if _, err := r.conn.WriteTo((*bufPtr)[:n], addr); err != nil {
+		r.txErrors.Add(1)
 		r.logger.Debug("udp audio send failed", "token_hash", peer.tokenHash, "error", err)
 		return
 	}
@@ -550,6 +565,7 @@ type UDPAudioStats struct {
 	InboundGapsOver20ms uint64  `json:"inboundGapsOver20ms"`
 	MaxInboundGapMs     float64 `json:"maxInboundGapMs"`
 	MaxRouteMs          float64 `json:"maxRouteMs"`
+	TxErrors            uint64  `json:"txErrors"`
 }
 
 // relayGapLogThreshold: inbound gaps longer than this are logged. Native
@@ -596,5 +612,6 @@ func (r *UDPAudioRelay) Stats() UDPAudioStats {
 		InboundGapsOver20ms: r.inboundGaps.Load(),
 		MaxInboundGapMs:     float64(r.maxInboundGapNanos.Load()) / 1e6,
 		MaxRouteMs:          float64(r.maxRouteNanos.Load()) / 1e6,
+		TxErrors:            r.txErrors.Load(),
 	}
 }

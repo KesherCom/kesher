@@ -92,7 +92,7 @@ Important coupling to understand before changing routing logic:
 - `Hub` and `MediaManager` are intentionally linked (`hub.SetMediaManager(media)`), and `MediaManager` reads hub client state while holding internal locks for routing decisions.
 - Authorization for party-line/broadcast access is enforced in both event handling (`server.go` + `hub.go`) and media forwarding (`media.go`), so behavior changes usually require updates in both places.
 - Store sentinel errors (`ErrInvalidInput`, `ErrConflict`, `ErrNotFound`) are mapped centrally in `writeStoreErr`.
-- Current caveat: `requireAdmin` in `server.go` currently returns `true`, so admin endpoints are effectively not role-gated.
+- Admin endpoints (`requireAdmin` in `server.go`) require the admin PIN in the `X-Admin-Pin` header (lab servers use `ADMIN_PIN`, default `123456`).
 
 ## Desktop proxy architecture
 

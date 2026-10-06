@@ -104,6 +104,13 @@ const MAX_TARGET_SAMPLES: usize = 4_800;
 /// Free a source slot after this long without packets.
 const SOURCE_RELEASE_IDLE_SAMPLES: u64 = 5 * 48_000;
 
+/// UDP socket buffer size. A listener on a busy party line receives
+/// (talkers - 1) x 200 packets/s, and a server hiccup arrives as one burst;
+/// a larger buffer keeps such a burst instead of dropping it. (Safety
+/// margin: with 8 talkers on an otherwise idle lab machine the 64 KiB OS
+/// default did not lose packets either.)
+const SOCKET_BUFFER_BYTES: usize = 1 << 20;
+
 const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(1000);
 /// Re-send REGISTER every N heartbeats so a lost REGISTER or a relay restart
 /// heals itself.
@@ -269,6 +276,14 @@ struct Stats {
     rx_max_gap_us: AtomicU64,
     /// Longest single socket.send() call in the capture path.
     tx_send_max_us: AtomicU64,
+    /// Mix samples that exceeded full scale and were clipped, out of all
+    /// mixed samples (several loud talkers at once).
+    clipped_samples: AtomicU64,
+    mixed_samples: AtomicU64,
+    /// Time spent in the output callback (decode + jitter buffers + mix).
+    render_calls: AtomicU64,
+    render_total_us: AtomicU64,
+    render_max_us: AtomicU64,
 }
 
 /// Records the gap since `last` into the max/over-20ms counters.
@@ -1238,6 +1253,21 @@ impl Source {
     }
 }
 
+/// Mix limiter: transparent up to LIMIT_KNEE, then bends smoothly towards
+/// full scale instead of clipping hard. Several talkers at normal level sum
+/// above 1.0 (8 at once overshot on ~0.2 % of samples in the lab), and hard
+/// clipping is heard as crackle.
+const LIMIT_KNEE: f32 = 0.75;
+
+fn soft_limit(x: f32) -> f32 {
+    let a = x.abs();
+    if a <= LIMIT_KNEE {
+        return x;
+    }
+    let headroom = 1.0 - LIMIT_KNEE;
+    (LIMIT_KNEE + headroom * ((a - LIMIT_KNEE) / headroom).tanh()).copysign(x)
+}
+
 /// Owned by the output callback: drains the network queue, renders every
 /// source into a mono mix and writes it to all device channels.
 struct Playback {
@@ -1275,6 +1305,7 @@ impl Playback {
     }
 
     fn on_output(&mut self, out: &mut [f32]) {
+        let started = Instant::now();
         while let Ok(pkt) = self.rx.try_recv() {
             self.route(pkt);
         }
@@ -1293,6 +1324,7 @@ impl Playback {
         stats.output_callback_frames.store(frames as u32, Ordering::Relaxed);
         let mut done = 0;
         let mut output_peak = 0.0f32;
+        let mut clipped = 0u64;
         while done < frames {
             let n = (frames - done).min(mix.len());
             let mix = &mut mix[..n];
@@ -1306,7 +1338,10 @@ impl Playback {
                 levels.source_peak_bits[slot].fetch_max(peak.to_bits(), Ordering::Relaxed);
             }
             for (i, &v) in mix.iter().enumerate() {
-                let v = v.clamp(-1.0, 1.0);
+                if v.abs() > 1.0 {
+                    clipped += 1;
+                }
+                let v = soft_limit(v);
                 output_peak = output_peak.max(v.abs());
                 let base = (done + i) * channels;
                 out[base..base + channels].fill(v);
@@ -1314,6 +1349,8 @@ impl Playback {
             done += n;
         }
         levels.output_peak_bits.fetch_max(output_peak.to_bits(), Ordering::Relaxed);
+        stats.clipped_samples.fetch_add(clipped, Ordering::Relaxed);
+        stats.mixed_samples.fetch_add(frames as u64, Ordering::Relaxed);
         let mut active = 0u32;
         let mut max_target = 0usize;
         let mut max_queued = 0usize;
@@ -1325,6 +1362,10 @@ impl Playback {
         stats.active_sources.store(active, Ordering::Relaxed);
         stats.max_target_samples.store(max_target as u32, Ordering::Relaxed);
         stats.max_queued_samples.fetch_max(max_queued as u32, Ordering::Relaxed);
+        let took = started.elapsed().as_micros() as u64;
+        stats.render_calls.fetch_add(1, Ordering::Relaxed);
+        stats.render_total_us.fetch_add(took, Ordering::Relaxed);
+        stats.render_max_us.fetch_max(took, Ordering::Relaxed);
     }
 }
 
@@ -1526,6 +1567,72 @@ pub struct VirtualDevice {
     pub period_frames: usize,
     pub input: VirtualInput,
     pub output: VirtualOutput,
+    /// Shared clock for running many virtual devices in one process (all
+    /// ticks at once, no spinning thread per device). Its period wins over
+    /// `period_frames`. None = this device keeps its own clock.
+    pub clock: Option<Arc<VirtualClock>>,
+}
+
+/// One tick source for several virtual devices. A single high-priority
+/// thread keeps time; devices block on a condvar instead of each spinning
+/// a core, which would otherwise starve the server and network threads the
+/// benchmark is measuring.
+#[cfg_attr(not(feature = "bench"), allow(dead_code))]
+pub struct VirtualClock {
+    period_frames: usize,
+    /// (tick count, time of the latest tick)
+    state: Mutex<(u64, Instant)>,
+    ticked: std::sync::Condvar,
+    stop: AtomicBool,
+}
+
+#[cfg_attr(not(feature = "bench"), allow(dead_code))]
+impl VirtualClock {
+    pub fn start(period_frames: usize) -> Arc<Self> {
+        let period_frames = period_frames.clamp(16, 4096);
+        let period = Duration::from_secs_f64(period_frames as f64 / NATIVE_SAMPLE_RATE as f64);
+        let clock = Arc::new(Self {
+            period_frames,
+            state: Mutex::new((0, Instant::now())),
+            ticked: std::sync::Condvar::new(),
+            stop: AtomicBool::new(false),
+        });
+        let ticker = Arc::clone(&clock);
+        let _ = std::thread::Builder::new().name("kesher-virtual-clock".into()).spawn(move || {
+            raise_virtual_thread_priority();
+            let mut tick = Instant::now() + period;
+            while !ticker.stop.load(Ordering::Acquire) {
+                sleep_until(tick);
+                if Instant::now().saturating_duration_since(tick) > period * 8 {
+                    tick = Instant::now();
+                }
+                {
+                    let mut st = ticker.state.lock().unwrap();
+                    st.0 += 1;
+                    st.1 = tick;
+                }
+                ticker.ticked.notify_all();
+                tick += period;
+            }
+            ticker.ticked.notify_all();
+        });
+        clock
+    }
+
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::Release);
+        self.ticked.notify_all();
+    }
+
+    /// Blocks until the tick count exceeds `seen` (or ~100 ms pass).
+    fn wait_after(&self, seen: u64) -> Option<(u64, Instant)> {
+        let st = self.state.lock().unwrap();
+        let (st, _) = self
+            .ticked
+            .wait_timeout_while(st, Duration::from_millis(100), |st| st.0 <= seen && !self.stop.load(Ordering::Acquire))
+            .unwrap();
+        (st.0 > seen).then_some((st.0, st.1))
+    }
 }
 
 fn open_virtual<M>(device: VirtualDevice, shared: &Arc<Shared>, slot: &QueueSlot, make: M) -> Result<(StreamReport, StreamReport), String>
@@ -1536,8 +1643,9 @@ where
         period_frames,
         mut input,
         mut output,
+        clock,
     } = device;
-    let period_frames = period_frames.clamp(16, 4096);
+    let period_frames = clock.as_ref().map_or(period_frames, |c| c.period_frames).clamp(16, 4096);
     let mut playback = new_playback(1, shared, slot)?;
     let mut capture = make(1)?;
     let period = Duration::from_secs_f64(period_frames as f64 / NATIVE_SAMPLE_RATE as f64);
@@ -1548,6 +1656,30 @@ where
             raise_virtual_thread_priority();
             let mut in_buf = vec![0.0f32; period_frames];
             let mut out_buf = vec![0.0f32; period_frames];
+            let mut process = |at: Instant| {
+                input(&mut in_buf, at - period);
+                capture.on_input(&in_buf);
+                out_buf.fill(0.0);
+                playback.on_output(&mut out_buf);
+                output(&out_buf, at);
+            };
+            if let Some(clock) = clock {
+                let mut seen = clock.state.lock().unwrap().0;
+                while !shared.stop.load(Ordering::Acquire) {
+                    let Some((count, at)) = clock.wait_after(seen) else { continue };
+                    // Missed ticks (this thread ran late) are still processed,
+                    // so every device sees every period, but they are counted.
+                    let missed = count - seen - 1;
+                    if missed > 0 {
+                        shared.stats.virtual_late_ticks.fetch_add(missed, Ordering::Relaxed);
+                    }
+                    for k in (0..=missed).rev() {
+                        process(at - period * k as u32);
+                    }
+                    seen = count;
+                }
+                return;
+            }
             // Ideal device clock: timestamps come from `tick`, not from when
             // the thread actually woke up.
             let mut tick = Instant::now() + period;
@@ -1562,11 +1694,7 @@ where
                         tick = Instant::now();
                     }
                 }
-                input(&mut in_buf, tick - period);
-                capture.on_input(&in_buf);
-                out_buf.fill(0.0);
-                playback.on_output(&mut out_buf);
-                output(&out_buf, tick);
+                process(tick);
                 tick += period;
             }
         })
@@ -1717,6 +1845,11 @@ pub struct NativeStatsSnapshot {
     pub tx_max_gap_ms: f32,
     pub rx_max_gap_ms: f32,
     pub tx_send_max_ms: f32,
+    pub clipped_samples: u64,
+    pub mixed_samples: u64,
+    pub render_calls: u64,
+    pub render_total_us: u64,
+    pub render_max_ms: f32,
     pub active_sources: u32,
     /// Current jitter-buffer target of the deepest source.
     pub target_ms: f32,
@@ -1743,6 +1876,11 @@ impl Stats {
             tx_max_gap_ms: self.tx_max_gap_us.load(Ordering::Relaxed) as f32 / 1000.0,
             rx_max_gap_ms: self.rx_max_gap_us.load(Ordering::Relaxed) as f32 / 1000.0,
             tx_send_max_ms: self.tx_send_max_us.load(Ordering::Relaxed) as f32 / 1000.0,
+            clipped_samples: self.clipped_samples.load(Ordering::Relaxed),
+            mixed_samples: self.mixed_samples.load(Ordering::Relaxed),
+            render_calls: self.render_calls.load(Ordering::Relaxed),
+            render_total_us: self.render_total_us.load(Ordering::Relaxed),
+            render_max_ms: self.render_max_us.load(Ordering::Relaxed) as f32 / 1000.0,
             active_sources: self.active_sources.load(Ordering::Relaxed),
             target_ms: ms(&self.max_target_samples),
             capture_callback_ms: ms(&self.capture_callback_frames),
@@ -1825,6 +1963,16 @@ fn start_engine_with(
     let bind_addr = if server_addr.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" };
     let socket = UdpSocket::bind(bind_addr).map_err(|e| format!("bind udp: {e}"))?;
     socket.connect(server_addr).map_err(|e| format!("connect udp: {e}"))?;
+    {
+        let sock = socket2::SockRef::from(&socket);
+        let _ = sock.set_recv_buffer_size(SOCKET_BUFFER_BYTES);
+        let _ = sock.set_send_buffer_size(SOCKET_BUFFER_BYTES);
+        log::info!(
+            "[native] udp socket buffers: recv {:?} send {:?}",
+            sock.recv_buffer_size().ok(),
+            sock.send_buffer_size().ok()
+        );
+    }
 
     let version = match params.protocol_version {
         Some(v) if v >= UDP_VERSION_2 => UDP_VERSION_2,
@@ -2201,6 +2349,17 @@ mod tests {
             src.render(&mut mix, &mut scratch, &stats, &settings);
         }
         assert_eq!(src.target, TARGET_FLOOR_SAMPLES);
+    }
+
+    #[test]
+    fn soft_limit_is_transparent_below_knee_and_bounded_above() {
+        assert_eq!(soft_limit(0.5), 0.5);
+        assert_eq!(soft_limit(-0.75), -0.75);
+        assert!(soft_limit(1.0) < 1.0 && soft_limit(1.0) > 0.9);
+        assert!(soft_limit(4.0) <= 1.0);
+        assert!(soft_limit(-4.0) >= -1.0);
+        // Monotonic, so loud stays louder than less loud.
+        assert!(soft_limit(1.2) > soft_limit(1.1));
     }
 
     #[test]

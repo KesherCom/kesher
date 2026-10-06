@@ -35,6 +35,9 @@ env_logger = "0.11"
 # Windows pipeline; the native UDP performance path on macOS uses raw
 # tokio::net::UdpSocket and does not require webrtc-rs.
 cpal = "0.15"
+# Larger UDP socket buffers for the performance engine (already a
+# transitive dependency via tokio).
+socket2 = "0.5"
 opus = "0.3"
 bytes = "1"
 serde_yaml = "0.9"
