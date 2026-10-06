@@ -43,6 +43,9 @@ the containers instead (`deploy/compose/docker-compose.lab.yml`).
 - On the first run, Playwright and its browsers are installed into
   `testlab/node_modules` (about 300 MB, one time only).
 - Docker is **not** required.
+- Optional, for the speech-quality column (`MOS`): Python 3 with numpy, scipy
+  and `pesq` (`pip install numpy scipy pesq`). Without it the column stays
+  empty and the run prints why.
 
 ## Desktop app: latency and audio quality (`make lab-desktop`)
 
@@ -87,12 +90,22 @@ worst 2.5ms  390.24ms  390.24ms  391.7ms               7.5ms  15.2%         27dB
 | `fec` | Packets rebuilt from Opus in-band FEC. |
 | `late` | Packets that arrived too late for the jitter buffer. |
 | `heard` | Markers received / markers sent. A missing marker means its packet was lost and concealed. |
+| `MOS` / `MOSmin` | Speech quality: a voice clip (`assets/speech.wav`) goes through the same path, and wideband PESQ (ITU-T P.862.2) rates what the listener heard against what was sent. 1.0 = bad, 4.64 = perfect; mean and worst 8 s segment. Opus at 48 kbit/s over a clean LAN scores about 4.2–4.3. Unlike the test tone, this reacts to how loss and concealment sound on speech. |
 
 Each run is saved to `testlab/results/desktop-<time>.json`, including the git
 revision and the full engine counters. `desktop-baseline.json` is the
 reference for the Δ columns. With `--strict`, the run fails when p95 gets
 worse than the baseline by more than `LAB_DESKTOP_TOLERANCE_MS` (default 3) or
-distortion by more than `LAB_DESKTOP_TOLERANCE_DISTORTION` (default 1 point).
+distortion by more than `LAB_DESKTOP_TOLERANCE_DISTORTION` (default 1 point)
+or speech MOS drops by more than `LAB_DESKTOP_TOLERANCE_MOS` (default 0.2).
+
+The speech recordings of every run stay in
+`testlab/results/speech/<run>-<profile>-<frame>/` (`reference.wav` = sent,
+`degraded.wav` = heard, delayed by the latency) — listen to them when a
+number looks odd. The clip itself is synthetic speech from the offline
+Windows voices (German and English intercom calls), regenerated with
+`powershell -File testlab/assets/make-speech.ps1`; replace it with real
+recordings (48 kHz, 16-bit, mono) for a more realistic score.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -102,6 +115,9 @@ distortion by more than `LAB_DESKTOP_TOLERANCE_DISTORTION` (default 1 point).
 | `LAB_DESKTOP_PERIOD` | `128` | virtual device period in samples (128 = 2.67 ms) |
 | `LAB_<PROFILE>_<KEY>` | see table below | override network values, e.g. `LAB_WAN_LATENCY_MS=30` |
 | `LAB_VERBOSE` | unset | show the benchmark's engine log |
+| `LAB_SPEECH` | on | `0` skips the speech-quality pass |
+| `LAB_SPEECH_SECONDS` | `24` | length of the speech pass per scenario |
+| `LAB_PYTHON` | `python` / `python3` | interpreter for `lib/pesq_score.py` |
 
 ### Real mouth-to-ear latency with your sound card (`make lab-desktop-hw`)
 

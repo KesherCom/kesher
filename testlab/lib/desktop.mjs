@@ -13,6 +13,22 @@ const TAURI_DIR = path.join(ROOT_DIR, "desktop", "src-tauri");
 const BENCH_BIN = path.join(TAURI_DIR, "target", "release", isWin ? "kesher_audio_bench.exe" : "kesher_audio_bench");
 const RESULTS = path.join(LAB_DIR, "results");
 const BASELINE = path.join(RESULTS, "desktop-baseline.json");
+// Speech-quality pass: the talker plays this clip, pesq_score.py rates what
+// the listener heard (wideband PESQ, MOS 1.0 .. 4.64).
+const SPEECH_WAV = path.join(LAB_DIR, "assets", "speech.wav");
+const PESQ_SCRIPT = path.join(LAB_DIR, "lib", "pesq_score.py");
+const PYTHON = process.env.LAB_PYTHON || (isWin ? "python" : "python3");
+
+let speechCheck = null;
+/** Speech scoring needs the clip plus Python with numpy, scipy and pesq. */
+function speechAvailable() {
+  if (speechCheck) return speechCheck;
+  if (process.env.LAB_SPEECH === "0") return (speechCheck = { ok: false, why: "disabled (LAB_SPEECH=0)" });
+  if (!existsSync(SPEECH_WAV)) return (speechCheck = { ok: false, why: `missing ${path.relative(ROOT_DIR, SPEECH_WAV)}` });
+  const res = spawnSync(PYTHON, ["-c", "import numpy, scipy, pesq"], { encoding: "utf8" });
+  if (res.status !== 0) return (speechCheck = { ok: false, why: `${PYTHON} needs numpy, scipy and pesq (pip install pesq)` });
+  return (speechCheck = { ok: true });
+}
 
 function buildBench() {
   console.log("lab: building desktop audio bench (desktop/src-tauri, release)...");
@@ -119,6 +135,38 @@ async function virtualScenario(profile, frameMs, opts) {
   }
 }
 
+/** Plays the speech clip through the chain and scores it with PESQ. */
+async function speechScenario(profile, frameMs, opts, runId) {
+  const baseURL = profileURL(profile);
+  const id = `${Date.now() % 100000}${userSeq++}`;
+  const recordDir = path.join(RESULTS, "speech", `${runId}-${profile}-${frameMs}ms`);
+  const talker = await nativeSession(baseURL, { username: `benchspk${id}`, role: "audio", listen: [], talk: ["foh"], ptt: true });
+  const listener = await nativeSession(baseURL, { username: `benchlst${id}`, role: "producer", listen: ["foh"], talk: [], ptt: false });
+  let bench;
+  try {
+    bench = runBench("virtual", {
+      talker: talker.endpoint,
+      listener: listener.endpoint,
+      durationSeconds: opts.speechSeconds,
+      periodFrames: opts.periodFrames,
+      frameMs,
+      speechWav: SPEECH_WAV,
+      recordDir,
+    });
+  } finally {
+    talker.close();
+    listener.close();
+  }
+  if (bench.error) return bench;
+  const res = spawnSync(PYTHON, [PESQ_SCRIPT, bench.referenceWav, bench.degradedWav], { encoding: "utf8" });
+  const line = (res.stdout || "").trim().split(/\r?\n/).pop() || "{}";
+  try {
+    return { ...JSON.parse(line), recordDir: path.relative(ROOT_DIR, recordDir) };
+  } catch {
+    return { error: `pesq_score failed: ${(res.stderr || "").trim().split(/\r?\n/).pop()}` };
+  }
+}
+
 async function hardwareScenario(profile, frameMs, opts) {
   const baseURL = profileURL(profile);
   const id = `${Date.now() % 100000}${userSeq++}`;
@@ -165,6 +213,9 @@ function printTable(rows, baseline) {
     ["fec", 5],
     ["late", 5],
     ["heard", 7],
+    ["MOS", 5],
+    ["MOSmin", 6],
+    ["ΔMOS", 6],
   ];
   console.log(head.map(([n, w]) => n.padEnd(w)).join(" "));
   console.log(head.map(([, w]) => "-".repeat(w)).join(" "));
@@ -192,6 +243,9 @@ function printTable(rows, baseline) {
         fmt(r.listener?.fecRecovered, 5),
         fmt(r.listener?.latePackets, 5),
         fmt(`${r.markersHeard}/${r.markersSent}`, 7),
+        fmt(r.speech?.mos, 5),
+        fmt(r.speech?.mosMin, 6),
+        delta(r.speech?.mos, b?.speech?.mos, 6),
       ].join(" "),
     );
   }
@@ -219,6 +273,8 @@ function printTable(rows, baseline) {
   console.log("distort      share of 5 ms windows where the received test tone is audibly damaged (SNR < 20 dB:");
   console.log("             PLC artifacts, clicks, gaps). SNR = median tone SNR. dropout = windows that were silent.");
   console.log("PLC/min      packet-loss concealment events; fec = packets rebuilt from Opus FEC; late = arrived too late.");
+  console.log("MOS         speech quality of a voice clip sent through the same path: wideband PESQ (ITU-T P.862.2),");
+  console.log("             1.0 bad .. 4.64 perfect; mean and worst 8 s segment. Recordings in testlab/results/speech/.");
   console.log("Δ            difference to the baseline (save one with: make lab-desktop-baseline).");
 }
 
@@ -227,12 +283,16 @@ function compareRegressions(rows, baseline) {
   const base = new Map(baseline.rows.map((r) => [r.key, r]));
   const tolMs = Number(process.env.LAB_DESKTOP_TOLERANCE_MS || 3);
   const tolDist = Number(process.env.LAB_DESKTOP_TOLERANCE_DISTORTION || 1);
+  const tolMos = Number(process.env.LAB_DESKTOP_TOLERANCE_MOS || 0.2);
   const out = [];
   for (const r of rows) {
     const b = base.get(r.key);
     if (!b || r.error || r.mode !== "virtual") continue;
     if (r.latencyMs?.p95 - b.latencyMs?.p95 > tolMs) out.push(`${r.key}: p95 ${b.latencyMs.p95} → ${r.latencyMs.p95} ms`);
     if (r.distortedPct - b.distortedPct > tolDist) out.push(`${r.key}: distortion ${b.distortedPct} → ${r.distortedPct} %`);
+    if (b.speech?.mos != null && r.speech?.mos != null && b.speech.mos - r.speech.mos > tolMos) {
+      out.push(`${r.key}: speech MOS ${b.speech.mos} → ${r.speech.mos}`);
+    }
   }
   return out;
 }
@@ -245,7 +305,11 @@ export async function runDesktop(flags) {
     seconds: Number(flags.seconds || process.env.LAB_DESKTOP_SECONDS || 20),
     periodFrames: Number(flags.period || process.env.LAB_DESKTOP_PERIOD || 128),
     runs: Number(flags.runs || process.env.LAB_HW_RUNS || 10),
+    speechSeconds: Number(flags["speech-seconds"] || process.env.LAB_SPEECH_SECONDS || 24),
   };
+  const speech = speechAvailable();
+  if (!speech.ok) console.log(`lab: speech-quality pass skipped: ${speech.why}`);
+  const runId = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const hardware = Boolean(flags.hardware || process.env.LAB_DESKTOP_HARDWARE);
   for (const p of profiles) if (!PROFILES[p]) throw new Error(`unknown profile ${p}`);
 
@@ -278,8 +342,18 @@ export async function runDesktop(flags) {
         } catch (err) {
           r = { error: String(err.message || err) };
         }
-        rows.push({ key, profile, frameMs, mode: "virtual", ...r });
+        const row = { key, profile, frameMs, mode: "virtual", ...r };
+        rows.push(row);
         console.log(r.error ? `error: ${r.error}` : `p50 ${r.latencyMs?.p50} ms, distortion ${r.distortedPct} %`);
+        if (speech.ok) {
+          process.stdout.write(`lab: speech quality ${key} (${opts.speechSeconds}s)... `);
+          try {
+            row.speech = await speechScenario(profile, frameMs, opts, runId);
+          } catch (err) {
+            row.speech = { error: String(err.message || err) };
+          }
+          console.log(row.speech.error ? `error: ${row.speech.error}` : `MOS ${row.speech.mos} (worst segment ${row.speech.mosMin})`);
+        }
         if (hardware) {
           const hkey = `${profile} ${frameMs}ms hw`;
           process.stdout.write(`lab: hardware loopback ${hkey} (${opts.runs} clicks)... `);

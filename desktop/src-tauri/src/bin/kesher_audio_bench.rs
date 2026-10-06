@@ -12,6 +12,11 @@
 //!       mixing) to the sample, plus audible dropouts. Excludes the sound
 //!       card/driver buffers (see the hardware mode for those).
 //!
+//!       With `speechWav` + `recordDir` in the config the talker plays that
+//!       clip instead of the tone, and the bench writes what was sent
+//!       (reference.wav) and what the listener heard (degraded.wav) for
+//!       speech-quality scoring (testlab/lib/pesq_score.py).
+//!
 //!   kesher_audio_bench hardware <config.json>
 //!       One engine on real devices; repeats the app's built-in loopback
 //!       click test (relay echoes the click, it must reach the input via a
@@ -112,6 +117,12 @@ struct VirtualConfig {
     marker_interval_ms: f64,
     #[serde(default)]
     frame_ms: Option<f32>,
+    /// Speech mode: 48 kHz 16-bit mono WAV the talker plays in a loop.
+    #[serde(default)]
+    speech_wav: Option<String>,
+    /// Speech mode: directory for reference.wav / degraded.wav.
+    #[serde(default)]
+    record_dir: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -230,7 +241,166 @@ struct Heard {
     snr_db: Vec<f64>,
 }
 
+// ── WAV helpers (16-bit PCM mono, 48 kHz) ──────────────────────────────
+
+fn read_wav_mono16(path: &str) -> Result<Vec<f32>, String> {
+    let data = std::fs::read(path).map_err(|e| format!("read {path}: {e}"))?;
+    if data.len() < 12 || &data[0..4] != b"RIFF" || &data[8..12] != b"WAVE" {
+        return Err(format!("{path}: not a WAV file"));
+    }
+    let u16_at = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);
+    let u32_at = |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+    let (mut channels, mut rate, mut bits) = (0u16, 0u32, 0u16);
+    let mut pos = 12;
+    while pos + 8 <= data.len() {
+        let id = &data[pos..pos + 4];
+        let len = u32_at(pos + 4) as usize;
+        let body = pos + 8;
+        if id == b"fmt " && len >= 16 {
+            if u16_at(body) != 1 {
+                return Err(format!("{path}: only PCM WAV is supported"));
+            }
+            channels = u16_at(body + 2);
+            rate = u32_at(body + 4);
+            bits = u16_at(body + 14);
+        } else if id == b"data" {
+            if rate != RATE as u32 || bits != 16 || channels == 0 {
+                return Err(format!("{path}: need 48 kHz 16-bit PCM (got {rate} Hz, {bits} bit, {channels} ch)"));
+            }
+            let end = (body + len).min(data.len());
+            let stride = 2 * channels as usize;
+            return Ok(data[body..end]
+                .chunks_exact(stride)
+                .map(|f| i16::from_le_bytes([f[0], f[1]]) as f32 / 32768.0)
+                .collect());
+        }
+        pos = body + len + (len & 1);
+    }
+    Err(format!("{path}: no data chunk"))
+}
+
+fn write_wav_mono16(path: &std::path::Path, samples: &[f32]) -> Result<(), String> {
+    let data_len = (samples.len() * 2) as u32;
+    let mut out = Vec::with_capacity(44 + data_len as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    out.extend_from_slice(&1u16.to_le_bytes()); // mono
+    out.extend_from_slice(&(RATE as u32).to_le_bytes());
+    out.extend_from_slice(&(RATE as u32 * 2).to_le_bytes());
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_len.to_le_bytes());
+    for &s in samples {
+        out.extend_from_slice(&((s.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
+    }
+    std::fs::write(path, out).map_err(|e| format!("write {}: {e}", path.display()))
+}
+
+// ── Speech mode ──────────────────────────────────────────────────────────
+
+/// Plays a speech clip through talker -> relay -> listener and records both
+/// ends over the same wall-clock window. The listener keeps recording a
+/// little longer so the delayed tail is included; the scorer aligns them.
+fn run_speech(cfg: VirtualConfig, wav: &str) -> Result<serde_json::Value, String> {
+    let clip = Arc::new(read_wav_mono16(wav)?);
+    if clip.is_empty() {
+        return Err(format!("{wav}: empty clip"));
+    }
+    let dir = std::path::PathBuf::from(cfg.record_dir.clone().ok_or("speech mode needs recordDir")?);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    let capacity = ((cfg.duration_seconds + 3.0) * RATE) as usize;
+    let reference: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::with_capacity(capacity)));
+    let degraded: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::with_capacity(capacity)));
+    let record_in = Arc::new(AtomicBool::new(false));
+    let record_out = Arc::new(AtomicBool::new(false));
+
+    let talker_input = {
+        let clip = Arc::clone(&clip);
+        let reference = Arc::clone(&reference);
+        let record_in = Arc::clone(&record_in);
+        let mut pos = 0usize;
+        Box::new(move |buf: &mut [f32], _: Instant| {
+            for s in buf.iter_mut() {
+                *s = clip[pos];
+                pos = (pos + 1) % clip.len();
+            }
+            if record_in.load(Ordering::Relaxed) {
+                reference.lock().unwrap().extend_from_slice(buf);
+            }
+        }) as audio_native::VirtualInput
+    };
+    let listener_output = {
+        let degraded = Arc::clone(&degraded);
+        let record_out = Arc::clone(&record_out);
+        Box::new(move |buf: &[f32], _: Instant| {
+            if record_out.load(Ordering::Relaxed) {
+                degraded.lock().unwrap().extend_from_slice(buf);
+            }
+        }) as audio_native::VirtualOutput
+    };
+
+    let talker = NativeAudioState::default();
+    let listener = NativeAudioState::default();
+    let listener_info = audio_native::start_engine_virtual(
+        params(&cfg.listener, cfg.frame_ms),
+        &listener,
+        VirtualDevice {
+            period_frames: cfg.period_frames,
+            input: Box::new(|buf: &mut [f32], _| buf.fill(0.0)),
+            output: listener_output,
+        },
+    )?;
+    let talker_info = audio_native::start_engine_virtual(
+        params(&cfg.talker, cfg.frame_ms),
+        &talker,
+        VirtualDevice {
+            period_frames: cfg.period_frames,
+            input: talker_input,
+            output: Box::new(|_: &[f32], _| {}),
+        },
+    )?;
+    audio_native::set_mic_active(&talker, true);
+
+    std::thread::sleep(Duration::from_secs_f64(cfg.warmup_seconds));
+    let t0 = audio_native::stats_snapshot(&talker).unwrap_or_default();
+    let l0 = audio_native::stats_snapshot(&listener).unwrap_or_default();
+    record_out.store(true, Ordering::Relaxed);
+    record_in.store(true, Ordering::Relaxed);
+    std::thread::sleep(Duration::from_secs_f64(cfg.duration_seconds));
+    record_in.store(false, Ordering::Relaxed);
+    // Worst-case one-way latency in the lab is ~0.5 s.
+    std::thread::sleep(Duration::from_millis(1000));
+    record_out.store(false, Ordering::Relaxed);
+    let t1 = audio_native::stats_snapshot(&talker).unwrap_or_default();
+    let l1 = audio_native::stats_snapshot(&listener).unwrap_or_default();
+    talker.engine.lock().unwrap().take();
+    listener.engine.lock().unwrap().take();
+    std::thread::sleep(Duration::from_millis(300));
+
+    let ref_path = dir.join("reference.wav");
+    let deg_path = dir.join("degraded.wav");
+    write_wav_mono16(&ref_path, &reference.lock().unwrap())?;
+    write_wav_mono16(&deg_path, &degraded.lock().unwrap())?;
+    Ok(serde_json::json!({
+        "mode": "speech",
+        "frameMs": talker_info.frame_ms,
+        "periodMs": listener_info.output.period_ms,
+        "seconds": cfg.duration_seconds,
+        "referenceWav": ref_path.to_string_lossy(),
+        "degradedWav": deg_path.to_string_lossy(),
+        "talker": diff(&t0, &t1),
+        "listener": diff(&l0, &l1),
+    }))
+}
+
 fn run_virtual(cfg: VirtualConfig) -> Result<serde_json::Value, String> {
+    if let Some(wav) = cfg.speech_wav.clone() {
+        return run_speech(cfg, &wav);
+    }
     let marker_interval = (cfg.marker_interval_ms / 1000.0 * RATE) as u64;
     // Markers emitted by the talker during the measurement window.
     let emitted: Arc<Mutex<Vec<Instant>>> = Arc::default();
