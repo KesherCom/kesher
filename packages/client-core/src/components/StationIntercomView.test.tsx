@@ -731,4 +731,15 @@ describe("StationIntercomView", () => {
     expect(onAudioGateEnabledChange).toHaveBeenCalledWith(false);
     expect(onAudioGateThresholdDbChange).toHaveBeenCalledWith(-40);
   });
+
+  it("resets a party line fader to 0 dB on double-click", () => {
+    const onRoomGainChange = vi.fn();
+    const { container } = render(
+      <StationIntercomView {...baseProps} onRoomGainChange={onRoomGainChange} />,
+    );
+    const fader = container.querySelector<HTMLInputElement>("#room-gain-room-1");
+    expect(fader).not.toBeNull();
+    fireEvent.doubleClick(fader!);
+    expect(onRoomGainChange).toHaveBeenCalledWith("room-1", 1);
+  });
 });

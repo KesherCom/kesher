@@ -61,6 +61,7 @@ import type {
   StreamDeckSettings,
 } from "./types";
 import { directRoleTargetPrefix } from "./types";
+import { createStreamDeckHoldTracker } from "./lib/streamDeckHolds";
 import { useSettings } from "./hooks/useSettings";
 import { useAudioDevices } from "./hooks/useAudioDevices";
 import { useIntercomSession } from "./hooks/useIntercomSession";
@@ -416,7 +417,8 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
   const lastDirectCallerUserIdRef = useRef<string | null>(null);
   const incomingAttentionRef = useRef(false);
   const streamDeckAttentionPulseOnRef = useRef(false);
-  const streamDeckPressedRoleTargetsRef = useRef<Map<string, string>>(new Map());
+  // Stream Deck keys that are down (see lib/streamDeckHolds.ts).
+  const streamDeckHoldsRef = useRef(createStreamDeckHoldTracker());
   const streamDeckSelectListenHoldsRef = useRef<
     Map<string, StreamDeckSelectListenHoldState>
   >(new Map());
@@ -642,6 +644,12 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
     streamDeckSelectListenHoldsRef.current.clear();
   }, []);
 
+  /** Ends every hold action still running from the Stream Deck. */
+  const releaseStreamDeckHolds = useCallback(() => {
+    streamDeckHoldsRef.current.releaseAll();
+    clearStreamDeckSelectListenHolds();
+  }, [clearStreamDeckSelectListenHolds]);
+
   const disconnectStreamDeckWebHid = useCallback(
     async (options?: { announce?: boolean }) => {
       const session = streamDeckHidSessionRef.current;
@@ -650,7 +658,7 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
       streamDeckHidSessionRef.current = null;
       streamDeckPendingRenderRef.current = null;
       streamDeckRenderedSignatureByIndexRef.current.clear();
-      clearStreamDeckSelectListenHolds();
+      releaseStreamDeckHolds();
 
       try {
         session.deck.off("down", session.onDown);
@@ -684,7 +692,7 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
         });
       }
     },
-    [clearStreamDeckSelectListenHolds, emitStreamDeckBridgeEvent],
+    [releaseStreamDeckHolds, emitStreamDeckBridgeEvent],
   );
 
   const connectStreamDeckWebHid = useCallback(async () => {
@@ -1236,6 +1244,7 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
 
   useEffect(() => {
     if (!token || authMode !== "operator") {
+      releaseStreamDeckHolds();
       void disconnectStreamDeckWebHid({ announce: false });
       setStreamDeckConnected(false);
       setStreamDeckWebHidActive(false);
@@ -1248,6 +1257,9 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
     ) => {
       if (!payload) return;
       if (payload.kind === "connection") {
+        if (!payload.connected) {
+          releaseStreamDeckHolds();
+        }
         setStreamDeckConnected(payload.connected);
         if (payload.message) {
           setStreamDeckLastEvent(payload.message);
@@ -1255,13 +1267,31 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
         return;
       }
 
+      const holds = streamDeckHoldsRef.current;
+      const released =
+        payload.state === "up" ? holds.release(payload.buttonIndex) : undefined;
+      if (released?.released) {
+        setStreamDeckLastEvent(
+          `P${(released.page ?? 0) + 1}/B${payload.buttonIndex + 1} up`,
+        );
+        return;
+      }
+
       const streamDeckCfg = streamDeckSettingsRef.current;
       const currentAppData = appData;
       if (!streamDeckCfg || !currentAppData) return;
-      const effectivePage =
-        typeof payload.page === "number"
+      // A release belongs to the page its press was on.
+      let effectivePage =
+        released?.page ??
+        (typeof payload.page === "number"
           ? payload.page
-          : streamDeckCfg.selectedPage;
+          : streamDeckCfg.selectedPage);
+      if (payload.state === "down") {
+        effectivePage = holds.press(payload.buttonIndex, effectivePage);
+      }
+      /** The release of this key stops what its press started. */
+      const holdUntilRelease = (release: () => void) =>
+        holds.setRelease(payload.buttonIndex, release);
       const action = resolveStreamDeckButtonAction(
         streamDeckCfg,
         effectivePage,
@@ -1404,7 +1434,9 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
           return;
         }
         if (payload.state === "down") {
-          session.handleChannelPttStart(action.roomId);
+          const roomId = action.roomId;
+          session.handleChannelPttStart(roomId);
+          holdUntilRelease(() => session.handleChannelPttStop(roomId));
         } else {
           session.handleChannelPttStop(action.roomId);
         }
@@ -1493,6 +1525,7 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
         }
         if (payload.state === "down") {
           session.startPtt();
+          holdUntilRelease(() => session.stopPtt());
         } else {
           session.stopPtt();
         }
@@ -1525,7 +1558,6 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
         return;
       }
       if (action.type === "direct_role" && action.roleId) {
-        const buttonKey = `${effectivePage}:${payload.buttonIndex}`;
         if (payload.state === "down") {
           if (!isDirectToRoleAllowed(action.roleId)) {
             setStreamDeckLastEvent(
@@ -1546,15 +1578,8 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
           }
           // A role call reaches everyone logged in with that role.
           const roleTarget = `${directRoleTargetPrefix}${action.roleId}`;
-          streamDeckPressedRoleTargetsRef.current.set(buttonKey, roleTarget);
           session.startDirectPtt(roleTarget);
-        } else {
-          const targetUserId =
-            streamDeckPressedRoleTargetsRef.current.get(buttonKey);
-          if (targetUserId) {
-            session.stopDirectPtt(targetUserId);
-            streamDeckPressedRoleTargetsRef.current.delete(buttonKey);
-          }
+          holdUntilRelease(() => session.stopDirectPtt(roleTarget));
         }
         return;
       }
@@ -1566,26 +1591,28 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
           return;
         }
         if (payload.state === "down") {
-          session.startDirectPtt(action.userId);
+          const userId = action.userId;
+          session.startDirectPtt(userId);
+          holdUntilRelease(() => session.stopDirectPtt(userId));
         } else {
           session.stopDirectPtt(action.userId);
         }
         return;
       }
       if (action.type === "reply_to_caller") {
+        // Only the press picks the caller; a call arriving while the key is
+        // held must not change whom the release stops (#51).
+        if (payload.state !== "down") return;
         const callerId = session.lastDirectCallerUserId;
         if (!callerId) return;
-        if (payload.state === "down" && !isDirectToUserAllowed(callerId)) {
+        if (!isDirectToUserAllowed(callerId)) {
           setStreamDeckLastEvent(
             `P${effectivePage + 1}/B${payload.buttonIndex + 1} NOT ALLOW`,
           );
           return;
         }
-        if (payload.state === "down") {
-          session.startDirectPtt(callerId);
-        } else {
-          session.stopDirectPtt(callerId);
-        }
+        session.startDirectPtt(callerId);
+        holdUntilRelease(() => session.stopDirectPtt(callerId));
         return;
       }
       if (action.type === "broadcast_ptt" && action.broadcastGroupId) {
@@ -1599,7 +1626,9 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
           return;
         }
         if (payload.state === "down") {
-          session.startBroadcastPtt(action.broadcastGroupId);
+          const groupId = action.broadcastGroupId;
+          session.startBroadcastPtt(groupId);
+          holdUntilRelease(() => session.stopBroadcastPtt(groupId));
         } else {
           session.stopBroadcastPtt(action.broadcastGroupId);
         }
@@ -1627,7 +1656,6 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
 
     return () => {
       clearStreamDeckSelectListenHolds();
-      streamDeckPressedRoleTargetsRef.current.clear();
       window.removeEventListener("message", onMessage);
       window.removeEventListener(
         streamDeckButtonEventName,
@@ -1639,6 +1667,7 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
     authMode,
     clearStreamDeckSelectListenHolds,
     disconnectStreamDeckWebHid,
+    releaseStreamDeckHolds,
     session,
     settings,
     token,

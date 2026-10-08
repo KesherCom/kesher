@@ -10,8 +10,9 @@ describe("streamDeckDevTools", () => {
     api.buttonDown(0, 2);
     api.buttonUp(0, 2);
 
+    // Exactly once per event: the app listens to both channels.
     expect(dispatchEvent).toHaveBeenCalledTimes(2);
-    expect(postMessage).toHaveBeenCalledTimes(2);
+    expect(postMessage).not.toHaveBeenCalled();
   });
 
   it("emits connection events", () => {
@@ -22,6 +23,6 @@ describe("streamDeckDevTools", () => {
     api.setConnection(true, "ok");
 
     expect(dispatchEvent).toHaveBeenCalledTimes(1);
-    expect(postMessage).toHaveBeenCalledTimes(1);
+    expect(postMessage).not.toHaveBeenCalled();
   });
 });

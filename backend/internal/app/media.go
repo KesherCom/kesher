@@ -647,6 +647,17 @@ func (m *MediaManager) SetDirectTargetActive(sourceToken, targetUserID string, e
 	m.recomputeSourceRoutingLocked(sourceToken)
 }
 
+// SilenceSource stops forwarding a source until it talks again (admin mute):
+// no direct or broadcast target, no room fallback.
+func (m *MediaManager) SilenceSource(sourceToken string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.directActive, sourceToken)
+	delete(m.broadcastActive, sourceToken)
+	m.idleRoomFallbackSuppressed[sourceToken] = struct{}{}
+	m.recomputeSourceRoutingLocked(sourceToken)
+}
+
 func (m *MediaManager) SetIdleRoomFallbackSuppressed(sourceToken string, suppressed bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

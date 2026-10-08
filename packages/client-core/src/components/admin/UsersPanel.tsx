@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   deleteUser,
   fetchAdminUsers,
+  interveneAdminUser,
   getAdminBirthdayUsersToday,
   updateAdminBirthdayUsersToday,
 } from "../../api";
@@ -156,6 +157,34 @@ export function UsersPanel({
                   {u.username}{" "}
                   <small>({roleNameById.get(u.roleId) ?? u.roleId})</small>
                 </span>
+                {u.online ? (
+                  <>
+                    <button
+                      className="secondary"
+                      disabled={adminBusy}
+                      title={`Turn off ${u.username}'s microphone now; they can talk again with the next press`}
+                      onClick={() =>
+                        void runAdminAction(() => interveneAdminUser(token, adminPin, u.id, "mute"))
+                      }
+                    >
+                      Mute mic
+                    </button>
+                    <button
+                      className="secondary danger"
+                      disabled={adminBusy}
+                      title={`Log ${u.username} out on all devices`}
+                      onClick={() => {
+                        if (!window.confirm(`Log ${u.username} out on all devices?`)) return;
+                        void runAdminAction(async () => {
+                          await interveneAdminUser(token, adminPin, u.id, "kick");
+                          await loadUsers();
+                        });
+                      }}
+                    >
+                      Kick
+                    </button>
+                  </>
+                ) : null}
                 <button
                   className="secondary danger"
                   disabled={u.online || adminBusy}

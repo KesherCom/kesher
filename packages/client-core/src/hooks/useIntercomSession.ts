@@ -120,6 +120,7 @@ type WsMessage =
       data: { candidate: string; sdpMid?: string; sdpMLineIndex?: number };
     }
   | { type: "session_revoked"; data: SessionRevokedEvent }
+  | { type: "admin_mute"; data: { reason?: string } }
   | { type: "config_updated"; data: unknown };
 const opusMaxBitrateBps = 24000;
 
@@ -2117,6 +2118,18 @@ export function useIntercomSession({
             return sameStringArray(prev, next) ? prev : next;
           });
           remote.applyVolumeToAllRemoteAudio();
+          return;
+        }
+        if (msg.type === "admin_mute") {
+          // An admin turned our microphone off (#15): drop every talk state
+          // so nothing re-opens it until the next press.
+          pushDebugEvent("system · microphone muted by an admin");
+          setAlwaysOn(false);
+          setPttPressed(false);
+          setPttPressedChannelId(null);
+          setdirectPttPressedUserId(null);
+          setBroadcastPttPressed(null);
+          nativeAudio?.setPtt(false);
           return;
         }
         if (msg.type === "session_revoked") {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -4725,6 +4726,10 @@ func (s *Server) handleAdminUserByID(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 	userID := strings.TrimPrefix(r.URL.Path, "/api/admin/users/")
+	if id, action, ok := strings.Cut(userID, "/"); ok && r.Method == http.MethodPost && (action == "mute" || action == "kick") {
+		s.handleAdminUserIntervention(w, r, id, action)
+		return
+	}
 	if userID == "" || strings.Contains(userID, "/") {
 		http.Error(w, "invalid user id", http.StatusBadRequest)
 		return
@@ -4761,6 +4766,40 @@ func (s *Server) handleAdminUserByID(w http.ResponseWriter, r *http.Request, ses
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// POST /api/admin/users/{id}/mute: turn off the person's microphone now
+// (all their sessions); they can talk again with their next press.
+// POST /api/admin/users/{id}/kick: end their sessions (#15).
+func (s *Server) handleAdminUserIntervention(w http.ResponseWriter, r *http.Request, userID, action string) {
+	user, err := s.store.FindUserByID(r.Context(), userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "unknown user", http.StatusNotFound)
+			return
+		}
+		s.internalErr(w, err)
+		return
+	}
+	if action == "kick" {
+		s.sessionMu.Lock()
+		s.revokeSessionsOfUser(user.Username, "kicked")
+		s.sessionMu.Unlock()
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
+	tokens := s.hub.MuteUser(user.ID)
+	if len(tokens) == 0 {
+		http.Error(w, "user is not online", http.StatusConflict)
+		return
+	}
+	for _, token := range tokens {
+		if s.media != nil {
+			s.media.SilenceSource(token)
+		}
+		s.hub.SendToToken(token, WSOutbound{Type: "admin_mute", Data: map[string]string{"reason": "admin"}})
+	}
+	s.writeJSON(w, http.StatusOK, map[string]int{"sessions": len(tokens)})
 }
 
 func (s *Server) handleAdminRooms(w http.ResponseWriter, r *http.Request, session Session) {
@@ -5334,13 +5373,18 @@ func (s *Server) handleAdminTelegramUsers(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		// Automatically create or upsert the Kesher user with the internal telegram role.
-		_, err := s.store.UpsertUser(r.Context(), req.KesherUsername, telegramVirtualRoleID)
-		if err != nil {
-			if s.writeStoreErr(w, err) {
+		// Create the Kesher user with the internal telegram role if it does
+		// not exist yet; an existing user keeps their role (#76).
+		if _, err := s.store.FindUserByUsername(r.Context(), req.KesherUsername); errors.Is(err, sql.ErrNoRows) {
+			if _, err := s.store.UpsertUser(r.Context(), req.KesherUsername, telegramVirtualRoleID); err != nil {
+				if s.writeStoreErr(w, err) {
+					return
+				}
+				s.internalErr(w, fmt.Errorf("failed to create kesher user: %w", err))
 				return
 			}
-			s.internalErr(w, fmt.Errorf("failed to create kesher user: %w", err))
+		} else if err != nil {
+			s.internalErr(w, err)
 			return
 		}
 

@@ -946,6 +946,16 @@ export async function deleteAdminDevice(token: string, adminPin: string, id: str
   await apiMutation(`/api/admin/devices/${encodeURIComponent(id)}`, token, "DELETE", adminPin);
 }
 
+/** Turns off a person's microphone now, or ends their sessions (#15). */
+export async function interveneAdminUser(
+  token: string,
+  adminPin: string,
+  userId: string,
+  action: "mute" | "kick",
+): Promise<void> {
+  await apiMutation(`/api/admin/users/${encodeURIComponent(userId)}/${action}`, token, "POST", adminPin);
+}
+
 export async function getAdminStreamDecks(
   token: string,
   adminPin: string,

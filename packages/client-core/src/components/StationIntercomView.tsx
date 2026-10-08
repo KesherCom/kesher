@@ -10,6 +10,7 @@ import type {
   StreamDeckSettings,
 } from "../types";
 import type { KeyboardShortcutSettings } from "../app/settings";
+import { formatBinding } from "../app/settings";
 import { renderStreamDeckPreviewImages } from "../api";
 import { createHoldButtonProps } from "../lib/holdButton";
 import { withResolvedStreamDeckButtonLabel } from "../lib/streamDeckLabels";
@@ -1440,6 +1441,12 @@ export function StationIntercomView({
       {...mainPttButtonProps}
     >
       Hold to talk
+      {keyboardShortcuts.ptt ? (
+        // The assigned key (#8); aria-hidden keeps the button name "Hold to talk".
+        <kbd className="ptt-key-hint" aria-hidden="true" title="Keyboard shortcut">
+          {formatBinding(keyboardShortcuts.ptt)}
+        </kbd>
+      ) : null}
     </button>
   );
   const replyButton = (
@@ -1663,6 +1670,9 @@ export function StationIntercomView({
                         </label>
                         <input
                           id={`room-gain-${room.id}`}
+                          // Double-click resets to 0 dB, like a mixer fader (#11).
+                          onDoubleClick={() => onRoomGainChange(room.id, 1)}
+                          title="Double-click: 0 dB"
                           type="range"
                           min={MUTE_POS}
                           max={OUTPUT_DB_MAX}
@@ -1808,6 +1818,9 @@ export function StationIntercomView({
                             </label>
                             <input
                               id={`direct-gain-${p.userId}`}
+                              // Double-click resets to 0 dB, like a mixer fader (#11).
+                              onDoubleClick={() => onDirectGainChange(p.userId, 1)}
+                              title="Double-click: 0 dB"
                               type="range"
                               min={MUTE_POS}
                               max={OUTPUT_DB_MAX}
@@ -1903,6 +1916,9 @@ export function StationIntercomView({
                         </label>
                         <input
                           id={`direct-gain-${p.userId}`}
+                          // Double-click resets to 0 dB, like a mixer fader (#11).
+                          onDoubleClick={() => onDirectGainChange(p.userId, 1)}
+                          title="Double-click: 0 dB"
                           type="range"
                           min={MUTE_POS}
                           max={OUTPUT_DB_MAX}
@@ -2896,6 +2912,9 @@ export function StationIntercomView({
                           </label>
                           <input
                             id="input-gain"
+                            // Double-click resets to 0 dB, like a mixer fader (#11).
+                            onDoubleClick={() => onInputGainChange(selectedInputDeviceId, 1)}
+                            title="Double-click: 0 dB"
                             type="range"
                             min={MUTE_POS}
                             max={INPUT_DB_MAX}

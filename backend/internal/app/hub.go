@@ -823,6 +823,25 @@ func (h *Hub) OnlineUsernames() map[string]bool {
 	return names
 }
 
+// MuteUser turns off the microphone of every session of a user on the
+// server side (voice state, broadcast) and returns their tokens.
+func (h *Hub) MuteUser(userID string) []string {
+	h.mu.Lock()
+	tokens := []string{}
+	for token, c := range h.clients {
+		if c.user.ID != userID {
+			continue
+		}
+		c.voiceMode = "ptt"
+		c.micEnabled = false
+		c.broadcastGroups = make(map[string]struct{})
+		tokens = append(tokens, token)
+	}
+	h.mu.Unlock()
+	h.requestPresenceBroadcast()
+	return tokens
+}
+
 func (h *Hub) TokensForRole(roleID string) []string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

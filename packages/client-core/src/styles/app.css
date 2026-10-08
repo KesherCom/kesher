@@ -2008,6 +2008,18 @@ button.secondary {
     background-color 160ms linear,
     border-color 160ms linear;
 }
+.ptt-key-hint {
+  display: block;
+  width: fit-content;
+  margin: 0.35rem auto 0;
+  padding: 0.05em 0.45em;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+}
 .simple-ptt small {
   margin-top: 0.35rem;
   text-transform: none;

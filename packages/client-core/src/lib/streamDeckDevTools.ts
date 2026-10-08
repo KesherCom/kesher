@@ -16,11 +16,13 @@ type MessageTarget = {
   postMessage: (message: unknown, targetOrigin: string) => void;
 };
 
+// One channel only: the app listens to both the custom event and
+// postMessage (for external bridges), so sending on both ran every
+// simulated press twice (#77).
 function emitToBridge(target: MessageTarget, payload: unknown) {
   target.dispatchEvent(
     new CustomEvent(streamDeckButtonEventName, { detail: payload }),
   );
-  target.postMessage(payload, "*");
 }
 
 export function createStreamDeckDevTools(target: MessageTarget): StreamDeckDevToolsApi {

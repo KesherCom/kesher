@@ -199,6 +199,36 @@ func TestAdminTelegramUserCreationAssignsTelegramRole(t *testing.T) {
 	if createdUser.RoleID != telegramVirtualRoleID {
 		t.Fatalf("expected role %q, got %q", telegramVirtualRoleID, createdUser.RoleID)
 	}
+
+	// An existing Kesher user keeps their role (#76).
+	if _, err := store.UpsertUser(context.Background(), "anna", "camera"); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/admin/telegram-users", bytes.NewBufferString(`{"telegramUsername":"tg_anna","kesherUsername":"anna"}`))
+	req.Header.Set("X-Admin-Pin", "123456")
+	rec = httptest.NewRecorder()
+	s.handleAdminTelegramUsers(rec, req, session)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if anna, _ := store.FindUserByUsername(context.Background(), "anna"); anna.RoleID != "camera" {
+		t.Fatalf("existing user lost their role: %q", anna.RoleID)
+	}
+}
+
+func TestTelegramPrivateChatID(t *testing.T) {
+	private := TelegramUpdate{Message: &TelegramMessage{Chat: TelegramChat{ID: 42, Type: "private"}}}
+	group := TelegramUpdate{Message: &TelegramMessage{Chat: TelegramChat{ID: -7, Type: "group"}}}
+	callback := TelegramUpdate{CallbackQuery: &TelegramCallbackQuery{Message: &TelegramMessage{Chat: TelegramChat{ID: 43, Type: "private"}}}}
+	if got := privateChatID(private); got != "42" {
+		t.Fatalf("private chat: %q", got)
+	}
+	if got := privateChatID(group); got != "" {
+		t.Fatalf("groups get no access-denied reply: %q", got)
+	}
+	if got := privateChatID(callback); got != "43" {
+		t.Fatalf("callback in private chat: %q", got)
+	}
 }
 
 func TestTelegramProcessUpdate(t *testing.T) {

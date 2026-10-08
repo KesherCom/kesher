@@ -158,7 +158,10 @@ func (t *TelegramBot) processUpdate(update TelegramUpdate) {
 	if sender != nil {
 		allowed, chatID := t.checkTelegramUserAllowed(ctx, sender)
 		if !allowed {
-			// Silently reject or send generic access denied message
+			// Tell the person in a private chat; stay silent in groups.
+			if chatID == "" {
+				chatID = privateChatID(update)
+			}
 			if chatID != "" {
 				t.sendMessage(ctx, chatID, "🚫 Access Denied. Contact the system administrator.")
 			}
@@ -230,6 +233,22 @@ func (t *TelegramBot) processUpdate(update TelegramUpdate) {
 
 // checkTelegramUserAllowed verifies if a Telegram user is on the allowlist and implements TOFU (Trust On First Use).
 // Returns (allowed, chatID) where chatID is the private chat ID for sending error messages.
+// privateChatID: the chat of an update when it is a private chat with the
+// bot, else "".
+func privateChatID(update TelegramUpdate) string {
+	var msg *TelegramMessage
+	switch {
+	case update.Message != nil:
+		msg = update.Message
+	case update.CallbackQuery != nil:
+		msg = update.CallbackQuery.Message
+	}
+	if msg == nil || msg.Chat.Type != "private" {
+		return ""
+	}
+	return strconv.FormatInt(msg.Chat.ID, 10)
+}
+
 func (t *TelegramBot) checkTelegramUserAllowed(ctx context.Context, user *TelegramUser) (bool, string) {
 	numericID := strconv.FormatInt(user.ID, 10)
 	username := user.Username
