@@ -1938,6 +1938,44 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
     return alwaysOnFallbackRoomIds.has(roomId);
   }
 
+  /** Names of the people heard on a party line right now. */
+  function roomTalkers(roomId: string): string[] {
+    if (!session.incomingAudioActive) return [];
+    const senderIds = new Set<string>();
+    for (const route of receivingRoutes) {
+      if (route.scope === "room" && route.targetID === roomId) {
+        senderIds.add(route.senderUserID);
+      }
+      if (
+        route.scope === "broadcast" &&
+        appData?.broadcastGroups
+          .find((g) => g.id === route.targetID)
+          ?.roomIds.includes(roomId)
+      ) {
+        senderIds.add(route.senderUserID);
+      }
+    }
+    if (alwaysOnFallbackRoomIds.has(roomId)) {
+      for (const p of session.presence) {
+        if (
+          p.userId !== appData?.self.id &&
+          p.voiceMode === "always_on" &&
+          p.micEnabled &&
+          p.talkRooms?.includes(roomId)
+        ) {
+          senderIds.add(p.userId);
+        }
+      }
+    }
+    const names = [...senderIds].map(
+      (id) =>
+        session.presence.find((p) => p.userId === id)?.username ||
+        appData?.users.find((u) => u.id === id)?.username ||
+        "?",
+    );
+    return [...new Set(names)].sort((a, b) => a.localeCompare(b));
+  }
+
   function isReceivingBroadcast(groupId: string) {
     if (!session.incomingAudioActive) return false;
     return receivingRoutes.some(
@@ -2046,6 +2084,8 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
         toggleTalkRoom={session.toggleTalkRoom}
         toggleListenRoom={session.toggleListenRoom}
         isReceivingRoom={isReceivingRoom}
+        roomTalkers={roomTalkers}
+        audioError={session.audioError}
         isReceivingBroadcast={isReceivingBroadcast}
         isReceivingDirect={isReceivingDirect}
         broadcastPttPressed={session.broadcastPttPressed}

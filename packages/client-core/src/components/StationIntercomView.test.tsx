@@ -732,6 +732,46 @@ describe("StationIntercomView", () => {
     expect(onAudioGateThresholdDbChange).toHaveBeenCalledWith(-40);
   });
 
+  it("shows who is talking on a party line", () => {
+    const { container } = render(
+      <StationIntercomView
+        {...baseProps}
+        roomTalkers={(roomId) => (roomId === "room-1" ? ["Ben", "Tom"] : [])}
+      />,
+    );
+    expect(screen.getByText("Ben, Tom")).toBeVisible();
+    expect(container.querySelector(".station-card-receiving")).not.toBeNull();
+  });
+
+  it("shows microphone problems in the header and opens sound settings", async () => {
+    const user = userEvent.setup();
+    const setIsUserSettingsOpen = vi.fn();
+    const { rerender } = render(
+      <StationIntercomView
+        {...baseProps}
+        audioError="Permission denied"
+        setIsUserSettingsOpen={setIsUserSettingsOpen}
+      />,
+    );
+    const mic = screen.getByRole("button", { name: /Microphone: Permission denied/ });
+    expect(mic).toHaveTextContent("Mic problem");
+    await user.click(mic);
+    expect(setIsUserSettingsOpen).toHaveBeenCalledWith(true);
+    rerender(
+      <StationIntercomView
+        {...baseProps}
+        audioError="Permission denied"
+        isUserSettingsOpen
+        setIsUserSettingsOpen={setIsUserSettingsOpen}
+      />,
+    );
+    // The sound settings section is already expanded.
+    expect(screen.getByRole("button", { name: /Sound settings/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
   it("resets a party line fader to 0 dB on double-click", () => {
     const onRoomGainChange = vi.fn();
     const { container } = render(

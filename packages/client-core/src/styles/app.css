@@ -2205,6 +2205,92 @@ button.secondary {
   justify-content: space-between;
   margin-bottom: 0;
 }
+/* Microphone at a glance (header): state, level, device. */
+.station-mic-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  max-width: 420px;
+  margin: 0 1rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.station-mic-state {
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.72);
+  white-space: nowrap;
+}
+.station-mic-meter {
+  position: relative;
+  flex: 0 0 72px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.station-mic-meter > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: #22c55e;
+  transition: width 80ms linear;
+}
+.station-mic-device {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(226, 232, 240, 0.72);
+}
+.station-mic-status.on-air {
+  border-color: #dc2626;
+  background: rgba(220, 38, 38, 0.18);
+}
+.station-mic-status.on-air .station-mic-state {
+  color: #fca5a5;
+}
+.station-mic-status.has-problem {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.16);
+}
+.station-mic-status.has-problem .station-mic-state,
+.station-mic-status.has-problem .station-mic-device {
+  color: #fcd34d;
+}
+/* Who is talking into a party line right now. */
+.station-talkers {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #93c5fd;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.station-talkers::before {
+  content: "\25B6\00a0";
+  font-size: 0.6rem;
+}
+.station-card.station-card-receiving {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px #3b82f6, 0 0 18px rgba(59, 130, 246, 0.35);
+}
+/* No keyboard on touch screens: no key hint on the talk button. */
+@media (pointer: coarse) {
+  .ptt-key-hint {
+    display: none;
+  }
+}
 .station-live {
   display: inline-flex;
   flex-direction: column;
@@ -3831,7 +3917,7 @@ button.secondary {
   .station-shell {
     display: flex;
     flex-direction: column;
-    padding-bottom: calc(13rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(10rem + env(safe-area-inset-bottom, 0px));
   }
   .station-header {
     position: static;
@@ -3866,11 +3952,29 @@ button.secondary {
   .station-controls.station-controls-hidden-mobile {
     display: none;
   }
+  .station-topbar {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+    margin-bottom: 0.75rem;
+  }
+  .station-mic-status {
+    order: 3;
+    box-sizing: border-box;
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    overflow: hidden;
+    /* Long device names or errors must not widen the page. */
+    contain: inline-size;
+  }
+  /* The fixed talk bar at the bottom: big enough for a thumb, small
+     enough to leave the party lines visible. */
   .station-ptt {
     width: 100%;
     min-width: 0;
-    height: clamp(140px, 38vw, 220px);
-    min-height: 140px;
+    height: clamp(88px, 24vw, 140px);
+    min-height: 88px;
     border-radius: 16px;
   }
   .station-always-on {
@@ -3879,13 +3983,13 @@ button.secondary {
   .station-reply {
     width: 100%;
     min-width: 0;
-    height: clamp(140px, 38vw, 220px);
-    min-height: 140px;
+    height: clamp(88px, 24vw, 140px);
+    min-height: 88px;
     border-radius: 16px;
   }
   .station-controls button {
     min-width: 0;
-    min-height: 140px;
+    min-height: 88px;
   }
   .station-reply small {
     text-align: center;

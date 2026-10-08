@@ -16,6 +16,7 @@ import {
 import {
   clampGainValue,
   clampInputGainValue,
+  loadSessionSettings,
   micInputBaseBoost,
 } from "../app/settings";
 import { gainWithDbDelta } from "../lib/streamDeckBridge";
@@ -523,6 +524,8 @@ export type UseIntercomSessionResult = {
   rtpStats: RtpStats;
   incomingAudioActive: boolean;
   activeVoiceRoutes: VoiceRoute[];
+  /** Last microphone/audio problem ("" when fine). */
+  audioError: string;
   incomingAttention: { title: string; detail: string } | null;
   lastCompanionCommand: {
     command: string;
@@ -625,7 +628,7 @@ export function useIntercomSession({
   const [connectionState, setConnectionState] = useState<
     "connecting" | "connected" | "reconnecting" | "offline"
   >("offline");
-  const [, setAudioError] = useState("");
+  const [audioError, setAudioError] = useState("");
   const [, setWebrtcState] = useState("");
   const [presence, setPresence] = useState<Presence[]>([]);
   const [chatMessages, setChatMessages] = useState<
@@ -1814,27 +1817,41 @@ export function useIntercomSession({
         ? hadStoredSessionSettings
         : false;
       const hadStored = isInitial ? hadStoredSessionSettings : false;
+      let restored = false;
       if (hadStored) {
-        setListenRoomIds((prev) => {
-          const sanitized = prev.filter((roomId) => {
-            const room = data.rooms.find((entry) => entry.id === roomId);
-            return (
-              !!room && roleAllowed(room.receiverRoleIds, data.self.roleId)
-            );
-          });
-          return mergeForcedListenRooms(
-            sanitized,
-            data.rooms,
-            data.self.roleId,
-          );
+        // The login screen stores the role's default party line right before
+        // logging in, after this hook read its initial state: fall back to
+        // what is stored, so a fresh login does not start in silence.
+        const stored = loadSessionSettings();
+        const previousListen = listenRoomIdsRef.current.length
+          ? listenRoomIdsRef.current
+          : stored.listenRoomIds;
+        const previousTalk = talkRoomIdsRef.current.length
+          ? talkRoomIdsRef.current
+          : stored.talkRoomIds;
+        const sanitizedListen = previousListen.filter((roomId) => {
+          const room = data.rooms.find((entry) => entry.id === roomId);
+          return !!room && roleAllowed(room.receiverRoleIds, data.self.roleId);
         });
-        setTalkRoomIds((prev) =>
-          prev.filter((roomId) => {
-            const room = data.rooms.find((entry) => entry.id === roomId);
-            return !!room && roleAllowed(room.senderRoleIds, data.self.roleId);
-          }),
-        );
-      } else {
+        const sanitizedTalk = previousTalk.filter((roomId) => {
+          const room = data.rooms.find((entry) => entry.id === roomId);
+          return !!room && roleAllowed(room.senderRoleIds, data.self.roleId);
+        });
+        // Nothing usable stored (e.g. another role's rooms): use the
+        // defaults below instead of hearing nothing.
+        if (sanitizedListen.length > 0 || sanitizedTalk.length > 0) {
+          setListenRoomIds(
+            mergeForcedListenRooms(
+              sanitizedListen,
+              data.rooms,
+              data.self.roleId,
+            ),
+          );
+          setTalkRoomIds(sanitizedTalk);
+          restored = true;
+        }
+      }
+      if (!restored) {
         let initialRoom = "";
         if (roleDefaults?.defaultRoomId) {
           initialRoom = roleDefaults.defaultRoomId;
@@ -2791,6 +2808,7 @@ export function useIntercomSession({
       ? performanceIncomingActive
       : remote.incomingAudioActive,
     activeVoiceRoutes,
+    audioError,
     incomingAttention,
     lastCompanionCommand,
     attentionFlashKey,

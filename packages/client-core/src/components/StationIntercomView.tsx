@@ -313,6 +313,10 @@ type StationIntercomViewProps = {
   toggleTalkRoom: (roomId: string) => void;
   toggleListenRoom: (roomId: string) => void;
   isReceivingRoom: (roomId: string) => boolean;
+  /** Who is talking into a party line right now (names). */
+  roomTalkers?: (roomId: string) => string[];
+  /** Microphone/audio problem to show in the header ("" when fine). */
+  audioError?: string;
   isReceivingBroadcast: (groupId: string) => boolean;
   isReceivingDirect: (userId: string) => boolean;
   broadcastPttPressed: string | null;
@@ -437,6 +441,8 @@ export function StationIntercomView({
   toggleTalkRoom,
   toggleListenRoom,
   isReceivingRoom,
+  roomTalkers,
+  audioError = "",
   isReceivingBroadcast,
   isReceivingDirect,
   broadcastPttPressed,
@@ -1502,6 +1508,43 @@ export function StationIntercomView({
               {roleNameById.get(appData.self.roleId) || appData.self.roleId}
             </div>
           </div>
+          {(() => {
+            // Microphone at a glance: level, device, whether we are sending,
+            // and problems that used to stay invisible. Opens sound settings.
+            const micOpen =
+              pttPressed ||
+              voiceMode === "always_on" ||
+              !!directPttPressedUserId ||
+              !!broadcastPttPressed;
+            const inputLabel =
+              inputDevices.find((d) => d.deviceId === selectedInputDeviceId)
+                ?.label || "Default microphone";
+            const problem =
+              audioError ||
+              (inputDevices.length === 0 ? "No microphone found" : "");
+            return (
+              <button
+                type="button"
+                className={`station-mic-status ${micOpen ? "on-air" : ""} ${problem ? "has-problem" : ""}`}
+                onClick={() => {
+                  setIsUserSettingsOpen(true);
+                  setIsAudioOpen(true);
+                }}
+                title="Sound settings"
+                aria-label={`Microphone: ${problem || (micOpen ? "on air" : "off")}, ${inputLabel}. Open sound settings`}
+              >
+                <span className="station-mic-state">
+                  {problem ? "Mic problem" : micOpen ? "On air" : "Mic off"}
+                </span>
+                <span className="station-mic-meter" aria-hidden="true">
+                  <span
+                    style={{ width: `${problem ? 0 : meterDbFsToPercent(inputLevelDbFs)}%` }}
+                  />
+                </span>
+                <span className="station-mic-device">{problem || inputLabel}</span>
+              </button>
+            );
+          })()}
           <div className="station-top-actions">
             <button
               className="station-top-admin"
@@ -1597,10 +1640,11 @@ export function StationIntercomView({
                     : ""
                 }`;
 
+                const talkers = roomTalkers?.(room.id) ?? [];
                 return (
                   <article
                     key={`station-room-${room.id}`}
-                    className="station-card"
+                    className={`station-card ${talkers.length > 0 ? "station-card-receiving" : ""}`}
                   >
                     {listenerCount > 0 ? (
                       <span
@@ -1643,11 +1687,16 @@ export function StationIntercomView({
                           : "Your role is not allowed to send to this party line"
                       }
                     >
-                      {isReceivingRoom(room.id) ? (
+                      {isReceivingRoom(room.id) && talkers.length === 0 ? (
                         <span className="station-receiving-badge">RX</span>
                       ) : null}
                       <small>Talk</small>
                       <strong>{room.name}</strong>
+                      {talkers.length > 0 ? (
+                        <span className="station-talkers" title="Talking now">
+                          {talkers.join(", ")}
+                        </span>
+                      ) : null}
                       {(() => {
                         const p = room.priorityLevel ?? 1;
                         if (p === 1) return null;
