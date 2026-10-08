@@ -95,9 +95,13 @@ make run-production-certmagic DOMAIN=intercom.example.org DNS_PROVIDER=cloudflar
 
 ## Docker
 
-**Running a server?** Start with [docs/deployment/server.md](docs/deployment/server.md):
-on a Linux server you only need two files from [`deploy/server`](deploy/server)
-and the published image `ghcr.io/keshercom/kesher-selfsigned`, no source code.
+**Running a server?** Start with [docs/deployment/server.md](docs/deployment/server.md).
+On a Linux server one command installs everything (Docker, published image,
+firewall, `kesher` management command):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/KesherCom/kesher/main/deploy/server/install.sh | sudo bash
+```
 
 The rest of this section builds the image from the repository with the
 compose files in `deploy/compose` (development, Docker Desktop, own domain).

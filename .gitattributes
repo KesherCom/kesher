@@ -2,3 +2,5 @@
 *.sh text eol=lf
 # Installed on Linux devices as-is (systemd unit, maintainer scripts, config).
 deploy/node/** text eol=lf
+# Server installer and helper, downloaded and run on Linux servers.
+deploy/server/** text eol=lf

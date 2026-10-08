@@ -5,7 +5,7 @@ desktop app, Raspberry Pi stations) connect to it. Pick the way that fits:
 
 | Where | How | Section |
 | --- | --- | --- |
-| **Linux server** (permanent installation, up to ~50 people) | Docker with the published image, no source code needed | [Linux server with Docker](#linux-server-with-docker-recommended) |
+| **Linux server** (permanent installation, up to ~50 people) | One install command (Docker, published image) | [Linux server with Docker](#linux-server-with-docker-recommended) |
 | Windows or Mac PC (small setup, rehearsal, test) | Download the server program and start it | [Windows or Mac PC](#windows-or-mac-pc) |
 | Windows or Mac with Docker Desktop | Build from the repository | [Docker Desktop](#docker-desktop-windows-or-mac) |
 | Trusted certificate for your own domain | Let's Encrypt via DNS | [README: Docker](../../README.md#docker), `docker-compose.certmagic.yml` |
@@ -17,68 +17,50 @@ certificate: each device confirms a warning once, then it works.
 
 ## Linux server with Docker (recommended)
 
-Works on any 64-bit Linux server (x86 or ARM) with Docker. The container
-uses the server's network directly (`network_mode: host`): no port mapping
-in the audio path, and no IP address to configure.
+Works on any 64-bit Linux server (x86 or ARM): Debian, Ubuntu, Raspberry Pi
+OS, Fedora and others. Kesher runs in Docker and uses the server's network
+directly (`network_mode: host`): no port mapping in the audio path, and no
+IP address to configure.
 
-### 1. Install Docker
-
-```sh
-curl -fsSL https://get.docker.com | sudo sh
-```
-
-### 2. Get the two files
-
-Create a folder and download `docker-compose.yml` and `.env.example` from
-[`deploy/server`](../../deploy/server) of the release you want (replace
-`v0.9.0` with the current release from the
-[releases page](https://github.com/KesherCom/kesher/releases)):
+### Install with one command
 
 ```sh
-sudo mkdir -p /opt/kesher && cd /opt/kesher
-sudo curl -fsSLO https://raw.githubusercontent.com/KesherCom/kesher/v0.9.0/deploy/server/docker-compose.yml
-sudo curl -fsSL -o .env https://raw.githubusercontent.com/KesherCom/kesher/v0.9.0/deploy/server/.env.example
+curl -fsSL https://raw.githubusercontent.com/KesherCom/kesher/main/deploy/server/install.sh | sudo bash
 ```
 
-### 3. Set the admin PIN
+The installer:
+
+1. installs Docker if it is missing (asks first),
+2. sets up `/opt/kesher` and asks for an **admin PIN**,
+3. downloads the server image and opens the firewall ports (ufw or
+   firewalld),
+4. starts Kesher, which then also starts after every reboot,
+5. installs the `kesher` command and prints the addresses to open.
+
+Running it again is safe: settings and data are kept, the server is
+updated.
+
+**Before the first release with Docker images** (or to test a branch), let
+it build the image from that branch instead of downloading it:
 
 ```sh
-sudo nano .env
+curl -fsSL https://raw.githubusercontent.com/KesherCom/kesher/dev/deploy/server/install.sh | sudo bash -s -- --build --ref dev
 ```
 
-Set `ADMIN_PIN=` to your own PIN. Everything else can stay as it is. For
-events, set `KESHER_VERSION` to a fixed release (e.g. `0.9.0`) so the
-server only changes when you decide to.
+Options (after `bash -s --`):
 
-### 4. Open the firewall
+| Option | Meaning |
+| --- | --- |
+| `--pin PIN` | admin PIN without asking (letters, digits, `.` `-` `_`) |
+| `--version 0.9.0` | a fixed release instead of `latest` (recommended for events) |
+| `--build --ref BRANCH` | build the image from a branch on this machine |
+| `--dir DIR` | install somewhere else than `/opt/kesher` |
+| `--yes` | no questions (for scripts) |
 
-| Port | Protocol | For |
-| --- | --- | --- |
-| 8443 | TCP | web UI and API |
-| 8081 | UDP | audio of the desktop app and the Pi stations |
-| 8082 | UDP | audio of browsers |
-
-With `ufw`:
-
-```sh
-sudo ufw allow 8443/tcp && sudo ufw allow 8081:8082/udp
-```
-
-### 5. Start
-
-```sh
-sudo docker compose up -d
-sudo docker compose logs -f
-```
-
-The log shows `generated self-signed certificate for ...` with the server's
-addresses, then `starting server`. Stop following the log with Ctrl+C; the
-server keeps running and starts again after a reboot.
-
-### 6. Connect
+### Connect
 
 - **Browser:** open `https://<server-ip>:8443`, accept the certificate
-  warning once, log in. The admin area uses the PIN from step 3.
+  warning once, log in. The admin area uses your admin PIN.
 - **Desktop app:** server address `https://<server-ip>:8443`.
 - **Raspberry Pi station:** in `/etc/kesher/node.toml`
   `server = "https://<server-ip>:8443"` and `tls_insecure = true` (the
@@ -86,26 +68,46 @@ server keeps running and starts again after a reboot.
 
 ### Everyday tasks
 
-All commands in `/opt/kesher`:
-
 | Task | Command |
 | --- | --- |
-| Status / logs | `sudo docker compose ps` / `sudo docker compose logs -f` |
-| Update | set `KESHER_VERSION` in `.env` (or keep `latest`), then `sudo docker compose pull && sudo docker compose up -d` |
-| Restart | `sudo docker compose restart` |
-| Stop | `sudo docker compose down` (data is kept) |
-| Back up the database | `sudo docker compose cp kesher:/app/data/intercom.db ./intercom-backup.db` |
-| New certificate (after the server's IP changed) | `sudo docker compose down && sudo docker volume rm kesher_kesher_certs && sudo docker compose up -d` |
+| Is it running? Which addresses? | `kesher status` |
+| Follow the log | `kesher logs` |
+| Update to the newest version | `sudo kesher update` |
+| Switch to a specific version | `sudo kesher update 0.9.0` |
+| Restart (e.g. after editing `/opt/kesher/.env`) | `sudo kesher restart` |
+| Back up the database | `sudo kesher backup` |
+| New certificate (after the server's IP changed) | `sudo kesher new-certificate` |
+| Remove (keeps data; `--purge` deletes it) | `sudo kesher uninstall` |
+
+Settings (admin PIN, ports, version) are in `/opt/kesher/.env`.
+
+### Manual installation (without the installer)
+
+The installer only automates these steps:
+
+1. Install Docker: `curl -fsSL https://get.docker.com | sudo sh`
+2. Put [`docker-compose.yml`](../../deploy/server/docker-compose.yml) and
+   [`.env.example`](../../deploy/server/.env.example) into `/opt/kesher`,
+   rename `.env.example` to `.env` and set `ADMIN_PIN=`.
+3. Open 8443/TCP and 8081-8082/UDP, e.g.
+   `sudo ufw allow 8443/tcp && sudo ufw allow 8081:8082/udp`.
+4. In `/opt/kesher`: `sudo docker compose up -d`.
+
+| Port | Protocol | For |
+| --- | --- | --- |
+| 8443 | TCP | web UI and API |
+| 8081 | UDP | audio of the desktop app and the Pi stations |
+| 8082 | UDP | audio of browsers |
 
 ### If something does not work
 
 | Symptom | Fix |
 | --- | --- |
-| `set ADMIN_PIN in .env` on start | Step 3: `ADMIN_PIN=` must not be empty. |
-| Page loads, but no audio | UDP 8081 and 8082 must be open (step 4), also in firewalls between clients and server. |
-| Audio only works on some networks | The server has several networks: set `KESHER_PUBLIC_IP` in `.env` to the address clients use, then recreate the certificate (table above). |
+| Page loads, but no audio | UDP 8081 and 8082 must be open, also in firewalls between clients and server. |
+| Audio only works on some networks | The server has several networks: set `KESHER_PUBLIC_IP` in `/opt/kesher/.env` to the address clients use, then `sudo kesher new-certificate`. |
 | Browser: no microphone | Use `https://`, not `http://`. |
-| `pull access denied` | The image is not public yet (maintainers: see [Releases](../releases/README.md)). |
+| `cannot download ghcr.io/...` | No release with Docker images yet: install with `--build --ref <branch>`. Maintainers: images must be public (see [Releases](../releases/README.md)). |
+| Server does not start | `kesher logs` shows why. |
 
 ## Windows or Mac PC
 

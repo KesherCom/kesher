@@ -1,6 +1,7 @@
 # Kesher server on a Linux host, from the published image. No source code
 # or build needed. Full guide: docs/deployment/server.md
 #
+# Usually set up by install.sh (one command, see the guide). By hand:
 #   1. put this file and .env.example into one folder, e.g. /opt/kesher
 #   2. cp .env.example .env    and set ADMIN_PIN
 #   3. docker compose up -d

@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# kesher: manage the Kesher server installed by deploy/server/install.sh.
+# Installed as /usr/local/bin/kesher. Run `kesher help`.
+set -euo pipefail
+
+DIR="${KESHER_DIR:-/opt/kesher}"
+REPO="KesherCom/kesher"
+
+die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+
+usage() {
+  cat <<'EOF'
+kesher - manage the Kesher server
+
+  kesher status            is it running? which version, which addresses
+  kesher logs              follow the server log (Ctrl+C to stop)
+  kesher update            install the newest version (keeps settings and data)
+  kesher update X.Y.Z      switch to a specific version
+  kesher restart           restart, e.g. after editing /opt/kesher/.env
+  kesher stop | start      stop or start the server
+  kesher backup [FILE]     copy the database (default: kesher-backup-<date>.db)
+  kesher new-certificate   make a new HTTPS certificate (after an IP change)
+  kesher uninstall         stop and remove the server (data is kept;
+                           add --purge to delete data and certificates too)
+EOF
+}
+
+[ -f "$DIR/docker-compose.yml" ] || die "no installation in $DIR (run install.sh first)"
+cd "$DIR"
+compose() { docker compose "$@"; }
+need_root() { [ "$(id -u)" = 0 ] || die "please run with sudo: sudo kesher $*"; }
+env_value() { sed -n "s/^$1=//p" .env | tail -n 1; }
+REF="$(sed -n 's/^REF=//p' .install 2>/dev/null)"; REF="${REF:-main}"
+BUILD="$(sed -n 's/^BUILD=//p' .install 2>/dev/null)"; BUILD="${BUILD:-0}"
+PORT="$(env_value KESHER_HTTPS_PORT)"; PORT="${PORT:-8443}"
+
+addresses() {
+  ip -o -4 addr show scope global 2>/dev/null \
+    | awk '$2 !~ /^(docker|br-|veth|virbr|cni|flannel)/ {print $4}' | cut -d/ -f1 \
+    | while read -r ip; do printf '   https://%s:%s\n' "$ip" "$PORT"; done
+}
+
+case "${1:-help}" in
+  status)
+    compose ps
+    if curl -fsk "https://127.0.0.1:$PORT/api/healthz" >/dev/null 2>&1; then
+      printf '\nKesher is running (image %s). Addresses:\n' "$(docker inspect --format '{{.Config.Image}}' kesher 2>/dev/null || echo '?')"
+      addresses
+    else
+      printf '\nKesher does not answer on port %s. See: kesher logs\n' "$PORT"
+    fi
+    ;;
+  logs)
+    compose logs -f --tail 100
+    ;;
+  update)
+    need_root update
+    if [ -n "${2:-}" ]; then
+      v="${2#v}"
+      sed -i "s|^KESHER_VERSION=.*|KESHER_VERSION=$v|" .env
+      grep -q '^KESHER_VERSION=' .env || echo "KESHER_VERSION=$v" >> .env
+    fi
+    # Same steps as the installer; it keeps .env and the data.
+    curl -fsSL "https://raw.githubusercontent.com/$REPO/$REF/deploy/server/install.sh" \
+      | KESHER_DIR="$DIR" bash -s -- --ref "$REF" --yes $([ "$BUILD" = 1 ] && echo --build)
+    ;;
+  restart)
+    need_root restart
+    compose up -d --force-recreate
+    ;;
+  stop)
+    need_root stop
+    compose stop
+    ;;
+  start)
+    need_root start
+    compose up -d
+    ;;
+  backup)
+    need_root backup
+    file="${2:-kesher-backup-$(date +%Y%m%d-%H%M).db}"
+    case "$file" in /*) ;; *) file="$OLDPWD/$file" ;; esac
+    compose --progress quiet cp kesher:/app/data/intercom.db "$file"
+    say "database saved to $file"
+    ;;
+  new-certificate)
+    need_root new-certificate
+    compose down
+    # Project "kesher" (name: in docker-compose.yml) -> volume kesher_kesher_certs.
+    docker volume rm kesher_kesher_certs >/dev/null
+    compose up -d
+    say "new certificate created; every device confirms the warning once again"
+    ;;
+  uninstall)
+    need_root uninstall
+    if [ "${2:-}" = "--purge" ]; then
+      compose down -v
+      rm -rf "$DIR"
+      say "removed Kesher including data and certificates"
+    else
+      compose down
+      say "removed the server; data and settings are kept in $DIR and the Docker volumes"
+    fi
+    rm -f /usr/local/bin/kesher
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac

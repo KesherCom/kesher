@@ -30,7 +30,7 @@ make lab-down
 make clean
 ```
 
-Docker: one image `deploy/docker/Dockerfile` (targets `runtime`, `selfsigned`), published on release tags as `ghcr.io/keshercom/kesher` / `kesher-selfsigned` (amd64+arm64). `deploy/server/` = production Linux setup from the published image (`network_mode: host`, only `ADMIN_PIN` required; guide `docs/deployment/server.md`). `deploy/compose/` = build-from-source compose files (dev, Docker Desktop, CertMagic).
+Docker: one image `deploy/docker/Dockerfile` (targets `runtime`, `selfsigned`), published on release tags as `ghcr.io/keshercom/kesher` / `kesher-selfsigned` (amd64+arm64). `deploy/server/` = production Linux setup from the published image (`network_mode: host`, only `ADMIN_PIN` required): `install.sh` (one-command installer, `--build --ref <branch>` builds the image locally; `KESHER_SOURCE_DIR` for testing from a checkout) and the `kesher` management command; guide `docs/deployment/server.md`. `deploy/compose/` = build-from-source compose files (dev, Docker Desktop, CertMagic).
 WebRTC in containers needs `WEBRTC_UDP_PORT` (single UDP mux port, published 1:1) and `WEBRTC_PUBLIC_IPS` (host LAN IP).
 Test lab lives in `testlab/` (own `package.json`, Playwright); see `testlab/README.md`. The benchmark binary is `crates/kesher-audio/src/bin/kesher_audio_bench.rs` (cargo feature `bench`, never bundled); it drives the real engine (`crates/kesher-audio/src/native.rs`) through `VirtualDevice`.
 
