@@ -36,7 +36,7 @@ The approved draft is the design canvas "Kesher Redesign Entwurf"
 
 ## Limits
 
-- `theme.css`/`app.css` still hold the old values; screens move over one by
-  one, so for a while old and new styles coexist.
-- IBM Plex has to be bundled for offline use (no CDN on a LAN without
-  internet).
+- `app.css` still uses some older variable names; `theme.css` maps each of
+  them onto a token, so they cannot drift apart.
+- IBM Plex is bundled (`@fontsource/ibm-plex-sans`, `-mono`) so it works on
+  a LAN without internet; it adds about 0.5 MB of font files to the build.

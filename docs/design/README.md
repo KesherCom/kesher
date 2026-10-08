@@ -3,8 +3,20 @@
 The rules every screen follows: station view (browser, desktop app), admin
 console, login. The values live in
 [`packages/client-core/src/styles/tokens.css`](../../packages/client-core/src/styles/tokens.css)
-as `--k-*` variables. New and reworked UI uses only those; the older
-`theme.css`/`app.css` move over step by step.
+as `--k-*` variables. New and reworked UI uses only those.
+
+Where things live in `packages/client-core/src`:
+
+- `styles/tokens.css`: the values (colors, type, spacing, radii).
+- `styles/theme.css`: older variable names still used in `app.css`, each
+  pointing at a token. No raw colors there; drop a name once nothing uses it.
+- `styles/app.css`: component styles. Base controls (`input`, `select`,
+  `button`) are 44 px with radius 10; button kinds are `.primary`,
+  `.secondary` (also plain `<button>`) and `.danger`; icon-only buttons use
+  `.k-icon-button`.
+- `components/Icon.tsx`: the icon set (`<Icon name="headphones" />`).
+- Fonts: IBM Plex is bundled (`@fontsource/*`), so it works on a LAN
+  without internet.
 
 The approved draft (visual system, station desktop and phone, clickable) is the
 design canvas "Kesher Redesign Entwurf" on claude.ai:

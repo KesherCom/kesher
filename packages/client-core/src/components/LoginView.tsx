@@ -41,16 +41,24 @@ export function LoginView({
     <div className="root login">
       <div className="login-card panel">
         <div className="login-card-head">
-          <img className="brand-logo" src={logoUrl} alt="" width={56} height={56} />
-          <h1>kesher - Live Production Intercom</h1>
-          <p className="variant-subtitle">Station Deck</p>
+          <img
+            className="brand-logo"
+            src={logoUrl}
+            alt=""
+            width={56}
+            height={56}
+          />
+          <h1>Kesher</h1>
+          <p className="variant-subtitle">Live production intercom</p>
         </div>
         <div className="login-form">
           <label>
             <span className="login-label-text">Display name</span>
             <input
               value={username}
-              onChange={(e) => onUsernameChange(stripWhitespace(e.target.value))}
+              onChange={(e) =>
+                onUsernameChange(stripWhitespace(e.target.value))
+              }
               placeholder="e.g. Tim FOH"
             />
           </label>
@@ -82,8 +90,8 @@ export function LoginView({
                 <h3>Role currently in use</h3>
               </div>
               <p className="login-admin-note">
-                {takeoverConflict.conflictRoleName || takeoverConflict.conflictRoleId}
-                {" "}
+                {takeoverConflict.conflictRoleName ||
+                  takeoverConflict.conflictRoleId}{" "}
                 is currently active
                 {takeoverConflict.conflictUsername
                   ? ` by ${takeoverConflict.conflictUsername}`

@@ -112,7 +112,12 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
     gridColumns: 5,
     gridRows: 3,
     selectedPage: 0,
-    pages: [{ page: 0, buttons: Array.from({ length: 15 }, (_, i) => ({ index: i })) }],
+    pages: [
+      {
+        page: 0,
+        buttons: Array.from({ length: 15 }, (_, i) => ({ index: i })),
+      },
+    ],
   },
   streamDeckBusy: false,
   streamDeckError: "",
@@ -362,21 +367,14 @@ describe("StationIntercomView", () => {
 
   it("offers stream deck navigation and folder functions in user settings", async () => {
     const user = userEvent.setup();
-    render(
-      <StationIntercomView
-        {...baseProps}
-        isUserSettingsOpen
-      />,
-    );
+    render(<StationIntercomView {...baseProps} isUserSettingsOpen />);
 
     await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
 
     expect(
       screen.getByRole("option", { name: "Volume +/-" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("option", { name: "Page up" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Page up" })).toBeInTheDocument();
     expect(
       screen.getByRole("option", { name: "Page down" }),
     ).toBeInTheDocument();
@@ -636,9 +634,13 @@ describe("StationIntercomView", () => {
       },
     };
 
-    const file = new File([JSON.stringify(importedSettings)], "streamdeck.json", {
-      type: "application/json",
-    });
+    const file = new File(
+      [JSON.stringify(importedSettings)],
+      "streamdeck.json",
+      {
+        type: "application/json",
+      },
+    );
 
     await user.upload(input!, file);
 
@@ -739,8 +741,10 @@ describe("StationIntercomView", () => {
         roomTalkers={(roomId) => (roomId === "room-1" ? ["Ben", "Tom"] : [])}
       />,
     );
-    expect(screen.getByText("Ben, Tom")).toBeVisible();
-    expect(container.querySelector(".station-card-receiving")).not.toBeNull();
+    expect(screen.getByText("Ben, Tom are talking")).toBeVisible();
+    expect(
+      container.querySelector(".station-card.is-receiving"),
+    ).not.toBeNull();
   });
 
   it("shows microphone problems in the header and opens sound settings", async () => {
@@ -753,7 +757,9 @@ describe("StationIntercomView", () => {
         setIsUserSettingsOpen={setIsUserSettingsOpen}
       />,
     );
-    const mic = screen.getByRole("button", { name: /Microphone: Permission denied/ });
+    const mic = screen.getByRole("button", {
+      name: /Microphone: Permission denied/,
+    });
     expect(mic).toHaveTextContent("Mic problem");
     await user.click(mic);
     expect(setIsUserSettingsOpen).toHaveBeenCalledWith(true);
@@ -766,18 +772,26 @@ describe("StationIntercomView", () => {
       />,
     );
     // The sound settings section is already expanded.
-    expect(screen.getByRole("button", { name: /Sound settings/ })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
+    expect(
+      screen.getByRole("button", { name: /Sound settings/ }),
+    ).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("resets a party line fader to 0 dB on double-click", () => {
+  it("opens a party line fader from its dB value; double-click resets to 0 dB", async () => {
+    const user = userEvent.setup();
     const onRoomGainChange = vi.fn();
     const { container } = render(
-      <StationIntercomView {...baseProps} onRoomGainChange={onRoomGainChange} />,
+      <StationIntercomView
+        {...baseProps}
+        onRoomGainChange={onRoomGainChange}
+      />,
     );
-    const fader = container.querySelector<HTMLInputElement>("#room-gain-room-1");
+    expect(container.querySelector("#room-gain-room-1")).toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "Volume Party Line 1: 0 dB" }),
+    );
+    const fader =
+      container.querySelector<HTMLInputElement>("#room-gain-room-1");
     expect(fader).not.toBeNull();
     fireEvent.doubleClick(fader!);
     expect(onRoomGainChange).toHaveBeenCalledWith("room-1", 1);

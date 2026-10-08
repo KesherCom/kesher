@@ -18,6 +18,8 @@
   --k-attention: #fb923c; /* something is wrong */
   --k-attention-tint: rgba(251, 146, 60, 0.14);
   --k-selection: #22d3ee; /* navigation and focus only, never a status */
+  --k-danger-bg: #2a1416; /* danger buttons (kick, delete) */
+  --k-danger-border: #7f1d1d;
 
   /* Neutrals */
   --k-ground: #0e1116;

@@ -1,4 +1,5 @@
 import type { Bootstrap } from "../../types";
+import { Icon } from "../Icon";
 import { AdminMenu } from "./AdminMenu";
 
 type AdminShellProps = {
@@ -43,16 +44,27 @@ export function AdminShell({
         <div>
           <h1>Admin console</h1>
           <p className="admin-shell-user">
-            Signed in as {displayUsername} ({adminRoleLabel})
+            {displayUsername
+              ? `Signed in as ${displayUsername} (${adminRoleLabel})`
+              : `Signed in as ${adminRoleLabel.toLowerCase() || "admin"}`}
           </p>
         </div>
         <div className="admin-shell-actions">
-          <button onClick={() => void onRefresh()}>Refresh</button>
           <button
-            className="station-top-logout"
+            type="button"
+            className="secondary"
+            onClick={() => void onRefresh()}
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
+            className="k-icon-button"
+            aria-label="Log out and lock"
+            title="Log out and lock"
             onClick={() => void onLogout()}
           >
-            Logout / Lock
+            <Icon name="lock" />
           </button>
         </div>
       </div>
