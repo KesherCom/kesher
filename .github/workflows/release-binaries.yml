@@ -15,6 +15,13 @@ on:
 permissions:
   contents: write
 
+env:
+  # The opus crate (audiopus_sys) builds the bundled libopus with
+  # cmake_minimum_required(VERSION 3.1), which CMake 4 (on the runners)
+  # rejects; this lets CMake 4 configure it. Used where Opus is built from
+  # source (Windows desktop).
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+
 jobs:
   # 1. Backend & Web CI/Release
   build:
@@ -265,7 +272,8 @@ jobs:
   build-desktop-macos-amd64:
     if: ${{ github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || contains(github.event.head_commit.message, '[full-build]') }}
     name: Build Desktop (macOS amd64)
-    runs-on: macos-13
+    # macos-13 was retired; macos-15-intel is the remaining Intel image.
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
