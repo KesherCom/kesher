@@ -374,6 +374,9 @@ webrtc_public_ips: []
 | `WEBRTC_PUBLIC_IPS`             | _(empty)_     | IP advertised to browsers instead of the local interface IPs (Docker host LAN IP)    |
 | `UDP_AUDIO_ADDR`                | `:8081`       | Native (desktop app) UDP audio relay listen address; empty disables it               |
 | `UDP_AUDIO_ADVERTISE_IP`        | _(empty)_     | IP advertised to the desktop app for the UDP relay (default: host from the request)  |
+| `LAN_HTTP_ADDR`                 | _(empty)_     | Extra plain-HTTP listener (e.g. `:8080`) next to HTTPS, for the desktop app and Pi stations on the LAN |
+| `MDNS_ENABLED`                  | `true`        | Announce the server on the LAN (mDNS `_kesher._tcp`) so apps and stations find it      |
+| `MDNS_NAME`                     | `Kesher (<hostname>)` | Name shown when apps and stations find the server                              |
 | `COMPANION_SHARED_SECRET`       | _(empty)_     | Optional shared secret required by Companion discovery and bridge endpoints           |
 | `COMPANION_ALLOWED_USERNAMES`   | _(empty)_     | Optional comma-separated allowlist of usernames that may be controlled by Companion   |
 

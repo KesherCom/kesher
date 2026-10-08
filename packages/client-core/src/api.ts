@@ -8,6 +8,7 @@ import type {
   ConfigurationDocument,
   ConfigurationImportResponse,
   ConfigurationSection,
+  Device,
   LoginConflict,
   LoginSuccess,
   PublicBootstrap,
@@ -903,6 +904,30 @@ export async function getTelegramAllowlist(
   });
   if (!res.ok) throw new Error("failed to load telegram allowlist");
   return res.json() as Promise<TelegramAllowlistEntry[]>;
+}
+
+export async function getAdminDevices(token: string, adminPin: string): Promise<Device[]> {
+  const res = await fetch(apiUrl("/api/admin/devices"), {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+    },
+  });
+  if (!res.ok) throw new Error("failed to load devices");
+  return res.json() as Promise<Device[]>;
+}
+
+export async function updateAdminDevice(
+  token: string,
+  adminPin: string,
+  id: string,
+  payload: { name: string; roleId: string; mode: Device["mode"]; status: Device["status"] },
+): Promise<void> {
+  await apiMutation(`/api/admin/devices/${encodeURIComponent(id)}`, token, "PUT", adminPin, payload);
+}
+
+export async function deleteAdminDevice(token: string, adminPin: string, id: string): Promise<void> {
+  await apiMutation(`/api/admin/devices/${encodeURIComponent(id)}`, token, "DELETE", adminPin);
 }
 
 export async function createTelegramAllowlistEntry(

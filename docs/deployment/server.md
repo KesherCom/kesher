@@ -61,10 +61,15 @@ Options (after `bash -s --`):
 
 - **Browser:** open `https://<server-ip>:8443`, accept the certificate
   warning once, log in. The admin area uses your admin PIN.
-- **Desktop app:** server address `https://<server-ip>:8443`.
-- **Raspberry Pi station:** in `/etc/kesher/node.toml`
-  `server = "https://<server-ip>:8443"` and `tls_insecure = true` (the
-  certificate is self-signed); see [raspberry-pi.md](../hardware/raspberry-pi.md).
+- **Desktop app:** the connection screen lists the server under "Im
+  Netzwerk gefunden"; click *Verbinden*. Otherwise enter
+  `http://<server-ip>:8080` (the app uses plain HTTP on the LAN; it cannot
+  click through a self-signed certificate warning like a browser).
+- **Raspberry Pi station:** install the package; the station finds the
+  server and appears in the admin area under **Stations** for approval.
+  See [raspberry-pi.md](../hardware/raspberry-pi.md).
+
+Discovery works within one network. Background: [decision 0005](../decisions/0005-zero-config-stations.md).
 
 ### Everyday tasks
 
@@ -89,21 +94,24 @@ The installer only automates these steps:
 2. Put [`docker-compose.yml`](../../deploy/server/docker-compose.yml) and
    [`.env.example`](../../deploy/server/.env.example) into `/opt/kesher`,
    rename `.env.example` to `.env` and set `ADMIN_PIN=`.
-3. Open 8443/TCP and 8081-8082/UDP, e.g.
-   `sudo ufw allow 8443/tcp && sudo ufw allow 8081:8082/udp`.
+3. Open the ports in the table below, e.g.
+   `sudo ufw allow 8443/tcp && sudo ufw allow 8080/tcp && sudo ufw allow 8081:8082/udp && sudo ufw allow 5353/udp`.
 4. In `/opt/kesher`: `sudo docker compose up -d`.
 
 | Port | Protocol | For |
 | --- | --- | --- |
-| 8443 | TCP | web UI and API |
+| 8443 | TCP | web UI and API for browsers (HTTPS) |
+| 8080 | TCP | desktop app and Pi stations (plain HTTP on the LAN) |
 | 8081 | UDP | audio of the desktop app and the Pi stations |
 | 8082 | UDP | audio of browsers |
+| 5353 | UDP | discovery (mDNS), so apps and stations find the server |
 
 ### If something does not work
 
 | Symptom | Fix |
 | --- | --- |
 | Page loads, but no audio | UDP 8081 and 8082 must be open, also in firewalls between clients and server. |
+| Desktop app or Pi does not find the server | They must be in the same network, and UDP 5353 must be open on the server. Otherwise enter the address (`http://<server-ip>:8080` in the app, `server = "https://<server-ip>:8443"` on the Pi). |
 | Audio only works on some networks | The server has several networks: set `KESHER_PUBLIC_IP` in `/opt/kesher/.env` to the address clients use, then `sudo kesher new-certificate`. |
 | Browser: no microphone | Use `https://`, not `http://`. |
 | `cannot download ghcr.io/...` | No release with Docker images yet: install with `--build --ref <branch>`. Maintainers: images must be public (see [Releases](../releases/README.md)). |

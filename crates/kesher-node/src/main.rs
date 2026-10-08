@@ -78,8 +78,31 @@ fn load(path: &std::path::Path) -> Config {
 
 fn check(path: &std::path::Path) {
     let cfg = load(path);
-    println!("config ok: {} as {:?}, role {:?}, mode {:?}", cfg.server, cfg.username(), cfg.role, cfg.mode);
+    println!("config ok");
     let mut ok = true;
+    match cfg.server_url() {
+        Some(server) => println!("server: {server}"),
+        None => match kesher_discovery::discover(std::time::Duration::from_secs(3)) {
+            Ok(found) if !found.is_empty() => {
+                for f in &found {
+                    let http = f.http_url.as_deref().map(|u| format!(", desktop app: {u}")).unwrap_or_default();
+                    println!("server: found {:?} at {}{http} (version {})", f.name, f.url, f.version);
+                }
+            }
+            Ok(_) => {
+                println!("server: none found on this network (set server = \"https://<ip>:8443\" in the config)");
+                ok = false;
+            }
+            Err(e) => {
+                println!("server: discovery failed: {e}");
+                ok = false;
+            }
+        },
+    }
+    match cfg.role() {
+        Some(role) => println!("login: role {role:?} as {:?}, mode {:?}", cfg.username(), cfg.mode),
+        None => println!("login: station pairing (approve it in the admin area -> Stations)"),
+    }
     for (input, wanted, label) in [(true, &cfg.audio.input, "input"), (false, &cfg.audio.output, "output")] {
         match devices::resolve(wanted.as_deref(), input) {
             Ok(Some(name)) => println!("{label}: {name}"),

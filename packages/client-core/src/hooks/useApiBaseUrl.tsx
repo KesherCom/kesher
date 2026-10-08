@@ -47,7 +47,7 @@ function detectDesktopEnvironment(): boolean {
   return detected;
 }
 
-async function invokeTauri<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+export async function invokeTauri<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const tauriWindow = window as TauriWindow;
   const globalInvoke = tauriWindow.__TAURI__?.core?.invoke;
   if (typeof globalInvoke === "function") {

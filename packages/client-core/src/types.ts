@@ -147,6 +147,22 @@ export type Bootstrap = PublicBootstrap & {
   users: User[];
 };
 
+/** Hardware station (kesher-node) as listed in the admin area. */
+export type Device = {
+  id: string;
+  name: string;
+  hostname: string;
+  model: string;
+  version: string;
+  status: "pending" | "approved" | "rejected";
+  roleId: string;
+  mode: "ptt" | "always_on";
+  lastIp: string;
+  createdAt: number;
+  lastSeenAt: number;
+  online: boolean;
+};
+
 export type TelegramMapping = {
   id: string;
   chatId: string;

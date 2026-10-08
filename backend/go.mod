@@ -11,6 +11,7 @@ require (
 	github.com/libdns/cloudflare v0.2.2
 	github.com/libdns/hetzner v1.0.0
 	github.com/libdns/route53 v1.6.0
+	github.com/libp2p/zeroconf/v2 v2.2.0
 	github.com/pion/ice/v4 v4.2.2
 	github.com/pion/interceptor v0.1.44
 	github.com/pion/opus v0.1.0

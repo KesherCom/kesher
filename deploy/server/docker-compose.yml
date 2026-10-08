@@ -5,7 +5,8 @@
 #   1. put this file and .env.example into one folder, e.g. /opt/kesher
 #   2. cp .env.example .env    and set ADMIN_PIN
 #   3. docker compose up -d
-#   4. open https://<server-ip>:8443 (accept the certificate once per device)
+#   4. browsers: https://<server-ip>:8443 (accept the certificate once per
+#      device); desktop app: finds the server itself (or http://<server-ip>:8080)
 #
 # Linux only: network_mode: host does not work with Docker Desktop on
 # Windows/macOS (use deploy/compose there, see the guide).
@@ -25,6 +26,9 @@ services:
       ADMIN_PIN: ${ADMIN_PIN:?set ADMIN_PIN in .env}
       SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-720}
       APP_ADDR: ":${KESHER_HTTPS_PORT:-8443}"
+      # Plain HTTP for the desktop app and Pi stations on the LAN; their
+      # clients cannot click through a self-signed certificate warning.
+      LAN_HTTP_ADDR: ":${KESHER_HTTP_PORT:-8080}"
       UDP_AUDIO_ADDR: ":${KESHER_NATIVE_UDP_PORT:-8081}"
       WEBRTC_UDP_PORT: ${KESHER_WEBRTC_UDP_PORT:-8082}
       # Only needed when the server has several networks and clients must

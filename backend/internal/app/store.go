@@ -670,7 +670,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	)`); err != nil {
 		return err
 	}
-	return nil
+	return s.ensureDevicesSchema(ctx)
 }
 
 func (s *Store) seed(ctx context.Context) error {

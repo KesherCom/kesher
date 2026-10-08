@@ -15,6 +15,8 @@ pub enum LedState {
     On = 1,
     /// Not connected to the server: slow blink.
     Offline = 2,
+    /// Waiting for approval in the admin area: double blink.
+    Pending = 3,
 }
 
 /// Cheap handle; the blink thread reads the state.
@@ -105,6 +107,7 @@ mod imp {
                     let on = match thread_state.load(Ordering::Relaxed) {
                         x if x == LedState::On as u8 => true,
                         x if x == LedState::Offline as u8 => tick % 10 < 2,
+                        x if x == LedState::Pending as u8 => matches!(tick % 10, 0 | 2),
                         _ => false,
                     };
                     let _ = req.set_value(offset, if on { Value::Active } else { Value::Inactive });

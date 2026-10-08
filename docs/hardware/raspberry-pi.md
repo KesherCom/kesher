@@ -47,13 +47,17 @@ Wi-Fi network for the intercom.
 
 ## Setup
 
+The short version: install the package, plug in the headset, approve the
+station in the admin area. No configuration on the Pi is needed when it is
+in the same network as the server.
+
 ### 1. Prepare the SD card
 
 In **Raspberry Pi Imager** choose *Raspberry Pi OS Lite (64-bit)* and, under
 *Edit settings*:
 
-- set a **hostname** per station, e.g. `stage-left` (it becomes the name in
-  the user list unless the config sets one),
+- set a **hostname** per station, e.g. `stage-left` (it is the suggested
+  name when you approve the station),
 - enable **SSH**,
 - set Wi-Fi only if the station has no cable.
 
@@ -71,42 +75,43 @@ ssh <user>@stage-left.local
 sudo apt install ./kesher-node-raspberrypi-arm64.deb
 ```
 
-This installs the program, the `kesher-node` service (enabled, started once
-the config has been edited) and the config `/etc/kesher/node.toml`.
+The station starts right away and from then on with every boot.
 
-### 3. Create a role on the server
+### 3. Plug in the headset
 
-In the admin area create **one role per node** (a role can only be logged in
-once) and give it its party lines. Note the role ID.
-
-The server needs its native UDP relay (on by default, UDP port 8081); with
-Docker, publish that port and set `KESHER_PUBLIC_IP` (see the main README).
-
-### 4. Configure
-
-Plug in the headset and check that it is recognised:
+Any USB headset or USB audio interface. By default the station uses the
+sound card with "USB" in its name; check with:
 
 ```sh
 kesher-node devices
 ```
 
-Edit the config (every option is explained in the file):
+### 4. Approve the station
+
+In the admin area, **Stations (Raspberry Pi)** shows the new station
+(highlighted, "1 new"). Choose:
+
+- the **name** in the user list (suggested: the hostname),
+- the **role** (its party lines), one role per station because a role can
+  only be logged in once,
+- the **talk mode**: push to talk (button) or always on.
+
+Click **Approve**. The station connects within a few seconds and appears in
+the user list. Name, role and mode can be changed there at any time; the
+station picks up changes immediately.
+
+What happens behind it: the station finds the server on the network (mDNS),
+creates its own ID and secret on first start, and logs in with them once
+approved. A self-signed server certificate is remembered on first contact
+and checked from then on. Details in
+[decision 0005](../decisions/0005-zero-config-stations.md).
+
+Check it on the Pi at any time:
 
 ```sh
-sudo nano /etc/kesher/node.toml
+sudo kesher-node check          # server found? which sound card?
+journalctl -u kesher-node -f    # live log
 ```
-
-At minimum set `server`, `role` and, under `[audio]`, part of the headset's
-name (`"USB"` usually works). Then check and start:
-
-```sh
-sudo kesher-node check
-sudo systemctl restart kesher-node
-journalctl -u kesher-node -f
-```
-
-A working node logs `logged in`, `connected`, `audio running: ...` and its
-party lines, and appears in the user list on the server.
 
 ### 5. Mic level
 
@@ -118,7 +123,19 @@ alsamixer
 sudo alsactl store
 ```
 
-Fine-tune with `input_gain_db` in the config.
+Fine-tune with `input_gain_db` in `/etc/kesher/node.toml`.
+
+### Optional: settings on the Pi
+
+`/etc/kesher/node.toml` explains every option. Typical reasons to edit it
+(then `sudo systemctl restart kesher-node`):
+
+| Situation | Setting |
+| --- | --- |
+| Server in another network (discovery only works within one) | `server = "https://<ip>:8443"` |
+| Sound card without "USB" in its name | `[audio] input = ...` / `output = ...` (part of the name from `kesher-node devices`) |
+| Talk button / LED | `[gpio]`, see below |
+| No approval step: log in with a fixed role | `role = "stage"` (then `name` and `mode` are set in the file too) |
 
 ## Talk button and LED
 
@@ -134,19 +151,27 @@ No external pull-up is needed; the node enables the internal one.
 
 | Mode | Button | LED |
 | --- | --- | --- |
-| `ptt` | hold to talk | on while talking |
-| `always_on` | press to mute / unmute | on while the mic is open |
+| push to talk | hold to talk | on while talking |
+| always on | press to mute / unmute | on while the mic is open |
 
-The LED blinks slowly while the node is not connected. In `always_on` mode
-the node only sends while someone speaks (silence suppression, as in the
-desktop app).
+| LED pattern | Meaning |
+| --- | --- |
+| slow blink | no connection to the server |
+| double blink | waiting for approval in the admin area |
+| off / on | connected, silent / talking |
+
+In always-on mode the node only sends while someone speaks (silence
+suppression, as in the desktop app).
 
 ## What the node does by itself
 
+- **Finds the server** on the network, and looks again if the server's
+  address changes.
 - **Reconnects** after network loss, server restarts or a missing USB
   headset (it restarts the audio when the device comes back).
-- **Keeps its session** across restarts (`/var/lib/kesher-node`), and logs
-  out on a clean shutdown, so a reboot does not leave the role "in use".
+- **Keeps its identity and session** across restarts
+  (`/var/lib/kesher-node`), and logs out on a clean shutdown, so a reboot
+  does not leave the role "in use".
 - **Real-time audio**: the audio threads run with real-time priority
   (`SCHED_FIFO`); the service sets the CPU governor to `performance` and
   turns Wi-Fi power saving off (`/usr/lib/kesher-node/tune.sh`; disable with
@@ -157,20 +182,24 @@ desktop app).
 ## Updating and removing
 
 ```sh
-sudo apt install ./kesher-node-raspberrypi-arm64.deb    # newer file; keeps node.toml
+sudo apt install ./kesher-node-raspberrypi-arm64.deb    # newer file; keeps settings and approval
 dpkg -s kesher-node | grep Version                       # installed version
 sudo apt remove kesher-node                              # keeps the config
-sudo apt purge kesher-node                               # removes everything
+sudo apt purge kesher-node                               # removes everything (needs a new approval)
 ```
 
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 | --- | --- |
-| `role "x" is in use by "y"` | Another client is logged in with this role. Give the node its own role, or set `takeover = true` if the role belongs to this node only. |
-| `no input device matches "USB"` | The headset is not plugged in or has another name: run `kesher-node devices` and use part of the name shown there. |
+| `no Kesher server found on the network` | Server and Pi are in different networks, or the server's firewall blocks UDP 5353: set `server = "https://<ip>:8443"` in the config. |
+| `waiting for approval` | Approve the station in the admin area -> Stations. |
+| `this station was rejected` | Approve it in the admin area (Stations -> Approve…). |
+| `the certificate of ... changed` | The server got a new certificate (e.g. `kesher new-certificate`): remove its line from `/var/lib/kesher-node/server-certs.json` and restart. |
+| `the role assigned to this station is in use` | Someone else is logged in with that role: give the station its own role in the admin area. |
+| `no input device matches "USB"` | The headset is not plugged in or has another name: run `kesher-node devices` and set part of the name in the config. |
 | `config error: ...` | Fix the named line in `/etc/kesher/node.toml`; the service waits until then. |
-| Connected, but nobody hears the node | Mic level (`alsamixer`), mode `ptt` without a button, or the role has no talk party line (the log says so). |
+| Connected, but nobody hears the node | Mic level (`alsamixer`), push to talk without a button, or the role has no talk party line (the log says so). |
 | The node hears nothing | The role has no listen party line, or UDP port 8081 is blocked between node and server. |
 | Clicks or dropouts | Check the minute summary in the journal (`lost/concealed`, `underruns`). On a Pi 3 try another USB port; prefer cable over Wi-Fi. |
 | `could not enable real-time scheduling` | Running by hand instead of as the service; harmless for tests. |

@@ -166,6 +166,14 @@ async fn native_latency_test(state: State<'_, NativeAudioState>) -> Result<Optio
     audio_native::run_latency_test(&state).await
 }
 
+/// Kesher servers announced on the LAN (mDNS), for the connection screen.
+#[tauri::command]
+async fn discover_servers() -> Result<Vec<kesher_discovery::FoundServer>, String> {
+    tokio::task::spawn_blocking(|| kesher_discovery::discover(std::time::Duration::from_secs(3)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -180,6 +188,7 @@ pub fn run() {
             .invoke_handler(tauri::generate_handler![
                 get_server_url,
                 set_server_url,
+                discover_servers,
                 list_audio_devices,
                 start_audio_engine,
                 stop_audio_engine,
@@ -209,6 +218,7 @@ pub fn run() {
             .invoke_handler(tauri::generate_handler![
                 get_server_url,
                 set_server_url,
+                discover_servers,
                 start_native_audio,
                 stop_native_audio,
                 set_native_mic,
@@ -229,6 +239,7 @@ pub fn run() {
             .invoke_handler(tauri::generate_handler![
                 get_server_url,
                 set_server_url,
+                discover_servers,
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");

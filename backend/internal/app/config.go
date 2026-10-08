@@ -50,6 +50,14 @@ type Config struct {
 	// ephemeral per-peer ports; set it (plus WebRTCPublicIPs) in Docker.
 	WebRTCUDPPort   int
 	WebRTCPublicIPs []string
+	// LAN discovery via mDNS (discovery.go).
+	MDNSEnabled bool
+	MDNSName    string
+	// LANHTTPAddr: extra plain-HTTP listener next to the HTTPS one, for the
+	// desktop app and Pi stations on a trusted LAN (their WebView/clients
+	// cannot use a self-signed certificate the way a browser can after a
+	// click). Browsers keep using HTTPS for microphone access.
+	LANHTTPAddr string
 }
 type fileConfig struct {
 	Addr                               string   `yaml:"app_addr"`
@@ -86,6 +94,9 @@ type fileConfig struct {
 	UDPAudioAdvertiseIP                string   `yaml:"udp_audio_advertise_ip"`
 	WebRTCUDPPort                      *int     `yaml:"webrtc_udp_port"`
 	WebRTCPublicIPs                    []string `yaml:"webrtc_public_ips"`
+	MDNSEnabled                        *bool    `yaml:"mdns_enabled"`
+	MDNSName                           string   `yaml:"mdns_name"`
+	LANHTTPAddr                        string   `yaml:"lan_http_addr"`
 }
 
 func getEnvWithPresence(k, fallback string) (string, bool) {
@@ -132,6 +143,9 @@ func defaultConfig() Config {
 		UDPAudioAdvertiseIP:         "",
 		WebRTCUDPPort:               0,
 		WebRTCPublicIPs:             nil,
+		MDNSEnabled:                 true,
+		MDNSName:                    "",
+		LANHTTPAddr:                 "",
 	}
 }
 
@@ -280,6 +294,15 @@ func loadConfigFromFile(path string) (Config, error) {
 	if fileCfg.WebRTCUDPPort != nil {
 		cfg.WebRTCUDPPort = *fileCfg.WebRTCUDPPort
 	}
+	if fileCfg.MDNSEnabled != nil {
+		cfg.MDNSEnabled = *fileCfg.MDNSEnabled
+	}
+	if strings.TrimSpace(fileCfg.MDNSName) != "" {
+		cfg.MDNSName = strings.TrimSpace(fileCfg.MDNSName)
+	}
+	if strings.TrimSpace(fileCfg.LANHTTPAddr) != "" {
+		cfg.LANHTTPAddr = strings.TrimSpace(fileCfg.LANHTTPAddr)
+	}
 	if len(fileCfg.WebRTCPublicIPs) > 0 {
 		cfg.WebRTCPublicIPs = splitCSV(strings.Join(fileCfg.WebRTCPublicIPs, ","))
 	}
@@ -329,6 +352,9 @@ func loadConfigFromEnv() Config {
 		UDPAudioAdvertiseIP:    getEnv("UDP_AUDIO_ADVERTISE_IP", ""),
 		WebRTCUDPPort:          getEnvInt("WEBRTC_UDP_PORT", 0),
 		WebRTCPublicIPs:        splitCSV(getEnv("WEBRTC_PUBLIC_IPS", "")),
+		MDNSEnabled:            getEnv("MDNS_ENABLED", "true") != "false",
+		MDNSName:               getEnv("MDNS_NAME", ""),
+		LANHTTPAddr:            getEnv("LAN_HTTP_ADDR", ""),
 	}
 }
 

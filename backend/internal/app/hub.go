@@ -749,6 +749,17 @@ func (h *Hub) LatestRoleSession(roleID string) (Session, bool) {
 	return selected.session, true
 }
 
+// OnlineUsernames: login names with a connected client.
+func (h *Hub) OnlineUsernames() map[string]bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	names := make(map[string]bool, len(h.clients))
+	for _, c := range h.clients {
+		names[c.session.Username] = true
+	}
+	return names
+}
+
 func (h *Hub) TokensForRole(roleID string) []string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

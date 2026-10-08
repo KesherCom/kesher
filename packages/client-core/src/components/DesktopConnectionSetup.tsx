@@ -1,7 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { normalizeServerAddressInput } from "../api";
-import { useApiBaseUrl } from "../hooks/useApiBaseUrl";
+import { invokeTauri, useApiBaseUrl } from "../hooks/useApiBaseUrl";
 import "./DesktopConnectionSetup.css";
+
+/** A server announced on the LAN (Tauri command discover_servers). */
+type FoundServer = {
+  name: string;
+  url: string;
+  /** Plain-HTTP address; the app's WebView cannot use a self-signed HTTPS certificate. */
+  http_url: string | null;
+  version: string;
+};
 
 type DesktopConnectionSetupProps = {
   onContinue: () => void;
@@ -21,10 +30,29 @@ export function DesktopConnectionSetup({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isChecking, setIsChecking] = useState(false);
+  const [found, setFound] = useState<FoundServer[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
 
   useEffect(() => {
     setInput(baseUrl);
   }, [baseUrl]);
+
+  const searchServers = useCallback(async () => {
+    setIsSearching(true);
+    try {
+      setFound(await invokeTauri<FoundServer[]>("discover_servers"));
+    } catch {
+      setFound([]);
+    } finally {
+      setIsSearching(false);
+      setSearched(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void searchServers();
+  }, [searchServers]);
 
   const normalizedPreview = useMemo(() => {
     try {
@@ -34,9 +62,9 @@ export function DesktopConnectionSetup({
     }
   }, [input]);
 
-  const persistAddress = (): string | null => {
+  const persistAddress = (address: string = input): string | null => {
     try {
-      const normalized = normalizeServerAddressInput(input);
+      const normalized = normalizeServerAddressInput(address);
       setBaseUrl(normalized);
       setError("");
       setSuccess("Server-Adresse lokal gespeichert.");
@@ -70,8 +98,8 @@ export function DesktopConnectionSetup({
     void persistAddress();
   };
 
-  const handleConnectWithCheck = async () => {
-    const normalized = persistAddress();
+  const handleConnectWithCheck = async (address?: string) => {
+    const normalized = persistAddress(address);
     if (!normalized) return;
 
     setIsChecking(true);
@@ -103,6 +131,46 @@ export function DesktopConnectionSetup({
         <p className="desktop-connection-subtitle">
           Die Adresse wird lokal gespeichert. Erlaubt sind IP, DNS oder volle URL inklusive frei waehlbarem Port.
         </p>
+
+        <div className="desktop-connection-found" aria-label="Gefundene Server">
+          <div className="desktop-connection-found-head">
+            <span className="desktop-connection-label">Im Netzwerk gefunden</span>
+            <button type="button" onClick={() => void searchServers()} disabled={isSearching}>
+              {isSearching ? "Suche ..." : "Erneut suchen"}
+            </button>
+          </div>
+          {found.length > 0 ? (
+            <ul className="desktop-connection-found-list">
+              {found.map((server) => {
+                const address = server.http_url ?? server.url;
+                return (
+                  <li key={server.name}>
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => {
+                        setInput(address);
+                        void handleConnectWithCheck(address);
+                      }}
+                      disabled={isChecking}
+                    >
+                      Verbinden
+                    </button>
+                    <span>
+                      <strong>{server.name}</strong> <small>{address}</small>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="desktop-connection-hint">
+              {isSearching || !searched
+                ? "Suche nach Kesher-Servern ..."
+                : "Kein Server gefunden. Adresse unten eingeben (z. B. wenn der Server in einem anderen Netz steht)."}
+            </p>
+          )}
+        </div>
 
         <label className="desktop-connection-label" htmlFor="desktop-server-address">
           Server-Adresse

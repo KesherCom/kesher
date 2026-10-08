@@ -3435,6 +3435,9 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/admin/login", s.handleAdminLogin)
 	mux.HandleFunc("/api/login/takeover", s.handleLoginTakeover)
+	// Hardware stations (kesher-node): pairing and login, see devices.go.
+	mux.HandleFunc("/api/devices/hello", s.handleDeviceHello)
+	mux.HandleFunc("/api/devices/login", s.handleDeviceLogin)
 	mux.HandleFunc("/api/logout", s.withAuth(s.handleLogout))
 	mux.HandleFunc("/api/bootstrap", s.withAuth(s.handleBootstrap))
 	mux.HandleFunc("/api/status", s.withAuth(s.handleStatus))
@@ -3446,6 +3449,8 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/companion/publish", s.withAuth(s.handleAdminCompanionPublish))
 	mux.HandleFunc("/api/admin/companion/role-pages", s.withAuth(s.handleAdminCompanionRolePages))
 	mux.HandleFunc("/api/user/companion/publish", s.withAuth(s.handleUserCompanionPublish))
+	mux.HandleFunc("/api/admin/devices", s.withAuth(s.handleAdminDevices))
+	mux.HandleFunc("/api/admin/devices/", s.withAuth(s.handleAdminDeviceByID))
 	mux.HandleFunc("/api/admin/roles", s.withAuth(s.handleAdminRoles))
 	mux.HandleFunc("/api/admin/roles/", s.withAuth(s.handleAdminRoleByID))
 	mux.HandleFunc("/api/admin/users", s.withAuth(s.handleAdminUsers))
@@ -3501,6 +3506,8 @@ func NewServer(cfg Config) (*Server, error) {
 }
 
 func (s *Server) ListenAndServe() error {
+	announcement := startDiscovery(s.cfg, s.logger)
+	defer announcement.Close()
 	// Start Telegram long polling if configured
 	if s.telegram != nil && s.telegram.Mode() == "polling" {
 		if err := s.telegram.DeleteWebhook(); err != nil {
@@ -3538,6 +3545,16 @@ func (s *Server) ListenAndServe() error {
 		return nil
 	}
 	s.logger.Info("starting server", "addr", s.cfg.Addr, "dbPath", s.cfg.DBPath)
+	if lanAddr := s.lanHTTPAddr(); lanAddr != "" {
+		lanSrv := &http.Server{Addr: lanAddr, Handler: s.httpSrv.Handler, ReadHeaderTimeout: 5 * time.Second}
+		go func() {
+			s.logger.Info("also serving plain HTTP for desktop app and stations", "addr", lanAddr)
+			if err := lanSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				s.logger.Warn("plain HTTP listener stopped", "addr", lanAddr, "error", err)
+			}
+		}()
+		defer lanSrv.Close()
+	}
 	var err error
 	if s.cfg.TrustedLANHTTP {
 		if s.netem != nil {

@@ -17,13 +17,10 @@ if [ "$1" = "configure" ]; then
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload
     systemctl enable kesher-node.service >/dev/null 2>&1 || true
-    # Start once the config was edited; on upgrades restart a running node.
-    if systemctl is-active --quiet kesher-node.service \
-       || ! cmp -s /etc/kesher/node.toml /usr/share/doc/kesher-node/node.toml.example; then
-      systemctl restart kesher-node.service || true
-    else
-      echo "kesher-node: edit /etc/kesher/node.toml, then run: sudo systemctl restart kesher-node"
-    fi
+    # Works without editing the config: the station finds the server on
+    # the network and waits for approval in the admin area.
+    systemctl restart kesher-node.service || true
+    echo "kesher-node: started. Approve this station in the Kesher admin area -> Stations."
   fi
 fi
 

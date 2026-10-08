@@ -22,6 +22,11 @@ toml = "0.8"
 url = "2"
 log = "0.4"
 env_logger = "0.11"
+# Fingerprints of trusted-on-first-use server certificates (net.rs).
+sha2 = "0.11"
+# Device ID and pairing secret.
+uuid = { version = "1", features = ["v4"] }
+kesher-discovery = { path = "../kesher-discovery" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # GPIO character device; finds lines by name, so Pi 3/4/5 all work.

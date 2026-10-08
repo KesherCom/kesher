@@ -3982,3 +3982,48 @@ button.secondary {
      so you may need to adjust those manually if needed
 
    ========================================== */
+
+/* Stations (AdminDevicesCard) */
+.admin-device-badge {
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: var(--color-warning);
+  color: #111;
+  font-size: 0.75rem;
+  font-weight: 800;
+  vertical-align: middle;
+}
+.admin-device {
+  margin-bottom: 0.75rem;
+  width: 100%;
+}
+.admin-device-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  align-items: baseline;
+  margin-bottom: 0.4rem;
+}
+.admin-device-head small,
+.admin-device-row small {
+  color: var(--text-muted);
+}
+.admin-list li.admin-device-row {
+  grid-template-columns: 1fr auto;
+}
+.admin-device-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+.admin-device-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-right: 0.45rem;
+  border-radius: 50%;
+  background: var(--text-dark);
+}
+.admin-device-dot.online {
+  background: var(--color-success);
+}

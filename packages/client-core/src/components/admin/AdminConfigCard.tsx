@@ -3,6 +3,7 @@ import { AdminRolesCard } from "./AdminRolesCard";
 import { AdminRoomsCard } from "./AdminRoomsCard";
 import { AdminChannelsCard } from "./AdminChannelsCard";
 import { AdminUsersCard } from "./AdminUsersCard";
+import { AdminDevicesCard } from "./AdminDevicesCard";
 import { AdminTelegramCard } from "./AdminTelegramCard";
 import { AdminTelegramUsersCard } from "./AdminTelegramUsersCard";
 import { AdminRoutingMatrixCard } from "./AdminRoutingMatrixCard";
@@ -60,6 +61,8 @@ export function AdminConfigCard({
           appData={appData}
           refreshBootstrapData={refreshBootstrapData}
         />
+
+        <AdminDevicesCard token={token} adminPin={adminPin} appData={appData} />
 
         <AdminRoomsCard
           token={token}

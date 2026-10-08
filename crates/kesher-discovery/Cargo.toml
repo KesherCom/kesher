@@ -1,0 +1,11 @@
+[package]
+name = "kesher-discovery"
+version = "0.1.0"
+description = "Finds Kesher servers on the LAN (mDNS _kesher._tcp), for the Pi node and the desktop app"
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+mdns-sd = "0.21"
+serde = { version = "1", features = ["derive"] }
+log = "0.4"

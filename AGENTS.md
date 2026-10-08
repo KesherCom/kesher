@@ -38,7 +38,8 @@ Rust code is one Cargo workspace at the repo root (`Cargo.toml`, committed `Carg
 
 - `crates/kesher-audio`: the native low-latency audio engine (capture -> Opus -> KSHR/UDP -> jitter buffer -> mix), shared by the desktop app and the node. Windows WASAPI in `wasapi.rs`, Linux real-time threads in `realtime_linux.rs`.
 - `desktop/src-tauri`: Tauri app; uses the engine as `kesher_audio::native` (aliased `audio_native` in `main.rs`).
-- `crates/kesher-node`: headless station for Raspberry Pi 3/4/5 (systemd service, `/etc/kesher/node.toml`, GPIO talk button/LED). Speaks the same protocol as the desktop app in performance mode (login, `/ws?transport=native`, `native_audio_endpoint`, `voice_state`). Packaged by `make node-deb` (Docker, `deploy/node/`); user docs in `docs/hardware/raspberry-pi.md`.
+- `crates/kesher-discovery`: finds servers on the LAN (mDNS `_kesher._tcp`); used by the node and the desktop app (`discover_servers` command, connection screen). The server side is `backend/internal/app/discovery.go` (`MDNS_ENABLED`, `MDNS_NAME`).
+- `crates/kesher-node`: headless station for Raspberry Pi 3/4/5 (systemd service, `/etc/kesher/node.toml`, GPIO talk button/LED). Without `role` it pairs: `POST /api/devices/login` -> pending until approved in the admin area (Stations card, `backend/internal/app/devices.go`, `/api/admin/devices`); self-signed server certs are trusted on first use (`net.rs` `Trust`). See `docs/decisions/0005-zero-config-stations.md`. Speaks the same protocol as the desktop app in performance mode (login, `/ws?transport=native`, `native_audio_endpoint`, `voice_state`). Packaged by `make node-deb` (Docker, `deploy/node/`); user docs in `docs/hardware/raspberry-pi.md`.
 
 Design decisions are recorded in `docs/decisions/` (add a numbered file for new ones).
 

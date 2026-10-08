@@ -131,6 +131,7 @@ printf 'REF=%s\nBUILD=%s\n' "$REF" "$BUILD" > .install
 env_value() { sed -n "s/^$1=//p" .env | tail -n 1; }
 TAG="$(env_value KESHER_VERSION)"; TAG="${TAG:-latest}"
 HTTPS_PORT="$(env_value KESHER_HTTPS_PORT)"; HTTPS_PORT="${HTTPS_PORT:-8443}"
+HTTP_PORT="$(env_value KESHER_HTTP_PORT)"; HTTP_PORT="${HTTP_PORT:-8080}"
 NATIVE_PORT="$(env_value KESHER_NATIVE_UDP_PORT)"; NATIVE_PORT="${NATIVE_PORT:-8081}"
 WEBRTC_PORT="$(env_value KESHER_WEBRTC_UDP_PORT)"; WEBRTC_PORT="${WEBRTC_PORT:-8082}"
 
@@ -157,14 +158,16 @@ ok "image ready"
 # ── 4. Firewall ────────────────────────────────────────────────────────────
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
   ufw allow "$HTTPS_PORT/tcp" >/dev/null
+  ufw allow "$HTTP_PORT/tcp" >/dev/null
   ufw allow "$NATIVE_PORT:$WEBRTC_PORT/udp" >/dev/null 2>&1 || { ufw allow "$NATIVE_PORT/udp" >/dev/null; ufw allow "$WEBRTC_PORT/udp" >/dev/null; }
-  ok "firewall (ufw): opened $HTTPS_PORT/tcp, $NATIVE_PORT/udp, $WEBRTC_PORT/udp"
+  ufw allow 5353/udp >/dev/null
+  ok "firewall (ufw): opened $HTTPS_PORT/tcp, $HTTP_PORT/tcp, $NATIVE_PORT/udp, $WEBRTC_PORT/udp, 5353/udp (discovery)"
 elif command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then
-  for p in "$HTTPS_PORT/tcp" "$NATIVE_PORT/udp" "$WEBRTC_PORT/udp"; do firewall-cmd -q --permanent --add-port="$p"; done
+  for p in "$HTTPS_PORT/tcp" "$HTTP_PORT/tcp" "$NATIVE_PORT/udp" "$WEBRTC_PORT/udp" "5353/udp"; do firewall-cmd -q --permanent --add-port="$p"; done
   firewall-cmd -q --reload
-  ok "firewall (firewalld): opened $HTTPS_PORT/tcp, $NATIVE_PORT/udp, $WEBRTC_PORT/udp"
+  ok "firewall (firewalld): opened $HTTPS_PORT/tcp, $HTTP_PORT/tcp, $NATIVE_PORT/udp, $WEBRTC_PORT/udp, 5353/udp (discovery)"
 else
-  ok "no active firewall found (ufw/firewalld); if you use another one, open $HTTPS_PORT/tcp, $NATIVE_PORT/udp and $WEBRTC_PORT/udp"
+  ok "no active firewall found (ufw/firewalld); if you use another one, open $HTTPS_PORT/tcp, $HTTP_PORT/tcp, $NATIVE_PORT/udp, $WEBRTC_PORT/udp and 5353/udp"
 fi
 
 # ── 5. Start ───────────────────────────────────────────────────────────────
@@ -184,7 +187,9 @@ printf '\033[1mKesher is running.\033[0m Open in a browser (accept the certifica
 for ip in $ips; do printf '   https://%s:%s\n' "$ip" "$HTTPS_PORT"; done
 cat <<EOF
 
-Desktop app and Raspberry Pi stations use the same address.
+Desktop app and Raspberry Pi stations find the server by themselves in this
+network (desktop app address otherwise: http://<server-ip>:$HTTP_PORT).
+New Pi stations appear in the admin area under "Stations" for approval.
 Admin area: the PIN you chose (change it in $DIR/.env, then: kesher restart).
 
 Manage it with the kesher command:
