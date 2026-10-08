@@ -18,6 +18,15 @@ All parts of a release carry the same version (the tag).
 | `kesher-node-linux-amd64.deb` | Station, Debian package | x86 Linux (Debian/Ubuntu) |
 | `kesher-node-linux-amd64.tar.gz` | Station, program only | x86 Linux without `apt` |
 
-Server: unpack and run the binary, or use Docker (see the README).
+Docker images of the server (linux/amd64 and linux/arm64), tagged with this
+version and `latest`:
+
+| Image | What it is |
+| --- | --- |
+| `ghcr.io/keshercom/kesher-selfsigned` | Server with self-signed HTTPS (recommended, used by `deploy/server`) |
+| `ghcr.io/keshercom/kesher` | Server with HTTP or your own TLS configuration |
+
+Server setup: [docs/deployment/server.md](https://github.com/KesherCom/kesher/blob/main/docs/deployment/server.md)
+(Linux server with Docker, or the program alone on a PC).
 Stations: `sudo apt install ./kesher-node-raspberrypi-arm64.deb`, then follow
 [docs/hardware/raspberry-pi.md](https://github.com/KesherCom/kesher/blob/main/docs/hardware/raspberry-pi.md).

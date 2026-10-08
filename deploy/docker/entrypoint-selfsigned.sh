@@ -26,6 +26,19 @@ if [ ! -f "$TLS_CERT_FILE" ] || [ ! -f "$TLS_KEY_FILE" ]; then
   if [ -n "${CERT_EXTRA_SAN:-}" ]; then
     SAN="$SAN,${CERT_EXTRA_SAN}"
   fi
+  # Every IPv4 address of this machine, so https://<server-ip> works with
+  # no configuration. With network_mode: host (deploy/server) these are the
+  # server's real LAN addresses. CERT_AUTO_SAN=false turns this off.
+  if [ "${CERT_AUTO_SAN:-true}" = "true" ]; then
+    for ip in $(ip -o -4 addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1); do
+      case "$ip" in 127.*) continue ;; esac
+      case ",$SAN," in *",IP:$ip,"*) ;; *) SAN="$SAN,IP:$ip" ;; esac
+    done
+    host_name="$(hostname 2>/dev/null || true)"
+    if [ -n "$host_name" ]; then
+      case ",$SAN," in *",DNS:$host_name,"*) ;; *) SAN="$SAN,DNS:$host_name" ;; esac
+    fi
+  fi
 
   openssl req -x509 -newkey rsa:2048 -sha256 -days "$CERT_DAYS" -nodes \
     -keyout "$TLS_KEY_FILE" \

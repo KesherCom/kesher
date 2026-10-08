@@ -10,9 +10,13 @@
 #
 # Build from the repository root:
 #   docker build -f deploy/docker/Dockerfile -t kesher .
+#
+# Multi-arch (linux/amd64 + linux/arm64, as published to ghcr.io): the web
+# and Go stages run on the build machine's own platform (Go cross-compiles
+# via TARGETARCH); only the small final stages are per-architecture.
 
 # ── 1. Web UI (npm workspace: packages/client-core + web) ──────────────────
-FROM node:22-alpine AS web-build
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web-build
 WORKDIR /src
 # Only the workspaces needed for the web bundle; the desktop (Tauri) workspace
 # pulls in native tooling we do not want in this image.
@@ -20,14 +24,16 @@ COPY package.json ./
 RUN node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json'));p.workspaces=['packages/client-core','web'];fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
 COPY packages/client-core/package.json packages/client-core/
 COPY web/package.json web/
+# npm 10 (bundled with node 22) crashes on these peer deps ("reading
+# 'edgesOut'"); npm 11 resolves them.
 RUN --mount=type=cache,target=/root/.npm \
-    npm install --no-audit --no-fund
+    npm install -g npm@11 && npm install --no-audit --no-fund
 COPY packages/client-core/ packages/client-core/
 COPY web/ web/
 RUN npm run build --workspace web
 
 # ── 2. Go backend with embedded UI ─────────────────────────────────────────
-FROM golang:1.25-alpine AS go-build
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS go-build
 ARG TARGETOS=linux
 ARG TARGETARCH
 ARG VERSION=dev

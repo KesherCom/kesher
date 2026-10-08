@@ -1,0 +1,50 @@
+# Kesher server on a Linux host, from the published image. No source code
+# or build needed. Full guide: docs/deployment/server.md
+#
+#   1. put this file and .env.example into one folder, e.g. /opt/kesher
+#   2. cp .env.example .env    and set ADMIN_PIN
+#   3. docker compose up -d
+#   4. open https://<server-ip>:8443 (accept the certificate once per device)
+#
+# Linux only: network_mode: host does not work with Docker Desktop on
+# Windows/macOS (use deploy/compose there, see the guide).
+name: kesher
+
+services:
+  kesher:
+    # HTTPS with a self-signed certificate made on first start for every IP
+    # address of the server, so browsers may use the microphone.
+    image: ghcr.io/keshercom/kesher-selfsigned:${KESHER_VERSION:-latest}
+    container_name: kesher
+    # The container uses the server's network directly: no port mapping or
+    # NAT in the audio path, and the server sees its real addresses, so no
+    # IP has to be configured. Ports used: see KESHER_*_PORT in .env.
+    network_mode: host
+    environment:
+      ADMIN_PIN: ${ADMIN_PIN:?set ADMIN_PIN in .env}
+      SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-720}
+      APP_ADDR: ":${KESHER_HTTPS_PORT:-8443}"
+      UDP_AUDIO_ADDR: ":${KESHER_NATIVE_UDP_PORT:-8081}"
+      WEBRTC_UDP_PORT: ${KESHER_WEBRTC_UDP_PORT:-8082}
+      # Only needed when the server has several networks and clients must
+      # use one specific address (see .env.example).
+      UDP_AUDIO_ADVERTISE_IP: ${KESHER_PUBLIC_IP:-}
+      WEBRTC_PUBLIC_IPS: ${KESHER_PUBLIC_IP:-}
+      CERT_HOST: ${KESHER_PUBLIC_IP:-localhost}
+      CERT_EXTRA_SAN: ${CERT_EXTRA_SAN:-}
+      CERT_DAYS: ${CERT_DAYS:-825}
+    volumes:
+      - kesher_data:/app/data
+      - kesher_certs:/app/certs
+    init: true
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+volumes:
+  kesher_data:
+  kesher_certs:

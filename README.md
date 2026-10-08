@@ -8,7 +8,7 @@ On-prem, web-based intercom for church live productions. Built for 30–50 concu
 
 | Part | What it is | Where | Start / build | Docs |
 | --- | --- | --- | --- | --- |
-| Server | Go API, WebSocket hub, WebRTC SFU, UDP audio relay, embedded web UI | `backend/` | `make run-backend`, `make docker-up` | this README |
+| Server | Go API, WebSocket hub, WebRTC SFU, UDP audio relay, embedded web UI | `backend/`, `deploy/server/` | `make run-backend`, `make docker-up` | [docs/deployment/server.md](docs/deployment/server.md) |
 | Browser client | React SPA (fallback audio path via WebRTC) | `web/`, `packages/client-core/` | `make dev-web` | [AGENTS.md](AGENTS.md) |
 | Desktop app | Tauri app for Windows/macOS with the low-latency native audio path | `desktop/` | `make dev-desktop`, `make build-desktop-windows` | [AGENTS.md](AGENTS.md) |
 | Audio engine | Shared Rust engine (Opus over KSHR/UDP, jitter buffer, mixing) used by the desktop app and the node | `crates/kesher-audio/` | `make desktop-rust-test` | [docs/decisions/0004](docs/decisions/0004-one-repo-shared-audio-engine.md) |
@@ -51,6 +51,10 @@ Every release contains the same set of files, all with the release's version:
 | `kesher-node-raspberrypi-arm64.deb` | Headless station with USB headset | Raspberry Pi 3/4/5 ([guide](docs/hardware/raspberry-pi.md)) |
 | `kesher-node-linux-amd64.deb` | Same station for x86 Linux | Debian/Ubuntu PCs |
 
+The server is also published as Docker images `ghcr.io/keshercom/kesher` and
+`ghcr.io/keshercom/kesher-selfsigned` (amd64 and arm64), tagged with the
+version and `latest`; see [docs/deployment/server.md](docs/deployment/server.md).
+
 Each server archive contains a single binary with the web UI embedded. The
 station packages also come as `.tar.gz` for systems without `apt`. The full
 per-file list is in [docs/releases/downloads.md](docs/releases/downloads.md);
@@ -91,6 +95,12 @@ make run-production-certmagic DOMAIN=intercom.example.org DNS_PROVIDER=cloudflar
 
 ## Docker
 
+**Running a server?** Start with [docs/deployment/server.md](docs/deployment/server.md):
+on a Linux server you only need two files from [`deploy/server`](deploy/server)
+and the published image `ghcr.io/keshercom/kesher-selfsigned`, no source code.
+
+The rest of this section builds the image from the repository with the
+compose files in `deploy/compose` (development, Docker Desktop, own domain).
 One image (`deploy/docker/Dockerfile`) contains the Go server with the web UI
 embedded. Three ready-made compose files cover the usual setups:
 
