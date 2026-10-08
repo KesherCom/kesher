@@ -1,4 +1,4 @@
-const CACHE_NAME = "kesher-shell-v1";
+const CACHE_NAME = "kesher-shell-v2";
 const FALLBACK_URLS = ["/", "/manifest.webmanifest", "/favicon.svg"];
 
 self.addEventListener("install", (event) => {

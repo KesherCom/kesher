@@ -25,6 +25,12 @@
   display: grid;
   gap: 0.85rem;
 }
+.brand-logo {
+  display: block;
+  width: 56px;
+  height: 56px;
+  margin: 0 0 0.6rem;
+}
 .login-card-head h1 {
   margin: 0;
   font-size: 1.25rem;

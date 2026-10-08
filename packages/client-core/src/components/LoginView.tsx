@@ -1,4 +1,5 @@
 import { useState } from "react";
+import logoUrl from "../assets/logo.svg";
 import type { LoginConflict, PublicBootstrap } from "../types";
 
 type LoginViewProps = {
@@ -40,6 +41,7 @@ export function LoginView({
     <div className="root login">
       <div className="login-card panel">
         <div className="login-card-head">
+          <img className="brand-logo" src={logoUrl} alt="" width={56} height={56} />
           <h1>kesher - Live Production Intercom</h1>
           <p className="variant-subtitle">Station Deck</p>
         </div>

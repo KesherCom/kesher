@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { completeSetup } from "../api";
+import logoUrl from "../assets/logo.svg";
 import type { PublicBootstrap } from "../types";
 
 type SetupViewProps = {
@@ -48,6 +49,7 @@ export function SetupView({ publicData, onDone }: SetupViewProps) {
     <div className="root login">
       <div className="login-card panel">
         <div className="login-card-head">
+          <img className="brand-logo" src={logoUrl} alt="" width={56} height={56} />
           <h1>Welcome to kesher</h1>
           <p className="variant-subtitle">Set up this server (takes a minute, only once)</p>
         </div>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import logoUrl from "../assets/logo.svg";
 import { normalizeServerAddressInput } from "../api";
 import { invokeTauri, useApiBaseUrl } from "../hooks/useApiBaseUrl";
 import "./DesktopConnectionSetup.css";
@@ -127,6 +128,7 @@ export function DesktopConnectionSetup({
   return (
     <div className={`desktop-connection-root${compact ? " compact" : ""}`}>
       <section className="desktop-connection-card" aria-label="Desktop connection setup">
+        <img className="brand-logo" src={logoUrl} alt="" width={56} height={56} />
         <h1 className="desktop-connection-title">Server-Verbindung einrichten</h1>
         <p className="desktop-connection-subtitle">
           Die Adresse wird lokal gespeichert. Erlaubt sind IP, DNS oder volle URL inklusive frei waehlbarem Port.
