@@ -6,6 +6,7 @@ import {
   updateAdminStreamDeck,
 } from "../../api";
 import type { Bootstrap, ClientPlace, StreamDeckDevice } from "../../types";
+import { useAdminCardDefaultOpen } from "./adminCardOpen";
 
 type AdminStreamDecksCardProps = {
   token: string;
@@ -23,7 +24,7 @@ const POLL_MS = 5000;
  * is logged in there. See docs/COMPANION-SETUP.md.
  */
 export function AdminStreamDecksCard({ token, adminPin, appData }: AdminStreamDecksCardProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(useAdminCardDefaultOpen());
   const [decks, setDecks] = useState<StreamDeckDevice[]>([]);
   const [places, setPlaces] = useState<ClientPlace[]>([]);
   const [editing, setEditing] = useState<string | null>(null);

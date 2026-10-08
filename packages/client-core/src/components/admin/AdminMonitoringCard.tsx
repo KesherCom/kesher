@@ -1,6 +1,7 @@
 import React from "react";
 import { getRealtimeStats } from "../../api";
 import type { RealtimeStatsResponse } from "../../types";
+import { useAdminCardDefaultOpen } from "./adminCardOpen";
 
 type AdminMonitoringCardProps = {
   token: string;
@@ -28,7 +29,7 @@ export function AdminMonitoringCard({
   audioStats,
   activeRoutesCount,
 }: AdminMonitoringCardProps) {
-  const [isOpen, setIsOpen] = React.useState(false);
+  const [isOpen, setIsOpen] = React.useState(useAdminCardDefaultOpen());
   const [stats, setStats] = React.useState<RealtimeStatsResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -79,7 +80,7 @@ export function AdminMonitoringCard({
   return (
     <div className="admin-card">
       <div className="admin-card-header">
-        <div className="admin-card-title">Monitoring · Audio / RTP</div>
+        <div className="admin-card-title">Audio and network</div>
         <div className="admin-card-actions">
           <button
             className="admin-toggle-button"

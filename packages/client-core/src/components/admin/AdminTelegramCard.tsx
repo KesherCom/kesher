@@ -9,6 +9,7 @@ import {
 import type { Bootstrap } from "../../types";
 import type { TelegramMapping } from "../../types";
 import { useAdminAction } from "./useAdminAction";
+import { useAdminCardDefaultOpen } from "./adminCardOpen";
 
 type AdminTelegramCardProps = {
   token: string;
@@ -21,7 +22,7 @@ export function AdminTelegramCard({
   adminPin,
   appData,
 }: AdminTelegramCardProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(useAdminCardDefaultOpen());
   const [botConfigured, setBotConfigured] = useState(false);
   const [mode, setMode] = useState<"polling" | "webhook" | "">("");
   const [mappings, setMappings] = useState<TelegramMapping[]>([]);
@@ -115,7 +116,7 @@ export function AdminTelegramCard({
   return (
     <div className="admin-card">
       <div className="admin-card-header">
-        <div className="admin-card-title">Telegram Bot Integration</div>
+        <div className="admin-card-title">Telegram bot</div>
         <div className="admin-card-actions">
           <button
             className="admin-toggle-button"

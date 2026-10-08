@@ -1,11 +1,12 @@
 import React from "react";
+import { useAdminCardDefaultOpen } from "./adminCardOpen";
 
 type AdminPinCardProps = {
   onUpdateAdminPin: (currentPin: string, newPin: string) => Promise<void>;
 };
 
 export function AdminPinCard({ onUpdateAdminPin }: AdminPinCardProps) {
-  const [isOpen, setIsOpen] = React.useState(false);
+  const [isOpen, setIsOpen] = React.useState(useAdminCardDefaultOpen());
   const [pinCurrentInput, setPinCurrentInput] = React.useState("");
   const [pinNewInput, setPinNewInput] = React.useState("");
   const [pinConfirmInput, setPinConfirmInput] = React.useState("");
@@ -47,7 +48,7 @@ export function AdminPinCard({ onUpdateAdminPin }: AdminPinCardProps) {
   return (
     <div className="admin-card">
       <div className="admin-card-header">
-        <div className="admin-card-title">Security · Admin PIN</div>
+        <div className="admin-card-title">Admin PIN</div>
         <div className="admin-card-actions">
           <button
             className="admin-toggle-button"

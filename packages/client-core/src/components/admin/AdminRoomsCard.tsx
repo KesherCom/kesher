@@ -3,6 +3,7 @@ import type { Bootstrap } from "../../types";
 import { createRoom, deleteRoom, updateRoom } from "../../api";
 import { RoleMultiSelect } from "./RoleMultiSelect";
 import { useAdminAction } from "./useAdminAction";
+import { useAdminCardDefaultOpen } from "./adminCardOpen";
 
 type AdminRoomsCardProps = {
   token: string;
@@ -24,7 +25,7 @@ export function AdminRoomsCard({
     { value: 3, label: "Critical" },
   ] as const;
 
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(useAdminCardDefaultOpen());
   const {
     busy: adminBusy,
     error: adminError,
@@ -126,7 +127,7 @@ export function AdminRoomsCard({
   return (
     <div className="admin-card">
       <div className="admin-card-header">
-        <div className="admin-card-title">Configuration · Party Lines</div>
+        <div className="admin-card-title">Party lines</div>
         <div className="admin-card-actions">
           <button
             className="admin-toggle-button"

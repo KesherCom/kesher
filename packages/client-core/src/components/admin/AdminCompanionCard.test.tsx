@@ -11,6 +11,7 @@ import {
 vi.mock("../../api", () => ({
   getCompanionAdminSummary: vi.fn(),
   publishCompanionProfile: vi.fn(),
+  buildAbsoluteApiUrl: (path: string) => `http://kesher.test${path}`,
 }));
 
 const appData: Bootstrap = {

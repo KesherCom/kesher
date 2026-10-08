@@ -7,6 +7,7 @@ import type {
 	ConfigurationDocument,
 	ConfigurationSection,
 } from "../../types";
+import { useAdminCardDefaultOpen } from "./adminCardOpen";
 
 type AdminShowfileCardProps = {
 	token: string;
@@ -73,7 +74,7 @@ export function AdminShowfileCard({
 	adminPin,
 	refreshBootstrapData,
 }: AdminShowfileCardProps) {
-	const [isOpen, setIsOpen] = useState(false);
+	const [isOpen, setIsOpen] = useState(useAdminCardDefaultOpen());
 	const [busy, setBusy] = useState(false);
 	const [importText, setImportText] = useState("");
 	const [message, setMessage] = useState("");
@@ -173,7 +174,7 @@ export function AdminShowfileCard({
 	return (
 		<div className="admin-card">
 			<div className="admin-card-header">
-				<div className="admin-card-title">Configuration · Showfile</div>
+				<div className="admin-card-title">Showfile (backup and restore)</div>
 				<div className="admin-card-actions">
 					<button
 						className="admin-toggle-button"

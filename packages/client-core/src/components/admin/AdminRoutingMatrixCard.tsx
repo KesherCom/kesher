@@ -11,6 +11,41 @@ type AdminRoutingMatrixCardProps = {
 
 type CellState = { talk: boolean; listen: boolean; forced: boolean };
 
+/**
+ * One click per cell steps through the useful combinations. "Always hears"
+ * means forced listen: the party line cannot be switched off at the station.
+ */
+const cellCycle: CellState[] = [
+  { talk: false, listen: false, forced: false },
+  { talk: false, listen: true, forced: false },
+  { talk: false, listen: true, forced: true },
+  { talk: true, listen: true, forced: false },
+  { talk: true, listen: true, forced: true },
+];
+
+function cellKey(cell: CellState): string {
+  return `${cell.talk ? 1 : 0}${cell.listen ? 1 : 0}${cell.forced ? 1 : 0}`;
+}
+
+function nextCell(cell: CellState): CellState {
+  const index = cellCycle.findIndex((c) => cellKey(c) === cellKey(cell));
+  // Unusual combinations (e.g. talk without listening) go back to "none".
+  return index < 0 ? cellCycle[0] : cellCycle[(index + 1) % cellCycle.length];
+}
+
+export function describeCell(cell: CellState): { label: string; long: string; className: string } {
+  if (cell.talk && cell.listen && cell.forced) {
+    return { label: "Talk ★", long: "talks, always hears", className: "talk forced" };
+  }
+  if (cell.talk && cell.listen) return { label: "Talk", long: "talks and hears", className: "talk" };
+  if (cell.talk) return { label: "Talk only", long: "talks, does not hear", className: "talk-only" };
+  if (cell.listen && cell.forced) {
+    return { label: "Hear ★", long: "always hears", className: "hear forced" };
+  }
+  if (cell.listen) return { label: "Hear", long: "hears", className: "hear" };
+  return { label: "–", long: "no access", className: "none" };
+}
+
 /** Build a map of roleId → roomId → { talk, listen, forced } from the current bootstrap data. */
 function buildMatrix(
   roles: Role[],
@@ -100,32 +135,14 @@ export function AdminRoutingMatrixCard({
     return false;
   }, [localMatrix, serverMatrix, appData.roles, appData.rooms]);
 
-  const toggleCell = useCallback(
-    (roleId: string, roomId: string, field: "talk" | "listen" | "forced") => {
-      setLocalMatrix((prev) => {
-        const next = { ...prev };
-        next[roleId] = { ...next[roleId] };
-        const cur = next[roleId][roomId];
-        const updated = { ...cur };
-
-        if (field === "forced") {
-          updated.forced = !cur.forced;
-          // Turning on forced → also enable listen
-          if (updated.forced) updated.listen = true;
-        } else if (field === "listen") {
-          updated.listen = !cur.listen;
-          // Turning off listen → also disable forced
-          if (!updated.listen) updated.forced = false;
-        } else {
-          updated.talk = !cur.talk;
-        }
-
-        next[roleId][roomId] = updated;
-        return next;
-      });
-    },
-    [],
-  );
+  const cycleCell = useCallback((roleId: string, roomId: string) => {
+    setLocalMatrix((prev) => {
+      const next = { ...prev };
+      next[roleId] = { ...next[roleId] };
+      next[roleId][roomId] = nextCell(next[roleId][roomId]);
+      return next;
+    });
+  }, []);
 
   const resetMatrix = useCallback(() => {
     setLocalMatrix(buildMatrix(appData.roles, appData.rooms));
@@ -158,7 +175,7 @@ export function AdminRoutingMatrixCard({
   return (
     <div className="admin-card">
       <div className="admin-card-header">
-        <div className="admin-card-title">Routing Matrix</div>
+        <div className="admin-card-title">Who talks and hears where</div>
         <div className="admin-card-actions">
           <button
             className="admin-toggle-button"
@@ -174,9 +191,10 @@ export function AdminRoutingMatrixCard({
           {adminError ? <p className="admin-error">{adminError}</p> : null}
 
           <p className="routing-matrix-hint">
-            Click <strong>T</strong>&thinsp;(Talk), <strong>L</strong>
-            &thinsp;(Listen), or <strong>F</strong>&thinsp;(Forced listen) to
-            toggle permissions for each role/party‑line combination.
+            Click a cell to step through: – no access → <strong>Hear</strong> →{" "}
+            <strong>Hear ★</strong> (always on, cannot be switched off at the
+            station) → <strong>Talk</strong> (talks and hears) →{" "}
+            <strong>Talk ★</strong>. Changes apply after Save.
           </p>
 
           <div className="routing-matrix-wrapper">
@@ -199,46 +217,29 @@ export function AdminRoutingMatrixCard({
                       const cell = localMatrix[role.id]?.[room.id] ?? {
                         talk: false,
                         listen: false,
+                        forced: false,
                       };
+                      const shown = describeCell(cell);
+                      const changed =
+                        cellKey(cell) !==
+                        cellKey(
+                          serverMatrix[role.id]?.[room.id] ?? {
+                            talk: false,
+                            listen: false,
+                            forced: false,
+                          },
+                        );
                       return (
                         <td key={room.id} className="routing-matrix-cell">
                           <button
                             type="button"
-                            className={`routing-matrix-toggle routing-matrix-talk${cell.talk ? " active" : ""}`}
-                            onClick={() => toggleCell(role.id, room.id, "talk")}
+                            className={`routing-matrix-state ${shown.className}${changed ? " changed" : ""}`}
+                            onClick={() => cycleCell(role.id, room.id)}
                             disabled={adminBusy}
-                            aria-label={`Talk ${role.name} → ${room.name}: ${cell.talk ? "on" : "off"}`}
-                            title={`Talk: ${cell.talk ? "ON" : "off"}`}
+                            aria-label={`${role.name} on ${room.name}: ${shown.long}`}
+                            title={`${role.name} on ${room.name}: ${shown.long} (click to change)`}
                           >
-                            T
-                          </button>
-                          <button
-                            type="button"
-                            className={`routing-matrix-toggle routing-matrix-listen${cell.listen ? " active" : ""}`}
-                            onClick={() =>
-                              toggleCell(role.id, room.id, "listen")
-                            }
-                            disabled={adminBusy}
-                            aria-label={`Listen ${role.name} → ${room.name}: ${cell.listen ? "on" : "off"}`}
-                            title={`Listen: ${cell.listen ? "ON" : "off"}`}
-                          >
-                            L
-                          </button>
-                          <button
-                            type="button"
-                            className={`routing-matrix-toggle routing-matrix-forced${cell.forced ? " active" : ""}${!cell.listen ? " unavailable" : ""}`}
-                            onClick={() =>
-                              toggleCell(role.id, room.id, "forced")
-                            }
-                            disabled={adminBusy || !cell.listen}
-                            aria-label={`Forced listen ${role.name} → ${room.name}: ${cell.forced ? "on" : "off"}`}
-                            title={
-                              cell.listen
-                                ? `Forced listen: ${cell.forced ? "ON" : "off"}`
-                                : "Enable Listen first"
-                            }
-                          >
-                            F
+                            {shown.label}
                           </button>
                         </td>
                       );
@@ -251,16 +252,15 @@ export function AdminRoutingMatrixCard({
 
           <div className="routing-matrix-legend">
             <span className="routing-matrix-legend-item">
-              <span className="routing-matrix-swatch routing-matrix-swatch-talk" />{" "}
-              Talk
+              <span className="routing-matrix-state hear">Hear</span> can
+              listen
             </span>
             <span className="routing-matrix-legend-item">
-              <span className="routing-matrix-swatch routing-matrix-swatch-listen" />{" "}
-              Listen
+              <span className="routing-matrix-state talk">Talk</span> can talk
+              and listen
             </span>
             <span className="routing-matrix-legend-item">
-              <span className="routing-matrix-swatch routing-matrix-swatch-forced" />{" "}
-              Forced listen
+              <strong>★</strong> always listening, cannot be switched off
             </span>
           </div>
 

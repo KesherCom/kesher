@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Bootstrap } from "../../types";
 import { createRole, deleteRole, updateRole } from "../../api";
 import { useAdminAction } from "./useAdminAction";
+import { useAdminCardDefaultOpen } from "./adminCardOpen";
 
 type AdminRolesCardProps = {
   token: string;
@@ -16,7 +17,7 @@ export function AdminRolesCard({
   appData,
   refreshBootstrapData,
 }: AdminRolesCardProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(useAdminCardDefaultOpen());
   const {
     busy: adminBusy,
     error: adminError,
@@ -106,7 +107,7 @@ export function AdminRolesCard({
   return (
     <div className="admin-card">
       <div className="admin-card-header">
-        <div className="admin-card-title">Configuration · Roles</div>
+        <div className="admin-card-title">Roles</div>
         <div className="admin-card-actions">
           <button
             className="admin-toggle-button"

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { deleteAdminDevice, getAdminDevices, updateAdminDevice } from "../../api";
 import type { Bootstrap, Device } from "../../types";
+import { useAdminCardDefaultOpen } from "./adminCardOpen";
 
 type AdminDevicesCardProps = {
   token: string;
@@ -27,7 +28,7 @@ function timeAgo(ms: number): string {
  * needs. See docs/hardware/raspberry-pi.md.
  */
 export function AdminDevicesCard({ token, adminPin, appData }: AdminDevicesCardProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(useAdminCardDefaultOpen());
   const [devices, setDevices] = useState<Device[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DeviceDraft>>({});
   const [editing, setEditing] = useState<string | null>(null);

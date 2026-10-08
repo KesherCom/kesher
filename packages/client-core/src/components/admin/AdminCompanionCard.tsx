@@ -9,6 +9,7 @@ import type {
   CompanionAdminSummary,
   CompanionPublishedProfileSummary,
 } from "../../types";
+import { useAdminCardDefaultOpen } from "./adminCardOpen";
 
 type AdminCompanionCardProps = {
   token: string;
@@ -32,7 +33,7 @@ export function AdminCompanionCard({
   adminPin,
   appData,
 }: AdminCompanionCardProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(useAdminCardDefaultOpen());
   const [loading, setLoading] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState("");
@@ -149,7 +150,7 @@ export function AdminCompanionCard({
   return (
     <div className="admin-card">
       <div className="admin-card-header">
-        <div className="admin-card-title">Integration · Companion</div>
+        <div className="admin-card-title">Companion bound to a role</div>
         <div className="admin-card-actions">
           <button
             className="admin-toggle-button"

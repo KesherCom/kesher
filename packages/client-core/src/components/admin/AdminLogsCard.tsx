@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { exportAdminLogsText, getAdminLogs } from "../../api";
 import type { AdminLogEntry } from "../../types";
+import { useAdminCardDefaultOpen } from "./adminCardOpen";
 
 type AdminLogsCardProps = {
   token: string;
@@ -22,7 +23,7 @@ function toUnixMs(datetimeLocal: string): number | undefined {
 }
 
 export function AdminLogsCard({ token, adminPin }: AdminLogsCardProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(useAdminCardDefaultOpen());
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState("");
@@ -117,7 +118,7 @@ export function AdminLogsCard({ token, adminPin }: AdminLogsCardProps) {
   return (
     <div className="admin-card">
       <div className="admin-card-header">
-        <div className="admin-card-title">Logs · Request / Audit / Errors</div>
+        <div className="admin-card-title">Logs</div>
         <div className="admin-card-actions">
           <button
             className="admin-toggle-button"

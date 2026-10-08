@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { resetAdminRoleStreamDeckSettings } from "../../api";
 import type { Bootstrap } from "../../types";
+import { useAdminCardDefaultOpen } from "./adminCardOpen";
 
 type AdminStreamDeckCardProps = {
   token: string;
@@ -13,7 +14,7 @@ export function AdminStreamDeckCard({
   adminPin,
   appData,
 }: AdminStreamDeckCardProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(useAdminCardDefaultOpen());
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -43,7 +44,7 @@ export function AdminStreamDeckCard({
   return (
     <div className="admin-card">
       <div className="admin-card-header">
-        <div className="admin-card-title">Stream Deck Profiles</div>
+        <div className="admin-card-title">Role layouts (reset)</div>
         <div className="admin-card-actions">
           <button
             className="admin-toggle-button"

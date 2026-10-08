@@ -67,25 +67,11 @@ describe("AdminRoutingMatrixCard", () => {
       />,
     );
 
-    // Audio can talk on FOH (active)
-    const audioFohTalk = screen.getByLabelText("Talk Audio → FOH: on");
-    expect(audioFohTalk).toHaveClass("active");
-
-    // Audio can listen on FOH (active)
-    const audioFohListen = screen.getByLabelText("Listen Audio → FOH: on");
-    expect(audioFohListen).toHaveClass("active");
-
-    // Video cannot talk on FOH (inactive)
-    const videoFohTalk = screen.getByLabelText("Talk Video → FOH: off");
-    expect(videoFohTalk).not.toHaveClass("active");
-
-    // Video can listen on FOH (active)
-    const videoFohListen = screen.getByLabelText("Listen Video → FOH: on");
-    expect(videoFohListen).toHaveClass("active");
-
-    // Audio cannot talk on Stage (inactive)
-    const audioStageTalk = screen.getByLabelText("Talk Audio → Stage: off");
-    expect(audioStageTalk).not.toHaveClass("active");
+    // One cell per role and party line, in plain words.
+    expect(screen.getByLabelText("Audio on FOH: talks and hears")).toHaveTextContent("Talk");
+    expect(screen.getByLabelText("Video on FOH: hears")).toHaveTextContent("Hear");
+    expect(screen.getByLabelText("Audio on Stage: no access")).toHaveTextContent("–");
+    expect(screen.getByLabelText("Video on Stage: hears")).toBeInTheDocument();
   });
 
   it("toggling a cell shows save/discard buttons and saves changes", async () => {
@@ -104,14 +90,11 @@ describe("AdminRoutingMatrixCard", () => {
     // No save button initially
     expect(screen.queryByText("Save changes")).not.toBeInTheDocument();
 
-    // Toggle Video talk on FOH
-    const videoFohTalk = screen.getByLabelText("Talk Video → FOH: off");
-    await user.click(videoFohTalk);
-
-    // The label should now say "on"
-    expect(
-      screen.getByLabelText("Talk Video → FOH: on"),
-    ).toBeInTheDocument();
+    // Video on FOH: hears → always hears → talks and hears
+    await user.click(screen.getByLabelText("Video on FOH: hears"));
+    expect(screen.getByLabelText("Video on FOH: always hears")).toHaveTextContent("Hear ★");
+    await user.click(screen.getByLabelText("Video on FOH: always hears"));
+    expect(screen.getByLabelText("Video on FOH: talks and hears")).toHaveClass("changed");
 
     // Save/Discard buttons should appear
     expect(screen.getByText("Save changes")).toBeVisible();
@@ -146,17 +129,12 @@ describe("AdminRoutingMatrixCard", () => {
       />,
     );
 
-    // Toggle Audio talk on Stage (off→on)
-    const audioStageTalk = screen.getByLabelText("Talk Audio → Stage: off");
-    await user.click(audioStageTalk);
+    await user.click(screen.getByLabelText("Audio on Stage: no access"));
+    expect(screen.getByLabelText("Audio on Stage: hears")).toBeInTheDocument();
 
-    // Now discard
     await user.click(screen.getByText("Discard"));
 
-    // Should be back to off
-    expect(
-      screen.getByLabelText("Talk Audio → Stage: off"),
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Audio on Stage: no access")).toBeInTheDocument();
     expect(screen.queryByText("Save changes")).not.toBeInTheDocument();
   });
 

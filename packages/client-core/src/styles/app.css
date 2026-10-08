@@ -4173,3 +4173,211 @@ button.secondary {
   color: var(--text-muted);
   margin-top: 0.15rem;
 }
+
+/* ── Admin console: section navigation (Live, Setup, Devices, System) ── */
+.admin-console {
+  grid-template-columns: 220px minmax(0, 1fr);
+  align-items: start;
+  gap: 1.25rem;
+}
+.admin-nav {
+  position: sticky;
+  top: 0.9rem;
+  display: grid;
+  gap: 0.35rem;
+}
+.admin-nav-item {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.65rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.admin-nav-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.admin-nav-item.active {
+  border-color: rgba(0, 209, 255, 0.25);
+  background: rgba(0, 209, 255, 0.08);
+  color: var(--text-bright-alt2);
+}
+.admin-nav-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 1rem;
+  font-weight: 800;
+}
+.admin-nav-hint {
+  font-size: 0.78rem;
+  line-height: 1.3;
+  opacity: 0.8;
+}
+.admin-section {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+}
+.admin-section-cards {
+  display: grid;
+  gap: 0.85rem;
+}
+.admin-subsection {
+  margin-top: 0.6rem;
+}
+.admin-subsection h3 {
+  margin: 0 0 0.2rem;
+  font-size: 0.95rem;
+  color: var(--text-bright-alt2);
+}
+.admin-subsection p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+/* Live page */
+.admin-live {
+  display: grid;
+  gap: 0.85rem;
+}
+.admin-live-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.admin-live-tile {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--panel);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.admin-live-tile:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+.admin-live-tile-value {
+  font-size: 1.7rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text-bright-alt2);
+}
+.admin-live-tile-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.admin-live-tile-detail {
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+.admin-live-tile.attention,
+.admin-live-tile.warning {
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(245, 158, 11, 0.08);
+}
+.admin-live-tile.attention .admin-live-tile-detail,
+.admin-live-tile.warning .admin-live-tile-detail {
+  color: #fcd34d;
+  opacity: 1;
+}
+.admin-live-tile.ok .admin-live-tile-value {
+  color: var(--color-success);
+}
+.admin-live-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+.admin-live-notice {
+  margin: 0 0 0.5rem;
+  color: var(--color-success);
+}
+.admin-live-warnings {
+  margin: 0.6rem 0 0;
+  padding-left: 1.1rem;
+  color: #fcd34d;
+  font-size: 0.85rem;
+}
+
+/* Routing matrix: one button per cell, in words */
+.routing-matrix-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4.6rem;
+  height: 1.9rem;
+  padding: 0 0.5rem;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-dark);
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.routing-matrix-state:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+.routing-matrix-state.hear {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.55);
+  color: #bfdbfe;
+}
+.routing-matrix-state.talk,
+.routing-matrix-state.talk-only {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: rgba(34, 197, 94, 0.6);
+  color: #bbf7d0;
+}
+.routing-matrix-state.forced {
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.7);
+}
+.routing-matrix-state.changed {
+  outline: 2px dashed rgba(0, 209, 255, 0.7);
+  outline-offset: 1px;
+}
+.routing-matrix-legend .routing-matrix-state {
+  min-width: 0;
+  height: 1.5rem;
+  cursor: default;
+}
+
+@media (max-width: 900px) {
+  .admin-console {
+    grid-template-columns: 1fr;
+  }
+  .admin-nav {
+    position: static;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .admin-nav-item {
+    text-align: center;
+    padding: 0.55rem 0.3rem;
+  }
+  .admin-nav-label {
+    justify-content: center;
+    font-size: 0.9rem;
+  }
+  .admin-nav-hint {
+    display: none;
+  }
+  .admin-live-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .admin-live-columns {
+    grid-template-columns: 1fr;
+  }
+}
