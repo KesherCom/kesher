@@ -219,6 +219,7 @@ export function normalizePublicBootstrap(data: unknown): PublicBootstrap {
       version: typeof (raw.appVersion as any)?.version === "string" ? (raw.appVersion as any).version : "unknown",
       buildTimestamp: typeof (raw.appVersion as any)?.buildTimestamp === "string" ? (raw.appVersion as any).buildTimestamp : "unknown",
     },
+    setupRequired: raw.setupRequired === true,
   };
 }
 
@@ -503,6 +504,16 @@ export async function loginTakeover(
   });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as LoginSuccess;
+}
+
+/** First-run setup: choose the admin PIN, keep or drop the example config. */
+export async function completeSetup(pin: string, start: "example" | "empty"): Promise<void> {
+  const res = await fetch(apiUrl("/api/setup"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pin, start }),
+  });
+  if (!res.ok) throw new Error((await res.text()).trim() || "setup failed");
 }
 
 export async function adminLogin(pin: string): Promise<LoginSuccess> {

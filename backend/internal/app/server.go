@@ -3434,6 +3434,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/public-bootstrap", s.handlePublicBootstrap)
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/admin/login", s.handleAdminLogin)
+	mux.HandleFunc("/api/setup", s.handleSetup)
 	mux.HandleFunc("/api/login/takeover", s.handleLoginTakeover)
 	// Hardware stations (kesher-node): pairing and login, see devices.go.
 	mux.HandleFunc("/api/devices/hello", s.handleDeviceHello)
@@ -3688,6 +3689,7 @@ func (s *Server) handlePublicBootstrap(w http.ResponseWriter, r *http.Request) {
 		BroadcastGroups: groups,
 		AckEnabled:      s.isAckEnabled(),
 		AppVersion:      GetVersionInfo(),
+		SetupRequired:   s.setupRequired(r.Context()),
 	})
 }
 
@@ -3832,6 +3834,10 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	var req AdminLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if s.setupRequired(r.Context()) {
+		http.Error(w, "finish the setup first", http.StatusForbidden)
 		return
 	}
 	configuredPIN, err := s.store.GetAdminPIN(r.Context())
@@ -4868,6 +4874,10 @@ func (s *Server) handleAdminBroadcastGroupByID(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request, _ Session) bool {
+	if s.setupRequired(r.Context()) {
+		http.Error(w, "finish the setup first", http.StatusForbidden)
+		return false
+	}
 	configuredPIN, err := s.store.GetAdminPIN(r.Context())
 	if err != nil || strings.TrimSpace(configuredPIN) == "" {
 		http.Error(w, "admin pin unavailable", http.StatusForbidden)

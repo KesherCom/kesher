@@ -3,6 +3,7 @@ export const sessionSettingsStorageKey = "intercom-session-settings";
 export const globalSettingsStorageKey = "intercom-global-settings";
 export const favoritesStorageKey = "intercom-favorites";
 export const keyboardShortcutsStorageKey = "intercom-keyboard-shortcuts";
+export const adminPinStorageKey = "intercom-admin-pin";
 export const defaultAdminPin = "123456";
 export const defaultAudioGateEnabled = false;
 export const defaultAudioGateThresholdDb = -52;

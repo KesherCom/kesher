@@ -3,10 +3,10 @@
 #
 # Usually set up by install.sh (one command, see the guide). By hand:
 #   1. put this file and .env.example into one folder, e.g. /opt/kesher
-#   2. cp .env.example .env    and set ADMIN_PIN
+#   2. cp .env.example .env
 #   3. docker compose up -d
-#   4. browsers: https://<server-ip>:8443 (accept the certificate once per
-#      device); desktop app: finds the server itself (or http://<server-ip>:8080)
+#   4. open https://<server-ip>:8443 (confirm the certificate once per
+#      device) and choose the admin PIN on the setup page
 #
 # Linux only: network_mode: host does not work with Docker Desktop on
 # Windows/macOS (use deploy/compose there, see the guide).
@@ -23,7 +23,9 @@ services:
     # IP has to be configured. Ports used: see KESHER_*_PORT in .env.
     network_mode: host
     environment:
-      ADMIN_PIN: ${ADMIN_PIN:?set ADMIN_PIN in .env}
+      # Empty: the first visit in the browser sets the admin PIN.
+      ADMIN_PIN: ${ADMIN_PIN:-}
+      FIRST_RUN_SETUP: "true"
       SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-720}
       APP_ADDR: ":${KESHER_HTTPS_PORT:-8443}"
       # Plain HTTP for the desktop app and Pi stations on the LAN; their

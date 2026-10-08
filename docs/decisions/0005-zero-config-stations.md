@@ -30,6 +30,12 @@ outright. The goal: install, plug in, approve, done.
    serves plain HTTP next to HTTPS (on by default in `deploy/server`, port
    8080). Browsers keep HTTPS (needed for the microphone); the desktop app
    uses the HTTP address, which discovery reports as `http_url`.
+5. **First-run setup in the browser.** With `FIRST_RUN_SETUP=true` (set in
+   `deploy/server`) a fresh server shows a setup page instead of the login:
+   admin PIN, example or empty configuration. Admin login stays closed
+   until then, so the default PIN never works on such a server. The
+   installer therefore asks nothing. The first visitor sets the PIN, as
+   with most network appliances.
 
 ## Why
 

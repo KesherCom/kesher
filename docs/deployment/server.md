@@ -28,17 +28,22 @@ IP address to configure.
 curl -fsSL https://raw.githubusercontent.com/KesherCom/kesher/main/deploy/server/install.sh | sudo bash
 ```
 
-The installer:
+It asks no questions. It installs Docker if it is missing, sets up
+`/opt/kesher`, downloads the server image, opens the firewall ports (ufw or
+firewalld), starts Kesher (also after every reboot), installs the `kesher`
+command and prints the address to open.
 
-1. installs Docker if it is missing (asks first),
-2. sets up `/opt/kesher` and asks for an **admin PIN**,
-3. downloads the server image and opens the firewall ports (ufw or
-   firewalld),
-4. starts Kesher, which then also starts after every reboot,
-5. installs the `kesher` command and prints the addresses to open.
+**Then open that address in a browser** (`https://<server-ip>:8443`,
+confirm the certificate warning once). The first visit shows the setup
+page:
 
-Running it again is safe: settings and data are kept, the server is
-updated.
+1. choose the **admin PIN**,
+2. keep the **example setup** (roles and party lines for a typical
+   production, adjustable later) or start empty,
+3. *Finish setup*: the admin area opens.
+
+That is all. Running the installer again is safe: settings and data are
+kept, the server is updated.
 
 **Before the first release with Docker images** (or to test a branch), let
 it build the image from that branch instead of downloading it:
@@ -51,16 +56,15 @@ Options (after `bash -s --`):
 
 | Option | Meaning |
 | --- | --- |
-| `--pin PIN` | admin PIN without asking (letters, digits, `.` `-` `_`) |
+| `--pin PIN` | set the admin PIN now instead of on the setup page (letters, digits, `.` `-` `_`) |
 | `--version 0.9.0` | a fixed release instead of `latest` (recommended for events) |
 | `--build --ref BRANCH` | build the image from a branch on this machine |
 | `--dir DIR` | install somewhere else than `/opt/kesher` |
-| `--yes` | no questions (for scripts) |
 
 ### Connect
 
 - **Browser:** open `https://<server-ip>:8443`, accept the certificate
-  warning once, log in. The admin area uses your admin PIN.
+  warning once, log in. The admin area uses the PIN from the setup page.
 - **Desktop app:** the connection screen lists the server under "Im
   Netzwerk gefunden"; click *Verbinden*. Otherwise enter
   `http://<server-ip>:8080` (the app uses plain HTTP on the LAN; it cannot
@@ -84,7 +88,9 @@ Discovery works within one network. Background: [decision 0005](../decisions/000
 | New certificate (after the server's IP changed) | `sudo kesher new-certificate` |
 | Remove (keeps data; `--purge` deletes it) | `sudo kesher uninstall` |
 
-Settings (admin PIN, ports, version) are in `/opt/kesher/.env`.
+Settings (ports, version) are in `/opt/kesher/.env`. The admin PIN is
+changed in the admin area (Security - Admin PIN); an `ADMIN_PIN` in `.env`
+would override it on every start.
 
 ### Manual installation (without the installer)
 
@@ -92,11 +98,12 @@ The installer only automates these steps:
 
 1. Install Docker: `curl -fsSL https://get.docker.com | sudo sh`
 2. Put [`docker-compose.yml`](../../deploy/server/docker-compose.yml) and
-   [`.env.example`](../../deploy/server/.env.example) into `/opt/kesher`,
-   rename `.env.example` to `.env` and set `ADMIN_PIN=`.
+   [`.env.example`](../../deploy/server/.env.example) into `/opt/kesher` and
+   rename `.env.example` to `.env`.
 3. Open the ports in the table below, e.g.
    `sudo ufw allow 8443/tcp && sudo ufw allow 8080/tcp && sudo ufw allow 8081:8082/udp && sudo ufw allow 5353/udp`.
-4. In `/opt/kesher`: `sudo docker compose up -d`.
+4. In `/opt/kesher`: `sudo docker compose up -d`, then open the address
+   and finish the setup page.
 
 | Port | Protocol | For |
 | --- | --- | --- |
@@ -114,6 +121,7 @@ The installer only automates these steps:
 | Desktop app or Pi does not find the server | They must be in the same network, and UDP 5353 must be open on the server. Otherwise enter the address (`http://<server-ip>:8080` in the app, `server = "https://<server-ip>:8443"` on the Pi). |
 | Audio only works on some networks | The server has several networks: set `KESHER_PUBLIC_IP` in `/opt/kesher/.env` to the address clients use, then `sudo kesher new-certificate`. |
 | Browser: no microphone | Use `https://`, not `http://`. |
+| Someone else finished the setup page first | Only possible in the minutes between start and setup. Reset: `sudo kesher uninstall --purge`, install again. |
 | `cannot download ghcr.io/...` | No release with Docker images yet: install with `--build --ref <branch>`. Maintainers: images must be public (see [Releases](../releases/README.md)). |
 | Server does not start | `kesher logs` shows why. |
 

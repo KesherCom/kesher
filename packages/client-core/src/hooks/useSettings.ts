@@ -3,6 +3,7 @@ import {
   clampAudioGateThresholdDb,
   clampInputGainValue,
   clampOutputGainValue,
+  adminPinStorageKey,
   defaultAdminPin,
   favoritesStorageKey,
   type FavoriteSettings,
@@ -161,8 +162,25 @@ export function useSettings(): UseSettingsResult {
   const [keyboardShortcuts, setKeyboardShortcuts] =
     useState<KeyboardShortcutSettings>(initialKeyboardShortcuts);
 
-  // Admin PIN guard
-  const [adminPinGuard, setAdminPinGuard] = useState<string>(defaultAdminPin);
+  // Admin PIN of the current admin session, sent with every admin request.
+  // Kept for the browser tab (like the session token) so a reload keeps the
+  // admin area working with a PIN other than the default.
+  const [adminPinGuard, setAdminPinGuardState] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem(adminPinStorageKey) || defaultAdminPin;
+    } catch {
+      return defaultAdminPin;
+    }
+  });
+  const setAdminPinGuard = useCallback((value: string) => {
+    setAdminPinGuardState(value);
+    try {
+      if (value && value !== defaultAdminPin) sessionStorage.setItem(adminPinStorageKey, value);
+      else sessionStorage.removeItem(adminPinStorageKey);
+    } catch {
+      // storage unavailable: the PIN stays in memory only
+    }
+  }, []);
 
   // Refs for stable access inside callbacks / effects
   const selectedInputDeviceIdRef = useRef(

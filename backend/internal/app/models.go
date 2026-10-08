@@ -213,6 +213,8 @@ type PublicBootstrapResponse struct {
 	BroadcastGroups []BroadcastGroup `json:"broadcastGroups"`
 	AckEnabled      bool             `json:"ackEnabled"`
 	AppVersion      VersionInfo      `json:"appVersion"`
+	// SetupRequired: show the first-run setup page instead of the login.
+	SetupRequired bool `json:"setupRequired,omitempty"`
 }
 
 type LoginRequest struct {

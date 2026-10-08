@@ -97,7 +97,8 @@ make run-production-certmagic DOMAIN=intercom.example.org DNS_PROVIDER=cloudflar
 
 **Running a server?** Start with [docs/deployment/server.md](docs/deployment/server.md).
 On a Linux server one command installs everything (Docker, published image,
-firewall, `kesher` management command):
+firewall, `kesher` management command); the admin PIN is then chosen on the
+setup page at the first visit:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/KesherCom/kesher/main/deploy/server/install.sh | sudo bash

@@ -2,18 +2,19 @@
 # Kesher server installer for Linux (Debian, Ubuntu, Raspberry Pi OS, Fedora,
 # ...). Installs Docker if needed, sets up /opt/kesher from deploy/server,
 # opens the firewall, starts the server and installs the `kesher` command.
+# It asks nothing: the admin PIN is chosen in the browser on first visit.
 #
 #   curl -fsSL https://raw.githubusercontent.com/KesherCom/kesher/main/deploy/server/install.sh | sudo bash
 #
 # Options (or the environment variables in brackets):
-#   --pin PIN        admin PIN (KESHER_ADMIN_PIN); asked for if missing
+#   --pin PIN        set the admin PIN now instead of in the browser
+#                    (KESHER_ADMIN_PIN)
 #   --version X.Y.Z  image version, default latest (KESHER_VERSION)
 #   --ref REF        git branch/tag to take the setup files from, default
 #                    main (KESHER_REF)
 #   --build          build the image from REF on this machine instead of
 #                    downloading it (to test a branch before a release)
 #   --dir DIR        install directory, default /opt/kesher (KESHER_DIR)
-#   --yes            do not ask; install Docker if missing
 #
 # Running it again is safe: it keeps .env (PIN, ports) and the data, and
 # updates the setup files and the image. Guide: docs/deployment/server.md
@@ -25,7 +26,6 @@ VERSION="${KESHER_VERSION:-}"
 DIR="${KESHER_DIR:-/opt/kesher}"
 PIN="${KESHER_ADMIN_PIN:-}"
 BUILD=0
-YES=0
 
 usage() {
   cat <<'EOF'
@@ -33,12 +33,12 @@ Kesher server installer.
   curl -fsSL https://raw.githubusercontent.com/KesherCom/kesher/main/deploy/server/install.sh | sudo bash
   ... | sudo bash -s -- [options]
 
-  --pin PIN        admin PIN (letters, digits, . - _); asked for if missing
+  --pin PIN        set the admin PIN now (letters, digits, . - _) instead of
+                   choosing it in the browser on first visit
   --version X.Y.Z  image version (default: latest)
   --ref REF        branch or tag for the setup files (default: main)
   --build          build the image from REF here instead of downloading it
   --dir DIR        install directory (default: /opt/kesher)
-  --yes            do not ask questions
 EOF
 }
 
@@ -55,7 +55,7 @@ while [ $# -gt 0 ]; do
     --ref) REF="${2:?--ref needs a value}"; shift 2 ;;
     --dir) DIR="${2:?--dir needs a value}"; shift 2 ;;
     --build) BUILD=1; shift ;;
-    --yes|-y) YES=1; shift ;;
+    --yes|-y) shift ;; # accepted for compatibility; the installer never asks
     -h|--help) usage; exit 0 ;;
     *) die "unknown option $1 (see --help)" ;;
   esac
@@ -69,22 +69,13 @@ fetch() { # fetch FILE DEST: one file of deploy/server
   if [ -n "$SOURCE_DIR" ]; then cp "$SOURCE_DIR/deploy/server/$1" "$2"; else curl -fsSL "$RAW/$1" -o "$2"; fi
 }
 
-# Questions go to the terminal even when the script is piped into bash.
-ask() {
-  local prompt="$1" answer=""
-  if [ "$YES" = 1 ] || [ ! -r /dev/tty ]; then return 0; fi
-  read -r -p "$prompt [Y/n] " answer </dev/tty || true
-  case "$answer" in [nN]*) return 1 ;; *) return 0 ;; esac
-}
-
 [ "$(uname -s)" = Linux ] || die "this installer is for Linux. On Windows/Mac see docs/deployment/server.md."
 [ "$(id -u)" = 0 ] || die "please run as root: curl ... | sudo bash"
 command -v curl >/dev/null || die "curl is missing (apt install curl)"
 
 # ── 1. Docker ──────────────────────────────────────────────────────────────
 if ! command -v docker >/dev/null; then
-  ask "Docker is not installed. Install it now (get.docker.com)?" || die "Docker is required."
-  say "Installing Docker"
+  say "Installing Docker (get.docker.com)"
   curl -fsSL https://get.docker.com | sh
 fi
 systemctl enable --now docker >/dev/null 2>&1 || true
@@ -106,22 +97,11 @@ set_env() { # set_env KEY VALUE: replace or append in .env
 
 if [ -f .env ]; then
   ok "keeping existing settings (.env)"
-  [ -n "$PIN" ] && set_env ADMIN_PIN "$PIN"
 else
   fetch .env.example .env || die "cannot download .env.example"
-  if [ -z "$PIN" ] && [ -r /dev/tty ] && [ "$YES" = 0 ]; then
-    while :; do
-      read -r -s -p "Choose an admin PIN (for the admin area): " PIN </dev/tty; echo
-      [[ "$PIN" =~ ^[A-Za-z0-9._-]+$ ]] || { warn "use letters, digits, . - _ (not empty)"; continue; }
-      read -r -s -p "Repeat the PIN: " pin2 </dev/tty; echo
-      [ "$PIN" = "$pin2" ] && break
-      warn "the PINs do not match"
-    done
-  fi
-  [ -n "$PIN" ] || die "no admin PIN: pass --pin PIN"
-  set_env ADMIN_PIN "$PIN"
 fi
-grep -Eq '^ADMIN_PIN=[A-Za-z0-9._-]+$' .env || die "ADMIN_PIN in $DIR/.env must be set and use only letters, digits, . - _"
+[ -n "$PIN" ] && set_env ADMIN_PIN "$PIN"
+grep -Eq '^ADMIN_PIN=([A-Za-z0-9._-]+)?$' .env || die "ADMIN_PIN in $DIR/.env may only use letters, digits, . - _"
 
 [ -n "$VERSION" ] && set_env KESHER_VERSION "$VERSION"
 chmod 600 .env
@@ -183,14 +163,16 @@ ok "server is running"
 # LAN addresses, without Docker's and VMs' internal bridges.
 ips="$(ip -o -4 addr show scope global 2>/dev/null | awk '$2 !~ /^(docker|br-|veth|virbr|cni|flannel)/ {print $4}' | cut -d/ -f1 || true)"
 echo
-printf '\033[1mKesher is running.\033[0m Open in a browser (accept the certificate warning once):\n'
+printf '\033[1mKesher is running.\033[0m Open it in a browser (confirm the certificate warning once):\n'
 for ip in $ips; do printf '   https://%s:%s\n' "$ip" "$HTTPS_PORT"; done
+if [ -z "$(env_value ADMIN_PIN)" ]; then
+  printf '\nThe first visit shows the setup page: choose the admin PIN there.\n'
+fi
 cat <<EOF
 
 Desktop app and Raspberry Pi stations find the server by themselves in this
 network (desktop app address otherwise: http://<server-ip>:$HTTP_PORT).
 New Pi stations appear in the admin area under "Stations" for approval.
-Admin area: the PIN you chose (change it in $DIR/.env, then: kesher restart).
 
 Manage it with the kesher command:
    kesher status | logs | update | restart | backup | help

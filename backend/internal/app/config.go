@@ -58,6 +58,9 @@ type Config struct {
 	// cannot use a self-signed certificate the way a browser can after a
 	// click). Browsers keep using HTTPS for microphone access.
 	LANHTTPAddr string
+	// FirstRunSetup: a fresh server asks for the admin PIN in the browser
+	// (setup.go) instead of using the default PIN.
+	FirstRunSetup bool
 }
 type fileConfig struct {
 	Addr                               string   `yaml:"app_addr"`
@@ -97,6 +100,7 @@ type fileConfig struct {
 	MDNSEnabled                        *bool    `yaml:"mdns_enabled"`
 	MDNSName                           string   `yaml:"mdns_name"`
 	LANHTTPAddr                        string   `yaml:"lan_http_addr"`
+	FirstRunSetup                      *bool    `yaml:"first_run_setup"`
 }
 
 func getEnvWithPresence(k, fallback string) (string, bool) {
@@ -303,6 +307,9 @@ func loadConfigFromFile(path string) (Config, error) {
 	if strings.TrimSpace(fileCfg.LANHTTPAddr) != "" {
 		cfg.LANHTTPAddr = strings.TrimSpace(fileCfg.LANHTTPAddr)
 	}
+	if fileCfg.FirstRunSetup != nil {
+		cfg.FirstRunSetup = *fileCfg.FirstRunSetup
+	}
 	if len(fileCfg.WebRTCPublicIPs) > 0 {
 		cfg.WebRTCPublicIPs = splitCSV(strings.Join(fileCfg.WebRTCPublicIPs, ","))
 	}
@@ -311,6 +318,10 @@ func loadConfigFromFile(path string) (Config, error) {
 
 func loadConfigFromEnv() Config {
 	adminPIN, adminPINFromEnv := getEnvWithPresence("ADMIN_PIN", "123456")
+	// An empty ADMIN_PIN (e.g. "${ADMIN_PIN:-}" in compose) means "not set".
+	if strings.TrimSpace(adminPIN) == "" {
+		adminPIN, adminPINFromEnv = "123456", false
+	}
 	return Config{
 		Addr:                       getEnv("APP_ADDR", ":8080"),
 		StaticDir:                  getEnv("STATIC_DIR", ""),
@@ -355,6 +366,7 @@ func loadConfigFromEnv() Config {
 		MDNSEnabled:            getEnv("MDNS_ENABLED", "true") != "false",
 		MDNSName:               getEnv("MDNS_NAME", ""),
 		LANHTTPAddr:            getEnv("LAN_HTTP_ADDR", ""),
+		FirstRunSetup:          getEnv("FIRST_RUN_SETUP", "false") == "true",
 	}
 }
 

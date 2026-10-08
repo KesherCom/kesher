@@ -21,6 +21,7 @@ import {
   updateAdminPin,
 } from "./api";
 import { LoginView } from "./components/LoginView";
+import { SetupView } from "./components/SetupView";
 import { SimpleIntercomView } from "./components/SimpleIntercomView";
 import { StationIntercomView } from "./components/StationIntercomView";
 import { AdminShell } from "./components/admin/AdminShell";
@@ -1078,15 +1079,15 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
     }
   }
 
-  async function handleAdminLogin() {
-    if (adminPinInput.trim() !== settings.adminPinGuard) {
-      setAdminLoginError("Incorrect admin PIN.");
-      return;
-    }
+  async function handleAdminLogin(pinOverride?: string) {
+    // The server checks the PIN; the admin area then sends it with every
+    // admin request.
+    const pin = (pinOverride ?? adminPinInput).trim();
     setAdminLoginError("");
     setAuthMode("admin");
     try {
-      const res = await adminLogin(adminPinInput.trim());
+      const res = await adminLogin(pin);
+      settings.setAdminPinGuard(pin);
       setPendingTakeover(null);
       setOperatorLoginError("");
       setShowBirthdayGreeting(false);
@@ -1108,6 +1109,7 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
     sessionStorage.removeItem(tokenStorageKey);
     localStorage.removeItem(tokenStorageKey);
     localStorage.removeItem(sessionSettingsStorageKey);
+    settings.setAdminPinGuard("");
     setAuthMode("operator");
     setAdminPinInput("");
     setAdminLoginError("");
@@ -1727,6 +1729,20 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
           </div>
         </div>
       </div>
+    );
+  }
+
+  if (!token && publicData.setupRequired) {
+    return (
+      <SetupView
+        publicData={publicData}
+        onDone={(pin) => {
+          // Straight into the admin area with the new PIN.
+          setAdminPinInput(pin);
+          void loadPublicBootstrap();
+          void handleAdminLogin(pin);
+        }}
+      />
     );
   }
 

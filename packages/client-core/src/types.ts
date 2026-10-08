@@ -140,6 +140,8 @@ export type PublicBootstrap = {
   broadcastGroups: BroadcastGroup[];
   ackEnabled: boolean;
   appVersion: VersionInfo;
+  /** Fresh server: show the first-run setup instead of the login. */
+  setupRequired?: boolean;
 };
 
 export type Bootstrap = PublicBootstrap & {
