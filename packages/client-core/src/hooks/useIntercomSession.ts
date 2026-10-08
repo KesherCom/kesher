@@ -33,6 +33,7 @@ import type {
   RoutedEvent,
   SessionRevokedEvent,
 } from "../types";
+import { directRoleTargetPrefix } from "../types";
 import { useLocalMic } from "./useLocalMic";
 import { useRemoteAudio } from "./useRemoteAudio";
 import { useRtpStats } from "./useRtpStats";
@@ -388,6 +389,18 @@ export function getAdaptivePlayoutDelayHint(
   }
   // Poor network: maximum buffer
   return 0.15; // 150 ms
+}
+
+/** A direct event is for us when it names us or our role (a role call). */
+function isDirectTargetSelf(
+  targetId: string | undefined,
+  ad: Bootstrap | null | undefined,
+): boolean {
+  if (!ad || !targetId) return false;
+  if (targetId.startsWith(directRoleTargetPrefix)) {
+    return targetId.slice(directRoleTargetPrefix.length) === ad.self.roleId;
+  }
+  return targetId === ad.self.id;
 }
 
 function isMobileClient(): boolean {
@@ -1340,6 +1353,11 @@ export function useIntercomSession({
   function canSelfSendDirectToUser(targetUserId: string): boolean {
     const ad = appDataRef.current;
     if (!ad || !targetUserId) return false;
+    if (targetUserId.startsWith(directRoleTargetPrefix)) {
+      return canSelfDirectToRole(
+        targetUserId.slice(directRoleTargetPrefix.length),
+      );
+    }
     if (targetUserId === ad.self.id) return false;
     const targetUser = ad.users.find((user) => user.id === targetUserId);
     if (!targetUser) return false;
@@ -2396,7 +2414,7 @@ export function useIntercomSession({
         if (
           msg.type === "voice_state" &&
           msg.data.scope === "direct" &&
-          msg.data.targetId === ad?.self.id &&
+          isDirectTargetSelf(msg.data.targetId, ad) &&
           msg.data.fromUser.id !== ad?.self.id &&
           msg.data.body === "ptt_start"
         ) {
@@ -2406,7 +2424,8 @@ export function useIntercomSession({
           const incomingGroupCall =
             msg.data.scope === "room" && msg.data.signal === "call";
           const incomingDirectSignal =
-            msg.data.scope === "direct" && msg.data.targetId === ad?.self.id;
+            msg.data.scope === "direct" &&
+            isDirectTargetSelf(msg.data.targetId, ad);
           if (incomingDirectSignal && msg.data.signal === "call") {
             setLastDirectCallerUserId(msg.data.fromUser.id);
           }

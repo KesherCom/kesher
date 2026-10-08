@@ -602,6 +602,9 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "roles", "default_simple_view", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn(ctx, "roles", "exclusive", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	if err := s.ensureColumn(ctx, "rooms", "priority_level", "INTEGER NOT NULL DEFAULT 1"); err != nil {
 		return err
 	}
@@ -670,6 +673,9 @@ func (s *Store) migrate(ctx context.Context) error {
 	)`); err != nil {
 		return err
 	}
+	if err := s.ensureStreamDecksSchema(ctx); err != nil {
+		return err
+	}
 	return s.ensureDevicesSchema(ctx)
 }
 
@@ -681,15 +687,15 @@ func (s *Store) seed(ctx context.Context) error {
 		{ID: "broadcast", Name: "Broadcast", DefaultRoomID: "livestream", DefaultVoiceMode: "ptt"},
 		{ID: "camera", Name: "Camera", DefaultRoomID: "stage", DefaultVoiceMode: "ptt", DefaultSimpleView: true},
 		{ID: "pastor", Name: "Pastor", DefaultRoomID: "stage", DefaultVoiceMode: "ptt"},
-		{ID: "producer", Name: "Producer", DefaultRoomID: "foh", DefaultVoiceMode: "ptt"},
+		{ID: "producer", Name: "Producer", DefaultRoomID: "foh", DefaultVoiceMode: "ptt", Exclusive: true},
 	}
 	for _, role := range roles {
 		defaultSimpleView := 0
 		if role.DefaultSimpleView {
 			defaultSimpleView = 1
 		}
-		if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO roles (id, name, default_room_id, default_voice_mode, default_simple_view) VALUES (?, ?, ?, ?, ?)`,
-			role.ID, role.Name, nullableString(role.DefaultRoomID), nullableString(role.DefaultVoiceMode), defaultSimpleView); err != nil {
+		if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO roles (id, name, default_room_id, default_voice_mode, default_simple_view, exclusive) VALUES (?, ?, ?, ?, ?, ?)`,
+			role.ID, role.Name, nullableString(role.DefaultRoomID), nullableString(role.DefaultVoiceMode), defaultSimpleView, boolInt(role.Exclusive)); err != nil {
 			return err
 		}
 	}
@@ -766,6 +772,34 @@ func (s *Store) seed(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// RoleExclusive reports whether a role allows only one login at a time.
+func (s *Store) RoleExclusive(ctx context.Context, roleID string) (bool, error) {
+	var exclusive int
+	err := s.db.QueryRowContext(ctx, `SELECT exclusive FROM roles WHERE id = ?`, roleID).Scan(&exclusive)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return exclusive != 0, err
+}
+
+func (s *Store) SetRoleExclusive(ctx context.Context, roleID string, exclusive bool) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE roles SET exclusive = ? WHERE id = ?`, boolInt(exclusive), strings.TrimSpace(roleID))
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func boolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func (s *Store) RoleExists(ctx context.Context, roleID string) (bool, error) {
@@ -1317,7 +1351,7 @@ func (s *Store) GetAllCompanionRolePages(ctx context.Context) (map[string]int, e
 }
 
 func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, default_room_id, default_voice_mode, default_simple_view FROM roles ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, default_room_id, default_voice_mode, default_simple_view, exclusive FROM roles ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -1327,8 +1361,8 @@ func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
 		var r Role
 		var defaultRoomID sql.NullString
 		var defaultVoiceMode sql.NullString
-		var defaultSimpleView int
-		if err := rows.Scan(&r.ID, &r.Name, &defaultRoomID, &defaultVoiceMode, &defaultSimpleView); err != nil {
+		var defaultSimpleView, exclusive int
+		if err := rows.Scan(&r.ID, &r.Name, &defaultRoomID, &defaultVoiceMode, &defaultSimpleView, &exclusive); err != nil {
 			return nil, err
 		}
 		if defaultRoomID.Valid {
@@ -1338,6 +1372,7 @@ func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
 			r.DefaultVoiceMode = defaultVoiceMode.String
 		}
 		r.DefaultSimpleView = defaultSimpleView != 0
+		r.Exclusive = exclusive != 0
 		roles = append(roles, r)
 	}
 	return roles, nil

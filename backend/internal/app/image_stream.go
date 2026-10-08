@@ -675,6 +675,9 @@ func (c *ImageStreamCoordinator) UnregisterClient(client *ImageStreamClient) {
 
 // HandleImageStreamWebSocket handles WebSocket connections for image streaming
 func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCompanionSecret(w, r) {
+		return
+	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.logger.Error("websocket upgrade failed", "error", err)
@@ -738,6 +741,13 @@ func (s *Server) resolveImageStreamTarget(ctx context.Context, r *http.Request) 
 	if s.store == nil {
 		return "", ""
 	}
+	if deckParam := strings.TrimSpace(r.URL.Query().Get("deck")); deckParam != "" {
+		deck, err := s.store.TouchStreamDeck(ctx, deckParam, remoteIP(r))
+		if err != nil {
+			return "", ""
+		}
+		return deckKey(deck.ID), ""
+	}
 	roleID := strings.TrimSpace(r.URL.Query().Get("roleId"))
 	username := strings.TrimSpace(r.URL.Query().Get("username"))
 	if roleID == "" && username != "" {
@@ -756,6 +766,12 @@ func (s *Server) resolveImageStreamTarget(ctx context.Context, r *http.Request) 
 
 func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageStreamClient, roleID string) {
 	if s.imageStreamCoord == nil || client == nil || strings.TrimSpace(roleID) == "" {
+		return
+	}
+	if _, isDeck := deckIDFromKey(roleID); isDeck {
+		// Images only go where they are still missing, so this fills in a
+		// newly connected deck without resending to others.
+		s.emitCompanionCurrentPageImages(ctx, roleID, "")
 		return
 	}
 

@@ -24,6 +24,12 @@ func NewSessionManager(ttl time.Duration) *SessionManager {
 }
 
 func (m *SessionManager) Create(user User) Session {
+	return m.CreateWithPlace(user, "")
+}
+
+// CreateWithPlace starts a session for a login from a known place (see
+// Session.PlaceID).
+func (m *SessionManager) CreateWithPlace(user User, placeID string) Session {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	token := uuid.NewString()
@@ -32,6 +38,7 @@ func (m *SessionManager) Create(user User) Session {
 		UserID:    user.ID,
 		Username:  user.Username,
 		RoleID:    user.RoleID,
+		PlaceID:   placeID,
 		ExpiresAt: time.Now().Add(m.ttl),
 	}
 	m.sessions[token] = s

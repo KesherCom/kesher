@@ -60,6 +60,7 @@ type Server struct {
 	companionPendingCallSourceByUser map[string]string
 	companionAckedSignalByUser       map[string]string
 	companionSelectListenHoldDelay   time.Duration
+	deckState                        deckRuntime
 	imageStreamCoord                 *ImageStreamCoordinator
 	companionImageEffectMapMu        sync.Mutex
 	companionImageEffectMapCached    string
@@ -234,29 +235,54 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "username query parameter is no longer supported; use roleId", http.StatusBadRequest)
 		return
 	}
-	roleID := strings.TrimSpace(r.URL.Query().Get("roleId"))
-	if roleID == "" {
-		autoRoleID, err := s.store.ResolveSinglePublishedCompanionRole(r.Context())
+	// ?deck=<serial or name>: a Stream Deck bound to a place (see
+	// stream_decks.go). ?roleId=: the older binding to a role.
+	deckID := ""
+	roleID := ""
+	if deckParam := strings.TrimSpace(r.URL.Query().Get("deck")); deckParam != "" {
+		deck, err := s.store.TouchStreamDeck(r.Context(), deckParam, remoteIP(r))
 		if err != nil {
-			if errors.Is(err, ErrConflict) {
-				http.Error(w, "multiple published profiles found; provide roleId", http.StatusConflict)
+			switch {
+			case errors.Is(err, ErrInvalidInput):
+				http.Error(w, "invalid deck name", http.StatusBadRequest)
+			case errors.Is(err, errTooManyStreamDecks):
+				http.Error(w, "too many stream decks", http.StatusTooManyRequests)
+			default:
+				s.internalErr(w, err)
+			}
+			return
+		}
+		deckID = deck.ID
+	} else {
+		roleID = strings.TrimSpace(r.URL.Query().Get("roleId"))
+		if roleID == "" {
+			autoRoleID, err := s.store.ResolveSinglePublishedCompanionRole(r.Context())
+			if err != nil {
+				if errors.Is(err, ErrConflict) {
+					http.Error(w, "multiple published profiles found; provide roleId or deck", http.StatusConflict)
+					return
+				}
+				http.Error(w, "roleId or deck required unless exactly one profile is published", http.StatusBadRequest)
 				return
 			}
-			http.Error(w, "roleId required unless exactly one profile is published", http.StatusBadRequest)
-			return
+			roleID = autoRoleID
 		}
-		roleID = autoRoleID
+		if roleID != "" {
+			knownRole, err := s.store.RoleExists(r.Context(), roleID)
+			if err != nil {
+				s.internalErr(w, err)
+				return
+			}
+			if !knownRole {
+				http.Error(w, "unknown roleId", http.StatusNotFound)
+				return
+			}
+		}
 	}
-	if roleID != "" {
-		knownRole, err := s.store.RoleExists(r.Context(), roleID)
-		if err != nil {
-			s.internalErr(w, err)
-			return
-		}
-		if !knownRole {
-			http.Error(w, "unknown roleId", http.StatusNotFound)
-			return
-		}
+	// key: whose Companion state this connection uses.
+	key := roleID
+	if deckID != "" {
+		key = deckKey(deckID)
 	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -264,19 +290,19 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+	if deckID != "" {
+		s.deckState.setConnected(deckID, 1)
+		defer s.deckState.setConnected(deckID, -1)
+	}
 	resolveUsername := func() string {
-		if roleID == "" {
+		if key == "" {
 			return ""
 		}
-		session, ok := s.sessions.LatestForRole(roleID)
-		if !ok {
-			return ""
-		}
-		return strings.TrimSpace(session.Username)
+		return s.companionTargetUsername(r.Context(), key)
 	}
 	presenceCh, unsubscribe := s.hub.SubscribePresence()
 	defer unsubscribe()
-	resultKey := roleID
+	resultKey := key
 	resultCh, unsubscribeResults := s.subscribeCompanionResults(resultKey)
 	defer unsubscribeResults()
 	stateCh, unsubscribeState := s.subscribeCompanionState(resultKey)
@@ -305,7 +331,17 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 		}
 		state.ImageEffectMapJSON = s.loadCompanionImageEffectMapJSON()
 		profileRoleID := strings.TrimSpace(roleID)
-		if profileRoleID != "" {
+		if deckID != "" {
+			state.CurrentPageNumber = s.currentCompanionPage(r.Context(), key)
+			if deck, err := s.store.GetStreamDeck(r.Context(), deckID); err == nil {
+				state.DeckName = deck.Name
+				if deck.PlaceID == "" {
+					state.PairingCode = s.deckState.pairingCode(deckID)
+				}
+			}
+			state.ProfileVersion = s.deckLayoutVersion(r.Context(), deckID)
+			state.ProfileStatus = "published"
+		} else if profileRoleID != "" {
 			state.CurrentPageNumber = s.currentCompanionPage(r.Context(), profileRoleID)
 			if profile, err := s.store.GetCompanionProfileByRole(r.Context(), profileRoleID); err == nil {
 				state.ProfileVersion = profile.ProfileVersion
@@ -366,7 +402,7 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 				}
 				writeState()
 				// Refresh button images when presence changes (e.g. listen state from browser)
-				resolvedRoleID := strings.TrimSpace(roleID)
+				resolvedRoleID := key
 				if resolvedRoleID != "" {
 					s.emitCompanionCurrentPageImages(r.Context(), resolvedRoleID, resolveUsername())
 				}
@@ -380,12 +416,12 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				writeState()
-				resolvedRoleID := strings.TrimSpace(roleID)
+				resolvedRoleID := key
 				if resolvedRoleID != "" {
 					s.emitCompanionCurrentPageImages(r.Context(), resolvedRoleID, resolveUsername())
 				}
 			case <-blinkTicker.C:
-				resolvedRoleID := strings.TrimSpace(roleID)
+				resolvedRoleID := key
 				if resolvedRoleID == "" {
 					continue
 				}
@@ -412,6 +448,9 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 		if err := conn.ReadJSON(&in); err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				targetLabel := "roleId=" + roleID
+				if deckID != "" {
+					targetLabel = "deck=" + deckID
+				}
 				s.logger.Warn("companion websocket closed unexpectedly", "target", targetLabel, "error", err)
 			}
 			return
@@ -444,10 +483,18 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 				"pageNumber", in.Data.PageNumber,
 			)
 		}
-		resolvedRoleID := strings.TrimSpace(roleID)
+		resolvedRoleID := key
 		if in.Data.Command == "press_button" {
 			if resolvedRoleID == "" {
 				writeRejected("target role unavailable")
+				continue
+			}
+			if deckID != "" && strings.TrimSpace(in.Data.SurfaceID) != "" {
+				_ = s.store.SetStreamDeckSurface(r.Context(), deckID, in.Data.SurfaceID)
+			}
+			if deck, unbound := s.deckUnbound(r.Context(), key); unbound {
+				s.emitDeckPairingImages(r.Context(), key, deck)
+				writeRejected("stream deck not paired: enter code " + s.deckState.pairingCode(deckID) + " at the place it belongs to")
 				continue
 			}
 			result := s.executeCompanionButtonPress(r.Context(), resolvedRoleID, resolveUsername(), in.Data)
@@ -475,11 +522,12 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			writeRejected("target unavailable")
 			continue
 		}
-		token, ok := s.hub.LatestTokenForUsername(resolvedUsername)
+		token, ok := s.companionTokenForKey(r.Context(), key, resolvedUsername)
 		if !ok {
 			writeRejected("target unavailable")
 			continue
 		}
+		targetRoleID := s.companionTargetRole(r.Context(), key)
 		if in.Data.Command == "set_voice_mode" && in.Data.Mode == "" {
 			writeRejected("missing mode")
 			continue
@@ -490,7 +538,7 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 				writeRejected("missing targetId")
 				continue
 			}
-			allowedListen, err := s.store.RoomAllowsReceiverRole(r.Context(), roomID, resolvedRoleID)
+			allowedListen, err := s.store.RoomAllowsReceiverRole(r.Context(), roomID, targetRoleID)
 			if err != nil {
 				writeRejected(err.Error())
 				continue
@@ -570,7 +618,7 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			})
 			continue
 		}
-		normalized, err := s.normalizeCompanionRelayCommand(r.Context(), resolvedRoleID, resolvedUsername, in.Data)
+		normalized, err := s.normalizeCompanionRelayCommand(r.Context(), targetRoleID, resolvedUsername, in.Data)
 		if err != nil {
 			writeCommandResult(CompanionCommandResult{
 				CommandID: commandID,
@@ -1249,7 +1297,9 @@ func companionResolvePageConfig(settings StreamDeckSettings, currentPage int) St
 	return settings.Pages[0]
 }
 
-func (s *Server) executeCompanionPageCommand(ctx context.Context, roleID, username string, command CompanionCommand) (CompanionCommandResult, bool) {
+// executeCompanionPageCommand: key is the Companion target (role ID or
+// "deck:<id>", see stream_decks.go).
+func (s *Server) executeCompanionPageCommand(ctx context.Context, key, username string, command CompanionCommand) (CompanionCommandResult, bool) {
 	cmd := strings.TrimSpace(command.Command)
 	if cmd != "navigate_to_page" && cmd != "page_up" && cmd != "page_down" && cmd != "page_jump" && cmd != "page_home" && cmd != "page_back" {
 		return CompanionCommandResult{}, false
@@ -1260,19 +1310,20 @@ func (s *Server) executeCompanionPageCommand(ctx context.Context, roleID, userna
 		Source:    "bridge",
 		Timestamp: time.Now().UnixMilli(),
 	}
-	if strings.TrimSpace(roleID) == "" {
+	if strings.TrimSpace(key) == "" {
 		result.OK = false
 		result.Status = "failed"
 		result.Error = "target role unavailable"
 		return result, true
 	}
-	settings, err := s.store.GetRoleStreamDeckSettings(ctx, roleID)
+	roleID := s.companionTargetRole(ctx, key)
+	settings, err := s.companionLayout(ctx, key)
 	if err != nil {
 		settings = DefaultStreamDeckSettings()
 	}
 	settings = s.companionResolvedSettings(ctx, roleID, settings)
 
-	targetPage := s.currentCompanionPage(ctx, roleID)
+	targetPage := s.currentCompanionPage(ctx, key)
 	runtime := s.resolveCompanionRuntimePage(ctx, roleID, settings, targetPage)
 	if runtime.Dynamic {
 		maxPage := runtime.TotalPages - 1
@@ -1345,11 +1396,11 @@ func (s *Server) executeCompanionPageCommand(ctx context.Context, roleID, userna
 		}
 	}
 
-	s.setCompanionCurrentPage(roleID, targetPage)
+	s.setCompanionCurrentPage(key, targetPage)
 	if s.imageStreamCoord != nil {
-		s.imageStreamCoord.ResetTargetCache(roleID, username)
+		s.imageStreamCoord.ResetTargetCache(key, username)
 	}
-	s.emitCompanionCurrentPageImages(ctx, roleID, username)
+	s.emitCompanionCurrentPageImages(ctx, key, username)
 	result.OK = true
 	result.Status = "executed"
 	return result, true
@@ -1662,7 +1713,7 @@ func (s *Server) currentCompanionPage(ctx context.Context, roleID string) int {
 	if ok {
 		return page
 	}
-	settings, err := s.store.GetRoleStreamDeckSettings(ctx, roleID)
+	settings, err := s.companionLayout(ctx, roleID)
 	if err != nil {
 		settings = DefaultStreamDeckSettings()
 	}
@@ -2152,7 +2203,9 @@ func (s *Server) companionButtonSnapshotState(ctx context.Context, roleID string
 	return state
 }
 
-func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string, username string, command CompanionCommand) CompanionCommandResult {
+// executeCompanionButtonPress: key is the Companion target (role ID or
+// "deck:<id>"); roleID below is the role whose rights apply.
+func (s *Server) executeCompanionButtonPress(ctx context.Context, key string, username string, command CompanionCommand) CompanionCommandResult {
 	result := CompanionCommandResult{
 		CommandID: command.CommandID,
 		Command:   command.Command,
@@ -2161,7 +2214,8 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		Source:    "server",
 		Timestamp: time.Now().UnixMilli(),
 	}
-	settings, err := s.store.GetRoleStreamDeckSettings(ctx, roleID)
+	roleID := s.companionTargetRole(ctx, key)
+	settings, err := s.companionLayout(ctx, key)
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
 			result.Error = err.Error()
@@ -2170,7 +2224,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 		settings = DefaultStreamDeckSettings()
 	}
 	settings = s.companionResolvedSettings(ctx, roleID, settings)
-	currentPage := s.currentCompanionPage(ctx, roleID)
+	currentPage := s.currentCompanionPage(ctx, key)
 	runtimePage := s.resolveCompanionRuntimePage(ctx, roleID, settings, currentPage)
 	page := runtimePage.Page
 	var button *StreamDeckButtonConfig
@@ -2180,7 +2234,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			break
 		}
 	}
-	if (button == nil || button.Action == nil || button.Action.Type == StreamDeckActionTypeNone) && s.hasCompanionPageNavAnchor(roleID, command.ButtonIndex) {
+	if (button == nil || button.Action == nil || button.Action.Type == StreamDeckActionTypeNone) && s.hasCompanionPageNavAnchor(key, command.ButtonIndex) {
 		button = companionResolveUniqueNavigationAction(page.Buttons)
 	}
 	if (button == nil || button.Action == nil || button.Action.Type == StreamDeckActionTypeNone) && runtimePage.Dynamic {
@@ -2213,7 +2267,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 				"totalPages", runtimePage.TotalPages,
 			)
 		}
-		s.emitCompanionButtonImage(ctx, roleID, username, page.Page, nil, ButtonState{State: "IDLE"})
+		s.emitCompanionButtonImage(ctx, key, username, page.Page, nil, ButtonState{State: "IDLE"})
 		result.OK = true
 		result.Status = "executed"
 		return result
@@ -2256,16 +2310,16 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			s.acknowledgeCompanionIncomingCall(username)
 		}
 	}
-	holdKey := fmt.Sprintf("%s:%d:%d", roleID, currentPage, command.ButtonIndex)
+	holdKey := fmt.Sprintf("%s:%d:%d", key, currentPage, command.ButtonIndex)
 	emitCompanionCurrentPageImages := func() {
-		s.emitCompanionCurrentPageImages(ctx, roleID, username)
+		s.emitCompanionCurrentPageImages(ctx, key, username)
 	}
 	emitCompanionButtonImage := func(bank int, button *StreamDeckButtonConfig, state ButtonState) {
-		s.emitCompanionButtonImage(ctx, roleID, username, bank, button, state)
+		s.emitCompanionButtonImage(ctx, key, username, bank, button, state)
 	}
 	presence, _ := s.hub.PresenceForUsername(username)
 	queueBrowserCommand := func(next CompanionCommand) CompanionCommandResult {
-		queued, err := s.queueCompanionBrowserCommand(username, next)
+		queued, err := s.queueCompanionBrowserCommandForKey(ctx, key, username, next)
 		if err != nil {
 			result.Error = err.Error()
 			return result
@@ -2360,13 +2414,13 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 	switch button.Action.Type {
 	case StreamDeckActionTypePageUp, StreamDeckActionTypePageDown:
 		if phase == "up" {
-			if s.consumeCompanionPageButtonDown(roleID, command.ButtonIndex) {
+			if s.consumeCompanionPageButtonDown(key, command.ButtonIndex) {
 				result.OK = true
 				result.Status = "executed"
 				return result
 			}
 		} else {
-			s.markCompanionPageButtonDown(roleID, command.ButtonIndex)
+			s.markCompanionPageButtonDown(key, command.ButtonIndex)
 		}
 		if phase != "down" && phase != "up" {
 			result.OK = true
@@ -2425,11 +2479,11 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 				"totalPages", runtimePage.TotalPages,
 			)
 		}
-		s.setCompanionCurrentPage(roleID, targetPage)
+		s.setCompanionCurrentPage(key, targetPage)
 		if s.imageStreamCoord != nil {
-			s.imageStreamCoord.ResetTargetCache(roleID, username)
+			s.imageStreamCoord.ResetTargetCache(key, username)
 		}
-		s.setCompanionPageNavAnchor(roleID, command.ButtonIndex)
+		s.setCompanionPageNavAnchor(key, command.ButtonIndex)
 		emitCompanionCurrentPageImages()
 		emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE"})
 		result.OK = true
@@ -2480,9 +2534,9 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 				"toPage", jumpTarget,
 			)
 		}
-		s.setCompanionCurrentPage(roleID, jumpTarget)
+		s.setCompanionCurrentPage(key, jumpTarget)
 		if s.imageStreamCoord != nil {
-			s.imageStreamCoord.ResetTargetCache(roleID, username)
+			s.imageStreamCoord.ResetTargetCache(key, username)
 		}
 		emitCompanionCurrentPageImages()
 		emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE"})
@@ -2650,7 +2704,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			return res
 		}
 		s.rememberCompanionHeldTarget(holdKey, roomID)
-		go func(roleID, username, roomID, holdKey, triggerKey string) {
+		go func(key, roleID, username, roomID, holdKey, triggerKey string) {
 			time.Sleep(s.selectListenCompanionHoldDelay())
 			heldTargetID, ok := s.companionHeldTarget(holdKey)
 			if !ok || heldTargetID != roomID {
@@ -2659,7 +2713,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			s.rememberCompanionHeldTarget(triggerKey, "1")
 			if allowed, err := s.store.RoomAllowsReceiverRole(context.Background(), roomID, roleID); err != nil || !allowed {
 				if err != nil {
-					s.publishCompanionResult(roleID, CompanionCommandResult{Command: "press_button", OK: false, Status: "failed", Error: err.Error(), Source: "server", Timestamp: time.Now().UnixMilli()})
+					s.publishCompanionResult(key, CompanionCommandResult{Command: "press_button", OK: false, Status: "failed", Error: err.Error(), Source: "server", Timestamp: time.Now().UnixMilli()})
 				}
 				return
 			}
@@ -2682,13 +2736,13 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			if nextListening {
 				filtered = append(filtered, roomID)
 			}
-			res, err := s.queueCompanionBrowserCommand(username, CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: filtered, TalkRoomIDs: append([]string(nil), presence.TalkRooms...)})
+			res, err := s.queueCompanionBrowserCommandForKey(context.Background(), key, username, CompanionCommand{Command: "set_room_matrix", ListenRoomIDs: filtered, TalkRoomIDs: append([]string(nil), presence.TalkRooms...)})
 			if err != nil {
-				s.publishCompanionResult(roleID, CompanionCommandResult{Command: "press_button", OK: false, Status: "failed", Error: err.Error(), Source: "server", Timestamp: time.Now().UnixMilli()})
+				s.publishCompanionResult(key, CompanionCommandResult{Command: "press_button", OK: false, Status: "failed", Error: err.Error(), Source: "server", Timestamp: time.Now().UnixMilli()})
 				return
 			}
-			s.publishCompanionResult(roleID, res)
-		}(roleID, username, roomID, holdKey, triggerKey)
+			s.publishCompanionResult(key, res)
+		}(key, roleID, username, roomID, holdKey, triggerKey)
 		result.OK = true
 		result.Status = "executed"
 		emitCompanionButtonImage(page.Page, button, ButtonState{State: map[bool]string{true: "LISTEN", false: "IDLE"}[isListening], Channel: roomID, IsListening: isListening, IsPTTSelected: isPTTSelected})
@@ -2828,13 +2882,14 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 			return rejectUnauthorized("not allowed to direct PTT target role")
 		}
 		if phase == "down" {
-			session, ok := s.sessions.LatestForRole(targetRoleID)
-			if !ok {
+			if !s.hub.HasActiveSessionsForRole(targetRoleID) {
 				result.Error = fmt.Sprintf("no active user found for role %s", targetRoleID)
 				return result
 			}
-			s.rememberCompanionHeldTarget(holdKey, session.UserID)
-			res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: session.UserID, State: "ptt_start"})
+			// A role call reaches everyone logged in with that role.
+			target := directRoleTarget(targetRoleID)
+			s.rememberCompanionHeldTarget(holdKey, target)
+			res := queueBrowserCommand(CompanionCommand{Command: "ptt", Scope: "direct", TargetID: target, State: "ptt_start"})
 			emitCompanionButtonImage(page.Page, button, ButtonState{State: "TALK", Channel: strings.TrimSpace(button.Action.RoleID)})
 			return res
 		}
@@ -2924,27 +2979,28 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, roleID string,
 	}
 }
 
-func (s *Server) emitCompanionCurrentPageImages(ctx context.Context, roleID string, username string) {
-	if s.imageStreamCoord == nil || strings.TrimSpace(roleID) == "" {
+// emitCompanionCurrentPageImages: key is the Companion target (role ID or
+// "deck:<id>").
+func (s *Server) emitCompanionCurrentPageImages(ctx context.Context, key string, username string) {
+	if s.imageStreamCoord == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+	if deck, unbound := s.deckUnbound(ctx, key); unbound {
+		s.emitDeckPairingImages(ctx, key, deck)
 		return
 	}
 
-	settings, err := s.store.GetRoleStreamDeckSettings(ctx, roleID)
+	settings, err := s.companionLayoutOrDefault(ctx, key)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			settings = DefaultStreamDeckSettings()
-		} else {
-			return
-		}
+		return
 	}
+	roleID := s.companionTargetRole(ctx, key)
 	settings = s.companionResolvedSettings(ctx, roleID, settings)
 
-	currentPage := s.currentCompanionPage(ctx, roleID)
+	currentPage := s.currentCompanionPage(ctx, key)
 	renderUsername := strings.TrimSpace(username)
 	if renderUsername == "" {
-		if session, ok := s.sessions.LatestForRole(strings.TrimSpace(roleID)); ok {
-			renderUsername = strings.TrimSpace(session.Username)
-		}
+		renderUsername = s.companionTargetUsername(ctx, key)
 	}
 	presence, _ := s.hub.PresenceForUsername(renderUsername)
 	runtimePage := s.resolveCompanionRuntimePage(ctx, roleID, settings, currentPage)
@@ -2952,8 +3008,8 @@ func (s *Server) emitCompanionCurrentPageImages(ctx context.Context, roleID stri
 
 	for i := range page.Buttons {
 		button := &page.Buttons[i]
-		state := s.companionButtonSnapshotState(ctx, roleID, page.Page, renderUsername, presence, *button)
-		s.emitCompanionButtonImage(ctx, roleID, renderUsername, page.Page, button, state)
+		state := s.companionButtonSnapshotState(ctx, key, page.Page, renderUsername, presence, *button)
+		s.emitCompanionButtonImage(ctx, key, renderUsername, page.Page, button, state)
 	}
 }
 
@@ -3092,11 +3148,15 @@ func (s *Server) resolveButtonLabel(ctx context.Context, button StreamDeckButton
 				}
 			}
 		}
-		// Show the active user for this role as primary if one is online
-		if session, ok := s.sessions.LatestForRole(strings.TrimSpace(action.RoleID)); ok {
-			return session.Username, roleName
+		// One person online: show the name; several: the role and how many.
+		switch names := s.hub.UsernamesForRole(strings.TrimSpace(action.RoleID)); len(names) {
+		case 0:
+			return roleName, ""
+		case 1:
+			return names[0], roleName
+		default:
+			return roleName, fmt.Sprintf("%d online", len(names))
 		}
-		return roleName, ""
 
 	case StreamDeckActionTypeBroadcastPTT:
 		if groups, err := s.store.ListBroadcastGroups(ctx); err == nil {
@@ -3195,6 +3255,23 @@ func (s *Server) handleCompanionDiscovery(w http.ResponseWriter, r *http.Request
 	}
 	if strings.TrimSpace(r.URL.Query().Get("username")) != "" {
 		http.Error(w, "username query parameter is no longer supported; use roleId", http.StatusBadRequest)
+		return
+	}
+	if profile, handled := s.deckProfileForRequest(w, r); handled {
+		if profile != nil {
+			s.writeJSON(w, http.StatusOK, CompanionDiscoveryResponse{
+				Username:          profile.Username,
+				RoleID:            profile.RoleID,
+				Rooms:             profile.Rooms,
+				Users:             profile.Users,
+				ActiveRoleUsers:   profile.ActiveRoleUsers,
+				BroadcastGroups:   profile.BroadcastGroups,
+				CurrentPageNumber: profile.CurrentPageNumber,
+				ProfileVersion:    profile.ProfileVersion,
+				ProfileStatus:     profile.ProfileStatus,
+				ProfileUpdatedAt:  profile.ProfileUpdatedAt,
+			})
+		}
 		return
 	}
 	roleID := strings.TrimSpace(r.URL.Query().Get("roleId"))
@@ -3450,6 +3527,10 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/admin/companion/publish", s.withAuth(s.handleAdminCompanionPublish))
 	mux.HandleFunc("/api/admin/companion/role-pages", s.withAuth(s.handleAdminCompanionRolePages))
 	mux.HandleFunc("/api/user/companion/publish", s.withAuth(s.handleUserCompanionPublish))
+	mux.HandleFunc("/api/user/stream-decks", s.withAuth(s.handleUserStreamDecks))
+	mux.HandleFunc("/api/user/stream-decks/", s.withAuth(s.handleUserStreamDecks))
+	mux.HandleFunc("/api/admin/stream-decks", s.withAuth(s.handleAdminStreamDecks))
+	mux.HandleFunc("/api/admin/stream-decks/", s.withAuth(s.handleAdminStreamDeckByID))
 	mux.HandleFunc("/api/admin/devices", s.withAuth(s.handleAdminDevices))
 	mux.HandleFunc("/api/admin/devices/", s.withAuth(s.handleAdminDeviceByID))
 	mux.HandleFunc("/api/admin/roles", s.withAuth(s.handleAdminRoles))
@@ -3723,7 +3804,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
-	if existing, conflict := s.sessions.LatestForRole(req.RoleID); conflict && !labMultiSession() {
+	if existing, conflict := s.sessions.LatestForRole(req.RoleID); conflict && s.roleIsExclusive(r.Context(), req.RoleID) {
 		s.writeJSON(w, http.StatusConflict, LoginConflictResponse{
 			RequiresTakeover: true,
 			ConflictRoleID:   req.RoleID,
@@ -3741,7 +3822,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.internalErr(w, err)
 		return
 	}
-	session := s.sessions.Create(user)
+	session := s.sessions.CreateWithPlace(user, normalizePlaceID(req.PlaceID))
 	s.writeJSON(w, http.StatusOK, LoginResponse{
 		Token:                session.Token,
 		User:                 user,
@@ -3818,7 +3899,7 @@ func (s *Server) handleLoginTakeover(w http.ResponseWriter, r *http.Request) {
 		s.internalErr(w, err)
 		return
 	}
-	session := s.sessions.Create(user)
+	session := s.sessions.CreateWithPlace(user, normalizePlaceID(req.PlaceID))
 	s.writeJSON(w, http.StatusOK, LoginResponse{
 		Token:                session.Token,
 		User:                 user,
@@ -3923,6 +4004,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, _ Session)
 }
 
 func (s *Server) handleUserStreamDeckSettings(w http.ResponseWriter, r *http.Request, session Session) {
+	if deck, ok := s.userPlaceDeck(r, session); ok {
+		s.handleDeckLayoutForUser(w, r, session, deck)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		settings, err := s.store.GetRoleStreamDeckSettings(r.Context(), session.RoleID)
@@ -4288,6 +4373,12 @@ func (s *Server) handleCompanionProfile(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "username query parameter is no longer supported; use roleId", http.StatusBadRequest)
 		return
 	}
+	if profile, handled := s.deckProfileForRequest(w, r); handled {
+		if profile != nil {
+			s.writeJSON(w, http.StatusOK, profile)
+		}
+		return
+	}
 	roleID := strings.TrimSpace(r.URL.Query().Get("roleId"))
 	targetUser, err := s.resolveCompanionTargetUser(r.Context(), roleID)
 	if err != nil {
@@ -4437,14 +4528,14 @@ func (s *Server) buildCompanionProfileResponse(ctx context.Context, targetUser U
 	}
 	settings, err := s.store.GetRoleStreamDeckSettings(ctx, targetUser.RoleID)
 	if err != nil {
-		if !errors.Is(err, ErrNotFound) {
+		if !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrInvalidInput) {
 			return CompanionProfileResponse{}, err
 		}
 		settings = DefaultStreamDeckSettings()
 	}
 	settings = s.companionResolvedSettings(ctx, targetUser.RoleID, settings)
 	pageNumber, err := s.store.GetCompanionRolePage(ctx, targetUser.RoleID)
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrInvalidInput) {
 		return CompanionProfileResponse{}, err
 	}
 	return CompanionProfileResponse{
@@ -4474,6 +4565,16 @@ func isValidLoginRequest(username, roleID string) bool {
 	return strings.TrimSpace(username) != "" && strings.TrimSpace(roleID) != ""
 }
 
+// roleIsExclusive: an exclusive role allows one login at a time. Errors
+// count as shared so a database hiccup never locks people out.
+func (s *Server) roleIsExclusive(ctx context.Context, roleID string) bool {
+	if labMultiSession() {
+		return false
+	}
+	exclusive, err := s.store.RoleExclusive(ctx, roleID)
+	return err == nil && exclusive
+}
+
 func (s *Server) roleNameByID(ctx context.Context, roleID string) string {
 	roles, err := s.store.ListRoles(ctx)
 	if err != nil {
@@ -4493,6 +4594,7 @@ type upsertRoleRequest struct {
 	DefaultRoomID     string `json:"defaultRoomId"`
 	DefaultVoiceMode  string `json:"defaultVoiceMode"`
 	DefaultSimpleView bool   `json:"defaultSimpleView"`
+	Exclusive         *bool  `json:"exclusive,omitempty"`
 }
 
 type upsertRoomRequest struct {
@@ -4530,6 +4632,12 @@ func (s *Server) handleAdminRoles(w http.ResponseWriter, r *http.Request, sessio
 			s.internalErr(w, err)
 			return
 		}
+		if req.Exclusive != nil {
+			if err := s.store.SetRoleExclusive(r.Context(), strings.TrimSpace(req.ID), *req.Exclusive); err != nil {
+				s.internalErr(w, err)
+				return
+			}
+		}
 		s.writeJSON(w, http.StatusCreated, map[string]bool{"ok": true})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -4558,6 +4666,12 @@ func (s *Server) handleAdminRoleByID(w http.ResponseWriter, r *http.Request, ses
 			}
 			s.internalErr(w, err)
 			return
+		}
+		if req.Exclusive != nil {
+			if err := s.store.SetRoleExclusive(r.Context(), roleID, *req.Exclusive); err != nil {
+				s.internalErr(w, err)
+				return
+			}
 		}
 		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	case http.MethodDelete:
@@ -5457,6 +5571,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		transport:       transport,
 	}
 	s.hub.Add(c)
+	// Stream Decks at this place now control this login.
+	go s.refreshDecksAtPlace(session.PlaceID)
 	// Send current presence snapshot to newly connected client so they see all other users
 	s.hub.SendPresenceSnapshot(session.Token)
 	s.hub.SendChatHistorySnapshot(session.Token)
@@ -5471,6 +5587,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		s.hub.Remove(session.Token)
 		s.sessions.ScheduleDisconnectLogout(session.Token, s.cfg.DisconnectLogoutDelay)
+		go s.refreshDecksAtPlace(session.PlaceID)
 	}()
 	// Native (UDP) sessions have no WebRTC negotiation; their routing must
 	// follow matrix changes from the start.
@@ -5610,6 +5727,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			s.publishCompanionResult(user.Username, result)
 			s.publishCompanionResult(user.RoleID, result)
+			if decks, err := s.store.StreamDecksForPlace(r.Context(), session.PlaceID); err == nil {
+				for _, deck := range decks {
+					s.publishCompanionResult(deckKey(deck.ID), result)
+				}
+			}
 		case "webrtc_answer":
 			raw, _ := json.Marshal(in.Data)
 			var e WebRTCAnswer

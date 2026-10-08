@@ -4,6 +4,7 @@ import { AdminRoomsCard } from "./AdminRoomsCard";
 import { AdminChannelsCard } from "./AdminChannelsCard";
 import { AdminUsersCard } from "./AdminUsersCard";
 import { AdminDevicesCard } from "./AdminDevicesCard";
+import { AdminStreamDecksCard } from "./AdminStreamDecksCard";
 import { AdminTelegramCard } from "./AdminTelegramCard";
 import { AdminTelegramUsersCard } from "./AdminTelegramUsersCard";
 import { AdminRoutingMatrixCard } from "./AdminRoutingMatrixCard";
@@ -63,6 +64,8 @@ export function AdminConfigCard({
         />
 
         <AdminDevicesCard token={token} adminPin={adminPin} appData={appData} />
+
+        <AdminStreamDecksCard token={token} adminPin={adminPin} appData={appData} />
 
         <AdminRoomsCard
           token={token}

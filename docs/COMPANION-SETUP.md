@@ -6,7 +6,22 @@ Dieses Dokument erklärt, wie du Bitfocus Companion mit Kesher verbindest und we
 
 Kesher kann über das **kesher Companion Module** gesteuert werden. Das Modul verbindet sich mit Kesher über WebSocket und ermöglicht dir, Kesher-Funktionen über Companion-Buttons, Tasten und Touch-Screens (wie den Elgato Stream Deck) zu steuern.
 
-Wichtig: Companion ist jetzt nur noch Anzeige- und Eingabegerät. Die vollständige Button-Konfiguration liegt im Kesher-Backend und wird im Kesher-Admin-Panel pro Rolle gepflegt. Operator-User bearbeiten oder veröffentlichen keine Companion-Layouts mehr selbst.
+Wichtig: Companion ist nur Anzeige- und Eingabegerät. Die Button-Konfiguration liegt im Kesher-Backend.
+
+### Empfohlen: ein Stream Deck pro Platz
+
+Seit Version 0006 ([Entscheidung](decisions/0006-shared-roles-and-stream-decks-per-place.md)) können sich mehrere Personen eine Rolle teilen. Damit jedes Stream Deck die richtige Person steuert, gehört ein Deck zu einem **Platz** (dem Browser, der Desktop-App oder der Station an diesem Tisch), nicht mehr zu einer Rolle. Das funktioniert auch mit einem zentralen Companion-Rechner und Satellite-Decks.
+
+1. In Companion **pro Stream Deck eine Kesher-Verbindung** anlegen und im Feld **Stream Deck** die Seriennummer oder einen Namen eintragen (z. B. `Kamera 1`). Das Feld *Target role ID* leer lassen.
+2. Für jede Verbindung eine Companion-Seite mit den Kesher-Slot-Presets dieser Verbindung anlegen und dem Deck zuweisen.
+3. Das Deck zeigt jetzt einen **4-stelligen Code**. An dem Platz, zu dem es gehört, in Kesher unter *Stream Deck* den Code eingeben und *Pair deck* drücken. Alternativ im Admin-Bereich unter **Stream Decks** einen Platz auswählen.
+4. Fertig: Das Deck steuert immer die Person, die an diesem Platz angemeldet ist, mit deren Rechten.
+
+Das **Layout gehört zum Deck**: Es sieht gleich aus, egal wer dort sitzt. Solange keins gespeichert ist, zeigt das Deck das Layout der Rolle, die dort angemeldet ist. Der Stream-Deck-Editor an einem Platz mit Deck bearbeitet das Layout dieses Decks (nicht das der Rolle). Im Admin-Bereich setzt *Use role layout* ein Deck wieder auf das Rollen-Layout zurück.
+
+Variablen für Deck-Verbindungen: `deck_name`, `pairing_code` (leer, sobald gekoppelt).
+
+Die ältere Bindung über *Target role ID* funktioniert weiter: Sie steuert die zuletzt angemeldete Person dieser Rolle.
 
 ### Wichtige Konzepte
 
@@ -96,7 +111,8 @@ Nach der Installation musst du die Kesher-Instanz konfigurieren.
 
 | Feld | Beschreibung | Beispiel |
 |------|-------------|---------|
-| **Target role ID** | Die Rolle, die dieses Companion-Modul steuert | `Studio-A`, `Dispatcher` |
+| **Stream Deck** | Seriennummer oder Name des Decks; das Deck gehört dann zu einem Platz (siehe oben) | `Kamera 1`, `CL12K1A00042` |
+| **Target role ID** | Ältere Bindung, nur wenn *Stream Deck* leer ist: steuert die neueste Anmeldung dieser Rolle | `Studio-A`, `Dispatcher` |
 | **Target page override** | Zielseite für die aus Kesher synchronisierten Presets | `-1` (Kesher-Mapping), `3`, `5` |
 
 ### Konfigurationsbeispiel
@@ -115,7 +131,7 @@ Target page override:   -1
 - Steuert die Rolle `Studio-A`
 - Nutzt das Kesher-Backend für die Seiten-Auswahl (`-1`)
 
-Wichtig: Das Kesher-Backend akzeptiert für Discovery, Profil und Bridge nur noch `roleId`. Ein username-basierter Target-Pfad wird serverseitig nicht mehr unterstützt, auch wenn ältere Modulversionen das Feld noch anzeigen sollten.
+Wichtig: Das Kesher-Backend akzeptiert für Discovery, Profil, Bridge und Bild-Stream `deck` oder `roleId`. Der Bild-Stream prüft das Shared Secret ebenfalls; ältere Modulversionen senden es dort nicht mit. Ein username-basierter Target-Pfad wird serverseitig nicht mehr unterstützt, auch wenn ältere Modulversionen das Feld noch anzeigen sollten.
 
 ### Backend-Sicherheitsoptionen
 

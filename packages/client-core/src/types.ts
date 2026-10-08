@@ -4,7 +4,12 @@ export type Role = {
   defaultRoomId?: string;
   defaultVoiceMode?: "always_on" | "ptt";
   defaultSimpleView?: boolean;
+  /** One login at a time; roles are shared by default. */
+  exclusive?: boolean;
 };
+
+/** Direct target for everyone logged in with a role (a role call). */
+export const directRoleTargetPrefix = "role:";
 
 export type VersionInfo = {
   version: string;
@@ -163,6 +168,33 @@ export type Device = {
   createdAt: number;
   lastSeenAt: number;
   online: boolean;
+};
+
+/** A Stream Deck reached through Companion, bound to a place. */
+export type StreamDeckDevice = {
+  id: string;
+  name: string;
+  placeId: string;
+  placeLabel: string;
+  /** Own layout; otherwise it shows the layout of the role logged in there. */
+  hasLayout: boolean;
+  /** Companion surface (serial number) last pressed. */
+  surface: string;
+  lastIp: string;
+  createdAt: number;
+  lastSeenAt: number;
+  connected: boolean;
+  username?: string;
+  roleId?: string;
+  /** Shown on the deck while it is not bound to a place. */
+  pairingCode?: string;
+};
+
+/** A client installation that is connected right now. */
+export type ClientPlace = {
+  placeId: string;
+  username: string;
+  roleId: string;
 };
 
 export type TelegramMapping = {

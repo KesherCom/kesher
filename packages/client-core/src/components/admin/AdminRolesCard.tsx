@@ -30,6 +30,7 @@ export function AdminRolesCard({
   >("");
   const [roleCreateDefaultSimpleView, setRoleCreateDefaultSimpleView] =
     useState(false);
+  const [roleCreateExclusive, setRoleCreateExclusive] = useState(false);
   const [showRoleCreateForm, setShowRoleCreateForm] = useState(false);
   const [roleEditId, setRoleEditId] = useState<string | null>(null);
   const [roleEditName, setRoleEditName] = useState("");
@@ -39,6 +40,7 @@ export function AdminRolesCard({
   >("");
   const [roleEditDefaultSimpleView, setRoleEditDefaultSimpleView] =
     useState(false);
+  const [roleEditExclusive, setRoleEditExclusive] = useState(false);
 
   function resetRoleCreateForm() {
     setRoleCreateId("");
@@ -46,6 +48,7 @@ export function AdminRolesCard({
     setRoleCreateDefaultRoomId("");
     setRoleCreateDefaultVoiceMode("");
     setRoleCreateDefaultSimpleView(false);
+    setRoleCreateExclusive(false);
   }
 
   function resetRoleEditForm() {
@@ -54,6 +57,7 @@ export function AdminRolesCard({
     setRoleEditDefaultRoomId("");
     setRoleEditDefaultVoiceMode("");
     setRoleEditDefaultSimpleView(false);
+    setRoleEditExclusive(false);
   }
 
   function createRoleConfig() {
@@ -67,6 +71,7 @@ export function AdminRolesCard({
         defaultRoomId: roleCreateDefaultRoomId.trim() || undefined,
         defaultVoiceMode: roleCreateDefaultVoiceMode || undefined,
         defaultSimpleView: roleCreateDefaultSimpleView,
+        exclusive: roleCreateExclusive,
       });
       resetRoleCreateForm();
       setShowRoleCreateForm(false);
@@ -83,6 +88,7 @@ export function AdminRolesCard({
         defaultRoomId: roleEditDefaultRoomId.trim() || undefined,
         defaultVoiceMode: roleEditDefaultVoiceMode || undefined,
         defaultSimpleView: roleEditDefaultSimpleView,
+        exclusive: roleEditExclusive,
       });
       resetRoleEditForm();
     });
@@ -180,6 +186,16 @@ export function AdminRolesCard({
                     />
                     <span>Default to simple mobile view</span>
                   </label>
+                  <label className="admin-checkbox admin-checkbox-wide">
+                    <input
+                      type="checkbox"
+                      checked={roleCreateExclusive}
+                      onChange={(e) => setRoleCreateExclusive(e.target.checked)}
+                    />
+                    <span>
+                      Only one person at a time (a second login takes over)
+                    </span>
+                  </label>
                 </div>
                 <div className="admin-form-actions">
                   <button
@@ -252,6 +268,16 @@ export function AdminRolesCard({
                     />
                     <span>Default to simple mobile view</span>
                   </label>
+                  <label className="admin-checkbox admin-checkbox-wide">
+                    <input
+                      type="checkbox"
+                      checked={roleEditExclusive}
+                      onChange={(e) => setRoleEditExclusive(e.target.checked)}
+                    />
+                    <span>
+                      Only one person at a time (a second login takes over)
+                    </span>
+                  </label>
                 </div>
                 <div className="admin-form-actions">
                   <button
@@ -275,6 +301,7 @@ export function AdminRolesCard({
                 <li key={role.id}>
                   <span>
                     {role.name} <small>({role.id})</small>
+                    {role.exclusive ? <small> · one person</small> : null}
                   </span>
                   <button
                     disabled={adminBusy}
@@ -287,6 +314,7 @@ export function AdminRolesCard({
                         (role.defaultVoiceMode as "always_on" | "ptt") || "",
                       );
                       setRoleEditDefaultSimpleView(!!role.defaultSimpleView);
+                      setRoleEditExclusive(!!role.exclusive);
                     }}
                   >
                     Edit

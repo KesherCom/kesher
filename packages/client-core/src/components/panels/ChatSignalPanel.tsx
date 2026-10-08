@@ -130,7 +130,7 @@ export function ChatSignalPanel({
               }))
           : [];
 
-      // Build role suggestions with current occupant or "Unbesetzt"
+      // Build role suggestions with who is in the role, or "Unbesetzt"
       const roleItems = roles
         .filter(
           (r) =>
@@ -138,9 +138,15 @@ export function ChatSignalPanel({
             r.id.toLowerCase().includes(context.query),
         )
         .map((r) => {
-          const occupant = onlineUsers.find((u) => u.roleId === r.id);
-          const occupantText = occupant
-            ? `Aktuell: ${occupant.username}`
+          const occupants = [
+            ...new Set(
+              onlineUsers
+                .filter((u) => u.roleId === r.id)
+                .map((u) => u.username),
+            ),
+          ].sort((a, b) => a.localeCompare(b));
+          const occupantText = occupants.length
+            ? `Aktuell: ${occupants.join(", ")}`
             : "Unbesetzt";
           return {
             key: `role:${r.id}`,

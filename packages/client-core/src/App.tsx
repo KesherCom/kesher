@@ -60,6 +60,7 @@ import type {
   StreamDeckButtonConfig,
   StreamDeckSettings,
 } from "./types";
+import { directRoleTargetPrefix } from "./types";
 import { useSettings } from "./hooks/useSettings";
 import { useAudioDevices } from "./hooks/useAudioDevices";
 import { useIntercomSession } from "./hooks/useIntercomSession";
@@ -250,6 +251,8 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
   const [streamDeckSettings, setStreamDeckSettings] =
     useState<StreamDeckSettings | null>(null);
   const [streamDeckBusy, setStreamDeckBusy] = useState(false);
+  // Bumped when a Companion deck is paired/released here: reload the layout.
+  const [streamDeckReloadKey, setStreamDeckReloadKey] = useState(0);
   const [streamDeckError, setStreamDeckError] = useState("");
   const [streamDeckConnected, setStreamDeckConnected] = useState(false);
   const [streamDeckLastEvent, setStreamDeckLastEvent] = useState("");
@@ -908,7 +911,7 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
     return () => {
       cancelled = true;
     };
-  }, [authMode, token]);
+  }, [authMode, token, streamDeckReloadKey]);
 
   // ── Status polling ──
   useEffect(() => {
@@ -1530,23 +1533,21 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
             );
             return;
           }
-          const candidates = session.presence
-            .filter(
-              (entry) =>
-                entry.userId !== currentAppData.self.id &&
-                entry.roleId === action.roleId &&
-                isDirectToUserAllowed(entry.userId),
-            )
-            .sort((a, b) => a.username.localeCompare(b.username));
-          const chosen = candidates[0];
-          if (!chosen) {
+          const someoneInRole = session.presence.some(
+            (entry) =>
+              entry.userId !== currentAppData.self.id &&
+              entry.roleId === action.roleId,
+          );
+          if (!someoneInRole) {
             setStreamDeckLastEvent(
               `P${effectivePage + 1}/B${payload.buttonIndex + 1} no active user in role`,
             );
             return;
           }
-          streamDeckPressedRoleTargetsRef.current.set(buttonKey, chosen.userId);
-          session.startDirectPtt(chosen.userId);
+          // A role call reaches everyone logged in with that role.
+          const roleTarget = `${directRoleTargetPrefix}${action.roleId}`;
+          streamDeckPressedRoleTargetsRef.current.set(buttonKey, roleTarget);
+          session.startDirectPtt(roleTarget);
         } else {
           const targetUserId =
             streamDeckPressedRoleTargetsRef.current.get(buttonKey);
@@ -2104,6 +2105,7 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
         onStreamDeckSettingsChange={handleStreamDeckSettingsChange}
         onSaveStreamDeckSettings={() => void handleSaveStreamDeckSettings()}
         onResetStreamDeckSettings={() => void handleResetStreamDeckSettings()}
+        onStreamDeckPlaceChanged={() => setStreamDeckReloadKey((k) => k + 1)}
         onPublishCompanionProfile={handlePublishUserCompanionProfile}
         streamDeckWebHidSupported={streamDeckWebHidSupported}
         streamDeckWebHidActive={streamDeckWebHidActive}

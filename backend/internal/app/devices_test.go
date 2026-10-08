@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -112,14 +113,21 @@ func TestDevicePairingApprovalAndLogin(t *testing.T) {
 	}
 }
 
-func TestDeviceLoginConflictsWithOtherUserOfRole(t *testing.T) {
+func TestDeviceLoginConflictsWithOtherUserOfExclusiveRole(t *testing.T) {
 	s := newDeviceTestServer(t)
 	deviceCall(t, s.handleDeviceHello, testDeviceSecret)
 	adminDeviceCall(t, s, http.MethodPut, "/api/admin/devices/"+testDeviceID,
 		`{"name":"stage-left","roleId":"audio","mode":"ptt","status":"approved"}`)
 	s.sessions.Create(User{ID: "u1", Username: "tim", RoleID: "audio"})
+	if rec, _ := deviceCall(t, s.handleDeviceLogin, testDeviceSecret); rec.Code != http.StatusOK {
+		t.Fatalf("shared role: expected login next to another user, got %d", rec.Code)
+	}
+	if err := s.store.SetRoleExclusive(context.Background(), "audio", true); err != nil {
+		t.Fatal(err)
+	}
+	s.sessions.DeleteByUsername("stage-left")
 	if rec, _ := deviceCall(t, s.handleDeviceLogin, testDeviceSecret); rec.Code != http.StatusConflict {
-		t.Fatalf("expected conflict with another user of the role, got %d", rec.Code)
+		t.Fatalf("exclusive role: expected conflict with another user, got %d", rec.Code)
 	}
 }
 

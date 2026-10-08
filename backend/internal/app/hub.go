@@ -436,11 +436,24 @@ func (h *Hub) RoomListenerCounts() map[string]int {
 	return counts
 }
 
-func (h *Hub) markDirectSignalIncoming(targetUserID string, fromUser User, signal string) {
+// A direct target is a user ID, or "role:<roleId>" for everyone logged in
+// with that role (a role call).
+const directRoleTargetPrefix = "role:"
+
+func directRoleTarget(roleID string) string { return directRoleTargetPrefix + roleID }
+
+func directTargetMatches(target, userID, roleID string) bool {
+	if rest, ok := strings.CutPrefix(target, directRoleTargetPrefix); ok {
+		return rest != "" && rest == roleID
+	}
+	return target != "" && target == userID
+}
+
+func (h *Hub) markDirectSignalIncoming(target string, fromUser User, signal string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, c := range h.clients {
-		if c.user.ID != targetUserID || c.user.ID == fromUser.ID {
+		if !directTargetMatches(target, c.user.ID, c.session.RoleID) || c.user.ID == fromUser.ID {
 			continue
 		}
 		c.signalFrom = fromUser.Username
@@ -749,6 +762,56 @@ func (h *Hub) LatestRoleSession(roleID string) (Session, bool) {
 	return selected.session, true
 }
 
+// LatestSessionForPlace: the newest connected login at a place.
+func (h *Hub) LatestSessionForPlace(placeID string) (Session, bool) {
+	if placeID == "" {
+		return Session{}, false
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var selected *client
+	for _, c := range h.clients {
+		if c.session.PlaceID != placeID {
+			continue
+		}
+		if selected == nil || c.connectedAt.After(selected.connectedAt) {
+			selected = c
+		}
+	}
+	if selected == nil {
+		return Session{}, false
+	}
+	return selected.session, true
+}
+
+// OnlinePlaces: connected places with who is logged in there (newest login
+// per place), sorted by name.
+func (h *Hub) OnlinePlaces() []Place {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	latest := map[string]*client{}
+	for _, c := range h.clients {
+		placeID := c.session.PlaceID
+		if placeID == "" {
+			continue
+		}
+		if current, ok := latest[placeID]; !ok || c.connectedAt.After(current.connectedAt) {
+			latest[placeID] = c
+		}
+	}
+	places := make([]Place, 0, len(latest))
+	for placeID, c := range latest {
+		places = append(places, Place{PlaceID: placeID, Username: c.session.Username, RoleID: c.session.RoleID})
+	}
+	sort.Slice(places, func(i, j int) bool {
+		if places[i].Username != places[j].Username {
+			return places[i].Username < places[j].Username
+		}
+		return places[i].PlaceID < places[j].PlaceID
+	})
+	return places
+}
+
 // OnlineUsernames: login names with a connected client.
 func (h *Hub) OnlineUsernames() map[string]bool {
 	h.mu.RLock()
@@ -801,7 +864,7 @@ func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
 		if eventType == "voice_state" && e.Body == "ptt_start" {
 			h.mu.Lock()
 			for _, c := range h.clients {
-				if c.user.ID == e.TargetID {
+				if directTargetMatches(e.TargetID, c.user.ID, c.session.RoleID) && c.user.ID != sender.user.ID {
 					c.lastDirectFrom = sender.user.ID
 					c.lastDirectName = sender.user.Username
 				}
@@ -820,7 +883,7 @@ func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
 			}
 			break
 		}
-		h.sendToUser(e.TargetID, out)
+		h.sendToDirectTarget(e.TargetID, out)
 		h.sendToToken(senderToken, out)
 	case "room":
 		if allowed, err := h.store.RoomAllowsSenderRole(context.Background(), e.TargetID, sender.session.RoleID); err != nil || !allowed {
@@ -943,6 +1006,36 @@ func (h *Hub) sendToUser(userID string, msg WSOutbound) {
 			h.enqueueOutbound(c, msg)
 		}
 	}
+}
+
+func (h *Hub) sendToDirectTarget(target string, msg WSOutbound) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, c := range h.clients {
+		if directTargetMatches(target, c.user.ID, c.session.RoleID) {
+			h.enqueueOutbound(c, msg)
+		}
+	}
+}
+
+// UsernamesForRole lists who is logged in with a role (sorted, no duplicates).
+func (h *Hub) UsernamesForRole(roleID string) []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	seen := map[string]struct{}{}
+	names := []string{}
+	for _, c := range h.clients {
+		if c.session.RoleID != roleID {
+			continue
+		}
+		if _, ok := seen[c.user.Username]; ok {
+			continue
+		}
+		seen[c.user.Username] = struct{}{}
+		names = append(names, c.user.Username)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (h *Hub) sendToLatestUserSession(userID string, msg WSOutbound) {

@@ -310,19 +310,17 @@ func (s *Server) handleDeviceLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
-	if existing, conflict := s.sessions.LatestForRole(d.RoleID); conflict && !labMultiSession() {
-		if existing.Username != d.Name {
-			s.writeJSON(w, http.StatusConflict, LoginConflictResponse{
-				RequiresTakeover: true,
-				ConflictRoleID:   d.RoleID,
-				ConflictRoleName: s.roleNameByID(r.Context(), d.RoleID),
-				ConflictUsername: existing.Username,
-			})
-			return
-		}
-		// The device's own earlier session (restart, network loss).
-		s.revokeSessionsOfUser(d.Name, "")
+	if existing, conflict := s.sessions.LatestForRole(d.RoleID); conflict && existing.Username != d.Name && s.roleIsExclusive(r.Context(), d.RoleID) {
+		s.writeJSON(w, http.StatusConflict, LoginConflictResponse{
+			RequiresTakeover: true,
+			ConflictRoleID:   d.RoleID,
+			ConflictRoleName: s.roleNameByID(r.Context(), d.RoleID),
+			ConflictUsername: existing.Username,
+		})
+		return
 	}
+	// The device's own earlier session (restart, network loss).
+	s.revokeSessionsOfUser(d.Name, "")
 	user, err := s.store.UpsertUser(r.Context(), d.Name, d.RoleID)
 	if err != nil {
 		if s.writeStoreErr(w, err) {
@@ -331,7 +329,8 @@ func (s *Server) handleDeviceLogin(w http.ResponseWriter, r *http.Request) {
 		s.internalErr(w, err)
 		return
 	}
-	session := s.sessions.Create(user)
+	// A station is its own place.
+	session := s.sessions.CreateWithPlace(user, "station-"+d.ID)
 	s.writeJSON(w, http.StatusOK, deviceLoginResponse{
 		LoginResponse: LoginResponse{Token: session.Token, User: user},
 		Device:        configOf(d),

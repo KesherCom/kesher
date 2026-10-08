@@ -16,6 +16,7 @@ import { withResolvedStreamDeckButtonLabel } from "../lib/streamDeckLabels";
 import { sortDirectUsersByRoleAndUsername } from "../lib/users";
 import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
 import { PerformanceAudioSettings } from "./panels/PerformanceAudioSettings";
+import { StreamDeckPlaceBar } from "./StreamDeckPlaceBar";
 import type { PerformanceAudioControls } from "../hooks/useIntercomSession";
 
 const DB_MIN = -60;
@@ -400,6 +401,8 @@ type StationIntercomViewProps = {
   onStreamDeckSettingsChange: (next: StreamDeckSettings) => void;
   onSaveStreamDeckSettings: () => void;
   onResetStreamDeckSettings: () => void;
+  /** A Companion Stream Deck was paired with or released from this place. */
+  onStreamDeckPlaceChanged?: () => void;
   onPublishCompanionProfile: () => Promise<CompanionProfileResponse>;
   streamDeckWebHidSupported: boolean;
   streamDeckWebHidActive: boolean;
@@ -514,6 +517,7 @@ export function StationIntercomView({
   streamDeckError,
   onStreamDeckSettingsChange,
   onSaveStreamDeckSettings,
+  onStreamDeckPlaceChanged,
   onResetStreamDeckSettings,
   onPublishCompanionProfile,
   streamDeckWebHidSupported,
@@ -2233,6 +2237,10 @@ export function StationIntercomView({
                           </button>
                         </div>
                       </div>
+                    <StreamDeckPlaceBar
+                      token={token}
+                      onChanged={() => onStreamDeckPlaceChanged?.()}
+                    />
                     <div className="streamdeck-settings-actions" style={{ marginBottom: "0.6rem" }}>
                       <small className="station-settings-meta">
                         Configure your Stream Deck layout here and click Save.

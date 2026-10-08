@@ -712,16 +712,8 @@ func (m *MediaManager) recomputeSourceRoutingWithSnapshotLocked(sourceToken stri
 	if !ok {
 		return
 	}
-	directTargetUserID := m.directActive[sourceToken]
-	var directTargetPeerToken string
-	if directTargetUserID != "" {
-		for _, p := range m.peers {
-			if p.userID == directTargetUserID {
-				directTargetPeerToken = p.token
-				break
-			}
-		}
-	}
+	// Direct target: a user (all of their sessions) or a whole role.
+	directTarget := m.directActive[sourceToken]
 	broadcastRooms := m.broadcastRoomsForSourceFromSnapshotLocked(sourceToken, snapshot)
 	talkRooms := m.talkRoomsForSourceFromSnapshotLocked(sourceToken, snapshot)
 	_, idleRoomFallbackSuppressed := m.idleRoomFallbackSuppressed[sourceToken]
@@ -754,8 +746,8 @@ func (m *MediaManager) recomputeSourceRoutingWithSnapshotLocked(sourceToken stri
 
 		// Compute the routing gate — instant, no renegotiation.
 		shouldReceive := false
-		if directTargetPeerToken != "" {
-			shouldReceive = p.token == directTargetPeerToken
+		if directTarget != "" {
+			shouldReceive = directTargetMatches(directTarget, p.userID, snapshot.clients[p.token].roleID)
 		} else if len(broadcastRooms) > 0 {
 			shouldReceive = m.peerListensToAnyRoomInSnapshotLocked(p.token, broadcastRooms, snapshot)
 		} else if !idleRoomFallbackSuppressed {
@@ -779,8 +771,8 @@ func (m *MediaManager) recomputeSourceRoutingWithSnapshotLocked(sourceToken stri
 			continue
 		}
 		shouldReceive := false
-		if directTargetUserID != "" {
-			shouldReceive = destClient.userID == directTargetUserID
+		if directTarget != "" {
+			shouldReceive = directTargetMatches(directTarget, destClient.userID, destClient.roleID)
 		} else if len(broadcastRooms) > 0 {
 			shouldReceive = m.peerListensToAnyRoomInSnapshotLocked(destToken, broadcastRooms, snapshot)
 		} else if !idleRoomFallbackSuppressed {

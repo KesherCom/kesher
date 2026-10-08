@@ -396,6 +396,9 @@ func TestServerHandleLoginConflictReturnsTakeoverHint(t *testing.T) {
 	defer store.Close()
 	s := &Server{store: store, sessions: NewSessionManager(time.Minute), hub: NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))}
 	_ = s.sessions.Create(User{ID: "u-existing", Username: "alice", RoleID: "audio"})
+	if err := store.SetRoleExclusive(context.Background(), "audio", true); err != nil {
+		t.Fatal(err)
+	}
 
 	body := bytes.NewBufferString("{\"username\":\"tim\",\"roleId\":\"audio\"}")
 	req := httptest.NewRequest(http.MethodPost, "/api/login", body)
@@ -410,6 +413,46 @@ func TestServerHandleLoginConflictReturnsTakeoverHint(t *testing.T) {
 	}
 	if !resp.RequiresTakeover || resp.ConflictRoleID != "audio" || resp.ConflictUsername != "alice" {
 		t.Fatalf("unexpected conflict response: %+v", resp)
+	}
+}
+
+func TestServerHandleLoginSharedRoleAllowsSeveralUsers(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &Server{store: store, sessions: NewSessionManager(time.Minute), hub: NewHub(store, slog.New(slog.NewTextHandler(io.Discard, nil)))}
+	for _, name := range []string{"alice", "tim"} {
+		body := bytes.NewBufferString(`{"username":"` + name + `","roleId":"camera"}`)
+		rec := httptest.NewRecorder()
+		s.handleLogin(rec, httptest.NewRequest(http.MethodPost, "/api/login", body))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200 for a shared role, got %d", name, rec.Code)
+		}
+	}
+	// The example setup keeps the producer exclusive.
+	if exclusive, err := store.RoleExclusive(context.Background(), "producer"); err != nil || !exclusive {
+		t.Fatalf("producer should be exclusive: %v %v", exclusive, err)
+	}
+}
+
+func TestDirectTargetMatches(t *testing.T) {
+	cases := []struct {
+		target, userID, roleID string
+		want                   bool
+	}{
+		{"u1", "u1", "audio", true},
+		{"u1", "u2", "audio", false},
+		{"role:audio", "u2", "audio", true},
+		{"role:audio", "u2", "video", false},
+		{"role:", "u2", "", false},
+		{"", "", "", false},
+	}
+	for _, c := range cases {
+		if got := directTargetMatches(c.target, c.userID, c.roleID); got != c.want {
+			t.Errorf("directTargetMatches(%q, %q, %q) = %v", c.target, c.userID, c.roleID, got)
+		}
 	}
 }
 

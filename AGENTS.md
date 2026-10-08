@@ -137,9 +137,9 @@ Desktop proxy implementation lives in the standalone repo:
 
 ## Companion integration
 
-- Discovery endpoint: `GET /api/companion/discovery?roleId=<roleId>` (preferred, `username` still supported as legacy fallback)
-- Bridge WebSocket: `/api/companion/ws?roleId=<roleId>` (preferred, `username` still supported as legacy fallback)
-- Backend binds companion commands to the latest active token for that role ID, then relays commands through normal WS control paths.
+- Roles are shared by default (several logins per role); only roles with `exclusive` ask to take over. A direct call to `role:<roleId>` reaches everyone in the role (`directTargetMatches` in `hub.go`).
+- Stream Decks: one Companion connection per deck with `?deck=<serial or name>` on discovery, profile, `/api/companion/ws` and `/api/image-stream`. A deck belongs to a place (`placeId` sent at login, `lib/place.ts`; stations use `station-<device id>`), controls whoever is logged in there and has its own layout (falls back to that login's role layout). Pairing: code on the unpaired deck, entered in the app (`/api/user/stream-decks/pair`) or in the admin area (`/api/admin/stream-decks`). Code in `backend/internal/app/stream_decks.go`; companion state is keyed by `deck:<id>` instead of the role ID. See `docs/decisions/0006-shared-roles-and-stream-decks-per-place.md`.
+- Older connections use `?roleId=<roleId>` (`username` is rejected) and bind to the latest login of that role.
 
 ## Module paths and runtime dependencies
 

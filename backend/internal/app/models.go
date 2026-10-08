@@ -16,6 +16,9 @@ type Role struct {
 	DefaultRoomID     string `json:"defaultRoomId,omitempty"`
 	DefaultVoiceMode  string `json:"defaultVoiceMode,omitempty"`
 	DefaultSimpleView bool   `json:"defaultSimpleView,omitempty"`
+	// Exclusive roles allow one login at a time (a second login asks to take
+	// over). Roles are shared by default: several people log in with them.
+	Exclusive bool `json:"exclusive,omitempty"`
 }
 
 type CompanionRoomDiscovery struct {
@@ -103,10 +106,13 @@ type AdminUserView struct {
 }
 
 type Session struct {
-	Token     string
-	UserID    string
-	Username  string
-	RoleID    string
+	Token    string
+	UserID   string
+	Username string
+	RoleID   string
+	// PlaceID: the client installation (browser profile, desktop app,
+	// station) this login came from; Stream Decks are bound to places.
+	PlaceID   string
 	ExpiresAt time.Time
 }
 
@@ -220,6 +226,7 @@ type PublicBootstrapResponse struct {
 type LoginRequest struct {
 	Username string `json:"username"`
 	RoleID   string `json:"roleId"`
+	PlaceID  string `json:"placeId,omitempty"`
 }
 
 type LoginResponse struct {
@@ -238,6 +245,7 @@ type LoginConflictResponse struct {
 type LoginTakeoverRequest struct {
 	Username string `json:"username"`
 	RoleID   string `json:"roleId"`
+	PlaceID  string `json:"placeId,omitempty"`
 }
 
 type AdminLoginRequest struct {
@@ -366,6 +374,8 @@ type CompanionCommand struct {
 	TalkRoomIDs   []string `json:"talkRoomIds"`
 	Brightness    int      `json:"brightness,omitempty"`
 	PageNumber    int      `json:"pageNumber,omitempty"`
+	// SurfaceID: the Companion surface (Stream Deck serial) that was pressed.
+	SurfaceID string `json:"surfaceId,omitempty"`
 }
 
 type CompanionCommandResult struct {
@@ -394,6 +404,10 @@ type CompanionBridgeState struct {
 	ProfileVersion      int            `json:"profileVersion,omitempty"`
 	ProfileStatus       string         `json:"profileStatus,omitempty"`
 	ProfileUpdatedAt    int64          `json:"profileUpdatedAt,omitempty"`
+	// Deck connections: the deck's name, and its pairing code while it is
+	// not bound to a place.
+	DeckName    string `json:"deckName,omitempty"`
+	PairingCode string `json:"pairingCode,omitempty"`
 }
 
 type StatusResponse struct {

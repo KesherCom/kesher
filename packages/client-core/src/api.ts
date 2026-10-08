@@ -8,6 +8,7 @@ import type {
   ConfigurationDocument,
   ConfigurationImportResponse,
   ConfigurationSection,
+  ClientPlace,
   Device,
   LoginConflict,
   LoginSuccess,
@@ -15,6 +16,7 @@ import type {
   RealtimeStatsResponse,
   StatusResponse,
   StreamDeckActionType,
+  StreamDeckDevice,
   StreamDeckSettings,
   TelegramAllowlistEntry,
   TelegramStatus,
@@ -22,6 +24,7 @@ import type {
   UserWithOnlineStatus,
 } from "./types";
 import { toStringArray } from "./lib/normalize";
+import { getPlaceId } from "./lib/place";
 
 const adminPinHeaderName = "X-Admin-Pin";
 
@@ -484,7 +487,7 @@ export async function login(
   const res = await fetch(apiUrl("/api/login"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, roleId }),
+    body: JSON.stringify({ username, roleId, placeId: getPlaceId() }),
   });
   if (res.status === 409) {
     return (await res.json()) as LoginConflict;
@@ -500,7 +503,7 @@ export async function loginTakeover(
   const res = await fetch(apiUrl("/api/login/takeover"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, roleId }),
+    body: JSON.stringify({ username, roleId, placeId: getPlaceId() }),
   });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as LoginSuccess;
@@ -594,6 +597,7 @@ export async function createRole(
     defaultRoomId?: string;
     defaultVoiceMode?: string;
     defaultSimpleView?: boolean;
+    exclusive?: boolean;
   },
 ): Promise<void> {
   await apiMutation("/api/admin/roles", token, "POST", adminPin, payload);
@@ -607,6 +611,7 @@ export async function updateRole(
     defaultRoomId?: string;
     defaultVoiceMode?: string;
     defaultSimpleView?: boolean;
+    exclusive?: boolean;
   },
 ): Promise<void> {
   await apiMutation(
@@ -939,6 +944,70 @@ export async function updateAdminDevice(
 
 export async function deleteAdminDevice(token: string, adminPin: string, id: string): Promise<void> {
   await apiMutation(`/api/admin/devices/${encodeURIComponent(id)}`, token, "DELETE", adminPin);
+}
+
+export async function getAdminStreamDecks(
+  token: string,
+  adminPin: string,
+): Promise<{ decks: StreamDeckDevice[]; places: ClientPlace[] }> {
+  const res = await fetch(apiUrl("/api/admin/stream-decks"), {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      [adminPinHeaderName]: adminPin,
+    },
+  });
+  if (!res.ok) throw new Error("failed to load stream decks");
+  return res.json() as Promise<{ decks: StreamDeckDevice[]; places: ClientPlace[] }>;
+}
+
+export async function updateAdminStreamDeck(
+  token: string,
+  adminPin: string,
+  id: string,
+  payload: { name: string; placeId: string; placeLabel: string },
+): Promise<void> {
+  await apiMutation(`/api/admin/stream-decks/${encodeURIComponent(id)}`, token, "PUT", adminPin, payload);
+}
+
+export async function deleteAdminStreamDeck(token: string, adminPin: string, id: string): Promise<void> {
+  await apiMutation(`/api/admin/stream-decks/${encodeURIComponent(id)}`, token, "DELETE", adminPin);
+}
+
+/** Drops a deck's own layout; it shows the role layout again. */
+export async function resetAdminStreamDeckLayout(token: string, adminPin: string, id: string): Promise<void> {
+  await apiMutation(`/api/admin/stream-decks/${encodeURIComponent(id)}/layout`, token, "DELETE", adminPin);
+}
+
+/** Stream Decks bound to this client's place. */
+export async function getPlaceStreamDecks(token: string): Promise<StreamDeckDevice[]> {
+  const res = await fetch(apiUrl("/api/user/stream-decks"), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("failed to load stream decks");
+  return res.json() as Promise<StreamDeckDevice[]>;
+}
+
+/** Binds the Stream Deck that shows this code to this client's place. */
+export async function pairStreamDeck(token: string, code: string): Promise<StreamDeckDevice> {
+  const res = await fetch(apiUrl("/api/user/stream-decks/pair"), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ code }),
+  });
+  if (res.status === 404) throw new Error("No Stream Deck shows this code.");
+  if (!res.ok) throw new Error((await res.text()).trim() || "pairing failed");
+  return res.json() as Promise<StreamDeckDevice>;
+}
+
+export async function releaseStreamDeck(token: string, id: string): Promise<void> {
+  const res = await fetch(apiUrl(`/api/user/stream-decks/${encodeURIComponent(id)}`), {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error((await res.text()).trim() || "release failed");
 }
 
 export async function createTelegramAllowlistEntry(

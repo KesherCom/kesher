@@ -547,12 +547,13 @@ func (s *Store) ReplaceConfiguration(ctx context.Context, state configurationSta
 		if role.DefaultSimpleView {
 			defaultSimpleView = 1
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO roles (id, name, default_room_id, default_voice_mode, default_simple_view) VALUES (?, ?, ?, ?, ?)`,
+		if _, err := tx.ExecContext(ctx, `INSERT INTO roles (id, name, default_room_id, default_voice_mode, default_simple_view, exclusive) VALUES (?, ?, ?, ?, ?, ?)`,
 			strings.TrimSpace(role.ID),
 			strings.TrimSpace(role.Name),
 			nullableString(role.DefaultRoomID),
 			nullableString(role.DefaultVoiceMode),
 			defaultSimpleView,
+			boolInt(role.Exclusive),
 		); err != nil {
 			return err
 		}

@@ -240,7 +240,7 @@ func (m *MediaManager) recomputeNativeSourceRoutingLocked(sourceToken string, sr
 // Caller must hold m.mu.
 func (m *MediaManager) computeOpenDestsLocked(sourceToken string, snapshot mediaHubSnapshot) map[string]struct{} {
 	open := make(map[string]struct{})
-	directTargetUserID := m.directActive[sourceToken]
+	directTarget := m.directActive[sourceToken]
 	broadcastRooms := m.broadcastRoomsForSourceFromSnapshotLocked(sourceToken, snapshot)
 	talkRooms := m.talkRoomsForSourceFromSnapshotLocked(sourceToken, snapshot)
 	_, idleRoomFallbackSuppressed := m.idleRoomFallbackSuppressed[sourceToken]
@@ -251,8 +251,8 @@ func (m *MediaManager) computeOpenDestsLocked(sourceToken string, snapshot media
 		}
 		shouldReceive := false
 		switch {
-		case directTargetUserID != "":
-			shouldReceive = destClient.userID == directTargetUserID
+		case directTarget != "":
+			shouldReceive = directTargetMatches(directTarget, destClient.userID, destClient.roleID)
 		case len(broadcastRooms) > 0:
 			shouldReceive = m.peerListensToAnyRoomInSnapshotLocked(destToken, broadcastRooms, snapshot)
 		case !idleRoomFallbackSuppressed:
