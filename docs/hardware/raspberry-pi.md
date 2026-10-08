@@ -61,14 +61,14 @@ Boot the Pi and log in: `ssh <user>@stage-left.local`.
 
 ### 2. Install the package
 
-Download `kesher-node_<version>_arm64.deb` from the
+Download `kesher-node-raspberrypi-arm64.deb` from the
 [GitHub releases](https://github.com/KesherCom/kesher/releases) (or build it,
 see [Building](#building-from-source)), copy it to the Pi and install it:
 
 ```sh
-scp kesher-node_*_arm64.deb <user>@stage-left.local:
+scp kesher-node-raspberrypi-arm64.deb <user>@stage-left.local:
 ssh <user>@stage-left.local
-sudo apt install ./kesher-node_*_arm64.deb
+sudo apt install ./kesher-node-raspberrypi-arm64.deb
 ```
 
 This installs the program, the `kesher-node` service (enabled, started once
@@ -157,7 +157,8 @@ desktop app).
 ## Updating and removing
 
 ```sh
-sudo apt install ./kesher-node_<new-version>_arm64.deb   # keeps node.toml
+sudo apt install ./kesher-node-raspberrypi-arm64.deb    # newer file; keeps node.toml
+dpkg -s kesher-node | grep Version                       # installed version
 sudo apt remove kesher-node                              # keeps the config
 sudo apt purge kesher-node                               # removes everything
 ```
@@ -192,7 +193,7 @@ The package is built in a Debian bookworm container (cross-compiled for
 arm64), the same way locally and in CI:
 
 ```sh
-make node-deb                  # dist/node/kesher-node_<version>_arm64.deb
+make node-deb                  # dist/node/kesher-node-raspberrypi-arm64.deb
 make node-deb NODE_ARCH=amd64  # x86 Linux
 make node-test                 # unit tests on the host
 ```

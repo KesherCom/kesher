@@ -191,6 +191,7 @@ jobs:
         run: |
           npm install -g npm@11
           npm install
+          node scripts/set-desktop-version.mjs
           npm --prefix desktop run tauri build -- --bundles nsis,msi
 
       - name: Prepare release assets
@@ -251,6 +252,7 @@ jobs:
         run: |
           npm install -g npm@11
           npm install
+          node scripts/set-desktop-version.mjs
           npm --prefix desktop run tauri build -- --target aarch64-apple-darwin
       - name: Prepare release assets
         run: |
@@ -309,6 +311,7 @@ jobs:
         run: |
           npm install -g npm@11
           npm install
+          node scripts/set-desktop-version.mjs
           npm --prefix desktop run tauri build -- --target x86_64-apple-darwin
       - name: Prepare release assets
         run: |
@@ -346,31 +349,24 @@ jobs:
           path: all-assets
           merge-multiple: true
 
-      - name: Resolve release notes file
-        id: notes
+      # Release text: docs/releases/<version>.md (if written) followed by
+      # the download table (docs/releases/downloads.md), then GitHub's
+      # generated list of changes.
+      - name: Release notes
         run: |
           version="${GITHUB_REF_NAME#v}"
           notes_file="docs/releases/${version}.md"
+          : > release-body.md
           if [ -f "$notes_file" ]; then
-            echo "has_notes=true" >> "$GITHUB_OUTPUT"
-            echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_notes=false" >> "$GITHUB_OUTPUT"
+            cat "$notes_file" >> release-body.md
+            echo >> release-body.md
           fi
+          cat docs/releases/downloads.md >> release-body.md
 
-      - name: Create GitHub Release (with notes file)
-        if: steps.notes.outputs.has_notes == 'true'
+      - name: Create GitHub Release
         uses: ncipollo/release-action@v1
         with:
           artifacts: "all-assets/*"
           token: ${{ secrets.GITHUB_TOKEN }}
-          bodyFile: ${{ steps.notes.outputs.notes_file }}
-          generateReleaseNotes: true
-
-      - name: Create GitHub Release (generated notes only)
-        if: steps.notes.outputs.has_notes != 'true'
-        uses: ncipollo/release-action@v1
-        with:
-          artifacts: "all-assets/*"
-          token: ${{ secrets.GITHUB_TOKEN }}
+          bodyFile: release-body.md
           generateReleaseNotes: true

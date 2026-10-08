@@ -38,21 +38,23 @@ Open `http://localhost:8080` (or `:5173` if using the Vite dev server).
 
 ## Downloadable builds
 
-Prebuilt binaries are published in GitHub Releases:
+Prebuilt files are published in GitHub Releases:
+https://github.com/KesherCom/kesher/releases
 
-- https://github.com/KesherCom/kesher/releases
+Every release contains the same set of files, all with the release's version:
 
-Release assets are named like:
+| File | What it is | For |
+| --- | --- | --- |
+| `kesher-server-<os>-<arch>` (`.tar.gz` / `.zip`) | Server with the web UI embedded | Linux (amd64, arm64), Windows (amd64), macOS (amd64, arm64) |
+| `kesher-desktop-windows-amd64-setup.exe` / `.msi` | Desktop app | Windows |
+| `kesher-desktop-macos-<arch>.dmg` | Desktop app | Mac with Apple silicon (`arm64`) or Intel (`amd64`) |
+| `kesher-node-raspberrypi-arm64.deb` | Headless station with USB headset | Raspberry Pi 3/4/5 ([guide](docs/hardware/raspberry-pi.md)) |
+| `kesher-node-linux-amd64.deb` | Same station for x86 Linux | Debian/Ubuntu PCs |
 
-- `kesher-darwin-arm64.tar.gz`
-- `kesher-darwin-amd64.tar.gz`
-- `kesher-windows-amd64.zip`
-- `kesher-windows-arm64.zip`
-
-Each archive contains a single backend binary (`kesher-<os>-<arch>` or `kesher-<os>-<arch>.exe`) with the web UI already embedded.
-
-The Raspberry Pi / Linux node is released alongside as `kesher-node_<version>_arm64.deb`
-(and `amd64`, plus `.tar.gz`); see [docs/hardware/raspberry-pi.md](docs/hardware/raspberry-pi.md).
+Each server archive contains a single binary with the web UI embedded. The
+station packages also come as `.tar.gz` for systems without `apt`. The full
+per-file list is in [docs/releases/downloads.md](docs/releases/downloads.md);
+how releases are made is in [docs/releases/README.md](docs/releases/README.md).
 
 ### Running unsigned binaries (macOS / Windows)
 
