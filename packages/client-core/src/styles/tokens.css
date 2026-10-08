@@ -1,0 +1,53 @@
+/*
+ * Kesher visual system: the values every screen uses.
+ * Rules and examples: docs/design/README.md. New and reworked UI uses
+ * these variables only (no raw colors); theme.css/app.css move over step
+ * by step.
+ */
+:root {
+  /* Colors with one meaning each, everywhere. */
+  --k-hear: #22c55e; /* you hear this line / someone on it is heard */
+  --k-hear-text: #4ade80;
+  --k-hear-tint: rgba(34, 197, 94, 0.18);
+  --k-on-air: #ef4444; /* your microphone goes out */
+  --k-on-air-text: #fca5a5;
+  --k-on-air-tint: rgba(239, 68, 68, 0.2);
+  --k-call: #facc15; /* someone calls you or a line */
+  --k-call-text: #fde047;
+  --k-call-tint: rgba(250, 204, 21, 0.12);
+  --k-attention: #fb923c; /* something is wrong */
+  --k-attention-tint: rgba(251, 146, 60, 0.14);
+  --k-selection: #22d3ee; /* navigation and focus only, never a status */
+
+  /* Neutrals */
+  --k-ground: #0e1116;
+  --k-surface: #161b22;
+  --k-raised: #1e2530;
+  --k-border: #2a323d;
+  --k-border-strong: #3a4452;
+  --k-text: #e6eaf0;
+  --k-text-soft: #c9d1db;
+  --k-text-muted: #9aa4b2;
+
+  /* Type: IBM Plex Sans, numbers in IBM Plex Mono. Capitals only on the
+     talk button. */
+  --k-font: "IBM Plex Sans", system-ui, sans-serif;
+  --k-font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --k-text-display: 28px;
+  --k-text-title: 18px;
+  --k-text-body: 15px;
+  --k-text-label: 13px;
+
+  /* Spacing, radii, sizes */
+  --k-space-1: 4px;
+  --k-space-2: 8px;
+  --k-space-3: 12px;
+  --k-space-4: 16px;
+  --k-space-5: 24px;
+  --k-space-6: 32px;
+  --k-radius-control: 10px;
+  --k-radius-card: 12px;
+  --k-radius-panel: 14px;
+  --k-touch: 44px; /* minimum height of anything you press */
+  --k-icon-stroke: 1.8;
+}

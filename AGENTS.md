@@ -43,6 +43,8 @@ Rust code is one Cargo workspace at the repo root (`Cargo.toml`, committed `Carg
 
 Design decisions are recorded in `docs/decisions/` (add a numbered file for new ones).
 
+UI follows the visual system in `docs/design/README.md` (decision 0007): signal colors with one meaning (hear green, on air red, call yellow, attention orange, cyan only for selection), IBM Plex, 44 px touch targets, three button kinds, one stroke icon set. Values are the `--k-*` variables in `packages/client-core/src/styles/tokens.css`; new or reworked UI uses only those (the older `theme.css`/`app.css` values move over step by step).
+
 CI: `.github/workflows/ci.yml` runs on every push (Go tests, web build, Rust tests on Linux, arm64 node package). `release-binaries.yml` builds everything (server, node, Windows/macOS desktop) on tags `v*` (and publishes the release), on manual runs, and on pushes whose commit message contains `[full-build]` (build only, no release). Release file names, versioning (`scripts/set-desktop-version.mjs`) and the release steps: `docs/releases/README.md`; keep `docs/releases/downloads.md` in sync when release files change.
 
 ```sh
