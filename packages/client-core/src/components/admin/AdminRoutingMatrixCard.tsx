@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import type { Bootstrap, Room, Role } from "../../types";
 import { updateRoutingMatrix, type RoutingMatrixEntry } from "../../api";
+import { Icon } from "../Icon";
 
 type AdminRoutingMatrixCardProps = {
   token: string;
@@ -12,8 +13,9 @@ type AdminRoutingMatrixCardProps = {
 type CellState = { talk: boolean; listen: boolean; forced: boolean };
 
 /**
- * One click per cell steps through the useful combinations. "Always hears"
- * means forced listen: the party line cannot be switched off at the station.
+ * One click per cell steps through the useful combinations. Being allowed to
+ * hear a party line does not mean hearing it all the time: the station
+ * switches listening on and off. Only "always" (forced listen) keeps it on.
  */
 const cellCycle: CellState[] = [
   { talk: false, listen: false, forced: false },
@@ -33,17 +35,49 @@ function nextCell(cell: CellState): CellState {
   return index < 0 ? cellCycle[0] : cellCycle[(index + 1) % cellCycle.length];
 }
 
-export function describeCell(cell: CellState): { label: string; long: string; className: string } {
-  if (cell.talk && cell.listen && cell.forced) {
-    return { label: "Talk ★", long: "talks, always hears", className: "talk forced" };
-  }
-  if (cell.talk && cell.listen) return { label: "Talk", long: "talks and hears", className: "talk" };
-  if (cell.talk) return { label: "Talk only", long: "talks, does not hear", className: "talk-only" };
-  if (cell.listen && cell.forced) {
-    return { label: "Hear ★", long: "always hears", className: "hear forced" };
-  }
-  if (cell.listen) return { label: "Hear", long: "hears", className: "hear" };
-  return { label: "–", long: "no access", className: "none" };
+type CellView = {
+  talk: boolean;
+  hear: "no" | "can" | "always";
+  long: string;
+};
+
+const hearingWords = {
+  no: "cannot hear",
+  can: "can switch listening on",
+  always: "always hears",
+} as const;
+
+function describeCell(cell: CellState): CellView {
+  const hear = !cell.listen ? "no" : cell.forced ? "always" : "can";
+  const long = cell.talk
+    ? `can talk, ${hearingWords[hear]}`
+    : hear === "no"
+      ? "no access"
+      : hearingWords[hear];
+  return { talk: cell.talk, hear, long };
+}
+
+function CellContent({ view }: { view: CellView }) {
+  if (!view.talk && view.hear === "no") return <>–</>;
+  return (
+    <>
+      {view.talk ? (
+        <span className="routing-matrix-part talk">
+          <Icon name="mic" size={14} />
+          Talk
+        </span>
+      ) : null}
+      {view.hear !== "no" ? (
+        <span className={`routing-matrix-part hear ${view.hear}`}>
+          <Icon
+            name={view.hear === "always" ? "lock" : "headphones"}
+            size={14}
+          />
+          {view.hear === "always" ? "Always" : "Hear"}
+        </span>
+      ) : null}
+    </>
+  );
 }
 
 /** Build a map of roleId → roomId → { talk, listen, forced } from the current bootstrap data. */
@@ -192,9 +226,11 @@ export function AdminRoutingMatrixCard({
 
           <p className="routing-matrix-hint">
             Click a cell to step through: – no access → <strong>Hear</strong> →{" "}
-            <strong>Hear ★</strong> (always on, cannot be switched off at the
-            station) → <strong>Talk</strong> (talks and hears) →{" "}
-            <strong>Talk ★</strong>. Changes apply after Save.
+            <strong>Always</strong> → <strong>Talk + Hear</strong> →{" "}
+            <strong>Talk + Always</strong>. <strong>Hear</strong> means the
+            station may listen and switches it on or off itself;{" "}
+            <strong>Always</strong> keeps listening on. Changes apply after
+            Save.
           </p>
 
           <div className="routing-matrix-wrapper">
@@ -233,13 +269,13 @@ export function AdminRoutingMatrixCard({
                         <td key={room.id} className="routing-matrix-cell">
                           <button
                             type="button"
-                            className={`routing-matrix-state ${shown.className}${changed ? " changed" : ""}`}
+                            className={`routing-matrix-state${changed ? " changed" : ""}`}
                             onClick={() => cycleCell(role.id, room.id)}
                             disabled={adminBusy}
                             aria-label={`${role.name} on ${room.name}: ${shown.long}`}
                             title={`${role.name} on ${room.name}: ${shown.long} (click to change)`}
                           >
-                            {shown.label}
+                            <CellContent view={shown} />
                           </button>
                         </td>
                       );
@@ -252,15 +288,25 @@ export function AdminRoutingMatrixCard({
 
           <div className="routing-matrix-legend">
             <span className="routing-matrix-legend-item">
-              <span className="routing-matrix-state hear">Hear</span> can
-              listen
+              <span className="routing-matrix-part talk">
+                <Icon name="mic" size={14} />
+                Talk
+              </span>
+              may talk
             </span>
             <span className="routing-matrix-legend-item">
-              <span className="routing-matrix-state talk">Talk</span> can talk
-              and listen
+              <span className="routing-matrix-part hear can">
+                <Icon name="headphones" size={14} />
+                Hear
+              </span>
+              may listen, switched at the station
             </span>
             <span className="routing-matrix-legend-item">
-              <strong>★</strong> always listening, cannot be switched off
+              <span className="routing-matrix-part hear always">
+                <Icon name="lock" size={14} />
+                Always
+              </span>
+              always listening, cannot be switched off
             </span>
           </div>
 

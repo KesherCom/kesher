@@ -68,10 +68,18 @@ describe("AdminRoutingMatrixCard", () => {
     );
 
     // One cell per role and party line, in plain words.
-    expect(screen.getByLabelText("Audio on FOH: talks and hears")).toHaveTextContent("Talk");
-    expect(screen.getByLabelText("Video on FOH: hears")).toHaveTextContent("Hear");
-    expect(screen.getByLabelText("Audio on Stage: no access")).toHaveTextContent("–");
-    expect(screen.getByLabelText("Video on Stage: hears")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Audio on FOH: can talk, can switch listening on"),
+    ).toHaveTextContent("TalkHear");
+    expect(
+      screen.getByLabelText("Video on FOH: can switch listening on"),
+    ).toHaveTextContent("Hear");
+    expect(
+      screen.getByLabelText("Audio on Stage: no access"),
+    ).toHaveTextContent("–");
+    expect(
+      screen.getByLabelText("Video on Stage: can switch listening on"),
+    ).toBeInTheDocument();
   });
 
   it("toggling a cell shows save/discard buttons and saves changes", async () => {
@@ -90,11 +98,17 @@ describe("AdminRoutingMatrixCard", () => {
     // No save button initially
     expect(screen.queryByText("Save changes")).not.toBeInTheDocument();
 
-    // Video on FOH: hears → always hears → talks and hears
-    await user.click(screen.getByLabelText("Video on FOH: hears"));
-    expect(screen.getByLabelText("Video on FOH: always hears")).toHaveTextContent("Hear ★");
+    // Video on FOH: can hear → always hears → can talk, can hear
+    await user.click(
+      screen.getByLabelText("Video on FOH: can switch listening on"),
+    );
+    expect(
+      screen.getByLabelText("Video on FOH: always hears"),
+    ).toHaveTextContent("Always");
     await user.click(screen.getByLabelText("Video on FOH: always hears"));
-    expect(screen.getByLabelText("Video on FOH: talks and hears")).toHaveClass("changed");
+    expect(
+      screen.getByLabelText("Video on FOH: can talk, can switch listening on"),
+    ).toHaveClass("changed");
 
     // Save/Discard buttons should appear
     expect(screen.getByText("Save changes")).toBeVisible();
@@ -130,11 +144,13 @@ describe("AdminRoutingMatrixCard", () => {
     );
 
     await user.click(screen.getByLabelText("Audio on Stage: no access"));
-    expect(screen.getByLabelText("Audio on Stage: hears")).toBeInTheDocument();
+    expect(screen.getByLabelText("Audio on Stage: can switch listening on")).toBeInTheDocument();
 
     await user.click(screen.getByText("Discard"));
 
-    expect(screen.getByLabelText("Audio on Stage: no access")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Audio on Stage: no access"),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Save changes")).not.toBeInTheDocument();
   });
 

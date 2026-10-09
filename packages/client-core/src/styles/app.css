@@ -3581,48 +3581,54 @@ button.secondary {
   font-size: 0.85rem;
 }
 
-/* Routing matrix: one button per cell, in words */
+/* Routing matrix: one button per cell. "Talk" is red text (no fill, it is
+   a permission, not on air); hearing is green: outlined when the station
+   switches it, filled when it is always on. */
 .routing-matrix-state {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: var(--k-space-1);
   min-width: 4.6rem;
-  height: 1.9rem;
-  padding: 0 0.5rem;
-  border-radius: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--text-dark);
-  font-size: 0.78rem;
-  font-weight: 800;
+  height: 2rem;
+  padding: 0 var(--k-space-1);
+  border-radius: 8px;
+  border: 1px solid var(--k-border);
+  background: transparent;
+  color: var(--k-text-muted);
+  font-size: var(--k-text-label);
+  font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
 }
 .routing-matrix-state:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.25);
+  border-color: var(--k-border-strong);
 }
-.routing-matrix-state.hear {
-  background: var(--k-hear-tint);
+.routing-matrix-state.changed {
+  outline: 2px dashed var(--k-selection);
+  outline-offset: 1px;
+}
+.routing-matrix-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: var(--k-text-label);
+  font-weight: 600;
+}
+.routing-matrix-part.talk {
+  color: var(--k-on-air-text);
+}
+.routing-matrix-part.hear.can {
   border-color: var(--k-hear);
   color: var(--k-hear-text);
 }
-.routing-matrix-state.talk,
-.routing-matrix-state.talk-only {
-  background: var(--k-on-air-tint);
-  border-color: var(--k-on-air);
-  color: var(--k-on-air-text);
-}
-.routing-matrix-state.forced {
-  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.7);
-}
-.routing-matrix-state.changed {
-  outline: 2px dashed rgba(0, 209, 255, 0.7);
-  outline-offset: 1px;
-}
-.routing-matrix-legend .routing-matrix-state {
-  min-width: 0;
-  height: 1.5rem;
-  cursor: default;
+.routing-matrix-part.hear.always {
+  border-color: var(--k-hear);
+  background: var(--k-hear-tint);
+  color: var(--k-hear-text);
 }
 
 @media (max-width: 900px) {
