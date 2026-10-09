@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -141,8 +139,8 @@ func TestCompanionButtonSnapshotStateReplyToCallerSetsBlinkEffectOnIncomingSigna
 	}
 
 	state := s.companionButtonSnapshotState(context.Background(), "role_a", 0, "operator", PresenceState{}, button)
-	if state.EffectValue != companionIncomingCallEffectValue {
-		t.Fatalf("expected blink effect value %d while signal is active, got %d", companionIncomingCallEffectValue, state.EffectValue)
+	if !state.Calling {
+		t.Fatalf("expected the key to blink while the call signal is active")
 	}
 }
 
@@ -171,8 +169,8 @@ func TestCompanionButtonSnapshotStateReplyToCallerDoesNotBlinkOnRoomCall(t *test
 	}
 
 	state := s.companionButtonSnapshotState(context.Background(), "role_a", 0, "operator", PresenceState{}, button)
-	if state.EffectValue != 0 {
-		t.Fatalf("expected reply-to-caller to ignore room call blink, got effectValue=%d", state.EffectValue)
+	if state.Calling {
+		t.Fatalf("expected reply-to-caller to ignore room call blink")
 	}
 }
 
@@ -189,8 +187,8 @@ func TestCompanionButtonSnapshotStateReplyToCallerKeepsBlinkWhenCallPending(t *t
 	}
 
 	state := s.companionButtonSnapshotState(context.Background(), "role_a", 0, "operator", PresenceState{}, button)
-	if state.EffectValue != companionIncomingCallEffectValue {
-		t.Fatalf("expected pending call effect value %d, got %d", companionIncomingCallEffectValue, state.EffectValue)
+	if !state.Calling {
+		t.Fatalf("expected the key to blink while a call is pending")
 	}
 }
 
@@ -219,8 +217,8 @@ func TestCompanionButtonSnapshotStateIncomingCallIndicatorShowsCallerAndBlink(t 
 	}
 
 	state := s.companionButtonSnapshotState(context.Background(), "role_a", 0, "operator", PresenceState{}, button)
-	if state.EffectValue != companionIncomingCallEffectValue {
-		t.Fatalf("expected blink effect value %d while signal is active, got %d", companionIncomingCallEffectValue, state.EffectValue)
+	if !state.Calling {
+		t.Fatalf("expected the key to blink while the call signal is active")
 	}
 	if state.Label != "Incoming" {
 		t.Fatalf("expected incoming indicator label, got %q", state.Label)
@@ -258,8 +256,8 @@ func TestCompanionButtonSnapshotStateDirectRoleButtonBlinksForDirectCallSource(t
 	}
 
 	state := s.companionButtonSnapshotState(context.Background(), "role_a", 0, "operator", PresenceState{}, button)
-	if state.EffectValue != companionIncomingCallEffectValue {
-		t.Fatalf("expected matching direct-role button to blink, got effectValue=%d", state.EffectValue)
+	if !state.Calling {
+		t.Fatalf("expected matching direct-role button to blink")
 	}
 }
 
@@ -291,8 +289,8 @@ func TestCompanionButtonSnapshotStateRoomButtonBlinksForRoomCallSource(t *testin
 	}
 
 	state := s.companionButtonSnapshotState(context.Background(), "role_a", 0, "operator", PresenceState{}, button)
-	if state.EffectValue != companionIncomingCallEffectValue {
-		t.Fatalf("expected matching room button to blink, got effectValue=%d", state.EffectValue)
+	if !state.Calling {
+		t.Fatalf("expected matching room button to blink")
 	}
 }
 
@@ -373,8 +371,8 @@ func TestExecuteCompanionButtonPressIncomingCallIndicatorNoOp(t *testing.T) {
 		t.Fatal("expected pending incoming call to be cleared after incoming indicator press")
 	}
 	state := s.companionButtonSnapshotState(context.Background(), "source", 0, "operator", PresenceState{}, settings.Pages[0].Buttons[0])
-	if state.EffectValue != 0 {
-		t.Fatalf("expected blinking to stay suppressed after acknowledgement, got effectValue=%d", state.EffectValue)
+	if state.Calling {
+		t.Fatalf("expected blinking to stay suppressed after acknowledgement")
 	}
 }
 
@@ -423,8 +421,8 @@ func TestExecuteCompanionButtonPressMatchingDirectRoleAcknowledgesIncomingCall(t
 		t.Fatal("expected pending incoming call to be cleared after matching direct-role press")
 	}
 	state := s.companionButtonSnapshotState(context.Background(), "source", 0, "operator", PresenceState{}, settings.Pages[0].Buttons[0])
-	if state.EffectValue != 0 {
-		t.Fatalf("expected direct-role blink to stop after acknowledgement, got effectValue=%d", state.EffectValue)
+	if state.Calling {
+		t.Fatalf("expected direct-role blink to stop after acknowledgement")
 	}
 }
 
@@ -476,8 +474,8 @@ func TestExecuteCompanionButtonPressMatchingRoomAcknowledgesIncomingCall(t *test
 		t.Fatal("expected pending incoming call to be cleared after matching room press")
 	}
 	state := s.companionButtonSnapshotState(context.Background(), "source", 0, "operator", PresenceState{}, settings.Pages[0].Buttons[0])
-	if state.EffectValue != 0 {
-		t.Fatalf("expected room blink to stop after acknowledgement, got effectValue=%d", state.EffectValue)
+	if state.Calling {
+		t.Fatalf("expected room blink to stop after acknowledgement")
 	}
 }
 
@@ -1155,23 +1153,6 @@ func TestNormalizeCompanionRelayCommandRejectsUnauthorizedBroadcastSignal(t *tes
 	})
 	if err == nil || err.Error() != "not allowed to signal broadcast group" {
 		t.Fatalf("expected broadcast signal authorization error, got %v", err)
-	}
-}
-
-func TestLoadCompanionImageEffectMapJSONFromFile(t *testing.T) {
-	tmp := t.TempDir()
-	mapPath := filepath.Join(tmp, "image-effect-map.json")
-	content := `{"0":{"mode":0},"1":{"mode":"blink","color":"#ff2d26"}}`
-	if err := os.WriteFile(mapPath, []byte(content), 0o644); err != nil {
-		t.Fatalf("failed to write image effect map: %v", err)
-	}
-
-	s := newCompanionTestServer(t)
-	s.cfg.CompanionImageEffectMapFile = mapPath
-
-	got := s.loadCompanionImageEffectMapJSON()
-	if got != content {
-		t.Fatalf("unexpected image effect map json: got %q want %q", got, content)
 	}
 }
 

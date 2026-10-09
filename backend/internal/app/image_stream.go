@@ -40,10 +40,9 @@ type ImageStreamMessage struct {
 	Bank          int    `json:"bank"`
 	ButtonIndex   int    `json:"buttonIndex"`
 	ImageBuffer   string `json:"imageBuffer"` // Base64-encoded PNG
-	EffectValue   int    `json:"effectValue,omitempty"`
 	Label         string `json:"label,omitempty"`
 	Channel       string `json:"channel,omitempty"`
-	State         string `json:"state,omitempty"` // "IDLE", "TALK", "LISTEN", "BROADCAST"
+	State         string `json:"state,omitempty"` // "IDLE", "TALK", "LISTEN", "BROADCAST", "CALL"
 	ActionType    string `json:"actionType,omitempty"`
 	Color         string `json:"color,omitempty"`
 	IsListening   bool   `json:"isListening,omitempty"`
@@ -168,16 +167,18 @@ func (r *ButtonImageRenderer) RenderButtonImageBase64(state ButtonState) (string
 // ButtonState represents the state of a button for rendering
 type ButtonState struct {
 	Channel       string
-	State         string // "IDLE", "TALK", "LISTEN", "BROADCAST"
+	State         string // "IDLE", "TALK", "LISTEN", "BROADCAST", "CALL" (blinking incoming call)
 	Label         string
 	Subtitle      string
-	EffectValue   int
 	ActionType    string
 	Color         string
 	TalkCount     int
 	IsListening   bool
 	IsPTTSelected bool
 	IsActive      bool
+	// Calling: an incoming call waits on this key; State blinks between
+	// "CALL" and the normal state.
+	Calling bool
 }
 
 type streamDeckPreviewButtonRequest struct {
@@ -263,6 +264,12 @@ func (r *ButtonImageRenderer) draw(state ButtonState) ([]byte, error) {
 	useCallPressedColor := pressed && (actionType == string(StreamDeckActionTypeCallRoom) || actionType == string(StreamDeckActionTypeReplyToCaller) || actionType == string(StreamDeckActionTypeIncomingCall))
 	useEmergencyPressedColor := pressed && actionType != string(StreamDeckActionTypeListenRoom) && actionType != string(StreamDeckActionTypeCallRoom) && actionType != string(StreamDeckActionTypeReplyToCaller) && actionType != string(StreamDeckActionTypeIncomingCall)
 	palette := getButtonPalette(actionType, state.Color, pressed)
+	if state.State == "CALL" {
+		// Someone calls: yellow, the call color of the visual system.
+		palette = keyPalette{background: "#facc15", border: "#fde047", label: "#1a1405"}
+		useCallPressedColor = false
+		useEmergencyPressedColor = false
+	}
 	strokeColor := palette.border
 	if pressed {
 		strokeColor = mixColors(strokeColor, "#ffffff", 0.2)
@@ -350,7 +357,12 @@ func (r *ButtonImageRenderer) draw(state ButtonState) ([]byte, error) {
 
 			subSize := r.fitFontSize(dc, subtitle, w-26, math.Max(11, w*0.1), false)
 			dc.SetFontFace(r.face(false, subSize))
-			dc.SetHexColor(mixColors(textColor, "#aeb6c0", 0.45))
+			subtitleColor := mixColors(textColor, "#aeb6c0", 0.45)
+			if state.State == "CALL" {
+				// Dark subtitle on the light call yellow.
+				subtitleColor = mixColors(textColor, palette.background, 0.25)
+			}
+			dc.SetHexColor(subtitleColor)
 			secondaryLines := wrapButtonLines(dc, subtitle, w-26, 1)
 			dc.DrawStringAnchored(secondaryLines[0], w/2, math.Round(h*0.68), 0.5, 0.5)
 		} else {
@@ -571,13 +583,13 @@ func buttonStateSignature(state ButtonState) string {
 			strings.TrimSpace(state.State),
 			strings.TrimSpace(state.Label),
 			strings.TrimSpace(state.Subtitle),
-			strconv.Itoa(state.EffectValue),
 			strings.TrimSpace(state.ActionType),
 			strings.TrimSpace(state.Color),
 			strconv.Itoa(state.TalkCount),
 			strconv.FormatBool(state.IsListening),
 			strconv.FormatBool(state.IsPTTSelected),
 			strconv.FormatBool(state.IsActive),
+			strconv.FormatBool(state.Calling),
 		},
 		"\x1f",
 	)
@@ -720,7 +732,6 @@ func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID, username 
 		Bank:          bank,
 		ButtonIndex:   buttonIndex,
 		ImageBuffer:   imageBase64,
-		EffectValue:   state.EffectValue,
 		Label:         state.Label,
 		Channel:       state.Channel,
 		State:         state.State,
@@ -963,7 +974,6 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 			Bank:          page.Page,
 			ButtonIndex:   button.Index,
 			ImageBuffer:   img,
-			EffectValue:   state.EffectValue,
 			Label:         state.Label,
 			Channel:       state.Channel,
 			State:         state.State,
@@ -1001,12 +1011,7 @@ func (s *Server) HandleDebugButtonImage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	state := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("state")))
-	switch state {
-	case "IDLE", "TALK", "LISTEN", "BROADCAST":
-	default:
-		state = "IDLE"
-	}
+	state := normalizeButtonRenderState(r.URL.Query().Get("state"))
 
 	label := strings.TrimSpace(r.URL.Query().Get("label"))
 	if label == "" {
@@ -1114,7 +1119,7 @@ func parsePreviewDimension(raw int, fallback int) int {
 func normalizeButtonRenderState(raw string) string {
 	state := strings.ToUpper(strings.TrimSpace(raw))
 	switch state {
-	case "IDLE", "TALK", "LISTEN", "BROADCAST":
+	case "IDLE", "TALK", "LISTEN", "BROADCAST", "CALL":
 		return state
 	default:
 		return "IDLE"

@@ -1,298 +1,75 @@
-# Kesher Intercom Image-Stream Bridge für Bitfocus Companion
+# Stream Deck key images
 
-Technischen Briefing zur Implementierung einer Pipeline für dynamisch gerenderte UI-Grafiken.
-
-## Überblick
-
-Diese Implementierung bietet eine WebSocket-basierte Pipeline, die Intercom-Zustände in dynamisch gerenderte 72x72px Grafiken (PNG) umwandelt und diese direkt auf Stream Deck Tasten via Bitfocus Companion pusht.
-
-## Architektur
-
-### Komponenten
+Kesher draws every Stream Deck key image itself and sends it to Companion
+as a finished PNG. Companion only shows it. This keeps the look under
+Kesher's control (Companion's own button styles are too limited) and keeps
+the Companion module small: no drawing code, no native packages.
 
 ```
-┌─────────────────────────────┐
-│   Kesher Backend (Go)       │
-├─────────────────────────────┤
-│ ImageStreamCoordinator      │
-│ └─ renderButtonImage()      │
-│ └─ BroadcastImageUpdate()   │
-│ └─ WebSocket Handler        │
-└──────────────┬──────────────┘
-               │ WebSocket
-               │ /api/image-stream
-               ▼
-┌─────────────────────────────┐
-│   Bitfocus Companion Module │
-├─────────────────────────────┤
-│ ImageBridge                 │
-│ └─ connectToKeher()         │
-│ └─ getImage(bankIndex)      │
-│                             │
-│ dynamic_button_image        │
-│ Feedback (API v3)           │
-│ └─ imageBuffer support      │
-└─────────────────────────────┘
+Kesher server (Go)                         Companion module
+──────────────────                         ────────────────
+key state changes ──► ButtonImageRenderer ──► /api/image-stream ──► ImageBridge
+(talk, listen, call,    draws a 72 px PNG      WebSocket, one per     keeps the latest
+ page change, …)        or takes it from        deck (?deck=…)         image per page/key
+                        its cache                                      │
+                                                                       ▼
+                                                    "Display Dynamic Web-UI Button Image"
+                                                    feedback returns it to Companion
 ```
 
-## Teil 1: Backend (Go)
+## Server (`backend/internal/app/image_stream.go`)
 
-### Datei: `image_stream.go`
+- `ButtonImageRenderer` draws a key from a `ButtonState` (label, subtitle,
+  action type, color, state, listening, selected for talk). The fonts are
+  parsed once; each renderer keeps its font faces and the images it drew,
+  so a state it has seen (on another deck, after paging back, the two
+  phases of a blinking call) costs no drawing. A new key takes about
+  2 ms, a repeated one well under a microsecond.
+- States: `IDLE`, `TALK` (red, your mic goes out), `LISTEN`, `BROADCAST`,
+  and `CALL` (yellow) for the "on" phase of an incoming call.
+- Blinking is done by the server: while a call waits, the Companion bridge
+  (`/api/companion/ws`) ticks every 300 ms and the affected keys alternate
+  between `CALL` and their normal state (`companionCallBlinkState` in
+  `server.go`). `ButtonState.Calling` says a call is waiting.
+- `ImageStreamCoordinator` sends an image only to the decks it belongs to
+  and only when it differs from what that deck already has. Changes are
+  pushed right away; a connected deck is refreshed every 15 s as a safety
+  net, a deck that is not known yet is looked up every 2 s.
+- The layout editor in the app shows the same images
+  (`POST /api/user/stream-deck/preview`), drawn by a shared renderer per
+  size.
 
-#### ButtonImageRenderer
-Rendert Intercom-Zustände zu PNG-Bildern (72x72px):
+### Message
 
-```go
-type ButtonImageRenderer struct {
-    config ButtonImageRenderConfig
-    fontFace font.Face
-    mu sync.RWMutex
-}
-
-func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, error)
-```
-
-**Unterstützte States:**
-- `IDLE`: Dunkelgrau (Standby)
-- `TALK`: Crimson Rot (aktiver Mic)
-- `LISTEN`: Dodger Blau (Empfang aktiv)
-- `BROADCAST`: Dark Orange (Broadcast aktiv)
-
-#### ImageStreamCoordinator
-Verwaltet WebSocket-Verbindungen und Broadcasting:
-
-```go
-type ImageStreamCoordinator struct {
-    mu sync.RWMutex
-    clients map[*ImageStreamClient]struct{}
-    renderer *ButtonImageRenderer
-}
-
-func (c *ImageStreamCoordinator) BroadcastImageUpdate(
-    state ButtonState, 
-    bank, 
-    buttonIndex int
-)
-```
-
-#### Protokoll (ImageStreamMessage)
 ```json
 {
   "type": "update_button_image",
-  "bank": 1,
-  "buttonIndex": 5,
-  "imageBuffer": "iVBORw0KGgoAAAANSUhEUgAAAEgAAABICAY...",
-  "label": "PROD",
-  "channel": "1",
-  "state": "TALK"
+  "bank": 0,
+  "buttonIndex": 7,
+  "imageBuffer": "<base64 PNG>",
+  "state": "CALL",
+  "label": "Reply",
+  "actionType": "reply_to_caller"
 }
 ```
 
-### Integration im Server
+`bank` is the Kesher page, `buttonIndex` the key (0–14). The other fields
+are for logs and debugging.
 
-```go
-// server.go
-type Server struct {
-    // ...
-    imageStreamCoord *ImageStreamCoordinator
-}
+## Companion module (`companion-module-kesher`)
 
-// In NewServer():
-imageStreamCoord, err := NewImageStreamCoordinator(logger)
-s.imageStreamCoord = imageStreamCoord
+- `ImageBridge` keeps one WebSocket to `/api/image-stream` (with the deck
+  and the shared secret in the query) and stores the base64 image per page
+  and key. It reconnects on its own with 1 s, 2 s, 4 s … up to 30 s, for as
+  long as the connection is configured.
+- The feedback "Display Dynamic Web-UI Button Image" returns the stored
+  image for the current page; a key without an image is cleared rather than
+  showing another page's image.
 
-// Route registrieren:
-mux.HandleFunc("/api/image-stream", s.HandleImageStreamWebSocket)
-```
+## Debugging
 
-### WebSocket Handler
-```go
-func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Request) {
-    // WebSocket-Upgrade
-    // Client-Liste verwalten
-    // Nachrichten broadcasten
-}
-```
-
-## Teil 2: Companion Module (TypeScript/Node.js)
-
-### Datei: `imageRenderer.ts`
-
-Rendering-Service mit **Canvas-Unterstützung**:
-
-```typescript
-export function renderButtonImage(
-    state: ButtonState,
-    options?: RenderOptions
-): Buffer
-```
-
-**Abhängigkeit:** `canvas` npm-Paket
-
-**Features:**
-- 72x72px PNG Export
-- SVG-ähnliche Icons (Mic, Ear, Broadcast)
-- Dynamische Hintergrundfarben
-- Text-Wrapping für Labels
-
-### Datei: `imageBridge.ts`
-
-WebSocket-Client zur Kesher-Backend-Verbindung:
-
-```typescript
-export class ImageBridge {
-    private imageStorage = new Map<number, Buffer>();
-    
-    connect(): void
-    disconnect(): void
-    getImage(bankIndex: number): Buffer | undefined
-}
-```
-
-**Funktion:**
-- Verbindet sich zu `/api/image-stream`
-- Speichert empfangene Images in lokaler Map
-- Triggert `checkFeedbacks('dynamic_button_image')`
-- Auto-Reconnect mit exponentieller Backoff-Strategie
-
-### Datei: `feedbacks.ts` - Neue Feedback-Definition
-
-```typescript
-dynamic_button_image: {
-    name: "Display Dynamic Web-UI Button Image",
-    type: "advanced",
-    options: [{
-        id: "bankIndex",
-        type: "number",
-        label: "Button Index",
-        default: 0,
-        min: 0,
-        max: 31
-    }],
-    callback: (feedback) => {
-        const imageBuffer = this.getButtonImage(feedback.options.bankIndex);
-        if (imageBuffer) {
-            return { imageBuffer };  // Companion API v3 Magic!
-        }
-        return false;
-    }
-}
-```
-
-**Wichtig:** Der `imageBuffer` Property in der Rückgabe verwendet die Companion API v3 Funktion für direktes Image-Rendering.
-
-### Integration in `main.ts`
-
-```typescript
-export class ModuleInstance extends InstanceBase<ModuleConfig> {
-    private imageBridge: ImageBridge | null = null;
-    
-    async init(config: ModuleConfig): Promise<void> {
-        // ...
-        this.connectImageBridge();
-    }
-    
-    private connectImageBridge(): void {
-        this.imageBridge = new ImageBridge(this, this.baseHttpURL());
-        this.imageBridge.connect();
-    }
-    
-    getButtonImage(bankIndex: number): Buffer | undefined {
-        return this.imageBridge?.getImage(bankIndex);
-    }
-}
-```
-
-## Teil 3: Workflow
-
-### Delta-Updates (Optimierung)
-
-Das System sendet nur dann neue Images, wenn sich der Zustand ändert:
-
-```typescript
-// Pseudocode im Hub
-if clientState[channel].state !== previousState[channel].state {
-    imageStreamCoord.BroadcastImageUpdate(newState, bank, buttonIndex);
-}
-```
-
-**Vorteil:** Minimale CPU-Last durch Vermeidung redundanter Rendering-Zyklen.
-
-### Performance
-
-- **Rendering:** < 5ms pro Image (72x72px)
-- **Binary Size:** ~2-4 KB pro PNG (komprimiert)
-- **Latenz:** < 10ms über lokales Netzwerk
-- **CPU:** ~1-2% für 32 Buttons @ 1 Hz Update Rate
-
-## Setup & Verwendung
-
-### 1. Backend Dependencies
-
-```bash
-cd backend
-go mod tidy  # Lädt golang.org/x/image und github.com/golang/freetype
-make build
-```
-
-### 2. Companion Module Installation
-
-```bash
-cd companion-module-kesher
-npm install canvas  # oder yarn add canvas
-npm run build       # oder yarn build
-npm run package     # Paket für Bitfocus erstellen
-```
-
-### 3. Stream Deck Konfiguration
-
-1. Im Companion Module auswählen: "Display Dynamic Web-UI Button Image"
-2. Button Index setzen (0-31)
-3. Dynamic images erscheinen auf der Taste
-
-## Logging & Debugging
-
-### Backend (Go)
-```
-INFO: Connected to Kesher image stream
-DEBUG: Stored image for button 1.5 (3245 bytes)
-WARN: Failed to process image update: <error>
-```
-
-### Companion Module (TypeScript)
-```typescript
-this.instance.log("debug", "Image stored for button...");
-this.instance.log("warn", "Disconnected from image stream");
-```
-
-## Zukünftige Erweiterungen
-
-1. **Custom Fonts:** WOFF/TTF-Support für Typography
-2. **Animationen:** GIF-Support für animierte Icons
-3. **Farbverwaltung:** Durch Intercom-Konfiguration anpassbar
-4. **SVG-Engine:** Direktes SVG-zu-PNG-Rendering
-5. **Caching:** LRU-Cache für häufig verwendete Designs
-
-## Troubleshooting
-
-### Images werden nicht angezeigt
-- [ ] Ist `/api/image-stream` Endpoint erreichbar?
-- [ ] Öffnet sich die WebSocket-Verbindung?
-- [ ] Logs prüfen auf Render-Fehler
-
-### Hohe CPU-Last
-- [ ] Image-Rendering-Rate reduzieren
-- [ ] Größere Update-Intervalle verwenden
-- [ ] Channel-Liste prüfen (zu viele aktive Channels?)
-
-### WebSocket Timeout
-- [ ] Firewall-Einstellungen prüfen
-- [ ] Netzwerk-Latenz messen
-- [ ] Reconnect-Delay erhöhen
-
-## Technische Ressourcen
-
-- [Companion API v3 Docs](https://github.com/bitfocus/companion-module-base)
-- [Canvas.js Documentation](https://github.com/Automattic/node-canvas)
-- [Go Image Package](https://golang.org/pkg/image/)
-- [golang.org/x/image](https://pkg.go.dev/golang.org/x/image)
+- `/api/debug/button-image?state=CALL&label=Reply` renders one key as PNG,
+  `/api/debug/button-image-preview` shows a few states side by side.
+- Module variables `image_connected`, `image_ws_state`,
+  `image_reconnect_attempts`, `image_last_message_at`, `image_last_error`
+  and `image_stored_images` show the image stream from Companion's side.

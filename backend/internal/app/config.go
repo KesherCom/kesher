@@ -40,7 +40,6 @@ type Config struct {
 	TelegramMode                string // "polling" (default) or "webhook"
 	CompanionSharedSecret       string
 	CompanionAllowedUsernames   []string
-	CompanionImageEffectMapFile string
 	CompanionDynamicPaging      bool
 	// Native low-latency UDP audio relay (performance mode). Empty UDPAudioAddr
 	// disables the relay; native clients then fall back to the WebRTC pipeline.
@@ -91,7 +90,6 @@ type fileConfig struct {
 	TelegramMode                       string   `yaml:"telegram_mode"`
 	CompanionSharedSecret              string   `yaml:"companion_shared_secret"`
 	CompanionAllowedUsernames          []string `yaml:"companion_allowed_usernames"`
-	CompanionImageEffectMapFile        string   `yaml:"companion_image_effect_map_file"`
 	CompanionDynamicPaging             *bool    `yaml:"companion_dynamic_paging"`
 	UDPAudioAddr                       string   `yaml:"udp_audio_addr"`
 	UDPAudioAdvertiseIP                string   `yaml:"udp_audio_advertise_ip"`
@@ -141,7 +139,6 @@ func defaultConfig() Config {
 		TelegramMode:                "polling",
 		CompanionSharedSecret:       "",
 		CompanionAllowedUsernames:   nil,
-		CompanionImageEffectMapFile: "image-effect-map.json",
 		CompanionDynamicPaging:      false,
 		UDPAudioAddr:                ":8081",
 		UDPAudioAdvertiseIP:         "",
@@ -283,9 +280,6 @@ func loadConfigFromFile(path string) (Config, error) {
 	if len(fileCfg.CompanionAllowedUsernames) > 0 {
 		cfg.CompanionAllowedUsernames = append([]string{}, splitCSV(strings.Join(fileCfg.CompanionAllowedUsernames, ","))...)
 	}
-	if strings.TrimSpace(fileCfg.CompanionImageEffectMapFile) != "" {
-		cfg.CompanionImageEffectMapFile = strings.TrimSpace(fileCfg.CompanionImageEffectMapFile)
-	}
 	if fileCfg.CompanionDynamicPaging != nil {
 		cfg.CompanionDynamicPaging = *fileCfg.CompanionDynamicPaging
 	}
@@ -354,19 +348,15 @@ func loadConfigFromEnv() Config {
 		TelegramMode:              getEnv("TELEGRAM_MODE", "polling"),
 		CompanionSharedSecret:     getEnv("COMPANION_SHARED_SECRET", ""),
 		CompanionAllowedUsernames: splitCSV(getEnv("COMPANION_ALLOWED_USERNAMES", "")),
-		CompanionImageEffectMapFile: getEnv(
-			"COMPANION_IMAGE_EFFECT_MAP_FILE",
-			"image-effect-map.json",
-		),
-		CompanionDynamicPaging: getEnv("COMPANION_DYNAMIC_PAGING", "false") == "true",
-		UDPAudioAddr:           getEnv("UDP_AUDIO_ADDR", ":8081"),
-		UDPAudioAdvertiseIP:    getEnv("UDP_AUDIO_ADVERTISE_IP", ""),
-		WebRTCUDPPort:          getEnvInt("WEBRTC_UDP_PORT", 0),
-		WebRTCPublicIPs:        splitCSV(getEnv("WEBRTC_PUBLIC_IPS", "")),
-		MDNSEnabled:            getEnv("MDNS_ENABLED", "true") != "false",
-		MDNSName:               getEnv("MDNS_NAME", ""),
-		LANHTTPAddr:            getEnv("LAN_HTTP_ADDR", ""),
-		FirstRunSetup:          getEnv("FIRST_RUN_SETUP", "false") == "true",
+		CompanionDynamicPaging:    getEnv("COMPANION_DYNAMIC_PAGING", "false") == "true",
+		UDPAudioAddr:              getEnv("UDP_AUDIO_ADDR", ":8081"),
+		UDPAudioAdvertiseIP:       getEnv("UDP_AUDIO_ADVERTISE_IP", ""),
+		WebRTCUDPPort:             getEnvInt("WEBRTC_UDP_PORT", 0),
+		WebRTCPublicIPs:           splitCSV(getEnv("WEBRTC_PUBLIC_IPS", "")),
+		MDNSEnabled:               getEnv("MDNS_ENABLED", "true") != "false",
+		MDNSName:                  getEnv("MDNS_NAME", ""),
+		LANHTTPAddr:               getEnv("LAN_HTTP_ADDR", ""),
+		FirstRunSetup:             getEnv("FIRST_RUN_SETUP", "false") == "true",
 	}
 }
 

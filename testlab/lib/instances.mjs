@@ -53,7 +53,6 @@ function profileEnv(name, publicIP) {
     UDP_AUDIO_ADDR: `:${p.nativePort}`,
     WEBRTC_UDP_PORT: String(p.webrtcPort),
     WEBRTC_PUBLIC_IPS: publicIP,
-    COMPANION_IMAGE_EFFECT_MAP_FILE: path.join(ROOT_DIR, "backend", "image-effect-map.json"),
     ...netem,
   };
   // A config file would replace the whole env config; never pick one up.

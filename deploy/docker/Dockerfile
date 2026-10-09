@@ -59,7 +59,6 @@ LABEL org.opencontainers.image.source="https://github.com/KesherCom/kesher"
 RUN apk add --no-cache openssl
 WORKDIR /app
 COPY --from=go-build /out/server /app/server
-COPY backend/image-effect-map.json /app/image-effect-map.json
 COPY deploy/docker/entrypoint-selfsigned.sh /app/entrypoint-selfsigned.sh
 # Strip CRLF in case the file was checked out on Windows without .gitattributes.
 RUN mkdir -p /app/data /app/certs && sed -i 's/\r$//' /app/entrypoint-selfsigned.sh && chmod +x /app/entrypoint-selfsigned.sh
@@ -85,7 +84,6 @@ LABEL org.opencontainers.image.description="On-prem web-based intercom for churc
 LABEL org.opencontainers.image.source="https://github.com/KesherCom/kesher"
 WORKDIR /app
 COPY --from=go-build /out/server /app/server
-COPY backend/image-effect-map.json /app/image-effect-map.json
 RUN mkdir -p /app/data
 ENV APP_ADDR=:8080 \
     DB_PATH=/app/data/intercom.db \

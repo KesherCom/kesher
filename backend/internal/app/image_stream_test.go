@@ -337,3 +337,23 @@ func BenchmarkRenderButtonImageUncached(b *testing.B) {
 		}
 	}
 }
+
+func TestRenderButtonImageDrawsIncomingCallInYellow(t *testing.T) {
+	renderer, err := NewButtonImageRenderer(nil)
+	if err != nil {
+		t.Fatalf("NewButtonImageRenderer failed: %v", err)
+	}
+	buf, err := renderer.RenderButtonImage(ButtonState{State: "CALL", Calling: true, ActionType: "reply_to_caller"})
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(buf))
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	r, g, b, _ := img.At(36, 36).RGBA()
+	// #facc15: strong red and green, little blue.
+	if r>>8 < 0xe0 || g>>8 < 0xb0 || b>>8 > 0x40 {
+		t.Fatalf("expected a yellow call key, got rgb(%d,%d,%d)", r>>8, g>>8, b>>8)
+	}
+}

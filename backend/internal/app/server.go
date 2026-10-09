@@ -63,11 +63,6 @@ type Server struct {
 	companionSelectListenHoldDelay   time.Duration
 	deckState                        deckRuntime
 	imageStreamCoord                 *ImageStreamCoordinator
-	companionImageEffectMapMu        sync.Mutex
-	companionImageEffectMapCached    string
-	companionImageEffectMapModTime   time.Time
-	companionImageEffectMapChecked   time.Time
-	companionImageEffectMapErr       string
 	udpAudio                         *UDPAudioRelay
 	netem                            *netemConfig
 }
@@ -122,8 +117,17 @@ const (
 	websocketPingWriteWindow              = 5 * time.Second
 	companionSelectListenHoldDelayDefault = 2 * time.Second
 	companionIncomingCallBlinkInterval    = 300 * time.Millisecond
-	companionIncomingCallEffectValue      = 3
 )
+
+// companionCallBlinkState is the phase of a blinking incoming call: "CALL"
+// (yellow) and "IDLE" alternate every companionIncomingCallBlinkInterval.
+// The server owns the blinking; Companion only shows the images it gets.
+func companionCallBlinkState() string {
+	if (time.Now().UnixMilli()/companionIncomingCallBlinkInterval.Milliseconds())%2 == 0 {
+		return "CALL"
+	}
+	return "IDLE"
+}
 
 func refreshWebSocketReadDeadline(conn *websocket.Conn) {
 	_ = conn.SetReadDeadline(time.Now().Add(websocketReadTimeout))
@@ -135,73 +139,6 @@ func writeWebSocketPing(conn *websocket.Conn, connMu *sync.Mutex) {
 		defer connMu.Unlock()
 	}
 	_ = conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(websocketPingWriteWindow))
-}
-
-func (s *Server) loadCompanionImageEffectMapJSON() string {
-	path := strings.TrimSpace(s.cfg.CompanionImageEffectMapFile)
-	if path == "" {
-		return ""
-	}
-
-	now := time.Now()
-	s.companionImageEffectMapMu.Lock()
-	defer s.companionImageEffectMapMu.Unlock()
-
-	if now.Sub(s.companionImageEffectMapChecked) < time.Second {
-		return s.companionImageEffectMapCached
-	}
-	s.companionImageEffectMapChecked = now
-
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			s.companionImageEffectMapCached = ""
-			s.companionImageEffectMapModTime = time.Time{}
-			s.companionImageEffectMapErr = ""
-			return ""
-		}
-		errMsg := err.Error()
-		if errMsg != s.companionImageEffectMapErr {
-			s.logger.Warn("failed to stat companion image effect map", "path", path, "error", err)
-			s.companionImageEffectMapErr = errMsg
-		}
-		return s.companionImageEffectMapCached
-	}
-
-	if !info.ModTime().After(s.companionImageEffectMapModTime) {
-		return s.companionImageEffectMapCached
-	}
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		errMsg := err.Error()
-		if errMsg != s.companionImageEffectMapErr {
-			s.logger.Warn("failed to read companion image effect map", "path", path, "error", err)
-			s.companionImageEffectMapErr = errMsg
-		}
-		return s.companionImageEffectMapCached
-	}
-
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" {
-		s.companionImageEffectMapCached = ""
-		s.companionImageEffectMapModTime = info.ModTime()
-		s.companionImageEffectMapErr = ""
-		return ""
-	}
-	if !json.Valid([]byte(trimmed)) {
-		errMsg := "invalid JSON"
-		if errMsg != s.companionImageEffectMapErr {
-			s.logger.Warn("invalid companion image effect map JSON", "path", path)
-			s.companionImageEffectMapErr = errMsg
-		}
-		return s.companionImageEffectMapCached
-	}
-
-	s.companionImageEffectMapCached = trimmed
-	s.companionImageEffectMapModTime = info.ModTime()
-	s.companionImageEffectMapErr = ""
-	return s.companionImageEffectMapCached
 }
 
 func startWebSocketKeepalive(conn *websocket.Conn, connMu *sync.Mutex) func() {
@@ -330,7 +267,6 @@ func (s *Server) handleCompanionWS(w http.ResponseWriter, r *http.Request) {
 			Username: resolvedUsername,
 			Bound:    false,
 		}
-		state.ImageEffectMapJSON = s.loadCompanionImageEffectMapJSON()
 		profileRoleID := strings.TrimSpace(roleID)
 		if deckID != "" {
 			state.CurrentPageNumber = s.currentCompanionPage(r.Context(), key)
@@ -2137,14 +2073,9 @@ func (s *Server) companionButtonSnapshotState(ctx context.Context, roleID string
 			hasPendingDirectCall = signalScope == "direct"
 		}
 		if hasPendingDirectCall {
-			state.EffectValue = companionIncomingCallEffectValue
+			state.Calling = true
 			if state.State != "TALK" {
-				blinkOn := (time.Now().UnixMilli()/companionIncomingCallBlinkInterval.Milliseconds())%2 == 0
-				if blinkOn {
-					state.State = "TALK"
-				} else {
-					state.State = "IDLE"
-				}
+				state.State = companionCallBlinkState()
 			}
 		}
 	}
@@ -2165,13 +2096,8 @@ func (s *Server) companionButtonSnapshotState(ctx context.Context, roleID string
 			}
 		}
 		if hasPendingCall {
-			state.EffectValue = companionIncomingCallEffectValue
-			blinkOn := (time.Now().UnixMilli()/companionIncomingCallBlinkInterval.Milliseconds())%2 == 0
-			if blinkOn {
-				state.State = "TALK"
-			} else {
-				state.State = "IDLE"
-			}
+			state.Calling = true
+			state.State = companionCallBlinkState()
 		}
 	}
 
@@ -2188,10 +2114,11 @@ func (s *Server) companionButtonSnapshotState(ctx context.Context, roleID string
 		hasPendingSource = signalSourceType != "" && signalSourceID != ""
 	}
 	if hasPendingSourceCall && hasPendingSource && companionIncomingSourceMatchesButton(action, pendingSourceType, pendingSourceID) {
-		state.EffectValue = companionIncomingCallEffectValue
-		blinkOn := (time.Now().UnixMilli()/companionIncomingCallBlinkInterval.Milliseconds())%2 == 0
-		if blinkOn {
-			state.State = "TALK"
+		state.Calling = true
+		if state.State == "IDLE" || state.State == "LISTEN" {
+			if blink := companionCallBlinkState(); blink == "CALL" {
+				state.State = blink
+			}
 		}
 	}
 
