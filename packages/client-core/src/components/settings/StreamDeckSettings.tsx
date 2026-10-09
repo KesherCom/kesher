@@ -15,6 +15,7 @@ import {
   withResolvedStreamDeckButtonLabel,
 } from "../../lib/streamDeckLabels";
 import { sortDirectUsersByRoleAndUsername } from "../../lib/users";
+import type { AutosaveState } from "../../hooks/useAutosave";
 import { StreamDeckPlaceBar } from "../StreamDeckPlaceBar";
 import { SettingsGroup } from "./SettingsParts";
 import {
@@ -42,6 +43,9 @@ export type StreamDeckSettingsProps = {
   streamDeckBusy: boolean;
   streamDeckError: string;
   onStreamDeckSettingsChange: (next: StreamDeckSettings) => void;
+  /** Edits save themselves; see streamDeckSaveState. */
+  streamDeckSaveState: AutosaveState;
+  /** Save now: the retry after a failed save. */
   onSaveStreamDeckSettings: () => void;
   onResetStreamDeckSettings: () => void;
   /** A Companion Stream Deck was paired with or released from this place. */
@@ -67,6 +71,13 @@ export type StreamDeckSettingsProps = {
   }) => void;
 };
 
+const saveStateLabels: Record<AutosaveState, string> = {
+  saved: "All changes saved",
+  pending: "Unsaved changes…",
+  saving: "Saving…",
+  error: "Not saved",
+};
+
 /**
  * The Stream Deck of this place: pairing, the layout editor and a browser
  * test mode. The layout belongs to the place, not to the person
@@ -86,6 +97,7 @@ export function StreamDeckSettingsSection({
   streamDeckBusy,
   streamDeckError,
   onStreamDeckSettingsChange,
+  streamDeckSaveState,
   onSaveStreamDeckSettings,
   onResetStreamDeckSettings,
   onStreamDeckPlaceChanged,
@@ -809,7 +821,7 @@ export function StreamDeckSettingsSection({
       const text = await file.text();
       const nextSettings = parseStreamDeckImportDocument(text);
       applyStreamDeckSettings(nextSettings, {
-        message: `${file.name} loaded. Click Save to persist it to your account.`,
+        message: `${file.name} loaded.`,
         error: "",
       });
     } catch (error) {
@@ -848,14 +860,21 @@ export function StreamDeckSettingsSection({
       />
       <SettingsGroup title="Layout">
         <div className="k-setting-actions">
-          <button
-            type="button"
-            className="primary"
-            onClick={onSaveStreamDeckSettings}
-            disabled={streamDeckBusy || !streamDeckSettings}
+          <span
+            className={`streamdeck-save-state ${streamDeckSaveState}`}
+            role="status"
           >
-            Save
-          </button>
+            {saveStateLabels[streamDeckSaveState]}
+          </span>
+          {streamDeckSaveState === "error" ? (
+            <button
+              type="button"
+              className="secondary"
+              onClick={onSaveStreamDeckSettings}
+            >
+              Try again
+            </button>
+          ) : null}
           {streamDeckWebHidSupported ? (
             <button
               type="button"

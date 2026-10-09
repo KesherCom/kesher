@@ -2673,6 +2673,15 @@ button.secondary {
   display: flex;
   flex-direction: column;
 }
+/* Layout save status: muted while saved or saving, orange when a save
+   failed (something is wrong, see the error line). */
+.streamdeck-save-state {
+  color: var(--k-text-muted);
+  font-size: var(--k-text-label);
+}
+.streamdeck-save-state.error {
+  color: var(--k-attention);
+}
 .streamdeck-code-input {
   width: 6em;
   font-family: var(--k-font-mono);

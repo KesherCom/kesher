@@ -22,6 +22,7 @@ import {
 } from "../lib/gain";
 import { Icon } from "./Icon";
 import type { PerformanceAudioControls } from "../hooks/useIntercomSession";
+import type { AutosaveState } from "../hooks/useAutosave";
 
 type StationIntercomViewProps = {
   token: string;
@@ -124,6 +125,9 @@ type StationIntercomViewProps = {
   streamDeckBusy: boolean;
   streamDeckError: string;
   onStreamDeckSettingsChange: (next: StreamDeckSettings) => void;
+  /** Layout edits save themselves; this is where that stands. */
+  streamDeckSaveState: AutosaveState;
+  /** Save now: the retry after a failed save. */
   onSaveStreamDeckSettings: () => void;
   onResetStreamDeckSettings: () => void;
   /** A Companion Stream Deck was paired with or released from this place. */

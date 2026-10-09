@@ -80,7 +80,7 @@ export function StreamDeckPlaceBar({
               <small className="k-setting-hint">
                 {deck.hasLayout
                   ? "Uses the layout below."
-                  : "Uses the role's layout until you save one here."}
+                  : "Uses the role's layout until you change the layout here."}
               </small>
             </span>
             <button

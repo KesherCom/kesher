@@ -120,6 +120,7 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
   streamDeckBusy: false,
   streamDeckError: "",
   onStreamDeckSettingsChange: vi.fn(),
+  streamDeckSaveState: "saved" as const,
   onSaveStreamDeckSettings: vi.fn(),
   onResetStreamDeckSettings: vi.fn(),
   onPublishCompanionProfile: vi.fn().mockResolvedValue({
@@ -551,21 +552,30 @@ describe("StationIntercomView", () => {
     expect(onStreamDeckSettingsChange).toHaveBeenCalledTimes(2);
   });
 
-  it("triggers save from stream deck settings header", async () => {
+  it("shows that the layout saves itself and offers a retry after an error", async () => {
     const user = userEvent.setup();
     const onSaveStreamDeckSettings = vi.fn();
-    render(
-      <StationIntercomView
-        {...baseProps}
-        isUserSettingsOpen
-        onSaveStreamDeckSettings={onSaveStreamDeckSettings}
-      />,
+    const { rerender } = render(
+      <StationIntercomView {...baseProps} isUserSettingsOpen />,
     );
 
     await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+    expect(screen.getByText("All changes saved")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Save" }),
+    ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Save" }));
-
+    rerender(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        streamDeckSaveState="error"
+        streamDeckError="server unreachable"
+        onSaveStreamDeckSettings={onSaveStreamDeckSettings}
+      />,
+    );
+    expect(screen.getByText("Not saved")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(onSaveStreamDeckSettings).toHaveBeenCalledTimes(1);
   });
 

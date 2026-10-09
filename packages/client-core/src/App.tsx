@@ -65,6 +65,7 @@ import { useSettings } from "./hooks/useSettings";
 import { useAudioDevices } from "./hooks/useAudioDevices";
 import { useIntercomSession } from "./hooks/useIntercomSession";
 import { useNativeAudio } from "./hooks/useNativeAudio";
+import { useAutosave } from "./hooks/useAutosave";
 
 const adminPathname = "/admin";
 const loginPathname = "/login";
@@ -204,6 +205,9 @@ type AppProps = {
   onRequestNetworkSettings?: () => void;
 };
 
+/** Wait after the last layout edit before saving (typing a label, dragging). */
+const STREAM_DECK_AUTOSAVE_MS = 800;
+
 export function App({ onRequestNetworkSettings }: AppProps = {}) {
   console.debug("[App] Component mounted, initializing...");
   // ── Core auth state ──
@@ -250,6 +254,15 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
   // Bumped when a Companion deck is paired/released here: reload the layout.
   const [streamDeckReloadKey, setStreamDeckReloadKey] = useState(0);
   const [streamDeckError, setStreamDeckError] = useState("");
+  // Layout edits save themselves shortly after the last change.
+  const streamDeckAutosave = useAutosave<StreamDeckSettings>({
+    delayMs: STREAM_DECK_AUTOSAVE_MS,
+    onSaved: (saved) => {
+      setStreamDeckSettings(saved);
+      setStreamDeckError("");
+    },
+    onError: setStreamDeckError,
+  });
   const [streamDeckConnected, setStreamDeckConnected] = useState(false);
   const [streamDeckLastEvent, setStreamDeckLastEvent] = useState("");
   const [streamDeckWebHidSupported] = useState(() => isWebHidSupported());
@@ -1103,6 +1116,8 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
 
   async function doLogout() {
     if (!token) return;
+    // A layout edit still waiting is saved while the session is valid.
+    await streamDeckAutosave.flush();
     await logout(token);
     sessionStorage.removeItem(tokenStorageKey);
     localStorage.removeItem(tokenStorageKey);
@@ -1678,33 +1693,21 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
     (next: StreamDeckSettings) => {
       setStreamDeckSettings(next);
       setStreamDeckError("");
-    },
-    [],
-  );
-
-  const handleSaveStreamDeckSettings = useCallback(async () => {
-    if (!token || !streamDeckSettings) return;
-    setStreamDeckBusy(true);
-    setStreamDeckError("");
-    try {
-      const saved = await updateStreamDeckSettings(token, streamDeckSettings);
-      setStreamDeckSettings(saved);
-    } catch (err) {
-      setStreamDeckError(
-        err instanceof Error
-          ? err.message
-          : "Failed to save Stream Deck settings.",
+      if (!token) return;
+      const sessionToken = token;
+      streamDeckAutosave.schedule(next, (value) =>
+        updateStreamDeckSettings(sessionToken, value),
       );
-    } finally {
-      setStreamDeckBusy(false);
-    }
-  }, [streamDeckSettings, token]);
+    },
+    [streamDeckAutosave.schedule, token],
+  );
 
   const handleResetStreamDeckSettings = useCallback(async () => {
     if (!token) return;
     setStreamDeckBusy(true);
     setStreamDeckError("");
     try {
+      streamDeckAutosave.discard();
       const reset = await resetStreamDeckSettings(token);
       setStreamDeckSettings(reset);
     } catch (err) {
@@ -2162,7 +2165,8 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
         streamDeckBusy={streamDeckBusy}
         streamDeckError={streamDeckError}
         onStreamDeckSettingsChange={handleStreamDeckSettingsChange}
-        onSaveStreamDeckSettings={() => void handleSaveStreamDeckSettings()}
+        streamDeckSaveState={streamDeckAutosave.state}
+        onSaveStreamDeckSettings={() => void streamDeckAutosave.flush()}
         onResetStreamDeckSettings={() => void handleResetStreamDeckSettings()}
         onStreamDeckPlaceChanged={() => setStreamDeckReloadKey((k) => k + 1)}
         onPublishCompanionProfile={handlePublishUserCompanionProfile}
