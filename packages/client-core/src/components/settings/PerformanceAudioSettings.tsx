@@ -21,7 +21,9 @@ const backendLabels: Record<string, string> = {
 function describeStream(report: NativeStreamReport): string {
   const backend = backendLabels[report.backend] ?? report.backend;
   const period =
-    report.periodMs === null ? "driver default" : `${report.periodMs.toFixed(1)} ms`;
+    report.periodMs === null
+      ? "driver default"
+      : `${report.periodMs.toFixed(1)} ms`;
   return `${backend}, ${period}`;
 }
 
@@ -56,19 +58,15 @@ export function PerformanceAudioSettings({
   };
 
   return (
-    <div className="local-monitor-control performance-audio-settings">
-      <h4>Performance audio</h4>
-      {info ? (
-        <small className="local-monitor-hint">
-          Mic: {describeStream(info.input)} · Speaker:{" "}
-          {describeStream(info.output)} · Frame {info.frameMs} ms
-        </small>
-      ) : (
-        <small className="local-monitor-hint">Starting audio engine…</small>
-      )}
+    <>
+      <small className="k-setting-hint">
+        {info
+          ? `Mic: ${describeStream(info.input)} · Speaker: ${describeStream(info.output)} · Frame ${info.frameMs} ms`
+          : "Starting audio engine…"}
+      </small>
       {showBackendChoice ? (
-        <label>
-          <small>Device access</small>{" "}
+        <label className="k-field">
+          <span>Device access</span>
           <select
             value={backend}
             onChange={(event) =>
@@ -85,22 +83,24 @@ export function PerformanceAudioSettings({
         </label>
       ) : null}
       {showBackendChoice && backend !== "system" ? (
-        <small className="local-monitor-hint">
+        <small className="k-setting-hint">
           Exclusive mode reserves the headset for Kesher; other apps cannot use
           it meanwhile. If playback stutters, choose shared low latency.
         </small>
       ) : null}
-      <button
-        type="button"
-        className="local-monitor-btn"
-        onClick={() => void runLatencyTest()}
-        disabled={measuring || !info}
-      >
-        {measuring ? "Measuring…" : "Measure latency"}
-      </button>
-      {latencyResult ? (
-        <small className="local-monitor-status">{latencyResult}</small>
-      ) : null}
-    </div>
+      <div className="k-setting-actions">
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => void runLatencyTest()}
+          disabled={measuring || !info}
+        >
+          {measuring ? "Measuring…" : "Measure latency"}
+        </button>
+        {latencyResult ? (
+          <small className="k-setting-hint">{latencyResult}</small>
+        ) : null}
+      </div>
+    </>
   );
 }

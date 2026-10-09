@@ -499,47 +499,6 @@ input[type="range"] {
 .chat-autocomplete button.active {
   background: var(--btn-bg-hover);
 }
-.mic-dropdown {
-  position: relative;
-  width: 100%;
-}
-.mic-dropdown-trigger {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-}
-.mic-dropdown-trigger span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mic-dropdown-menu {
-  position: absolute;
-  top: calc(100% + 0.25rem);
-  left: 0;
-  right: 0;
-  z-index: 30;
-  max-height: 220px;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel);
-  padding: 0.25rem;
-}
-.mic-dropdown-item {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  border-radius: 8px;
-  padding: 0.42rem 0.45rem;
-}
-.mic-dropdown-item:hover,
-.mic-dropdown-item.active {
-  background: var(--btn-bg-hover);
-}
 .meter {
   height: 11px;
   margin-top: 0.4rem;
@@ -1731,33 +1690,7 @@ button.secondary {
 }
 
 /* Quick tactile press ripple (subtle) */
-@keyframes ptt-press {
-  0% {
-    transform: scale(0.98);
-    opacity: 0.65;
-  }
-  100% {
-    transform: scale(1);
-    opacity: 0;
-  }
-}
-
 /* Transmitting pulse */
-@keyframes ptt-pulse {
-  0% {
-    transform: scale(1);
-    opacity: 0.9;
-  }
-  60% {
-    transform: scale(1.6);
-    opacity: 0.14;
-  }
-  100% {
-    transform: scale(2.1);
-    opacity: 0;
-  }
-}
-
 /* Add a soft glow ring when actively transmitting */
 
 /* Keep content above the ring */
@@ -1771,17 +1704,6 @@ button.secondary {
 }
 
 /* Micro interaction: small heartbeat when active-but-not-transmitting (attention) */
-@keyframes ppt-breathe {
-  0% {
-    transform: translateZ(0) scale(1);
-  }
-  50% {
-    transform: translateZ(0) scale(0.997);
-  }
-  100% {
-    transform: translateZ(0) scale(1);
-  }
-}
 .simple-reply {
   background: var(--panel);
   border-color: var(--border-strong);
@@ -2481,547 +2403,459 @@ button.secondary {
   min-height: 0;
   max-height: none;
 }
-.station-modal-backdrop {
+/* ── Settings dialog (components/settings) ─────────────────────────
+   Navigation on the left, one page per topic; a full-screen list on
+   phones. Groups are divided by a line, not boxed. */
+.k-dialog-backdrop {
   position: fixed;
   inset: 0;
   z-index: 90;
-  background: rgba(2, 6, 12, 0.7);
   display: grid;
   place-items: center;
-  padding: 0.25rem;
+  padding: var(--k-space-4);
+  background: rgba(2, 6, 12, 0.7);
 }
-.station-modal {
-  width: min(1100px, 100%);
-  height: min(920px, calc(100vh - 0.5rem));
-  max-height: calc(100vh - 0.5rem);
-  overflow: auto;
-}
-/* Enhanced user settings modal styling */
-.station-modal.panel {
-  background: var(--panel);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: 12px;
-  padding: 1rem 1.25rem;
-  box-shadow:
-    0 12px 40px rgba(2, 8, 20, 0.7),
-    inset 0 1px 0 rgba(255, 255, 255, 0.02);
-}
-.station-top-admin {
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.02);
-  color: var(--text);
-  padding: 0.45rem 0.65rem;
-  border-radius: 8px;
-  font-weight: 700;
-}
-.station-top-admin:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
-}
-
-.station-modal-body {
-  display: grid;
-  gap: 1rem;
-  grid-template-columns: 1fr;
-  align-items: start;
-}
-
-.station-settings-section {
-  display: grid;
-  gap: 0.55rem;
-}
-
-.station-settings-section-title {
-  margin: 0 0 0.5rem 0;
-  color: var(--k-text);
-  font-size: 1.02rem;
-  font-weight: 900;
-}
-
-.station-settings-grid {
-  display: grid;
-  gap: 0.55rem;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-}
-
-.station-settings-status {
-  padding: 0.8rem 0.9rem;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.station-settings-meta {
-  margin: 0;
-  color: var(--k-text-soft);
-  font-size: 0.88rem;
-}
-
-.station-settings-version {
-  margin-top: 0.6rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
-}
-
-.station-settings-build {
-  opacity: 0.7;
-  font-size: 0.85em;
-}
-
-/* audio controls stacked vertically inside modal */
-.station-modal-body .audio-section {
-  grid-column: 1 / -1;
-  margin-top: 1rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+.k-dialog {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  width: min(1040px, 100%);
+  height: min(860px, 100%);
+  overflow: hidden;
+  background: var(--k-surface);
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius-panel);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
 }
-.station-modal-body .audio-section h4 {
-  margin: 0;
-  color: var(--k-text);
-  font-size: 1.02rem;
-  font-weight: 900;
-}
-.audio-box {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  overflow: visible;
-}
-.audio-box-header {
-  padding: 0.6rem 0.85rem;
+.k-dialog-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  background: rgba(255, 255, 255, 0.02);
-}
-.audio-box-toggle {
-  width: 100%;
-  display: flex;
   justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.7rem 0.85rem;
-  background: rgba(255, 255, 255, 0.02);
-  border: 0;
-  color: var(--k-text);
-  font-weight: 800;
-  font-size: 0.96rem;
-  cursor: pointer;
-  transition: background 140ms ease;
+  gap: var(--k-space-3);
+  padding: var(--k-space-3) var(--k-space-3) var(--k-space-3) var(--k-space-5);
+  border-bottom: 1px solid var(--k-border);
 }
-.audio-box-toggle:hover {
-  background: rgba(255, 255, 255, 0.04);
+.k-dialog-header h3 {
+  margin: 0;
+  font-size: var(--k-text-title);
+  font-weight: 600;
 }
-.audio-box-toggle:focus {
-  outline: none;
-  box-shadow: 0 6px 20px rgba(16, 24, 34, 0.6);
-}
-.audio-box-body {
-  padding: 0.75rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-.audio-box .chev {
-  margin-left: 0.5rem;
-  transform: rotate(0deg);
-  transition: transform 180ms ease;
-}
-.audio-box .chev.open {
-  transform: rotate(-180deg);
-}
-.audio-box.collapsed .audio-box-body {
-  display: none;
-}
-.station-modal-body .audio-left,
-.station-modal-body .audio-right {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.station-modal-body .audio-row {
-  display: flex;
-  gap: 1rem;
-  align-items: stretch;
-}
-.station-modal-body .audio-row .mic-dropdown {
-  flex: 1;
-}
-.station-modal-body .audio-row .meter {
-  flex: 1;
-  min-width: 120px;
-}
-.station-modal-body .audio-row.audio-row-mic .mic-dropdown {
+.settings-dialog-layout {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  min-height: 0;
   flex: 1 1 auto;
 }
-.station-modal-body .input-level-row {
-  margin-top: 0.4rem;
-  display: grid;
-  gap: 0.35rem;
-}
-.station-modal-body .input-level-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
-}
-.station-modal-body .input-level-head small {
-  margin: 0;
-}
-.station-modal-body .input-level-head strong {
-  font-size: 0.84rem;
-  color: var(--k-text);
-}
-.station-modal-body .input-level-row .meter {
-  margin-top: 0;
-  margin-bottom: 0;
-  height: 12px;
-  border-color: rgba(133, 176, 240, 0.28);
-  background: rgba(17, 35, 57, 0.75);
-}
-.station-modal-body .input-level-row .meter-bar {
-  background: var(--k-hear);
-  box-shadow: 0 0 8px rgba(78, 195, 255, 0.35);
-}
-.station-modal-body .input-level-row .input-level-status {
-  font-weight: 700;
-}
-.station-modal-body .input-level-row .input-level-status.is-ok {
-  color: var(--k-hear-text);
-}
-.station-modal-body .input-level-row .input-level-status.is-clipping {
-  color: var(--k-on-air-text);
-}
-.station-modal-body .local-monitor-control {
-  margin-top: 0.6rem;
+.settings-nav {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: var(--k-space-1);
+  padding: var(--k-space-3);
+  border-right: 1px solid var(--k-border);
+  overflow-y: auto;
 }
-.station-modal-body .local-monitor-hint {
-  color: rgba(255, 255, 255, 0.45);
-}
-.station-modal-body .local-monitor-btn {
-  align-self: flex-start;
-  padding: 0.45rem 0.9rem;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: var(--k-text);
-  font-weight: 600;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition:
-    background 130ms ease,
-    border-color 130ms ease,
-    color 130ms ease;
-}
-.station-modal-body .local-monitor-btn:hover {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: rgba(255, 255, 255, 0.2);
-}
-.station-modal-body .local-monitor-btn.active {
-  background: rgba(0, 224, 143, 0.12);
-  border-color: rgba(0, 224, 143, 0.45);
-  color: var(--k-hear-text);
-  animation: local-monitor-pulse 2s ease-in-out infinite;
-}
-@keyframes local-monitor-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(0, 224, 143, 0);
-  }
-  50% {
-    box-shadow: 0 0 0 4px rgba(0, 224, 143, 0.18);
-  }
-}
-.station-modal-body .local-monitor-status {
-  color: var(--k-hear-text);
-  font-weight: 600;
-}
-.station-modal-body .input-gain-control {
-  margin-top: 0.55rem;
-}
-.station-modal-body .mic-dropdown-trigger {
-  padding: 0.7rem 0.85rem;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--k-text);
-  font-weight: 600;
-  transition:
-    background 140ms ease,
-    border-color 140ms ease;
-}
-
-.station-modal-body .mic-dropdown-trigger:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.12);
-}
-.station-modal-body .mic-dropdown-menu {
-  background: var(--modal-dropdown-bg-from);
-}
-.station-setting {
+.settings-nav-item {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  background: rgba(255, 255, 255, 0.04);
-  padding: 0.75rem 0.9rem;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  gap: var(--k-space-3);
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  color: var(--k-text-soft);
+  font-weight: 500;
+}
+.settings-nav-item:hover {
+  background: var(--k-raised);
+  color: var(--k-text);
+}
+.settings-nav-item.active {
+  background: var(--k-raised);
+  border-color: var(--k-border-strong);
+  color: var(--k-text);
+  box-shadow: inset 3px 0 0 var(--k-selection);
+}
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-5);
+  padding: var(--k-space-5);
+  overflow-y: auto;
+}
+.settings-page-title {
+  margin: 0;
+  font-size: var(--k-text-title);
+  font-weight: 600;
+}
+.settings-page-intro {
+  margin: calc(-1 * var(--k-space-4)) 0 0;
+  color: var(--k-text-muted);
+  font-size: var(--k-text-label);
+}
+.k-settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-3);
+  padding-top: var(--k-space-4);
+  border-top: 1px solid var(--k-border);
+}
+.k-settings-group h4 {
+  margin: 0;
+  font-size: var(--k-text-body);
+  font-weight: 600;
+}
+
+/* One on/off setting: switch, name, and a hint line below the name. */
+.k-setting {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--k-space-3);
+  row-gap: 2px;
+  align-items: center;
+}
+.k-setting label {
+  font-weight: 500;
+  cursor: pointer;
+}
+.k-setting .k-setting-hint {
+  grid-column: 2;
+}
+.k-setting.disabled {
+  opacity: 0.55;
+}
+.k-setting.disabled label {
+  cursor: not-allowed;
+}
+.k-setting-hint {
+  color: var(--k-text-muted);
+  font-size: var(--k-text-label);
+}
+.k-switch {
+  appearance: none;
+  position: relative;
+  width: 40px;
+  height: 24px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--k-border-strong);
+  border-radius: 999px;
+  background: var(--k-raised);
+  cursor: pointer;
   transition: background 140ms ease;
 }
-
-.station-setting:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.12);
+.k-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--k-text-muted);
+  transition: transform 140ms ease;
 }
-.station-setting span {
+.k-switch:checked {
+  background: var(--k-selection);
+  border-color: var(--k-selection);
+}
+.k-switch:checked::after {
+  transform: translateX(16px);
+  background: var(--k-ground);
+}
+.k-switch:disabled {
+  cursor: not-allowed;
+}
+
+/* A labelled control: name above, control below. */
+.k-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-1);
+  max-width: 480px;
+}
+.k-field > span {
+  color: var(--k-text-soft);
+  font-size: var(--k-text-label);
+}
+.k-setting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--k-space-2);
+}
+.k-setting-diagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-1);
+  align-items: flex-start;
+  color: var(--k-text-muted);
+  font-family: var(--k-font-mono);
+  font-size: var(--k-text-label);
+}
+.secondary.active {
+  border-color: var(--k-selection);
   color: var(--k-text);
-  font-weight: 800;
-  font-size: 0.98rem;
-}
-.station-setting.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.station-setting.disabled span {
-  color: var(--text-muted);
-}
-.station-setting.disabled input[type="checkbox"] {
-  cursor: not-allowed;
-}
-.station-modal .station-modal-hint {
-  grid-column: 1 / -1;
-  color: var(--muted);
-  margin-top: 0.25rem;
 }
 
-.streamdeck-settings-section {
-  grid-column: 1 / -1;
-  margin-top: 0.5rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+/* "More" menu: a details element whose summary looks like a button. */
+.k-more {
+  position: relative;
+}
+.k-more > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--k-touch);
+  padding: 0 var(--k-space-3);
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius-control);
+  list-style: none;
+  cursor: pointer;
+}
+.k-more > summary::-webkit-details-marker {
+  display: none;
+}
+.k-more-menu {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + var(--k-space-1));
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-1);
+  min-width: 180px;
+  padding: var(--k-space-2);
+  background: var(--k-raised);
+  border: 1px solid var(--k-border-strong);
+  border-radius: var(--k-radius-control);
 }
 
-.streamdeck-settings-header {
+/* Sound: input level meter */
+.input-level-row {
+  display: grid;
+  gap: var(--k-space-1);
+  max-width: 480px;
+}
+.input-level-head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--k-text-soft);
+  font-size: var(--k-text-label);
+}
+.input-level-head strong {
+  font-family: var(--k-font-mono);
+  font-weight: 500;
+  color: var(--k-text);
+}
+.input-level-row .meter {
+  margin: 0;
+  height: 10px;
+}
+.input-level-row .meter-bar {
+  background: var(--k-hear);
+}
+.input-level-status {
+  font-size: var(--k-text-label);
+}
+.input-level-status.is-ok {
+  color: var(--k-hear-text);
+}
+.input-level-status.is-clipping {
+  color: var(--k-on-air-text);
+}
+
+/* Stream Deck: paired Companion decks and the pairing code */
+.streamdeck-place-deck {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.6rem;
+  gap: var(--k-space-3);
+}
+.streamdeck-place-deck > span {
+  display: flex;
+  flex-direction: column;
+}
+.streamdeck-code-input {
+  width: 6em;
+  font-family: var(--k-font-mono);
 }
 
-.streamdeck-settings-actions {
-  display: flex;
-  gap: 0.35rem;
+@media (max-width: 760px) {
+  .k-dialog-backdrop {
+    padding: 0;
+  }
+  .k-dialog {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+  .settings-dialog-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .settings-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--k-border);
+  }
+  .settings-nav-item {
+    flex: 0 0 auto;
+  }
+  .settings-nav-item.active {
+    box-shadow: inset 0 -3px 0 var(--k-selection);
+  }
+  .settings-page {
+    padding: var(--k-space-4);
+  }
 }
 
 .streamdeck-import-input {
   display: none;
 }
-
 .streamdeck-error {
-  color: var(--k-on-air-text);
   display: block;
+  color: var(--k-on-air-text);
 }
 
+/* Stream Deck layout editor: key grid on the left, the key's settings on
+   the right. Selection is cyan, a drop target too; a test press is red
+   because it acts like a real talk key. */
+.streamdeck-editor-shell fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-3);
+}
 .streamdeck-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: end;
-  justify-content: space-between;
-  gap: 0.75rem;
+  gap: var(--k-space-2);
 }
-
 .streamdeck-page-nav {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
-  color: var(--muted);
-  font-size: 0.9rem;
+  gap: var(--k-space-2);
+  margin-right: auto;
+  color: var(--k-text-soft);
+  font-size: var(--k-text-label);
 }
-
 .streamdeck-layout {
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) minmax(260px, 320px);
-  gap: 0.8rem;
+  grid-template-columns: minmax(320px, 1fr) minmax(240px, 300px);
+  gap: var(--k-space-4);
 }
-
 .streamdeck-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(56px, 1fr));
-  gap: 0.5rem;
+  gap: var(--k-space-2);
+  align-content: start;
 }
-
 .streamdeck-button {
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: var(--k-ground);
   min-height: 84px;
   padding: 0;
   overflow: hidden;
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius-control);
+  background: var(--k-ground);
   cursor: pointer;
-  transition:
-    border-color 140ms ease,
-    transform 140ms ease,
-    box-shadow 140ms ease;
 }
-
 .streamdeck-button:hover {
-  transform: translateY(-1px);
-  border-color: rgba(147, 195, 255, 0.7);
+  border-color: var(--k-border-strong);
 }
-
-.streamdeck-button.active {
+.streamdeck-button.active,
+.streamdeck-button.drag-target {
   border-color: var(--k-selection);
-  box-shadow: 0 0 0 2px rgba(100, 166, 255, 0.25);
+  box-shadow: 0 0 0 2px var(--k-selection);
 }
-
 .streamdeck-button.drag-source {
   opacity: 0.5;
 }
-
-.streamdeck-button.drag-target {
-  border-color: var(--k-call);
-  box-shadow: 0 0 0 2px rgba(245, 195, 107, 0.26);
-}
-
 .streamdeck-button.test-pressed {
-  transform: translateY(0);
-  box-shadow: 0 0 0 2px rgba(255, 115, 115, 0.28);
+  box-shadow: 0 0 0 2px var(--k-on-air);
 }
-
 .streamdeck-button-preview {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-
 .streamdeck-editor.panel {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 10px;
-  padding: 0.65rem;
-  display: grid;
-  gap: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-3);
+  padding: var(--k-space-4);
+  background: var(--k-raised);
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius-card);
 }
-
 .streamdeck-editor h5 {
   margin: 0;
-  font-size: 0.95rem;
-  color: var(--k-text);
+  font-size: var(--k-text-body);
+  font-weight: 600;
 }
-
 .streamdeck-editor-actions {
   display: flex;
-  gap: 0.4rem;
   flex-wrap: wrap;
+  gap: var(--k-space-2);
 }
-
 .streamdeck-control {
-  display: grid;
-  gap: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-1);
 }
-
 .streamdeck-control span {
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-
-.streamdeck-control input,
-.streamdeck-control select {
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  background: rgba(15, 20, 30, 0.9);
-  color: var(--k-text);
-  padding: 0.45rem 0.55rem;
-}
-
-.streamdeck-control input::placeholder {
-  color: rgba(255, 255, 255, 0.45);
-}
-
-/* ── Keyboard shortcuts settings ────────────────────────────────── */
-.keyboard-shortcuts-settings {
-  grid-column: 1 / -1;
-  margin-top: 0.4rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--k-text-soft);
+  font-size: var(--k-text-label);
 }
 
 @media (max-width: 900px) {
   .streamdeck-layout {
     grid-template-columns: 1fr;
   }
-
   .streamdeck-grid {
     grid-template-columns: repeat(5, minmax(44px, 1fr));
   }
 }
 
-@media (max-width: 640px) {
-  .streamdeck-toolbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .streamdeck-grid {
-    grid-template-columns: repeat(3, minmax(70px, 1fr));
-  }
-}
-
-.keyboard-shortcuts-settings h4 {
-  margin: 0 0 0.5rem 0;
-  color: var(--k-text);
-  font-size: 1.02rem;
-  font-weight: 900;
-}
-
 .shortcuts-table {
   width: 100%;
+  max-width: 640px;
   border-collapse: collapse;
-  font-size: 0.92rem;
 }
 
 .shortcuts-table th {
   text-align: left;
   padding: 0.3rem 0.5rem;
-  color: var(--muted);
-  font-weight: 600;
-  font-size: 0.82rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--k-text-muted);
+  font-weight: 500;
+  font-size: var(--k-text-label);
+  border-bottom: 1px solid var(--k-border);
 }
 
 .shortcuts-table td {
   padding: 0.4rem 0.5rem;
   vertical-align: middle;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-.shortcut-type-hint {
-  display: block;
-  color: var(--muted);
-  font-size: 0.78rem;
+  border-bottom: 1px solid var(--k-border);
 }
 
 .shortcut-key {
   display: inline-block;
   padding: 0.15em 0.5em;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-  font-family: inherit;
-  font-size: 0.88rem;
+  background: var(--k-raised);
+  border: 1px solid var(--k-border-strong);
+  border-radius: 6px;
+  font-family: var(--k-font-mono);
+  font-size: var(--k-text-label);
   color: var(--k-text);
   min-width: 2.5em;
   text-align: center;
 }
 
 .shortcut-recording {
-  color: var(--accent);
+  color: var(--k-selection);
   font-style: italic;
   animation: shortcut-pulse 1.2s ease-in-out infinite;
 }
@@ -3041,75 +2875,6 @@ button.secondary {
   gap: 0.35rem;
 }
 
-.shortcut-btn {
-  padding: 0.2em 0.6em;
-  font-size: 0.82rem;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
-  color: var(--k-text);
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.shortcut-btn:hover {
-  background: rgba(255, 255, 255, 0.14);
-}
-
-.shortcut-btn-clear {
-  color: var(--muted);
-}
-
-.shortcuts-hint {
-  display: block;
-  margin-top: 0.4rem;
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-
-/* Make the checkboxes look nicer: compact and aligned */
-.station-setting input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-.station-modal-close {
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.03);
-  color: var(--muted);
-  padding: 0.36rem 0.5rem;
-  border-radius: 8px;
-}
-.station-modal-close:hover {
-  color: var(--text);
-  border-color: rgba(243, 195, 55, 0.18);
-}
-
-@media (max-width: 780px) {
-  .station-modal-body {
-    grid-template-columns: 1fr;
-  }
-  .station-top-admin {
-    padding: 0.35rem 0.5rem;
-  }
-}
-.station-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
-}
-.station-modal-header h3 {
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: 0.72rem;
-}
-.station-modal-close {
-  font-size: 0.64rem;
-}
 .attention-flash {
   position: fixed;
   inset: 0;
@@ -3159,20 +2924,6 @@ button.secondary {
   font-size: 1.03rem;
   font-weight: 700;
   color: var(--station-call-text);
-}
-@keyframes attention-flash-fade {
-  0% {
-    opacity: 0;
-  }
-  10% {
-    opacity: 1;
-  }
-  32% {
-    opacity: 0.96;
-  }
-  100% {
-    opacity: 0;
-  }
 }
 @keyframes attention-call-multi-flash {
   0% {

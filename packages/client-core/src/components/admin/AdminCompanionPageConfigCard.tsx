@@ -3,10 +3,7 @@ import {
   getAdminCompanionRolePages,
   saveAdminCompanionRolePage,
 } from "../../api";
-import type {
-  Bootstrap,
-  CompanionRolePagesResponse,
-} from "../../types";
+import type { Bootstrap } from "../../types";
 import { useAdminCardDefaultOpen } from "./adminCardOpen";
 
 type AdminCompanionPageConfigCardProps = {
@@ -27,7 +24,7 @@ export function AdminCompanionPageConfigCard({
   const [message, setMessage] = useState("");
   const [rolePages, setRolePages] = useState<Record<string, number>>({});
   const [selectedRoleId, setSelectedRoleId] = useState(
-    appData.roles[0]?.id || ""
+    appData.roles[0]?.id || "",
   );
   const [selectedPageNumber, setSelectedPageNumber] = useState(0);
 
@@ -39,7 +36,7 @@ export function AdminCompanionPageConfigCard({
       setRolePages(data.rolePages || {});
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to load role pages"
+        err instanceof Error ? err.message : "Failed to load role pages",
       );
     } finally {
       setLoading(false);
@@ -65,16 +62,14 @@ export function AdminCompanionPageConfigCard({
         token,
         adminPin,
         selectedRoleId,
-        selectedPageNumber
+        selectedPageNumber,
       );
       setMessage(
-        `Saved ${selectedRoleId} → Streamdeck Page ${selectedPageNumber}`
+        `Saved ${selectedRoleId} → Streamdeck Page ${selectedPageNumber}`,
       );
       await loadRolePages();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to save role page"
-      );
+      setError(err instanceof Error ? err.message : "Failed to save role page");
     } finally {
       setSaving(false);
     }
@@ -118,7 +113,11 @@ export function AdminCompanionPageConfigCard({
               min="0"
               max="14"
               value={selectedPageNumber}
-              onChange={(e) => setSelectedPageNumber(Math.min(14, Math.max(0, parseInt(e.target.value) || 0)))}
+              onChange={(e) =>
+                setSelectedPageNumber(
+                  Math.min(14, Math.max(0, parseInt(e.target.value) || 0)),
+                )
+              }
               disabled={saving}
             />
           </div>
@@ -141,15 +140,45 @@ export function AdminCompanionPageConfigCard({
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
-                    <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ccc" }}>Role ID</th>
-                    <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ccc" }}>Page Number</th>
+                    <th
+                      style={{
+                        textAlign: "left",
+                        padding: "8px",
+                        borderBottom: "1px solid #ccc",
+                      }}
+                    >
+                      Role ID
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "left",
+                        padding: "8px",
+                        borderBottom: "1px solid #ccc",
+                      }}
+                    >
+                      Page Number
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {Object.entries(rolePages).map(([roleId, pageNum]) => (
                     <tr key={roleId}>
-                      <td style={{ padding: "8px", borderBottom: "1px solid #eee" }}>{roleId}</td>
-                      <td style={{ padding: "8px", borderBottom: "1px solid #eee" }}>{pageNum}</td>
+                      <td
+                        style={{
+                          padding: "8px",
+                          borderBottom: "1px solid #eee",
+                        }}
+                      >
+                        {roleId}
+                      </td>
+                      <td
+                        style={{
+                          padding: "8px",
+                          borderBottom: "1px solid #eee",
+                        }}
+                      >
+                        {pageNum}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

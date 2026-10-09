@@ -43,14 +43,13 @@ import {
   resolveStreamDeckButtonAction,
   streamDeckButtonEventName,
 } from "./lib/streamDeckBridge";
-import {
-  isWebHidSupported,
-} from "./lib/streamDeckWebHid";
+import { isWebHidSupported } from "./lib/streamDeckWebHid";
 import { createStreamDeckDevTools } from "./lib/streamDeckDevTools";
+import { getStreamDeckPageButtons } from "./lib/streamDeckHardwareFeedback";
 import {
-  getStreamDeckPageButtons,
-} from "./lib/streamDeckHardwareFeedback";
-import { withResolvedStreamDeckButtonLabel } from "./lib/streamDeckLabels";
+  splitStreamDeckLabel,
+  withResolvedStreamDeckButtonLabel,
+} from "./lib/streamDeckLabels";
 import { sortDirectUsersByRoleAndUsername } from "./lib/users";
 import type {
   Bootstrap,
@@ -161,17 +160,6 @@ function streamDeckButtonRenderSignature(
   ].join("|");
 }
 
-function splitStreamDeckLabel(label?: string): { primary: string; subtitle: string } {
-  const lines = (label || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  return {
-    primary: lines[0] || "",
-    subtitle: lines[1] || "",
-  };
-}
-
 async function fillStreamDeckControlFromDataUrl(
   deck: StreamDeckWeb,
   control: StreamDeckButtonControlDefinition,
@@ -190,7 +178,8 @@ async function fillStreamDeckControlFromDataUrl(
   const image = await new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Failed to decode Stream Deck button image."));
+    img.onerror = () =>
+      reject(new Error("Failed to decode Stream Deck button image."));
     img.src = imageDataUrl;
   });
 
@@ -199,7 +188,12 @@ async function fillStreamDeckControlFromDataUrl(
 
   if (control.feedbackType === "rgb") {
     const pixel = ctx.getImageData(0, 0, 1, 1).data;
-    await deck.fillKeyColor(control.index, pixel[0] ?? 0, pixel[1] ?? 0, pixel[2] ?? 0);
+    await deck.fillKeyColor(
+      control.index,
+      pixel[0] ?? 0,
+      pixel[1] ?? 0,
+      pixel[2] ?? 0,
+    );
     return;
   }
 
@@ -215,12 +209,16 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
   // ── Core auth state ──
   const [token, setToken] = useState<string | null>(() => {
     const t = sessionStorage.getItem(tokenStorageKey);
-    console.debug("[App] Initial token from session storage:", t ? "exists" : "empty");
+    console.debug(
+      "[App] Initial token from session storage:",
+      t ? "exists" : "empty",
+    );
     return t;
   });
   const [appData, setAppData] = useState<Bootstrap | null>(null);
   const [publicData, setPublicData] = useState<PublicBootstrap | null>(null);
-  const [isPublicBootstrapLoading, setIsPublicBootstrapLoading] = useState(true);
+  const [isPublicBootstrapLoading, setIsPublicBootstrapLoading] =
+    useState(true);
   const [publicBootstrapError, setPublicBootstrapError] = useState("");
   const [authMode, setAuthMode] = useState<"operator" | "admin">(() =>
     isAdminPathname(window.location.pathname) ? "admin" : "operator",
@@ -235,16 +233,13 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
   const [roomListenerCounts, setRoomListenerCounts] = useState<
     Record<string, number>
   >({});
-  const [pendingTakeover, setPendingTakeover] = useState<
-    | {
-        username: string;
-        roleId: string;
-        conflict: LoginConflict;
-        targetAuthMode: "operator" | "admin";
-        adminOverrideActive: boolean;
-      }
-    | null
-  >(null);
+  const [pendingTakeover, setPendingTakeover] = useState<{
+    username: string;
+    roleId: string;
+    conflict: LoginConflict;
+    targetAuthMode: "operator" | "admin";
+    adminOverrideActive: boolean;
+  } | null>(null);
 
   // ── UI state ──
   const [isUserSettingsOpen, setIsUserSettingsOpen] = useState(false);
@@ -303,13 +298,11 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
     pressedButtons: Set<number>;
     onDown: (
       control:
-        | StreamDeckButtonControlDefinition
-        | StreamDeckEncoderControlDefinition,
+        StreamDeckButtonControlDefinition | StreamDeckEncoderControlDefinition,
     ) => void;
     onUp: (
       control:
-        | StreamDeckButtonControlDefinition
-        | StreamDeckEncoderControlDefinition,
+        StreamDeckButtonControlDefinition | StreamDeckEncoderControlDefinition,
     ) => void;
     onError: (error: unknown) => void;
   } | null>(null);
@@ -377,14 +370,6 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
     [settings.selectedInputDeviceId, settings.inputGainByDeviceId],
   );
 
-  const selectedMicLabel = useMemo(
-    () =>
-      audioDevices.inputDevices.find(
-        (d) => d.deviceId === settings.selectedInputDeviceId,
-      )?.label || "Select microphone",
-    [audioDevices.inputDevices, settings.selectedInputDeviceId],
-  );
-
   const outputSelectionSupported = useMemo(() => {
     type AudioWithSinkId = HTMLAudioElement & {
       setSinkId?: (sinkId: string) => Promise<void>;
@@ -392,15 +377,6 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
     const probe = document.createElement("audio") as AudioWithSinkId;
     return typeof probe.setSinkId === "function";
   }, []);
-
-  const selectedOutputLabel = useMemo(() => {
-    if (!settings.selectedOutputDeviceId) return "System default";
-    return (
-      audioDevices.outputDevices.find(
-        (d) => d.deviceId === settings.selectedOutputDeviceId,
-      )?.label || "System default"
-    );
-  }, [audioDevices.outputDevices, settings.selectedOutputDeviceId]);
 
   const roleNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -535,11 +511,15 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
               : controls;
 
           const previewPayloadButtons: StreamDeckPreviewButton[] = [];
-          const renderTargets: Array<{ control: StreamDeckButtonControlDefinition; signature: string }> = [];
+          const renderTargets: Array<{
+            control: StreamDeckButtonControlDefinition;
+            signature: string;
+          }> = [];
 
           for (const control of targetControls) {
             const button =
-              buttonMap.get(control.index) ?? ({ index: control.index } as StreamDeckRenderButtonState);
+              buttonMap.get(control.index) ??
+              ({ index: control.index } as StreamDeckRenderButtonState);
             const pressed = session.pressedButtons.has(control.index);
             const signature = streamDeckButtonRenderSignature(
               settings.selectedPage,
@@ -549,7 +529,9 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
 
             if (!nextRequest.force) {
               const previous =
-                streamDeckRenderedSignatureByIndexRef.current.get(control.index);
+                streamDeckRenderedSignatureByIndexRef.current.get(
+                  control.index,
+                );
               if (previous === signature) {
                 continue;
               }
@@ -705,9 +687,8 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
     try {
       await disconnectStreamDeckWebHid({ announce: false });
 
-      const { getStreamDecks, requestStreamDecks } = await import(
-        "@elgato-stream-deck/webhid"
-      );
+      const { getStreamDecks, requestStreamDecks } =
+        await import("@elgato-stream-deck/webhid");
       const grantedDecks = await getStreamDecks();
       const deck = grantedDecks[0] ?? (await requestStreamDecks())[0];
       if (!deck) {
@@ -762,7 +743,13 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
       deck.on("down", onDown);
       deck.on("up", onUp);
       deck.on("error", onError);
-      streamDeckHidSessionRef.current = { deck, pressedButtons, onDown, onUp, onError };
+      streamDeckHidSessionRef.current = {
+        deck,
+        pressedButtons,
+        onDown,
+        onUp,
+        onError,
+      };
 
       await deck.setBrightness(70);
 
@@ -1146,7 +1133,9 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
       setAuthMode(pendingTakeover.targetAuthMode);
       setAdminOverrideActive(pendingTakeover.adminOverrideActive);
       setShowBirthdayGreeting(Boolean(res.showBirthdayGreeting));
-      setBirthdayGreetingUsername(res.user.username || pendingTakeover.username);
+      setBirthdayGreetingUsername(
+        res.user.username || pendingTakeover.username,
+      );
       sessionStorage.setItem(tokenStorageKey, res.token);
       setToken(res.token);
     } catch (error) {
@@ -1403,7 +1392,7 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
         });
         return;
       }
-        if (action.type === "page_home" || action.type === "page_jump") {
+      if (action.type === "page_home" || action.type === "page_jump") {
         if (payload.state !== "down") {
           return;
         }
@@ -1412,16 +1401,17 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
           const pageOrder = prev.pages
             .map((entry) => entry.page)
             .sort((a, b) => a - b);
-            const homePage = pageOrder[0] ?? 0;
-            const targetPage = action.type === "page_home"
+          const homePage = pageOrder[0] ?? 0;
+          const targetPage =
+            action.type === "page_home"
               ? homePage
               : (action.targetPage ?? homePage);
           const found = pageOrder.includes(targetPage);
           const nextPage = found ? targetPage : (pageOrder[0] ?? 0);
           if (nextPage === prev.selectedPage) return prev;
-            setStreamDeckLastEvent(
-              `-> P${pageOrder.indexOf(nextPage) + 1} (${action.type === "page_home" ? "home" : "jump"})`,
-            );
+          setStreamDeckLastEvent(
+            `-> P${pageOrder.indexOf(nextPage) + 1} (${action.type === "page_home" ? "home" : "jump"})`,
+          );
           return { ...prev, selectedPage: nextPage };
         });
         return;
@@ -1701,7 +1691,9 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
       setStreamDeckSettings(saved);
     } catch (err) {
       setStreamDeckError(
-        err instanceof Error ? err.message : "Failed to save Stream Deck settings.",
+        err instanceof Error
+          ? err.message
+          : "Failed to save Stream Deck settings.",
       );
     } finally {
       setStreamDeckBusy(false);
@@ -1717,7 +1709,9 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
       setStreamDeckSettings(reset);
     } catch (err) {
       setStreamDeckError(
-        err instanceof Error ? err.message : "Failed to reset Stream Deck settings.",
+        err instanceof Error
+          ? err.message
+          : "Failed to reset Stream Deck settings.",
       );
     } finally {
       setStreamDeckBusy(false);
@@ -1743,8 +1737,8 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
           <p className="birthday-gate-kicker">Server offline</p>
           <h1>Keine Verbindung zum Backend</h1>
           <p>
-            Die App kann ohne Backend keine Rollen, Rooms oder Login-Daten laden.
-            Pruefe die Server-Adresse oder versuche es erneut.
+            Die App kann ohne Backend keine Rollen, Rooms oder Login-Daten
+            laden. Pruefe die Server-Adresse oder versuche es erneut.
           </p>
           {publicBootstrapError ? <p>{publicBootstrapError}</p> : null}
           <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
@@ -1827,9 +1821,7 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
         <div className="birthday-gate-card">
           <p className="birthday-gate-kicker">Today in focus</p>
           <h1>Happy Birthday, {displayName}!</h1>
-          <p>
-            We wish you a great day and smooth comms for every party line.
-          </p>
+          <p>We wish you a great day and smooth comms for every party line.</p>
           <button type="button" onClick={() => setShowBirthdayGreeting(false)}>
             Continue to intercom
           </button>
@@ -2150,7 +2142,6 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
         onRecordingShortcutChange={setIsRecordingShortcut}
         inputDevices={audioDevices.inputDevices}
         selectedInputDeviceId={settings.selectedInputDeviceId}
-        selectedMicLabel={selectedMicLabel}
         setSelectedInputDeviceId={settings.setSelectedInputDeviceId}
         inputLevelDbFs={session.inputLevelDbFs}
         inputGain={selectedInputGain}
@@ -2164,7 +2155,6 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
         onAudioGateThresholdDbChange={settings.setAudioGateThresholdDb}
         outputDevices={audioDevices.outputDevices}
         selectedOutputDeviceId={settings.selectedOutputDeviceId}
-        selectedOutputLabel={selectedOutputLabel}
         outputSelectionSupported={outputSelectionSupported}
         setSelectedOutputDeviceId={(id) => void changeOutputDevice(id)}
         performanceAudio={session.performanceAudio}

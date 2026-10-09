@@ -14,7 +14,13 @@ export type IconName =
   | "settings"
   | "lock"
   | "broadcast"
-  | "user";
+  | "user"
+  | "close"
+  | "speaker"
+  | "keyboard"
+  | "layout"
+  | "grid"
+  | "device";
 
 const paths: Record<IconName, ReactElement> = {
   mic: (
@@ -71,6 +77,41 @@ const paths: Record<IconName, ReactElement> = {
     <>
       <circle cx="12" cy="8" r="4" />
       <path d="M4 21a8 8 0 0 1 16 0" />
+    </>
+  ),
+  close: <path d="M6 6l12 12M18 6 6 18" />,
+  speaker: (
+    <>
+      <path d="M4 10h4l5-4v12l-5-4H4z" />
+      <path d="M16.5 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11" />
+    </>
+  ),
+  keyboard: (
+    <>
+      <rect x="3" y="6" width="18" height="12" rx="2" />
+      <path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10" />
+    </>
+  ),
+  layout: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 10h18M10 10v10" />
+    </>
+  ),
+  grid: (
+    <>
+      <rect x="3" y="5" width="5" height="5" rx="1" />
+      <rect x="10" y="5" width="5" height="5" rx="1" />
+      <rect x="17" y="5" width="4" height="5" rx="1" />
+      <rect x="3" y="13" width="5" height="5" rx="1" />
+      <rect x="10" y="13" width="5" height="5" rx="1" />
+      <rect x="17" y="13" width="4" height="5" rx="1" />
+    </>
+  ),
+  device: (
+    <>
+      <rect x="7" y="3" width="10" height="18" rx="2" />
+      <path d="M11 17h2" />
     </>
   ),
 };

@@ -15,6 +15,10 @@ Where things live in `packages/client-core/src`:
   `.secondary` (also plain `<button>`) and `.danger`; icon-only buttons use
   `.k-icon-button`.
 - `components/Icon.tsx`: the icon set (`<Icon name="headphones" />`).
+- `components/settings/`: the user settings dialog, one file per page
+  (sound, Stream Deck, shortcuts). `SettingsParts.tsx` holds the pieces
+  every settings page uses: a group with a title and an on/off switch with
+  a one-line hint. New settings use these instead of their own markup.
 - Fonts: IBM Plex is bundled (`@fontsource/*`), so it works on a LAN
   without internet.
 

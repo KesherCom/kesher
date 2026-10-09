@@ -1,7 +1,4 @@
-import type {
-  StreamDeckButtonConfig,
-  StreamDeckButtonAction,
-} from "../types";
+import type { StreamDeckButtonConfig, StreamDeckButtonAction } from "../types";
 
 type StreamDeckLabelLookup = {
   rooms: Array<{ id: string; name: string }>;
@@ -68,35 +65,34 @@ function resolveActionLabel(
         lookup.rooms.find((room) => room.id === action.roomId)?.name ||
         action.roomId
       );
-    case "direct_role":
-      {
-        const roleName =
-          lookup.roles.find((role) => role.id === action.roleId)?.name ||
-          action.roleId;
-        const roleUsers = (lookup.activeUsers ?? lookup.users).filter(
-          (u) => u.roleId === action.roleId,
-        );
-        if (roleUsers.length > 0) {
-          return `${roleUsers[0].username}\n${roleName}`;
-        }
-        return roleName;
+    case "direct_role": {
+      const roleName =
+        lookup.roles.find((role) => role.id === action.roleId)?.name ||
+        action.roleId;
+      const roleUsers = (lookup.activeUsers ?? lookup.users).filter(
+        (u) => u.roleId === action.roleId,
+      );
+      if (roleUsers.length > 0) {
+        return `${roleUsers[0].username}\n${roleName}`;
       }
-    case "direct_user":
-      {
-        const user = lookup.users.find((entry) => entry.id === action.userId);
-        const username = user?.username || action.userId;
-        const roleName = user?.roleId
-          ? lookup.roles.find((role) => role.id === user.roleId)?.name
-          : undefined;
-        if (username && roleName) {
-          return `${username}\n${roleName}`;
-        }
-        return username;
+      return roleName;
+    }
+    case "direct_user": {
+      const user = lookup.users.find((entry) => entry.id === action.userId);
+      const username = user?.username || action.userId;
+      const roleName = user?.roleId
+        ? lookup.roles.find((role) => role.id === user.roleId)?.name
+        : undefined;
+      if (username && roleName) {
+        return `${username}\n${roleName}`;
       }
+      return username;
+    }
     case "broadcast_ptt":
       return (
-        lookup.broadcastGroups.find((group) => group.id === action.broadcastGroupId)
-          ?.name || action.broadcastGroupId
+        lookup.broadcastGroups.find(
+          (group) => group.id === action.broadcastGroupId,
+        )?.name || action.broadcastGroupId
       );
     case "reply_to_caller":
       return `Reply\n${resolveReplyTargetLabel(lookup)}`;
@@ -113,7 +109,9 @@ function resolveActionLabel(
     case "page_home":
       return "Home";
     case "page_jump":
-      return action.targetPage !== undefined ? `Page ${action.targetPage + 1}` : "Jump";
+      return action.targetPage !== undefined
+        ? `Page ${action.targetPage + 1}`
+        : "Jump";
     case "none":
     default:
       return undefined;
@@ -127,8 +125,10 @@ export function withResolvedStreamDeckButtonLabel(
   if (button.action?.type === "reply_to_caller") {
     const existingLabel = button.label?.trim() ?? "";
     const primaryLabel =
-      existingLabel.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ||
-      "Reply";
+      existingLabel
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find(Boolean) || "Reply";
     return {
       ...button,
       label: `${primaryLabel}\n${resolveReplyTargetLabel(lookup)}`,
@@ -147,5 +147,20 @@ export function withResolvedStreamDeckButtonLabel(
   return {
     ...button,
     label: resolved,
+  };
+}
+
+/** A key label: first line is the name, the second a smaller subtitle. */
+export function splitStreamDeckLabel(label?: string): {
+  primary: string;
+  subtitle: string;
+} {
+  const lines = (label || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return {
+    primary: lines[0] || "",
+    subtitle: lines[1] || "",
   };
 }

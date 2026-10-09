@@ -11,7 +11,6 @@ export { StationIntercomView } from "./components/StationIntercomView";
 export { AdminShell } from "./components/admin/AdminShell";
 export { ChatSignalPanel } from "./components/panels/ChatSignalPanel";
 export { RealtimeEventsPanel } from "./components/panels/RealtimeEventsPanel";
-export { DesktopServerSettings } from "./components/DesktopServerSettings";
 
 // Hooks
 export { useIntercomSession } from "./hooks/useIntercomSession";

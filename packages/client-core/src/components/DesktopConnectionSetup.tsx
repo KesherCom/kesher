@@ -26,7 +26,7 @@ export function DesktopConnectionSetup({
   onCancel,
   compact = false,
 }: DesktopConnectionSetupProps) {
-  const { baseUrl, setBaseUrl, isReady } = useApiBaseUrl();
+  const { baseUrl, setBaseUrl } = useApiBaseUrl();
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -72,14 +72,19 @@ export function DesktopConnectionSetup({
       return normalized;
     } catch {
       setSuccess("");
-      setError("Bitte eine gueltige Server-Adresse eingeben (IP, DNS oder URL).");
+      setError(
+        "Bitte eine gueltige Server-Adresse eingeben (IP, DNS oder URL).",
+      );
       return null;
     }
   };
 
   const runConnectionCheck = async (base: string): Promise<boolean> => {
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), connectionCheckTimeoutMs);
+    const timer = window.setTimeout(
+      () => controller.abort(),
+      connectionCheckTimeoutMs,
+    );
 
     try {
       const response = await fetch(`${base}/api/public-bootstrap`, {
@@ -110,7 +115,9 @@ export function DesktopConnectionSetup({
     setIsChecking(false);
 
     if (!ok) {
-      setError("Verbindungstest fehlgeschlagen. Adresse pruefen oder trotzdem starten.");
+      setError(
+        "Verbindungstest fehlgeschlagen. Adresse pruefen oder trotzdem starten.",
+      );
       return;
     }
 
@@ -127,17 +134,35 @@ export function DesktopConnectionSetup({
 
   return (
     <div className={`desktop-connection-root${compact ? " compact" : ""}`}>
-      <section className="desktop-connection-card" aria-label="Desktop connection setup">
-        <img className="brand-logo" src={logoUrl} alt="" width={56} height={56} />
-        <h1 className="desktop-connection-title">Server-Verbindung einrichten</h1>
+      <section
+        className="desktop-connection-card"
+        aria-label="Desktop connection setup"
+      >
+        <img
+          className="brand-logo"
+          src={logoUrl}
+          alt=""
+          width={56}
+          height={56}
+        />
+        <h1 className="desktop-connection-title">
+          Server-Verbindung einrichten
+        </h1>
         <p className="desktop-connection-subtitle">
-          Die Adresse wird lokal gespeichert. Erlaubt sind IP, DNS oder volle URL inklusive frei waehlbarem Port.
+          Die Adresse wird lokal gespeichert. Erlaubt sind IP, DNS oder volle
+          URL inklusive frei waehlbarem Port.
         </p>
 
         <div className="desktop-connection-found" aria-label="Gefundene Server">
           <div className="desktop-connection-found-head">
-            <span className="desktop-connection-label">Im Netzwerk gefunden</span>
-            <button type="button" onClick={() => void searchServers()} disabled={isSearching}>
+            <span className="desktop-connection-label">
+              Im Netzwerk gefunden
+            </span>
+            <button
+              type="button"
+              onClick={() => void searchServers()}
+              disabled={isSearching}
+            >
               {isSearching ? "Suche ..." : "Erneut suchen"}
             </button>
           </div>
@@ -174,7 +199,10 @@ export function DesktopConnectionSetup({
           )}
         </div>
 
-        <label className="desktop-connection-label" htmlFor="desktop-server-address">
+        <label
+          className="desktop-connection-label"
+          htmlFor="desktop-server-address"
+        >
           Server-Adresse
         </label>
         <input
@@ -197,17 +225,36 @@ export function DesktopConnectionSetup({
         </p>
 
         <div className="desktop-connection-actions">
-          <button type="button" onClick={handleSave}>Speichern</button>
-          <button type="button" className="primary" onClick={() => void handleConnectWithCheck()} disabled={isChecking}>
+          <button type="button" onClick={handleSave}>
+            Speichern
+          </button>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => void handleConnectWithCheck()}
+            disabled={isChecking}
+          >
             {isChecking ? "Teste Verbindung ..." : "Speichern und verbinden"}
           </button>
-          <button type="button" onClick={handleContinueWithoutCheck}>Ohne Test starten</button>
-          <button type="button" onClick={() => setInput(baseUrl)}>Letzte Adresse laden</button>
-          {onCancel ? <button type="button" onClick={onCancel}>Schliessen</button> : null}
+          <button type="button" onClick={handleContinueWithoutCheck}>
+            Ohne Test starten
+          </button>
+          <button type="button" onClick={() => setInput(baseUrl)}>
+            Letzte Adresse laden
+          </button>
+          {onCancel ? (
+            <button type="button" onClick={onCancel}>
+              Schliessen
+            </button>
+          ) : null}
         </div>
 
-        {error ? <p className="desktop-connection-status error">{error}</p> : null}
-        {success ? <p className="desktop-connection-status success">{success}</p> : null}
+        {error ? (
+          <p className="desktop-connection-status error">{error}</p>
+        ) : null}
+        {success ? (
+          <p className="desktop-connection-status success">{success}</p>
+        ) : null}
       </section>
     </div>
   );

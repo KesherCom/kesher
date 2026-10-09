@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getPlaceStreamDecks, pairStreamDeck, releaseStreamDeck } from "../api";
 import type { StreamDeckDevice } from "../types";
+import { SettingsGroup } from "./settings/SettingsParts";
 
 type StreamDeckPlaceBarProps = {
   token: string;
@@ -13,7 +14,10 @@ type StreamDeckPlaceBarProps = {
  * with the code it shows. With a deck here, the editor below edits that
  * deck's layout instead of the role's.
  */
-export function StreamDeckPlaceBar({ token, onChanged }: StreamDeckPlaceBarProps) {
+export function StreamDeckPlaceBar({
+  token,
+  onChanged,
+}: StreamDeckPlaceBarProps) {
   const [decks, setDecks] = useState<StreamDeckDevice[]>([]);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,7 +51,12 @@ export function StreamDeckPlaceBar({ token, onChanged }: StreamDeckPlaceBarProps
   }
 
   async function release(deck: StreamDeckDevice) {
-    if (!window.confirm(`Release "${deck.name}" from this place? It then shows a new code.`)) return;
+    if (
+      !window.confirm(
+        `Release "${deck.name}" from this place? It then shows a new code.`,
+      )
+    )
+      return;
     setBusy(true);
     setError("");
     try {
@@ -62,29 +71,35 @@ export function StreamDeckPlaceBar({ token, onChanged }: StreamDeckPlaceBarProps
   }
 
   return (
-    <div className="streamdeck-place-bar">
+    <SettingsGroup title="Companion deck">
       {decks.length > 0 ? (
-        <small className="station-settings-meta">
-          Companion Stream Deck at this place:{" "}
-          {decks.map((deck, i) => (
-            <span key={deck.id}>
-              {i > 0 ? ", " : ""}
-              <strong>{deck.name}</strong> ({deck.hasLayout ? "own layout" : "role layout until you save"}){" "}
-              <button
-                type="button"
-                className="shortcut-btn shortcut-btn-clear"
-                onClick={() => void release(deck)}
-                disabled={busy}
-              >
-                Release
-              </button>
+        decks.map((deck) => (
+          <div key={deck.id} className="streamdeck-place-deck">
+            <span>
+              <strong>{deck.name}</strong>
+              <small className="k-setting-hint">
+                {deck.hasLayout
+                  ? "Uses the layout below."
+                  : "Uses the role's layout until you save one here."}
+              </small>
             </span>
-          ))}
-          . The layout below is this deck&apos;s, whoever logs in here.
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void release(deck)}
+              disabled={busy}
+            >
+              Release
+            </button>
+          </div>
+        ))
+      ) : (
+        <small className="k-setting-hint">
+          No Companion Stream Deck is paired with this place yet.
         </small>
-      ) : null}
+      )}
       <form
-        className="streamdeck-settings-actions"
+        className="k-setting-actions"
         onSubmit={(event) => {
           event.preventDefault();
           void pair();
@@ -92,19 +107,27 @@ export function StreamDeckPlaceBar({ token, onChanged }: StreamDeckPlaceBarProps
       >
         <input
           value={code}
-          onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 4))}
+          onChange={(e) =>
+            setCode(e.target.value.replace(/\D/g, "").slice(0, 4))
+          }
           inputMode="numeric"
           placeholder="Code"
           aria-label="Stream Deck code"
-          style={{ width: "6em" }}
+          className="streamdeck-code-input"
           disabled={busy}
         />
-        <button type="submit" className="shortcut-btn" disabled={busy || code.length !== 4}>
+        <button
+          type="submit"
+          className="secondary"
+          disabled={busy || code.length !== 4}
+        >
           Pair deck
         </button>
-        <small className="station-settings-meta">Enter the code a new Companion Stream Deck shows.</small>
+        <small className="k-setting-hint">
+          Enter the code a new Companion Stream Deck shows.
+        </small>
       </form>
       {error ? <small className="streamdeck-error">{error}</small> : null}
-    </div>
+    </SettingsGroup>
   );
 }

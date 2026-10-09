@@ -92,7 +92,7 @@ export function buildApiUrl(path: string): string {
   if (!base) {
     return normalizedPath;
   }
-  
+
   // Strip any pathname from base URL to ensure we only use protocol://host:port
   try {
     const parsed = new URL(base);
@@ -133,7 +133,8 @@ export function buildWebSocketUrl(
   query: Record<string, string | number | boolean | undefined> = {},
 ): string {
   const normalizedPath = normalizeApiPath(path);
-  const base = getGlobalApiBaseUrl() ||
+  const base =
+    getGlobalApiBaseUrl() ||
     (typeof window !== "undefined" ? window.location.origin : "");
 
   if (!base) {
@@ -146,9 +147,7 @@ export function buildWebSocketUrl(
   } catch {
     throw new Error("Invalid base URL for websocket.");
   }
-  
-  // Strip pathname to ensure clean origin
-  const cleanOrigin = `${parsedBase.protocol}//${parsedBase.host}`;
+
   const wsProtocol = parsedBase.protocol === "https:" ? "wss:" : "ws:";
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
@@ -216,11 +215,16 @@ export function normalizePublicBootstrap(data: unknown): PublicBootstrap {
         allowedRoleIds: toStringArray(entry.allowedRoleIds),
       };
     }),
-    ackEnabled:
-      typeof raw.ackEnabled === "boolean" ? raw.ackEnabled : true,
+    ackEnabled: typeof raw.ackEnabled === "boolean" ? raw.ackEnabled : true,
     appVersion: {
-      version: typeof (raw.appVersion as any)?.version === "string" ? (raw.appVersion as any).version : "unknown",
-      buildTimestamp: typeof (raw.appVersion as any)?.buildTimestamp === "string" ? (raw.appVersion as any).buildTimestamp : "unknown",
+      version:
+        typeof (raw.appVersion as any)?.version === "string"
+          ? (raw.appVersion as any).version
+          : "unknown",
+      buildTimestamp:
+        typeof (raw.appVersion as any)?.buildTimestamp === "string"
+          ? (raw.appVersion as any).buildTimestamp
+          : "unknown",
     },
     setupRequired: raw.setupRequired === true,
   };
@@ -263,7 +267,10 @@ function normalizeConfigurationDocument(data: unknown): ConfigurationDocument {
     ? raw.streamDeckSettings
     : [];
   const meta = (raw.meta ?? {}) as Record<string, unknown>;
-  const ackSettings = (raw.ackSettings ?? null) as Record<string, unknown> | null;
+  const ackSettings = (raw.ackSettings ?? null) as Record<
+    string,
+    unknown
+  > | null;
 
   return {
     meta: {
@@ -395,9 +402,10 @@ export function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
             Number.isFinite(buttonEntry.index)
               ? buttonEntry.index
               : -1;
-          const actionRaw = (buttonEntry.action ?? null) as
-            | Record<string, unknown>
-            | null;
+          const actionRaw = (buttonEntry.action ?? null) as Record<
+            string,
+            unknown
+          > | null;
           const typeCandidate =
             typeof actionRaw?.type === "string" ? actionRaw.type : "none";
           const type: StreamDeckActionType = allowedActionTypes.includes(
@@ -409,11 +417,17 @@ export function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
             ? {
                 type,
                 roomId:
-                  typeof actionRaw.roomId === "string" ? actionRaw.roomId : undefined,
+                  typeof actionRaw.roomId === "string"
+                    ? actionRaw.roomId
+                    : undefined,
                 userId:
-                  typeof actionRaw.userId === "string" ? actionRaw.userId : undefined,
+                  typeof actionRaw.userId === "string"
+                    ? actionRaw.userId
+                    : undefined,
                 roleId:
-                  typeof actionRaw.roleId === "string" ? actionRaw.roleId : undefined,
+                  typeof actionRaw.roleId === "string"
+                    ? actionRaw.roleId
+                    : undefined,
                 broadcastGroupId:
                   typeof actionRaw.broadcastGroupId === "string"
                     ? actionRaw.broadcastGroupId
@@ -431,15 +445,18 @@ export function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
           return {
             index,
             label:
-              typeof buttonEntry.label === "string" ? buttonEntry.label : undefined,
+              typeof buttonEntry.label === "string"
+                ? buttonEntry.label
+                : undefined,
             color:
-              typeof buttonEntry.color === "string" ? buttonEntry.color : undefined,
+              typeof buttonEntry.color === "string"
+                ? buttonEntry.color
+                : undefined,
             action,
           };
         })
         .filter((button) => button.index >= 0);
       return { page: pageNo, buttons };
-
     })
     .filter((page) => page.page >= 0);
 
@@ -456,16 +473,19 @@ export function normalizeStreamDeckSettings(data: unknown): StreamDeckSettings {
       const pageTypeCandidate =
         typeof pageEntry.pageType === "string" ? pageEntry.pageType : "manual";
       const pageType =
-        pageTypeCandidate === "all_roles" || pageTypeCandidate === "all_party_lines"
+        pageTypeCandidate === "all_roles" ||
+        pageTypeCandidate === "all_party_lines"
           ? pageTypeCandidate
           : "manual";
       const parentPage =
-        typeof pageEntry.parentPage === "number" && Number.isFinite(pageEntry.parentPage)
+        typeof pageEntry.parentPage === "number" &&
+        Number.isFinite(pageEntry.parentPage)
           ? pageEntry.parentPage
           : undefined;
       return {
         ...pageRaw,
-        title: typeof pageEntry.title === "string" ? pageEntry.title : undefined,
+        title:
+          typeof pageEntry.title === "string" ? pageEntry.title : undefined,
         pageType,
         parentPage,
       };
@@ -510,7 +530,10 @@ export async function loginTakeover(
 }
 
 /** First-run setup: choose the admin PIN, keep or drop the example config. */
-export async function completeSetup(pin: string, start: "example" | "empty"): Promise<void> {
+export async function completeSetup(
+  pin: string,
+  start: "example" | "empty",
+): Promise<void> {
   const res = await fetch(apiUrl("/api/setup"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -922,7 +945,10 @@ export async function getTelegramAllowlist(
   return res.json() as Promise<TelegramAllowlistEntry[]>;
 }
 
-export async function getAdminDevices(token: string, adminPin: string): Promise<Device[]> {
+export async function getAdminDevices(
+  token: string,
+  adminPin: string,
+): Promise<Device[]> {
   const res = await fetch(apiUrl("/api/admin/devices"), {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -937,13 +963,33 @@ export async function updateAdminDevice(
   token: string,
   adminPin: string,
   id: string,
-  payload: { name: string; roleId: string; mode: Device["mode"]; status: Device["status"] },
+  payload: {
+    name: string;
+    roleId: string;
+    mode: Device["mode"];
+    status: Device["status"];
+  },
 ): Promise<void> {
-  await apiMutation(`/api/admin/devices/${encodeURIComponent(id)}`, token, "PUT", adminPin, payload);
+  await apiMutation(
+    `/api/admin/devices/${encodeURIComponent(id)}`,
+    token,
+    "PUT",
+    adminPin,
+    payload,
+  );
 }
 
-export async function deleteAdminDevice(token: string, adminPin: string, id: string): Promise<void> {
-  await apiMutation(`/api/admin/devices/${encodeURIComponent(id)}`, token, "DELETE", adminPin);
+export async function deleteAdminDevice(
+  token: string,
+  adminPin: string,
+  id: string,
+): Promise<void> {
+  await apiMutation(
+    `/api/admin/devices/${encodeURIComponent(id)}`,
+    token,
+    "DELETE",
+    adminPin,
+  );
 }
 
 /** Turns off a person's microphone now, or ends their sessions (#15). */
@@ -953,7 +999,12 @@ export async function interveneAdminUser(
   userId: string,
   action: "mute" | "kick",
 ): Promise<void> {
-  await apiMutation(`/api/admin/users/${encodeURIComponent(userId)}/${action}`, token, "POST", adminPin);
+  await apiMutation(
+    `/api/admin/users/${encodeURIComponent(userId)}/${action}`,
+    token,
+    "POST",
+    adminPin,
+  );
 }
 
 export async function getAdminStreamDecks(
@@ -967,7 +1018,10 @@ export async function getAdminStreamDecks(
     },
   });
   if (!res.ok) throw new Error("failed to load stream decks");
-  return res.json() as Promise<{ decks: StreamDeckDevice[]; places: ClientPlace[] }>;
+  return res.json() as Promise<{
+    decks: StreamDeckDevice[];
+    places: ClientPlace[];
+  }>;
 }
 
 export async function updateAdminStreamDeck(
@@ -976,20 +1030,46 @@ export async function updateAdminStreamDeck(
   id: string,
   payload: { name: string; placeId: string; placeLabel: string },
 ): Promise<void> {
-  await apiMutation(`/api/admin/stream-decks/${encodeURIComponent(id)}`, token, "PUT", adminPin, payload);
+  await apiMutation(
+    `/api/admin/stream-decks/${encodeURIComponent(id)}`,
+    token,
+    "PUT",
+    adminPin,
+    payload,
+  );
 }
 
-export async function deleteAdminStreamDeck(token: string, adminPin: string, id: string): Promise<void> {
-  await apiMutation(`/api/admin/stream-decks/${encodeURIComponent(id)}`, token, "DELETE", adminPin);
+export async function deleteAdminStreamDeck(
+  token: string,
+  adminPin: string,
+  id: string,
+): Promise<void> {
+  await apiMutation(
+    `/api/admin/stream-decks/${encodeURIComponent(id)}`,
+    token,
+    "DELETE",
+    adminPin,
+  );
 }
 
 /** Drops a deck's own layout; it shows the role layout again. */
-export async function resetAdminStreamDeckLayout(token: string, adminPin: string, id: string): Promise<void> {
-  await apiMutation(`/api/admin/stream-decks/${encodeURIComponent(id)}/layout`, token, "DELETE", adminPin);
+export async function resetAdminStreamDeckLayout(
+  token: string,
+  adminPin: string,
+  id: string,
+): Promise<void> {
+  await apiMutation(
+    `/api/admin/stream-decks/${encodeURIComponent(id)}/layout`,
+    token,
+    "DELETE",
+    adminPin,
+  );
 }
 
 /** Stream Decks bound to this client's place. */
-export async function getPlaceStreamDecks(token: string): Promise<StreamDeckDevice[]> {
+export async function getPlaceStreamDecks(
+  token: string,
+): Promise<StreamDeckDevice[]> {
   const res = await fetch(apiUrl("/api/user/stream-decks"), {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -998,7 +1078,10 @@ export async function getPlaceStreamDecks(token: string): Promise<StreamDeckDevi
 }
 
 /** Binds the Stream Deck that shows this code to this client's place. */
-export async function pairStreamDeck(token: string, code: string): Promise<StreamDeckDevice> {
+export async function pairStreamDeck(
+  token: string,
+  code: string,
+): Promise<StreamDeckDevice> {
   const res = await fetch(apiUrl("/api/user/stream-decks/pair"), {
     method: "POST",
     headers: {
@@ -1012,11 +1095,17 @@ export async function pairStreamDeck(token: string, code: string): Promise<Strea
   return res.json() as Promise<StreamDeckDevice>;
 }
 
-export async function releaseStreamDeck(token: string, id: string): Promise<void> {
-  const res = await fetch(apiUrl(`/api/user/stream-decks/${encodeURIComponent(id)}`), {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${token}` },
-  });
+export async function releaseStreamDeck(
+  token: string,
+  id: string,
+): Promise<void> {
+  const res = await fetch(
+    apiUrl(`/api/user/stream-decks/${encodeURIComponent(id)}`),
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
   if (!res.ok) throw new Error((await res.text()).trim() || "release failed");
 }
 
@@ -1075,7 +1164,8 @@ function buildAdminLogQueryString(query: AdminLogQuery = {}): string {
   if (typeof query.from === "number") params.set("from", String(query.from));
   if (typeof query.to === "number") params.set("to", String(query.to));
   if (typeof query.limit === "number") params.set("limit", String(query.limit));
-  if (typeof query.offset === "number") params.set("offset", String(query.offset));
+  if (typeof query.offset === "number")
+    params.set("offset", String(query.offset));
   const built = params.toString();
   return built ? `?${built}` : "";
 }
@@ -1085,12 +1175,15 @@ export async function getAdminLogs(
   adminPin: string,
   query: AdminLogQuery = {},
 ): Promise<AdminLogsResponse> {
-  const res = await fetch(apiUrl(`/api/admin/logs${buildAdminLogQueryString(query)}`), {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      [adminPinHeaderName]: adminPin,
+  const res = await fetch(
+    apiUrl(`/api/admin/logs${buildAdminLogQueryString(query)}`),
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        [adminPinHeaderName]: adminPin,
+      },
     },
-  });
+  );
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<AdminLogsResponse>;
 }
@@ -1138,12 +1231,7 @@ export async function clearChatHistory(
   token: string,
   adminPin: string,
 ): Promise<void> {
-  await apiMutation(
-    "/api/admin/chat-history/clear",
-    token,
-    "POST",
-    adminPin,
-  );
+  await apiMutation("/api/admin/chat-history/clear", token, "POST", adminPin);
 }
 
 export async function updateAckSettings(
@@ -1250,7 +1338,10 @@ export async function renderStreamDeckPreviewImages(
   for (const entry of images) {
     if (typeof entry?.buttonIndex !== "number") continue;
     if (typeof entry?.imageBuffer !== "string" || !entry.imageBuffer) continue;
-    byIndex.set(entry.buttonIndex, `data:image/png;base64,${entry.imageBuffer}`);
+    byIndex.set(
+      entry.buttonIndex,
+      `data:image/png;base64,${entry.imageBuffer}`,
+    );
   }
   return byIndex;
 }
@@ -1261,7 +1352,9 @@ export async function getAdminRoleStreamDeckSettings(
   roleId: string,
 ): Promise<StreamDeckSettings> {
   const res = await fetch(
-    apiUrl(`/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`),
+    apiUrl(
+      `/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`,
+    ),
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -1281,7 +1374,9 @@ export async function updateAdminRoleStreamDeckSettings(
   settings: StreamDeckSettings,
 ): Promise<StreamDeckSettings> {
   const res = await fetch(
-    apiUrl(`/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`),
+    apiUrl(
+      `/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`,
+    ),
     {
       method: "PUT",
       headers: {
@@ -1303,7 +1398,9 @@ export async function resetAdminRoleStreamDeckSettings(
   roleId: string,
 ): Promise<StreamDeckSettings> {
   const res = await fetch(
-    apiUrl(`/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`),
+    apiUrl(
+      `/api/admin/stream-deck/settings?roleId=${encodeURIComponent(roleId)}`,
+    ),
     {
       method: "DELETE",
       headers: {

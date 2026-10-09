@@ -90,7 +90,6 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
   onRecordingShortcutChange: vi.fn(),
   inputDevices: [],
   selectedInputDeviceId: "",
-  selectedMicLabel: "Default input",
   setSelectedInputDeviceId: vi.fn(),
   inputLevelDbFs: -60,
   inputGain: 1,
@@ -104,7 +103,6 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
   onAudioGateThresholdDbChange: vi.fn(),
   outputDevices: [],
   selectedOutputDeviceId: "",
-  selectedOutputLabel: "Default output",
   outputSelectionSupported: false,
   setSelectedOutputDeviceId: vi.fn(),
   streamDeckSettings: {
@@ -238,8 +236,9 @@ describe("StationIntercomView", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: /Controls/ }));
     await user.click(
-      screen.getByRole("checkbox", { name: "Swap PTT and reply buttons" }),
+      screen.getByRole("checkbox", { name: "Talk button first" }),
     );
 
     expect(onSwapPttAndReplyButtonsChange).toHaveBeenCalledWith(true);
@@ -528,7 +527,7 @@ describe("StationIntercomView", () => {
 
     await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
 
-    await user.click(screen.getByRole("button", { name: "+ Page" }));
+    await user.click(screen.getByRole("button", { name: "Add page" }));
 
     const addArg = onStreamDeckSettingsChange.mock.calls[0]?.[0];
     expect(addArg?.pages?.length).toBe(2);
@@ -543,7 +542,7 @@ describe("StationIntercomView", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "- Page" }));
+    await user.click(screen.getByRole("button", { name: "Remove page" }));
 
     const removeArg = onStreamDeckSettingsChange.mock.calls[1]?.[0];
     expect(removeArg?.pages?.length).toBe(1);
@@ -582,6 +581,7 @@ describe("StationIntercomView", () => {
     render(<StationIntercomView {...baseProps} isUserSettingsOpen />);
 
     await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+    await user.click(screen.getByText("More"));
     await user.click(screen.getByRole("button", { name: "Export" }));
 
     expect(createObjectURLSpy).toHaveBeenCalledTimes(1);
@@ -652,11 +652,16 @@ describe("StationIntercomView", () => {
     );
   });
 
-  it("collapses and expands stream deck settings", async () => {
+  it("shows the stream deck editor on its own settings page", async () => {
     const user = userEvent.setup();
 
     render(<StationIntercomView {...baseProps} isUserSettingsOpen />);
 
+    // Sound is the first page.
+    expect(screen.getByRole("button", { name: /Sound/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     expect(
       screen.queryByRole("grid", { name: "Stream Deck 5x3 grid" }),
     ).not.toBeInTheDocument();
@@ -666,12 +671,20 @@ describe("StationIntercomView", () => {
     expect(
       screen.getByRole("grid", { name: "Stream Deck 5x3 grid" }),
     ).toBeInTheDocument();
+  });
 
-    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
-
-    expect(
-      screen.queryByRole("grid", { name: "Stream Deck 5x3 grid" }),
-    ).not.toBeInTheDocument();
+  it("closes the settings with Escape", async () => {
+    const user = userEvent.setup();
+    const setIsUserSettingsOpen = vi.fn();
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        setIsUserSettingsOpen={setIsUserSettingsOpen}
+      />,
+    );
+    await user.keyboard("{Escape}");
+    expect(setIsUserSettingsOpen).toHaveBeenCalledWith(false);
   });
 
   it("emits down and up events in stream deck browser test mode", async () => {
@@ -687,7 +700,7 @@ describe("StationIntercomView", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
-    await user.click(screen.getByRole("button", { name: "Test mode off" }));
+    await user.click(screen.getByRole("button", { name: "Try keys here" }));
 
     const key = screen.getByRole("button", {
       name: "Deck key 1",
@@ -723,7 +736,6 @@ describe("StationIntercomView", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /Sound settings/ }));
     await user.click(screen.getByRole("checkbox", { name: "Noise gate" }));
     fireEvent.change(
       screen.getByRole("slider", { name: "Microphone gate threshold" }),
@@ -771,10 +783,11 @@ describe("StationIntercomView", () => {
         setIsUserSettingsOpen={setIsUserSettingsOpen}
       />,
     );
-    // The sound settings section is already expanded.
-    expect(
-      screen.getByRole("button", { name: /Sound settings/ }),
-    ).toHaveAttribute("aria-expanded", "true");
+    // Settings open on the sound page.
+    expect(screen.getByRole("button", { name: /Sound/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("opens a party line fader from its dB value; double-click resets to 0 dB", async () => {
