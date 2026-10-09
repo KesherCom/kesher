@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -18,8 +17,6 @@ import (
 	"github.com/golang/freetype/truetype"
 	"github.com/gorilla/websocket"
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/gofont/gobold"
-	"golang.org/x/image/font/gofont/goregular"
 )
 
 // Button images are pushed when something changes. The periodic refresh is
@@ -93,24 +90,6 @@ func NewButtonImageRenderer(config *ButtonImageRenderConfig) (*ButtonImageRender
 		faces:  make(map[buttonFontKey]font.Face),
 		images: make(map[string]renderedButtonImage),
 	}, nil
-}
-
-var (
-	buttonFontsOnce    sync.Once
-	buttonFontBold     *truetype.Font
-	buttonFontRegular  *truetype.Font
-	buttonFontParseErr error
-)
-
-// parsedButtonFonts parses the embedded fonts once per process.
-func parsedButtonFonts() (bold, regular *truetype.Font, err error) {
-	buttonFontsOnce.Do(func() {
-		if buttonFontBold, buttonFontParseErr = truetype.Parse(gobold.TTF); buttonFontParseErr != nil {
-			return
-		}
-		buttonFontRegular, buttonFontParseErr = truetype.Parse(goregular.TTF)
-	})
-	return buttonFontBold, buttonFontRegular, buttonFontParseErr
 }
 
 var (
@@ -211,17 +190,8 @@ type streamDeckPreviewResponse struct {
 	Images []streamDeckPreviewImage `json:"images"`
 }
 
-type keyPalette struct {
-	background string
-	border     string
-	label      string
-}
-
-const (
-	streamDeckCanvasBackground = "#000000"
-	defaultBackground          = "#182028"
-	defaultForeground          = "#eef4ff"
-)
+// defaultBackground is used for a color that cannot be read.
+const defaultBackground = "#182028"
 
 // RenderButtonImage renders a button state as a PNG. The returned slice is
 // shared with the cache and must not be modified.
@@ -254,201 +224,6 @@ func (r *ButtonImageRenderer) render(state ButtonState) (renderedButtonImage, er
 	return img, nil
 }
 
-// draw paints one key; callers hold r.mu.
-func (r *ButtonImageRenderer) draw(state ButtonState) ([]byte, error) {
-
-	w := float64(r.config.Width)
-	h := float64(r.config.Height)
-	actionType := strings.TrimSpace(state.ActionType)
-	pressed := state.IsActive || state.State == "TALK" || state.State == "BROADCAST"
-	useCallPressedColor := pressed && (actionType == string(StreamDeckActionTypeCallRoom) || actionType == string(StreamDeckActionTypeReplyToCaller) || actionType == string(StreamDeckActionTypeIncomingCall))
-	useEmergencyPressedColor := pressed && actionType != string(StreamDeckActionTypeListenRoom) && actionType != string(StreamDeckActionTypeCallRoom) && actionType != string(StreamDeckActionTypeReplyToCaller) && actionType != string(StreamDeckActionTypeIncomingCall)
-	palette := getButtonPalette(actionType, state.Color, pressed)
-	if state.State == "CALL" {
-		// Someone calls: yellow, the call color of the visual system.
-		palette = keyPalette{background: "#facc15", border: "#fde047", label: "#1a1405"}
-		useCallPressedColor = false
-		useEmergencyPressedColor = false
-	}
-	strokeColor := palette.border
-	if pressed {
-		strokeColor = mixColors(strokeColor, "#ffffff", 0.2)
-	}
-
-	dc := gg.NewContext(r.config.Width, r.config.Height)
-
-	// Black canvas background
-	dc.SetHexColor(streamDeckCanvasBackground)
-	dc.Clear()
-
-	const cardInset = 2.0
-	radius := math.Max(10, math.Round(w*0.12))
-
-	dc.SetHexColor(palette.background)
-	dc.DrawRoundedRectangle(cardInset, cardInset, w-cardInset*2, h-cardInset*2, radius)
-	dc.Fill()
-
-	dc.SetHexColor(strokeColor)
-	if useEmergencyPressedColor {
-		dc.SetLineWidth(4)
-	} else {
-		dc.SetLineWidth(3)
-	}
-	dc.DrawRoundedRectangle(cardInset, cardInset, w-cardInset*2, h-cardInset*2, radius)
-	dc.Stroke()
-
-	if useEmergencyPressedColor {
-		dc.SetRGBA255(255, 115, 115, 72)
-		dc.SetLineWidth(2)
-		dc.DrawRoundedRectangle(cardInset-1, cardInset-1, w-(cardInset-1)*2, h-(cardInset-1)*2, radius+1)
-		dc.Stroke()
-	}
-	if useCallPressedColor {
-		dc.SetRGBA255(255, 214, 102, 90)
-		dc.SetLineWidth(2)
-		dc.DrawRoundedRectangle(cardInset-1, cardInset-1, w-(cardInset-1)*2, h-(cardInset-1)*2, radius+1)
-		dc.Stroke()
-	}
-
-	if (actionType == string(StreamDeckActionTypeSelectTalkRoom) || actionType == string(StreamDeckActionTypeSelectListen)) && state.IsPTTSelected {
-		stripeHeight := math.Max(6, math.Round(h*0.075))
-		dc.SetHexColor("#ff2d26")
-		dc.DrawRoundedRectangle(
-			cardInset+3,
-			cardInset+2,
-			(w-cardInset*2)-6,
-			stripeHeight,
-			math.Max(3, math.Round(stripeHeight/2)),
-		)
-		dc.Fill()
-	}
-
-	if (actionType == string(StreamDeckActionTypePTTRoom) || actionType == string(StreamDeckActionTypeListenRoom) || actionType == string(StreamDeckActionTypeSelectTalkRoom) || actionType == string(StreamDeckActionTypeSelectListen)) && state.IsListening {
-		stripeHeight := math.Max(6, math.Round(h*0.075))
-		dc.SetHexColor("#14c64b")
-		dc.DrawRoundedRectangle(
-			cardInset+3,
-			cardInset+(h-cardInset*2)-stripeHeight-2,
-			(w-cardInset*2)-6,
-			stripeHeight,
-			math.Max(3, math.Round(stripeHeight/2)),
-		)
-		dc.Fill()
-	}
-
-	// Text rendering
-	label := strings.TrimSpace(state.Label)
-	subtitle := strings.TrimSpace(state.Subtitle)
-	textColor := palette.label
-
-	if label != "" {
-		if subtitle != "" {
-			// Two-line layout: large primary near top, small subtitle near bottom
-			primarySize := r.fitFontSize(dc, label, w-24, math.Max(20, w*0.2), true)
-			dc.SetFontFace(r.face(true, primarySize))
-			dc.SetHexColor(textColor)
-			primaryLines := wrapButtonLines(dc, label, w-24, 2)
-			primaryLineHeight := math.Round(primarySize * 1.1)
-			primaryBlockHeight := float64(len(primaryLines)) * primaryLineHeight
-			primaryStartY := math.Round(h*0.38) - primaryBlockHeight/2 + primaryLineHeight/2
-			for i, line := range primaryLines {
-				dc.DrawStringAnchored(line, w/2, primaryStartY+float64(i)*primaryLineHeight, 0.5, 0.5)
-			}
-
-			subSize := r.fitFontSize(dc, subtitle, w-26, math.Max(11, w*0.1), false)
-			dc.SetFontFace(r.face(false, subSize))
-			subtitleColor := mixColors(textColor, "#aeb6c0", 0.45)
-			if state.State == "CALL" {
-				// Dark subtitle on the light call yellow.
-				subtitleColor = mixColors(textColor, palette.background, 0.25)
-			}
-			dc.SetHexColor(subtitleColor)
-			secondaryLines := wrapButtonLines(dc, subtitle, w-26, 1)
-			dc.DrawStringAnchored(secondaryLines[0], w/2, math.Round(h*0.68), 0.5, 0.5)
-		} else {
-			// Single-label layout: up to two wrapped lines, centered in lower half
-			labelSize := r.fitFontSize(dc, label, w-24, math.Max(18, w*0.15), true)
-			dc.SetFontFace(r.face(true, labelSize))
-			dc.SetHexColor(textColor)
-			labelLines := wrapButtonLines(dc, label, w-24, 2)
-			labelLineHeight := math.Round(labelSize * 1.03)
-			labelStartY := math.Round(h*0.56) - (float64(len(labelLines)-1)*labelLineHeight)/2
-			for i, line := range labelLines {
-				dc.DrawStringAnchored(line, w/2, labelStartY+float64(i)*labelLineHeight, 0.5, 0.5)
-			}
-		}
-	}
-
-	var buf bytes.Buffer
-	if err := dc.EncodePNG(&buf); err != nil {
-		return nil, fmt.Errorf("failed to encode PNG: %w", err)
-	}
-	return buf.Bytes(), nil
-}
-
-func getButtonPalette(actionType, color string, pressed bool) keyPalette {
-	if pressed && actionType == string(StreamDeckActionTypeCallRoom) {
-		return keyPalette{
-			background: "#f2c94c",
-			border:     "#ffd76a",
-			label:      "#2a2110",
-		}
-	}
-
-	useEmergencyPressedColor := pressed && actionType != string(StreamDeckActionTypeNone) && actionType != string(StreamDeckActionTypeListenRoom)
-	if useEmergencyPressedColor {
-		return keyPalette{
-			background: "#ef1212",
-			border:     "#ff2d26",
-			label:      "#f7f7f7",
-		}
-	}
-
-	if strings.TrimSpace(color) != "" {
-		custom := normalizeHexColor(color)
-		amount := 0.22
-		if pressed {
-			amount = 0.42
-		}
-		return keyPalette{
-			background: "#000000",
-			border:     mixColors(custom, "#ffffff", amount),
-			label:      "#f2f5f8",
-		}
-	}
-
-	switch actionType {
-	case string(StreamDeckActionTypeBroadcastPTT):
-		return keyPalette{background: "#000000", border: "#ff2d26", label: "#f7f7f7"}
-	case string(StreamDeckActionTypeCallRoom):
-		return keyPalette{background: "#000000", border: "#ffc067", label: "#f6f0e8"}
-	case string(StreamDeckActionTypeSelectTalkRoom):
-		return keyPalette{background: "#000000", border: "#2da8ff", label: "#ecf7ff"}
-	case string(StreamDeckActionTypeSelectListen):
-		return keyPalette{background: "#000000", border: "#2db8a3", label: "#ecf9f6"}
-	case string(StreamDeckActionTypePTTSelected):
-		return keyPalette{background: "#000000", border: "#ff4d4d", label: "#fff1f1"}
-	case string(StreamDeckActionTypeListenRoom):
-		return keyPalette{background: "#000000", border: "#26d07c", label: "#ebfff3"}
-	case string(StreamDeckActionTypeDirectRole), string(StreamDeckActionTypeDirectUser):
-		return keyPalette{background: "#000000", border: "#ff2d26", label: "#f3f5f7"}
-	case string(StreamDeckActionTypePTTRoom):
-		return keyPalette{background: "#000000", border: "#1b2026", label: "#f1f4f8"}
-	case string(StreamDeckActionTypeReplyToCaller):
-		return keyPalette{background: "#000000", border: "#ffc067", label: "#f6f0e8"}
-	case string(StreamDeckActionTypeIncomingCall):
-		return keyPalette{background: "#000000", border: "#ffc067", label: "#f6f0e8"}
-	case string(StreamDeckActionTypeMuteToggle):
-		return keyPalette{background: "#000000", border: "#f84e4e", label: "#fff1f1"}
-	case string(StreamDeckActionTypeVolumeDelta):
-		return keyPalette{background: "#000000", border: "#9d8cff", label: "#f2f0ff"}
-	case string(StreamDeckActionTypePageUp), string(StreamDeckActionTypePageDown):
-		return keyPalette{background: "#000000", border: "#58ccf6", label: "#effbff"}
-	default:
-		return keyPalette{background: "#000000", border: "#1a1f26", label: "#edf2f8"}
-	}
-}
-
 func normalizeHexColor(input string) string {
 	value := strings.TrimSpace(input)
 	if value == "" {
@@ -479,20 +254,6 @@ func mixColors(hex, target string, amount float64) string {
 		return int(math.Round(value))
 	}
 	return fmt.Sprintf("#%02x%02x%02x", mix(sr, tr), mix(sg, tg), mix(sb, tb))
-}
-
-// fitFontSize shrinks the point size from initialSize down to 12 until the
-// text fits maxWidth; callers hold r.mu.
-func (r *ButtonImageRenderer) fitFontSize(dc *gg.Context, text string, maxWidth, initialSize float64, bold bool) float64 {
-	size := initialSize
-	for size > 12 {
-		dc.SetFontFace(r.face(bold, size))
-		if w, _ := dc.MeasureString(text); w <= maxWidth {
-			return size
-		}
-		size--
-	}
-	return size
 }
 
 func wrapButtonLines(dc *gg.Context, text string, maxWidth float64, maxLines int) []string {

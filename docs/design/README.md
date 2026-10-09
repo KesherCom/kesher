@@ -88,3 +88,23 @@ On a phone the cards become a list: the row is the talk area, the
 headphones are a square button on the right. Talk and reply sit in a fixed
 bar at the bottom; volume opens from the value ("0 dB") instead of a
 slider on every card.
+
+## 6. Stream Deck keys
+
+Kesher draws the key images itself (`backend/internal/app/key_render.go`,
+see [IMAGE-STREAM-BRIDGE](../IMAGE-STREAM-BRIDGE.md)) with the same rules:
+
+- IBM Plex Sans Condensed (SemiBold for the name, Medium for the line
+  below), embedded in the server from `backend/internal/app/fonts` (SIL Open
+  Font License, next to the files).
+- An icon on top shows the kind of key (mic, headphones, bell, person,
+  reply, broadcast, speaker, page arrows, folder), drawn from the same
+  paths as `components/Icon.tsx`. Kinds are not told apart by color.
+- Colors carry the state only: red fill = your microphone goes out, red
+  frame = selected as the line you talk on, green bar at the bottom = you
+  hear this line (green frame on a listen key), yellow fill = someone calls
+  (blinking) or you call a line. Everything else is neutral; a color chosen
+  in the layout editor tints the frame and icon.
+- Names get the largest size that fits on up to two lines; only when even
+  the smallest size is too big is the end cut with "...".
+

@@ -48,19 +48,6 @@ func TestButtonImageRendererRenderButtonImageProducesValidPNG(t *testing.T) {
 	}
 }
 
-func TestGetButtonPaletteUsesYellowPressedPaletteForCallRoom(t *testing.T) {
-	palette := getButtonPalette(string(StreamDeckActionTypeCallRoom), "", true)
-	if palette.background != "#f2c94c" {
-		t.Fatalf("unexpected pressed call background: got %q", palette.background)
-	}
-	if palette.border != "#ffd76a" {
-		t.Fatalf("unexpected pressed call border: got %q", palette.border)
-	}
-	if palette.label != "#2a2110" {
-		t.Fatalf("unexpected pressed call label: got %q", palette.label)
-	}
-}
-
 func TestButtonImageRendererRenderButtonImageRendersTopAndBottomStatusStripes(t *testing.T) {
 	renderer, err := NewButtonImageRenderer(&ButtonImageRenderConfig{Width: 112, Height: 112})
 	if err != nil {
@@ -83,8 +70,9 @@ func TestButtonImageRendererRenderButtonImageRendersTopAndBottomStatusStripes(t 
 		t.Fatalf("png.Decode failed: %v", err)
 	}
 
-	assertPixelNearRGB(t, img, 56, 8, 255, 45, 38)
-	assertPixelNearRGB(t, img, 56, 103, 20, 198, 75)
+	// Selected for talk: red frame. Heard: green bar at the bottom.
+	assertPixelNearRGB(t, img, 56, 4, 0xef, 0x44, 0x44)
+	assertPixelNearRGB(t, img, 56, 99, 0x22, 0xc5, 0x5e)
 }
 
 func assertPixelNearRGB(t *testing.T, img image.Image, x, y int, wantR, wantG, wantB uint8) {

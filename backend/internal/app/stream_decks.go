@@ -522,7 +522,8 @@ func (s *Server) emitDeckPairingImages(ctx context.Context, key string, deck Str
 		state := ButtonState{State: "IDLE", ActionType: string(StreamDeckActionTypeNone)}
 		switch index {
 		case 0:
-			state.Label, state.Subtitle = "Code", code
+			// The code is what people type in: large, with a small caption.
+			state.Label, state.Subtitle = code, "Pairing code"
 		case 1:
 			state.Label, state.Subtitle = deck.Name, "not paired"
 		default:

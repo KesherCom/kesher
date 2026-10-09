@@ -20,11 +20,13 @@ key state changes ──► ButtonImageRenderer ──► /api/image-stream ─�
 ## Server (`backend/internal/app/image_stream.go`)
 
 - `ButtonImageRenderer` draws a key from a `ButtonState` (label, subtitle,
-  action type, color, state, listening, selected for talk). The fonts are
+  action type, color, state, listening, selected for talk); the look is in
+  `key_render.go` and follows the visual system (docs/design, section 6:
+  IBM Plex Sans Condensed, icons, colors with one meaning). The fonts are
   parsed once; each renderer keeps its font faces and the images it drew,
   so a state it has seen (on another deck, after paging back, the two
   phases of a blinking call) costs no drawing. A new key takes about
-  2 ms, a repeated one well under a microsecond.
+  1.5 ms, a repeated one well under a microsecond.
 - States: `IDLE`, `TALK` (red, your mic goes out), `LISTEN`, `BROADCAST`,
   and `CALL` (yellow) for the "on" phase of an incoming call.
 - Blinking is done by the server: while a call waits, the Companion bridge
