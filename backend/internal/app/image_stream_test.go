@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -263,5 +264,76 @@ func TestResolveImageStreamTargetKeepsRoleOnlyBindingWithoutUsername(t *testing.
 	}
 	if username != "" {
 		t.Fatalf("expected empty username for role-only binding, got %q", username)
+	}
+}
+
+func TestButtonImageRendererReusesRenderedImages(t *testing.T) {
+	renderer, err := NewButtonImageRenderer(nil)
+	if err != nil {
+		t.Fatalf("NewButtonImageRenderer failed: %v", err)
+	}
+	state := ButtonState{Label: "Party Line 1", Subtitle: "FOH", ActionType: "select_talk_room", IsListening: true}
+
+	first, err := renderer.RenderButtonImage(state)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	second, err := renderer.RenderButtonImage(state)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	if &first[0] != &second[0] {
+		t.Fatal("expected the same key state to come from the cache")
+	}
+
+	encoded, err := renderer.RenderButtonImageBase64(state)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	if encoded != base64.StdEncoding.EncodeToString(first) {
+		t.Fatal("base64 image does not match the PNG")
+	}
+
+	state.IsPTTSelected = true
+	changed, err := renderer.RenderButtonImage(state)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	if bytes.Equal(first, changed) {
+		t.Fatal("expected a different image for a different key state")
+	}
+}
+
+func TestButtonImageRendererIsSafeForConcurrentUse(t *testing.T) {
+	renderer, err := buttonImageRendererForSize(96, 96)
+	if err != nil {
+		t.Fatalf("renderer failed: %v", err)
+	}
+	done := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		go func(i int) {
+			_, err := renderer.RenderButtonImage(ButtonState{Label: "Key", Subtitle: string(rune('A' + i))})
+			done <- err
+		}(i)
+	}
+	for i := 0; i < 8; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("concurrent render failed: %v", err)
+		}
+	}
+	again, _ := buttonImageRendererForSize(96, 96)
+	if again != renderer {
+		t.Fatal("expected one shared renderer per size")
+	}
+}
+
+func BenchmarkRenderButtonImageUncached(b *testing.B) {
+	renderer, _ := NewButtonImageRenderer(nil)
+	for i := 0; i < b.N; i++ {
+		// A new label each time defeats the image cache: measures drawing.
+		state := ButtonState{Label: "Party Line " + strconv.Itoa(i), Subtitle: "Ben talking", ActionType: "select_talk_room", IsListening: true}
+		if _, err := renderer.RenderButtonImage(state); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

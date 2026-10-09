@@ -22,7 +22,17 @@ import (
 	"golang.org/x/image/font/gofont/goregular"
 )
 
-const imageStreamRefreshInterval = 2 * time.Second
+// Button images are pushed when something changes. The periodic refresh is
+// only a safety net (and resolves a deck that connected before it was
+// known), so it runs rarely once the target is resolved.
+const (
+	imageStreamResolveInterval = 2 * time.Second
+	imageStreamRefreshInterval = 15 * time.Second
+)
+
+// buttonImageCacheSize bounds the rendered-image cache per renderer. A deck
+// page has 15 keys with a few states each; 512 covers many decks and pages.
+const buttonImageCacheSize = 512
 
 // ImageStreamMessage represents an image update message sent via WebSocket
 type ImageStreamMessage struct {
@@ -46,10 +56,26 @@ type ButtonImageRenderConfig struct {
 	Height int
 }
 
-// ButtonImageRenderer renders button state to image buffers
+// ButtonImageRenderer renders button state to PNG images. It keeps the
+// font faces and the images it rendered: the same key state (on another
+// deck, after paging back, the two phases of a blinking call) is not drawn
+// again. Font faces are not safe for concurrent use, so drawing is
+// serialized; with the caches a key takes well under a millisecond.
 type ButtonImageRenderer struct {
 	config ButtonImageRenderConfig
-	mu     sync.RWMutex
+	mu     sync.Mutex
+	faces  map[buttonFontKey]font.Face
+	images map[string]renderedButtonImage
+}
+
+type buttonFontKey struct {
+	bold bool
+	size float64
+}
+
+type renderedButtonImage struct {
+	png    []byte
+	base64 string
 }
 
 // NewButtonImageRenderer creates a new renderer with default config
@@ -60,9 +86,83 @@ func NewButtonImageRenderer(config *ButtonImageRenderConfig) (*ButtonImageRender
 			Height: 72,
 		}
 	}
+	if _, _, err := parsedButtonFonts(); err != nil {
+		return nil, err
+	}
 	return &ButtonImageRenderer{
 		config: *config,
+		faces:  make(map[buttonFontKey]font.Face),
+		images: make(map[string]renderedButtonImage),
 	}, nil
+}
+
+var (
+	buttonFontsOnce    sync.Once
+	buttonFontBold     *truetype.Font
+	buttonFontRegular  *truetype.Font
+	buttonFontParseErr error
+)
+
+// parsedButtonFonts parses the embedded fonts once per process.
+func parsedButtonFonts() (bold, regular *truetype.Font, err error) {
+	buttonFontsOnce.Do(func() {
+		if buttonFontBold, buttonFontParseErr = truetype.Parse(gobold.TTF); buttonFontParseErr != nil {
+			return
+		}
+		buttonFontRegular, buttonFontParseErr = truetype.Parse(goregular.TTF)
+	})
+	return buttonFontBold, buttonFontRegular, buttonFontParseErr
+}
+
+var (
+	sizedRenderersMu sync.Mutex
+	sizedRenderers   = map[[2]int]*ButtonImageRenderer{}
+)
+
+// buttonImageRendererForSize returns a shared renderer for one image size,
+// so previews and debug images reuse its caches.
+func buttonImageRendererForSize(width, height int) (*ButtonImageRenderer, error) {
+	sizedRenderersMu.Lock()
+	defer sizedRenderersMu.Unlock()
+	key := [2]int{width, height}
+	if r, ok := sizedRenderers[key]; ok {
+		return r, nil
+	}
+	r, err := NewButtonImageRenderer(&ButtonImageRenderConfig{Width: width, Height: height})
+	if err != nil {
+		return nil, err
+	}
+	sizedRenderers[key] = r
+	return r, nil
+}
+
+// face returns a cached font face; callers hold r.mu.
+func (r *ButtonImageRenderer) face(bold bool, size float64) font.Face {
+	key := buttonFontKey{bold: bold, size: size}
+	if f, ok := r.faces[key]; ok {
+		return f
+	}
+	boldFont, regularFont, _ := parsedButtonFonts()
+	src := regularFont
+	if bold {
+		src = boldFont
+	}
+	f := truetype.NewFace(src, &truetype.Options{
+		Size:    size,
+		DPI:     72,
+		Hinting: font.HintingFull,
+	})
+	r.faces[key] = f
+	return f
+}
+
+// RenderButtonImageBase64 renders (or reuses) a key image as base64 PNG.
+func (r *ButtonImageRenderer) RenderButtonImageBase64(state ButtonState) (string, error) {
+	img, err := r.render(state)
+	if err != nil {
+		return "", err
+	}
+	return img.base64, nil
 }
 
 // ButtonState represents the state of a button for rendering
@@ -122,11 +222,39 @@ const (
 	defaultForeground          = "#eef4ff"
 )
 
-// RenderButtonImage renders a button state as a PNG using the same card palette and
-// typography rules as web/src/lib/streamDeckHardwareFeedback.ts.
+// RenderButtonImage renders a button state as a PNG. The returned slice is
+// shared with the cache and must not be modified.
 func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	img, err := r.render(state)
+	if err != nil {
+		return nil, err
+	}
+	return img.png, nil
+}
+
+func (r *ButtonImageRenderer) render(state ButtonState) (renderedButtonImage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := buttonStateSignature(state)
+	if img, ok := r.images[key]; ok {
+		return img, nil
+	}
+	png, err := r.draw(state)
+	if err != nil {
+		return renderedButtonImage{}, err
+	}
+	if len(r.images) >= buttonImageCacheSize {
+		// Simple bound: start over rather than track recency. Refilling
+		// the current pages costs a few milliseconds.
+		r.images = make(map[string]renderedButtonImage, buttonImageCacheSize)
+	}
+	img := renderedButtonImage{png: png, base64: base64.StdEncoding.EncodeToString(png)}
+	r.images[key] = img
+	return img, nil
+}
+
+// draw paints one key; callers hold r.mu.
+func (r *ButtonImageRenderer) draw(state ButtonState) ([]byte, error) {
 
 	w := float64(r.config.Width)
 	h := float64(r.config.Height)
@@ -209,10 +337,8 @@ func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, erro
 	if label != "" {
 		if subtitle != "" {
 			// Two-line layout: large primary near top, small subtitle near bottom
-			primarySize := fitButtonFontSize(dc, label, w-24, math.Max(20, w*0.2), 800, gobold.TTF)
-			if face, err := loadButtonFontFace(gobold.TTF, primarySize); err == nil {
-				dc.SetFontFace(face)
-			}
+			primarySize := r.fitFontSize(dc, label, w-24, math.Max(20, w*0.2), true)
+			dc.SetFontFace(r.face(true, primarySize))
 			dc.SetHexColor(textColor)
 			primaryLines := wrapButtonLines(dc, label, w-24, 2)
 			primaryLineHeight := math.Round(primarySize * 1.1)
@@ -222,19 +348,15 @@ func (r *ButtonImageRenderer) RenderButtonImage(state ButtonState) ([]byte, erro
 				dc.DrawStringAnchored(line, w/2, primaryStartY+float64(i)*primaryLineHeight, 0.5, 0.5)
 			}
 
-			subSize := fitButtonFontSize(dc, subtitle, w-26, math.Max(11, w*0.1), 600, goregular.TTF)
-			if face, err := loadButtonFontFace(goregular.TTF, subSize); err == nil {
-				dc.SetFontFace(face)
-			}
+			subSize := r.fitFontSize(dc, subtitle, w-26, math.Max(11, w*0.1), false)
+			dc.SetFontFace(r.face(false, subSize))
 			dc.SetHexColor(mixColors(textColor, "#aeb6c0", 0.45))
 			secondaryLines := wrapButtonLines(dc, subtitle, w-26, 1)
 			dc.DrawStringAnchored(secondaryLines[0], w/2, math.Round(h*0.68), 0.5, 0.5)
 		} else {
 			// Single-label layout: up to two wrapped lines, centered in lower half
-			labelSize := fitButtonFontSize(dc, label, w-24, math.Max(18, w*0.15), 800, gobold.TTF)
-			if face, err := loadButtonFontFace(gobold.TTF, labelSize); err == nil {
-				dc.SetFontFace(face)
-			}
+			labelSize := r.fitFontSize(dc, label, w-24, math.Max(18, w*0.15), true)
+			dc.SetFontFace(r.face(true, labelSize))
 			dc.SetHexColor(textColor)
 			labelLines := wrapButtonLines(dc, label, w-24, 2)
 			labelLineHeight := math.Round(labelSize * 1.03)
@@ -347,28 +469,14 @@ func mixColors(hex, target string, amount float64) string {
 	return fmt.Sprintf("#%02x%02x%02x", mix(sr, tr), mix(sg, tg), mix(sb, tb))
 }
 
-// loadButtonFontFace parses a TTF byte slice and returns a font.Face at the given point size.
-func loadButtonFontFace(ttfBytes []byte, size float64) (font.Face, error) {
-	f, err := truetype.Parse(ttfBytes)
-	if err != nil {
-		return nil, err
-	}
-	return truetype.NewFace(f, &truetype.Options{
-		Size:    size,
-		DPI:     72,
-		Hinting: font.HintingFull,
-	}), nil
-}
-
-// fitButtonFontSize shrinks point size from initialSize down to 12 until the string fits maxWidth.
-func fitButtonFontSize(dc *gg.Context, text string, maxWidth, initialSize, _ float64, ttfBytes []byte) float64 {
+// fitFontSize shrinks the point size from initialSize down to 12 until the
+// text fits maxWidth; callers hold r.mu.
+func (r *ButtonImageRenderer) fitFontSize(dc *gg.Context, text string, maxWidth, initialSize float64, bold bool) float64 {
 	size := initialSize
 	for size > 12 {
-		if face, err := loadButtonFontFace(ttfBytes, size); err == nil {
-			dc.SetFontFace(face)
-			if w, _ := dc.MeasureString(text); w <= maxWidth {
-				return size
-			}
+		dc.SetFontFace(r.face(bold, size))
+		if w, _ := dc.MeasureString(text); w <= maxWidth {
+			return size
 		}
 		size--
 	}
@@ -601,15 +709,11 @@ func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID, username 
 		return
 	}
 
-	// Render the image
-	imageBuf, err := c.renderer.RenderButtonImage(state)
+	imageBase64, err := c.renderer.RenderButtonImageBase64(state)
 	if err != nil {
 		c.logger.Error("failed to render button image", "error", err)
 		return
 	}
-
-	// Encode to base64
-	imageBase64 := base64.StdEncoding.EncodeToString(imageBuf)
 
 	msg := ImageStreamMessage{
 		Type:          "update_button_image",
@@ -705,8 +809,9 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 	// Ping ticker
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	refreshTicker := time.NewTicker(imageStreamRefreshInterval)
+	refreshTicker := time.NewTicker(imageStreamResolveInterval)
 	defer refreshTicker.Stop()
+	lastRefresh := time.Now()
 
 	for {
 		select {
@@ -724,11 +829,16 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 			}
 
 		case <-refreshTicker.C:
-			if strings.TrimSpace(targetRoleID) == "" {
+			resolved := strings.TrimSpace(targetRoleID) != ""
+			if resolved && time.Since(lastRefresh) < imageStreamRefreshInterval {
+				continue
+			}
+			if !resolved {
 				targetRoleID, targetUsername = s.resolveImageStreamTarget(context.Background(), r)
 				client.RoleID = targetRoleID
 				client.Username = targetUsername
 			}
+			lastRefresh = time.Now()
 			s.enqueueInitialImageSnapshot(context.Background(), client, targetRoleID)
 
 		case <-client.done:
@@ -842,7 +952,7 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 		if !client.needsButtonUpdate(page.Page, button.Index, signature) {
 			continue
 		}
-		img, renderErr := s.imageStreamCoord.renderer.RenderButtonImage(state)
+		img, renderErr := s.imageStreamCoord.renderer.RenderButtonImageBase64(state)
 		if renderErr != nil {
 			s.logger.Warn("image snapshot render failed", "roleId", roleID, "index", button.Index, "error", renderErr)
 			continue
@@ -852,7 +962,7 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 			Type:          "update_button_image",
 			Bank:          page.Page,
 			ButtonIndex:   button.Index,
-			ImageBuffer:   base64.StdEncoding.EncodeToString(img),
+			ImageBuffer:   img,
 			EffectValue:   state.EffectValue,
 			Label:         state.Label,
 			Channel:       state.Channel,
@@ -911,7 +1021,7 @@ func (s *Server) HandleDebugButtonImage(w http.ResponseWriter, r *http.Request) 
 	width := parseDebugInt(r.URL.Query().Get("width"), 72)
 	height := parseDebugInt(r.URL.Query().Get("height"), 72)
 
-	renderer, err := NewButtonImageRenderer(&ButtonImageRenderConfig{Width: width, Height: height})
+	renderer, err := buttonImageRendererForSize(width, height)
 	if err != nil {
 		http.Error(w, "failed to initialize renderer", http.StatusInternalServerError)
 		return
@@ -1031,7 +1141,7 @@ func (s *Server) handleUserStreamDeckPreview(w http.ResponseWriter, r *http.Requ
 	width := parsePreviewDimension(req.Width, 112)
 	height := parsePreviewDimension(req.Height, 112)
 
-	renderer, err := NewButtonImageRenderer(&ButtonImageRenderConfig{Width: width, Height: height})
+	renderer, err := buttonImageRendererForSize(width, height)
 	if err != nil {
 		s.internalErr(w, err)
 		return
@@ -1039,7 +1149,7 @@ func (s *Server) handleUserStreamDeckPreview(w http.ResponseWriter, r *http.Requ
 
 	images := make([]streamDeckPreviewImage, 0, len(req.Buttons))
 	for _, button := range req.Buttons {
-		img, renderErr := renderer.RenderButtonImage(ButtonState{
+		img, renderErr := renderer.RenderButtonImageBase64(ButtonState{
 			Channel:       strings.TrimSpace(button.Channel),
 			State:         normalizeButtonRenderState(button.State),
 			Label:         strings.TrimSpace(button.Label),
@@ -1056,7 +1166,7 @@ func (s *Server) handleUserStreamDeckPreview(w http.ResponseWriter, r *http.Requ
 		}
 		images = append(images, streamDeckPreviewImage{
 			ButtonIndex: button.ButtonIndex,
-			ImageBuffer: base64.StdEncoding.EncodeToString(img),
+			ImageBuffer: img,
 		})
 	}
 
