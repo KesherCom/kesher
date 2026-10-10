@@ -155,6 +155,8 @@ type ButtonState struct {
 	IsListening   bool
 	IsPTTSelected bool
 	IsActive      bool
+	// VolumeDelta is the step of a mic gain key (its sign is the direction).
+	VolumeDelta int
 	// Calling: an incoming call waits on this key; State blinks between
 	// "CALL" and the normal state.
 	Calling bool
@@ -171,6 +173,7 @@ type streamDeckPreviewButtonRequest struct {
 	IsListening   bool   `json:"isListening,omitempty"`
 	IsPTTSelected bool   `json:"isPttSelected,omitempty"`
 	IsActive      bool   `json:"isActive,omitempty"`
+	VolumeDelta   int    `json:"volumeDelta,omitempty"`
 }
 
 type streamDeckPreviewRequest struct {
@@ -351,6 +354,7 @@ func buttonStateSignature(state ButtonState) string {
 			strconv.FormatBool(state.IsPTTSelected),
 			strconv.FormatBool(state.IsActive),
 			strconv.FormatBool(state.Calling),
+			strconv.Itoa(state.VolumeDelta),
 		},
 		"\x1f",
 	)
@@ -717,6 +721,9 @@ func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageS
 		if button.Action != nil && strings.TrimSpace(state.ActionType) == "" {
 			state.ActionType = string(button.Action.Type)
 		}
+		if button.Action != nil {
+			state.VolumeDelta = button.Action.VolumeDelta
+		}
 		if strings.TrimSpace(state.Color) == "" {
 			state.Color = strings.TrimSpace(button.Color)
 		}
@@ -925,6 +932,7 @@ func (s *Server) handleUserStreamDeckPreview(w http.ResponseWriter, r *http.Requ
 			IsListening:   button.IsListening,
 			IsPTTSelected: button.IsPTTSelected,
 			IsActive:      button.IsActive,
+			VolumeDelta:   button.VolumeDelta,
 		})
 		if renderErr != nil {
 			http.Error(w, "failed to render preview image", http.StatusInternalServerError)

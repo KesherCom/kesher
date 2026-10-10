@@ -946,7 +946,7 @@ func validateStreamDeckSettings(in StreamDeckSettings) (StreamDeckSettings, erro
 				return StreamDeckSettings{}, ErrInvalidInput
 			}
 			seenButtonIdx[button.Index] = struct{}{}
-			button.Label = strings.TrimSpace(button.Label)
+			button.Label = normalizeButtonLabel(button.Label)
 			button.Color = strings.TrimSpace(button.Color)
 			if button.Action != nil {
 				action := *button.Action

@@ -31,7 +31,16 @@ function resolveReplyTargetLabel(lookup: StreamDeckLabelLookup): string {
   return "Unknown caller";
 }
 
-function resolveActionLabel(
+/**
+ * A mic gain key's name, e.g. "Mic +2 dB" or "Mic \u22121 dB" (real minus
+ * sign), so the direction is on the key. Same as micGainLabel on the server.
+ */
+export function micGainLabel(delta: number | undefined): string {
+  const step = delta || 1;
+  return step < 0 ? `Mic \u2212${-step} dB` : `Mic +${step} dB`;
+}
+
+export function resolveActionLabel(
   action: StreamDeckButtonAction | undefined,
   lookup: StreamDeckLabelLookup,
 ): string | undefined {
@@ -101,7 +110,7 @@ function resolveActionLabel(
     case "mute_toggle":
       return "Mute";
     case "volume_delta":
-      return "Volume";
+      return micGainLabel(action.volumeDelta);
     case "page_up":
       return "Page +";
     case "page_down":
@@ -118,24 +127,47 @@ function resolveActionLabel(
   }
 }
 
+/**
+ * A key label's two parts: the name (first line) and the subtitle (second
+ * line). Either may be empty: "\nFOH" is an automatic name with the
+ * subtitle "FOH".
+ */
+export function splitStreamDeckLabelParts(label?: string): {
+  name: string;
+  subtitle: string;
+} {
+  const [name = "", subtitle = ""] = (label ?? "").split(/\r?\n/);
+  return { name: name.trim(), subtitle: subtitle.trim() };
+}
+
+/** Joins name and subtitle back into a stored key label. */
+export function joinStreamDeckLabelParts(
+  name: string,
+  subtitle: string,
+): string {
+  const cleanSubtitle = subtitle.trim();
+  return cleanSubtitle ? `${name.trim()}\n${cleanSubtitle}` : name.trim();
+}
+
+/**
+ * The label a key shows: a name set in the layout wins, otherwise the name
+ * comes from the key's action; a subtitle set in the layout is kept. Same
+ * rules as resolveButtonLabel on the server.
+ */
 export function withResolvedStreamDeckButtonLabel(
   button: StreamDeckButtonConfig,
   lookup: StreamDeckLabelLookup,
 ): StreamDeckButtonConfig {
+  const { name, subtitle } = splitStreamDeckLabelParts(button.label);
+
   if (button.action?.type === "reply_to_caller") {
-    const existingLabel = button.label?.trim() ?? "";
-    const primaryLabel =
-      existingLabel
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .find(Boolean) || "Reply";
     return {
       ...button,
-      label: `${primaryLabel}\n${resolveReplyTargetLabel(lookup)}`,
+      label: `${name || "Reply"}\n${resolveReplyTargetLabel(lookup)}`,
     };
   }
 
-  if (button.label?.trim()) {
+  if (name) {
     return button;
   }
 
@@ -144,9 +176,13 @@ export function withResolvedStreamDeckButtonLabel(
     return button;
   }
 
+  // An own second line replaces the automatic one (e.g. the role name).
+  const automatic = splitStreamDeckLabelParts(resolved);
   return {
     ...button,
-    label: resolved,
+    label: subtitle
+      ? joinStreamDeckLabelParts(automatic.name, subtitle)
+      : resolved,
   };
 }
 

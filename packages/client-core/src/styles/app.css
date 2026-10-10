@@ -2726,49 +2726,103 @@ button.secondary {
   color: var(--k-on-air-text);
 }
 
-/* Stream Deck layout editor: key grid on the left, the key's settings on
-   the right. Selection is cyan, a drop target too; a test press is red
-   because it acts like a real talk key. */
-.streamdeck-editor-shell fieldset {
-  border: 0;
-  margin: 0;
-  padding: 0;
+/* Stream Deck page (components/settings/StreamDeckSettings.tsx), top to
+   bottom: save state and actions, page tabs, the key grid with the
+   selected key's settings beside it, pairing last. Selection is cyan (also
+   a drop target); a test press is red because it acts like a talk key. */
+.sd-header {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-2);
+  margin-top: calc(-1 * var(--k-space-3));
+}
+.sd-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-2);
+  margin-left: auto;
+}
+.streamdeck-editor-shell {
   display: flex;
   flex-direction: column;
   gap: var(--k-space-3);
 }
-.streamdeck-toolbar {
+
+/* Pages as tabs on one line, "+" adds one. */
+.sd-pages {
   display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: var(--k-space-2);
+  gap: var(--k-space-1);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--k-border);
 }
-.streamdeck-page-nav {
-  display: flex;
-  align-items: center;
-  gap: var(--k-space-2);
-  margin-right: auto;
+.sd-page-tab {
+  flex: 0 0 auto;
+  min-height: 40px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--k-text-soft);
+  font-weight: 500;
+  box-shadow: inset 0 -2px 0 transparent;
+}
+.sd-page-tab:hover {
+  color: var(--k-text);
+  background: transparent;
+}
+.sd-page-tab.active {
+  color: var(--k-text);
+  box-shadow: inset 0 -2px 0 var(--k-selection);
+}
+.sd-page-add {
+  min-width: 40px;
+  font-size: var(--k-text-title);
+  color: var(--k-text-muted);
+}
+.sd-page-settings > summary {
+  width: fit-content;
   color: var(--k-text-soft);
   font-size: var(--k-text-label);
+  cursor: pointer;
 }
+.sd-page-settings-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  align-items: end;
+  gap: var(--k-space-3);
+  margin-top: var(--k-space-2);
+  padding: var(--k-space-3);
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius-control);
+}
+
+/* Grid and key settings side by side. */
 .streamdeck-layout {
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(240px, 300px);
+  grid-template-columns: minmax(300px, 1fr) minmax(260px, 320px);
   gap: var(--k-space-4);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.sd-grid-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-2);
 }
 .streamdeck-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(56px, 1fr));
+  grid-template-columns: repeat(5, minmax(52px, 1fr));
   gap: var(--k-space-2);
   align-content: start;
 }
 .streamdeck-button {
-  min-height: 84px;
+  aspect-ratio: 1;
+  min-height: 0;
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--k-border);
   border-radius: var(--k-radius-control);
-  background: var(--k-ground);
+  background: #000;
   cursor: pointer;
 }
 .streamdeck-button:hover {
@@ -2791,24 +2845,82 @@ button.secondary {
   height: 100%;
   object-fit: cover;
 }
+.sd-grid-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--k-space-3);
+}
+.sd-grid-foot button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* The selected key: preview at about real size, then "what it does" and
+   "how it looks". */
 .streamdeck-editor.panel {
   display: flex;
   flex-direction: column;
-  gap: var(--k-space-3);
+  gap: var(--k-space-4);
   padding: var(--k-space-4);
   background: var(--k-raised);
   border: 1px solid var(--k-border);
   border-radius: var(--k-radius-card);
 }
+.sd-key-head {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-3);
+}
+.sd-key-head img,
+.streamdeck-actual-size-empty {
+  flex: 0 0 72px;
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  background: #000;
+}
+.sd-key-title {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-1);
+}
 .streamdeck-editor h5 {
   margin: 0;
-  font-size: var(--k-text-body);
+  font-size: var(--k-text-title);
   font-weight: 600;
 }
 .streamdeck-editor-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--k-space-2);
+  gap: var(--k-space-3);
+}
+/* Small text buttons for copy, paste and clear. */
+.sd-text-button {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--k-text-soft);
+  font-size: var(--k-text-label);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.sd-text-button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--k-text);
+}
+.sd-key-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-3);
+  padding-top: var(--k-space-3);
+  border-top: 1px solid var(--k-border);
+}
+.sd-key-section h6 {
+  margin: 0;
+  font-size: var(--k-text-label);
+  font-weight: 600;
+  color: var(--k-text-muted);
 }
 .streamdeck-control {
   display: flex;
@@ -2818,6 +2930,35 @@ button.secondary {
 .streamdeck-control span {
   color: var(--k-text-soft);
   font-size: var(--k-text-label);
+}
+/* Frame colors: round swatches, the chosen one ringed in selection cyan. */
+.streamdeck-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--k-space-2);
+}
+.streamdeck-color {
+  width: 36px;
+  height: 36px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--k-border-strong);
+  background: var(--k-ground);
+  box-shadow: inset 0 0 0 4px var(--k-ground), inset 0 0 0 18px var(--swatch);
+}
+.streamdeck-color.auto {
+  width: auto;
+  padding: 0 var(--k-space-3);
+  border-radius: 18px;
+  box-shadow: none;
+  color: var(--k-text-soft);
+  font-size: var(--k-text-label);
+}
+.streamdeck-color.checked {
+  border-color: var(--k-selection);
+  outline: 2px solid var(--k-selection);
+  outline-offset: 1px;
 }
 
 @media (max-width: 900px) {

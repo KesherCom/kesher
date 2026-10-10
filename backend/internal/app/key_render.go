@@ -130,8 +130,8 @@ func keyLookFor(state ButtonState) keyLook {
 }
 
 // keyIconFor is the icon of a key's kind; "" draws none.
-func keyIconFor(actionType string) string {
-	switch StreamDeckActionType(strings.TrimSpace(actionType)) {
+func keyIconFor(state ButtonState) string {
+	switch StreamDeckActionType(strings.TrimSpace(state.ActionType)) {
 	case StreamDeckActionTypePTTRoom, StreamDeckActionTypePTTSelected,
 		StreamDeckActionTypeSelectTalkRoom, StreamDeckActionTypeSelectListen,
 		StreamDeckActionTypeMuteToggle:
@@ -147,7 +147,11 @@ func keyIconFor(actionType string) string {
 	case StreamDeckActionTypeBroadcastPTT:
 		return "broadcast"
 	case StreamDeckActionTypeVolumeDelta:
-		return "speaker"
+		// Mic gain: the sign says which way.
+		if state.VolumeDelta < 0 {
+			return "mic-minus"
+		}
+		return "mic-plus"
 	case StreamDeckActionTypePageUp:
 		return "arrow-up"
 	case StreamDeckActionTypePageDown:
@@ -170,7 +174,7 @@ func (r *ButtonImageRenderer) draw(state ButtonState) ([]byte, error) {
 	look := keyLookFor(state)
 	label := strings.TrimSpace(state.Label)
 	subtitle := strings.TrimSpace(state.Subtitle)
-	icon := keyIconFor(state.ActionType)
+	icon := keyIconFor(state)
 
 	dc := gg.NewContext(r.config.Width, r.config.Height)
 	dc.SetHexColor(keyCanvas)
@@ -199,45 +203,22 @@ func (r *ButtonImageRenderer) draw(state ButtonState) ([]byte, error) {
 		dc.Fill()
 	}
 
-	// Layout: icon on top, label in the middle, subtitle below.
-	textTop := 8 * s
-	if icon != "" {
-		size := 20 * s
-		drawKeyIcon(dc, icon, w/2-size/2, 8*s, size, look.icon)
-		textTop = 8*s + size + 2*s
+	layout := r.layoutKey(dc, label, subtitle, icon, look.hearBar, w, h, s)
+	if layout.showIcon {
+		size := keyIconSize * s
+		drawKeyIcon(dc, icon, w/2-size/2, keyPadding*s, size, look.icon)
 	}
-	textBottom := h - 8*s
-	if look.hearBar {
-		textBottom -= 8 * s
-	}
-
-	maxWidth := w - 12*s
-	if subtitle != "" {
-		subSize := r.fitFontSize(dc, subtitle, maxWidth, 12*s, 9*s, false)
-		dc.SetFontFace(r.face(false, subSize))
+	if layout.subtitle != "" {
+		dc.SetFontFace(r.face(false, layout.subtitleSize))
 		dc.SetHexColor(look.subtitle)
-		subLine := wrapButtonLines(dc, subtitle, maxWidth, 1)[0]
-		subY := textBottom - subSize*0.5
-		dc.DrawStringAnchored(subLine, w/2, subY, 0.5, 0.35)
-		textBottom = subY - subSize*0.75
+		dc.DrawStringAnchored(layout.subtitle, w/2, layout.subtitleY, 0.5, 0.35)
 	}
-	if label != "" {
-		maxLines := 2
-		if textBottom-textTop < 2*13*s {
-			maxLines = 1
-		}
-		start := 17 * s
-		if icon == "" {
-			// No icon (a pairing code, a plain label): more room for the text.
-			start = 22 * s
-		}
-		size, lines := r.fitLabel(dc, label, maxWidth, maxLines, start, 10*s)
-		lineHeight := size * 1.05
-		blockCenter := (textTop + textBottom) / 2
-		firstY := blockCenter - float64(len(lines)-1)*lineHeight/2
-		dc.SetFontFace(r.face(true, size))
+	if len(layout.nameLines) > 0 {
+		dc.SetFontFace(r.face(true, layout.nameSize))
 		dc.SetHexColor(look.text)
-		for i, line := range lines {
+		lineHeight := layout.nameSize * keyLineHeight
+		firstY := layout.nameCenterY - float64(len(layout.nameLines)-1)*lineHeight/2
+		for i, line := range layout.nameLines {
 			dc.DrawStringAnchored(line, w/2, firstY+float64(i)*lineHeight, 0.5, 0.35)
 		}
 	}
@@ -252,33 +233,204 @@ func encodeKeyPNG(dc *gg.Context) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// fitFontSize shrinks the size from start down to min until the text fits
-// maxWidth on one line; callers hold r.mu.
-func (r *ButtonImageRenderer) fitFontSize(dc *gg.Context, text string, maxWidth, start, min float64, bold bool) float64 {
-	size := math.Round(start)
-	for size > min {
-		dc.SetFontFace(r.face(bold, size))
-		if width, _ := dc.MeasureString(text); width <= maxWidth {
-			return size
-		}
-		size--
-	}
-	return min
+// Key layout, in 72 px units. The name always wins: it gets the largest
+// of keyNameSizes that fits completely; if it does not fit next to the
+// icon, the icon is left out; only then are long words split and, at the
+// very end, the last line cut with "…". The second line stays one line.
+const (
+	keyPadding      = 6.0
+	keyIconSize     = 18.0
+	keyIconGap      = 3.0
+	keyHearBarSpace = 8.0
+	keyLineHeight   = 1.08
+)
+
+var (
+	keyNameSizes         = []float64{18, 16, 15, 14, 13, 12, 11}
+	keyNameSizesWithIcon = []float64{17, 16, 15, 14, 13} // below 13 the icon goes
+	keyPlainNameSizes    = []float64{24, 22, 20, 18, 16, 15, 14, 13, 12, 11}
+	keySubtitleSizes     = []float64{11, 10, 9}
+)
+
+type keyLayout struct {
+	showIcon     bool
+	nameSize     float64
+	nameLines    []string
+	nameCenterY  float64
+	subtitle     string
+	subtitleSize float64
+	subtitleY    float64
 }
 
-// fitLabel finds the largest size (from start down to min) at which the
-// label fits in maxLines lines without cutting a word. Only when even min
-// is too big is the last line cut with "...". Callers hold r.mu.
-func (r *ButtonImageRenderer) fitLabel(dc *gg.Context, label string, maxWidth float64, maxLines int, start, min float64) (float64, []string) {
+// layoutKey places icon, name and second line; callers hold r.mu.
+func (r *ButtonImageRenderer) layoutKey(dc *gg.Context, label, subtitle, icon string, hearBar bool, w, h, s float64) keyLayout {
+	maxWidth := w - 2*keyPadding*s
+	bottom := h - keyPadding*s
+	if hearBar {
+		bottom -= keyHearBarSpace * s
+	}
+	out := keyLayout{}
+
+	if subtitle != "" {
+		out.subtitleSize = keySubtitleSizes[len(keySubtitleSizes)-1] * s
+		for _, size := range keySubtitleSizes {
+			dc.SetFontFace(r.face(false, size*s))
+			if width, _ := dc.MeasureString(subtitle); width <= maxWidth {
+				out.subtitleSize = size * s
+				break
+			}
+		}
+		dc.SetFontFace(r.face(false, out.subtitleSize))
+		out.subtitle = truncateToWidth(dc, subtitle, maxWidth)
+		out.subtitleY = bottom - out.subtitleSize*0.5
+		bottom = out.subtitleY - out.subtitleSize*0.5 - 2*s
+	}
+
 	words := strings.Fields(label)
-	for size := math.Round(start); size >= min; size-- {
-		dc.SetFontFace(r.face(true, size))
-		if lines, ok := wrapWords(dc, words, maxWidth, maxLines); ok {
-			return size, lines
+	try := func(withIcon bool, sizes []float64) bool {
+		top := keyPadding * s
+		if withIcon {
+			top += (keyIconSize + keyIconGap) * s
+		}
+		for _, unit := range sizes {
+			size := unit * s
+			maxLines := int((bottom - top) / (size * keyLineHeight))
+			if maxLines > 3 {
+				maxLines = 3
+			}
+			if maxLines < 1 {
+				continue
+			}
+			dc.SetFontFace(r.face(true, size))
+			if lines, ok := wrapWords(dc, words, maxWidth, maxLines); ok {
+				lines = balanceTwoLines(dc, words, lines, maxWidth)
+				out.showIcon = withIcon
+				out.nameSize = size
+				out.nameLines = lines
+				out.nameCenterY = (top + bottom) / 2
+				return true
+			}
+		}
+		return false
+	}
+
+	switch {
+	case len(words) == 0:
+		out.showIcon = icon != ""
+	case icon == "":
+		if !try(false, keyPlainNameSizes) {
+			r.layoutSplitName(dc, &out, label, maxWidth, keyPadding*s, bottom, s)
+		}
+	default:
+		if !try(true, keyNameSizesWithIcon) && !try(false, keyNameSizes) {
+			r.layoutSplitName(dc, &out, label, maxWidth, keyPadding*s, bottom, s)
 		}
 	}
-	dc.SetFontFace(r.face(true, min))
-	return min, wrapButtonLines(dc, label, maxWidth, maxLines)
+	if len(words) == 0 && icon != "" {
+		// Only an icon (and maybe a second line): center it a little lower.
+		out.showIcon = true
+	}
+	return out
+}
+
+// layoutSplitName is the last resort for a name that does not fit even at
+// the smallest size: long words are split with a hyphen, and what still
+// does not fit is cut with "…".
+func (r *ButtonImageRenderer) layoutSplitName(dc *gg.Context, out *keyLayout, label string, maxWidth, top, bottom, s float64) {
+	size := keyNameSizes[len(keyNameSizes)-1] * s
+	dc.SetFontFace(r.face(true, size))
+	maxLines := int((bottom - top) / (size * keyLineHeight))
+	if maxLines > 3 {
+		maxLines = 3
+	}
+	if maxLines < 1 {
+		maxLines = 1
+	}
+	var pieces []string
+	for _, word := range strings.Fields(label) {
+		pieces = append(pieces, splitWordToWidth(dc, word, maxWidth)...)
+	}
+	lines, ok := wrapWords(dc, pieces, maxWidth, maxLines)
+	if !ok {
+		lines = wrapButtonLines(dc, strings.Join(pieces, " "), maxWidth, maxLines)
+		for i := range lines {
+			lines[i] = truncateToWidth(dc, lines[i], maxWidth)
+		}
+	}
+	out.showIcon = false
+	out.nameSize = size
+	out.nameLines = lines
+	out.nameCenterY = (top + bottom) / 2
+}
+
+// splitWordToWidth breaks a word wider than maxWidth into pieces that end
+// in "-" (the last one without).
+func splitWordToWidth(dc *gg.Context, word string, maxWidth float64) []string {
+	if width, _ := dc.MeasureString(word); width <= maxWidth {
+		return []string{word}
+	}
+	runes := []rune(word)
+	var pieces []string
+	start := 0
+	for start < len(runes) {
+		end := len(runes)
+		for end > start+1 {
+			piece := string(runes[start:end])
+			if end < len(runes) {
+				piece += "-"
+			}
+			if width, _ := dc.MeasureString(piece); width <= maxWidth {
+				break
+			}
+			end--
+		}
+		piece := string(runes[start:end])
+		if end < len(runes) {
+			piece += "-"
+		}
+		pieces = append(pieces, piece)
+		start = end
+	}
+	return pieces
+}
+
+// truncateToWidth cuts text with "…" so it fits maxWidth.
+func truncateToWidth(dc *gg.Context, text string, maxWidth float64) string {
+	if width, _ := dc.MeasureString(text); width <= maxWidth {
+		return text
+	}
+	runes := []rune(strings.TrimSuffix(strings.TrimSpace(text), "..."))
+	for len(runes) > 0 {
+		candidate := strings.TrimSpace(string(runes)) + "…"
+		if width, _ := dc.MeasureString(candidate); width <= maxWidth {
+			return candidate
+		}
+		runes = runes[:len(runes)-1]
+	}
+	return "…"
+}
+
+// balanceTwoLines re-splits a two-line name so both lines are about as
+// wide ("Party / Line 1" rather than "Party Line / 1").
+func balanceTwoLines(dc *gg.Context, words, lines []string, maxWidth float64) []string {
+	if len(lines) != 2 || len(words) < 2 {
+		return lines
+	}
+	best := lines
+	bestWidest := math.MaxFloat64
+	for cut := 1; cut < len(words); cut++ {
+		first := strings.Join(words[:cut], " ")
+		second := strings.Join(words[cut:], " ")
+		w1, _ := dc.MeasureString(first)
+		w2, _ := dc.MeasureString(second)
+		if w1 > maxWidth || w2 > maxWidth {
+			continue
+		}
+		if widest := math.Max(w1, w2); widest < bestWidest {
+			best, bestWidest = []string{first, second}, widest
+		}
+	}
+	return best
 }
 
 // wrapWords puts words on at most maxLines lines of maxWidth; ok is false
@@ -322,6 +474,8 @@ var keyIcons = map[string][]string{
 	"reply":      {"M9 14 4 9l5-5", "M4 9h10a6 6 0 0 1 6 6v3"},
 	"broadcast":  {"C 12 12 2", "M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"},
 	"speaker":    {"M4 10h4l5-4v12l-5-4H4z", "M16.5 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11"},
+	"mic-plus":   {"R 5 3 6 11 3", "M2 11a6 6 0 0 0 12 0M8 17v4", "M15 8h7M18.5 4.5v7"},
+	"mic-minus":  {"R 5 3 6 11 3", "M2 11a6 6 0 0 0 12 0M8 17v4", "M15 8h7"},
 	"arrow-up":   {"M12 19V5M6 11l6-6 6 6"},
 	"arrow-down": {"M12 5v14M6 13l6 6 6-6"},
 	"arrow-left": {"M19 12H5M11 6l-6 6 6 6"},

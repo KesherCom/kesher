@@ -568,6 +568,7 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
               state,
               channel:
                 button.action?.roomId ||
+              volumeDelta: button.action?.volumeDelta,
                 button.action?.broadcastGroupId ||
                 button.action?.roleId ||
                 button.action?.userId ||

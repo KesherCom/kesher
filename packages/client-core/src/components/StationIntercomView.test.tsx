@@ -372,7 +372,7 @@ describe("StationIntercomView", () => {
     await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
 
     expect(
-      screen.getByRole("option", { name: "Volume +/-" }),
+      screen.getByRole("option", { name: "Mic gain + / −" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Page up" })).toBeInTheDocument();
     expect(
@@ -577,6 +577,87 @@ describe("StationIntercomView", () => {
     expect(screen.getByText("Not saved")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(onSaveStreamDeckSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("edits a key's second line and frame color, keeping the automatic name", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    const streamDeckSettings: StreamDeckSettings = {
+      version: 1,
+      gridColumns: 5,
+      gridRows: 3,
+      selectedPage: 0,
+      pages: [
+        {
+          page: 0,
+          buttons: Array.from({ length: 15 }, (_, i) =>
+            i === 0
+              ? {
+                  index: 0,
+                  action: { type: "ptt_room" as const, roomId: "room-1" },
+                }
+              : { index: i },
+          ),
+        },
+      ],
+    };
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        streamDeckSettings={streamDeckSettings}
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    const name = screen.getByRole("textbox", { name: "Key name" });
+    expect(name).toHaveAttribute("placeholder", "Automatic: Party Line 1");
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Key second line" }),
+      "S",
+    );
+    const typed = onStreamDeckSettingsChange.mock.calls.at(-1)?.[0];
+    expect(typed?.pages[0].buttons[0].label).toBe("\nS");
+
+    await user.click(screen.getByRole("radio", { name: "Violet" }));
+    const colored = onStreamDeckSettingsChange.mock.calls.at(-1)?.[0];
+    expect(colored?.pages[0].buttons[0].color).toBe("#8b5cf6");
+  });
+
+  it("switches pages with the page tabs", async () => {
+    const user = userEvent.setup();
+    const onStreamDeckSettingsChange = vi.fn();
+    const streamDeckSettings: StreamDeckSettings = {
+      version: 1,
+      gridColumns: 5,
+      gridRows: 3,
+      selectedPage: 0,
+      pages: [0, 1].map((page) => ({
+        page,
+        title: page === 1 ? "Cameras" : "",
+        buttons: Array.from({ length: 15 }, (_, i) => ({ index: i })),
+      })),
+    };
+    render(
+      <StationIntercomView
+        {...baseProps}
+        isUserSettingsOpen
+        streamDeckSettings={streamDeckSettings}
+        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+
+    expect(screen.getByRole("tab", { name: "Page 1" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await user.click(screen.getByRole("tab", { name: "Cameras" }));
+    expect(onStreamDeckSettingsChange.mock.calls.at(-1)?.[0].selectedPage).toBe(
+      1,
+    );
   });
 
   it("exports stream deck settings as a JSON file", async () => {

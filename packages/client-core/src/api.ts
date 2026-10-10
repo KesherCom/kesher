@@ -1305,6 +1305,8 @@ export type StreamDeckPreviewButton = {
   isListening?: boolean;
   isPttSelected?: boolean;
   isActive?: boolean;
+  /** Step of a mic gain key; its sign is the direction on the key. */
+  volumeDelta?: number;
 };
 
 export async function renderStreamDeckPreviewImages(

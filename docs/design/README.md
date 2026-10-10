@@ -92,19 +92,55 @@ slider on every card.
 ## 6. Stream Deck keys
 
 Kesher draws the key images itself (`backend/internal/app/key_render.go`,
-see [IMAGE-STREAM-BRIDGE](../IMAGE-STREAM-BRIDGE.md)) with the same rules:
+see [IMAGE-STREAM-BRIDGE](../IMAGE-STREAM-BRIDGE.md)) with the same rules.
+Every design at a glance (regenerate with
+`KESHER_KEY_SHEET=../../../docs/design go test -run TestKeyDesignSheet ./internal/app`
+in `backend/`):
 
-- IBM Plex Sans Condensed (SemiBold for the name, Medium for the line
-  below), embedded in the server from `backend/internal/app/fonts` (SIL Open
-  Font License, next to the files).
-- An icon on top shows the kind of key (mic, headphones, bell, person,
-  reply, broadcast, speaker, page arrows, folder), drawn from the same
-  paths as `components/Icon.tsx`. Kinds are not told apart by color.
-- Colors carry the state only: red fill = your microphone goes out, red
-  frame = selected as the line you talk on, green bar at the bottom = you
-  hear this line (green frame on a listen key), yellow fill = someone calls
-  (blinking) or you call a line. Everything else is neutral; a color chosen
-  in the layout editor tints the frame and icon.
-- Names get the largest size that fits on up to two lines; only when even
-  the smallest size is too big is the end cut with "...".
+![All Stream Deck key designs](stream-deck-keys.png)
 
+**Build of a key** (72 px key; larger decks scale it):
+
+- Black key, a card inset 2 px with radius 10 and a 2 px frame.
+- Top: the icon of the key's kind (18 px). Middle: the name. Bottom: the
+  second line (one line, smaller, muted). A green bar under it when you
+  hear the line.
+- Type: IBM Plex Sans Condensed, SemiBold for the name, Medium for the
+  second line, embedded from `backend/internal/app/fonts` (SIL Open Font
+  License next to the files).
+
+**Colors carry the state, never the kind:**
+
+| Key shows | Means |
+| --- | --- |
+| neutral card, grey frame | idle |
+| red fill | your microphone goes out (talk, reply, broadcast held; mic open) |
+| red frame | this is the line you talk on (selected), like an armed card in the app |
+| green bar at the bottom | you hear this party line |
+| green frame and icon | a listen key that is on |
+| yellow fill | someone calls you (blinks every 300 ms), or you hold a call key |
+| darker card | you hold a key that sends no audio (page, mic gain, listen) |
+| own frame color | chosen in the editor only to tell keys apart (no red, green or yellow) |
+
+**Icons tell the kind:** mic (talk keys, mute), headphones (listen), bell
+(call a line, incoming calls), person (talk to a person or role), reply,
+broadcast, mic with + or − (mic gain), arrows and house (pages), folder
+(open a page). They use the paths of `components/Icon.tsx`.
+
+**Names:**
+
+- The name always wins. It gets the largest size that fits completely on
+  up to three lines (two lines are split evenly: "Party / Line 1").
+- If it does not fit next to the icon at 13 px, the icon is left out.
+- Only then are long words split with a hyphen ("Bühnenma-nagement"); "…"
+  is the very last resort. The second line is cut with "…" when too long.
+- Keys name themselves from their action when the name is empty: the party
+  line, the person (with their role below), "Mic +2 dB" / "Mic −1 dB" for
+  mic gain (the sign is the direction), "Page +", the page's name.
+- An unassigned key stays black.
+
+**In the layout editor** a key has a name (empty = automatic, the editor
+shows the automatic name as placeholder) and an optional second line; both
+are stored as one label, `name\nsecond line`, so `\nStage left` keeps the
+automatic name. Frame colors are swatches; the selected key is also shown at
+about its real size.

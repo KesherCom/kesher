@@ -2951,6 +2951,9 @@ func (s *Server) emitCompanionButtonImage(ctx context.Context, roleID string, us
 	if strings.TrimSpace(state.ActionType) == "" && button.Action != nil {
 		state.ActionType = string(button.Action.Type)
 	}
+	if button.Action != nil {
+		state.VolumeDelta = button.Action.VolumeDelta
+	}
 	if strings.TrimSpace(state.Color) == "" {
 		state.Color = strings.TrimSpace(button.Color)
 	}
@@ -2970,11 +2973,8 @@ func (s *Server) emitCompanionButtonImage(ctx context.Context, roleID string, us
 
 func (s *Server) resolveReplyToCallerLabels(button StreamDeckButtonConfig, username string) (primary, subtitle string) {
 	primary = "Reply"
-	if raw := strings.TrimSpace(button.Label); raw != "" {
-		parts := strings.SplitN(raw, "\n", 2)
-		if line := strings.TrimSpace(parts[0]); line != "" {
-			primary = line
-		}
+	if name, _ := splitButtonLabel(button.Label); name != "" {
+		primary = name
 	}
 	if s.hub == nil || strings.TrimSpace(username) == "" {
 		return primary, "No active caller"
@@ -2988,11 +2988,8 @@ func (s *Server) resolveReplyToCallerLabels(button StreamDeckButtonConfig, usern
 
 func (s *Server) resolveIncomingCallIndicatorLabels(button StreamDeckButtonConfig, username string) (primary, subtitle string) {
 	primary = "Incoming"
-	if raw := strings.TrimSpace(button.Label); raw != "" {
-		parts := strings.SplitN(raw, "\n", 2)
-		if line := strings.TrimSpace(parts[0]); line != "" {
-			primary = line
-		}
+	if name, _ := splitButtonLabel(button.Label); name != "" {
+		primary = name
 	}
 	if strings.TrimSpace(username) == "" {
 		return primary, ""
@@ -3009,19 +3006,46 @@ func (s *Server) resolveIncomingCallIndicatorLabels(button StreamDeckButtonConfi
 	return primary, ""
 }
 
-// resolveButtonLabel resolves the display label and optional subtitle for a button,
-// mirroring the logic in web/src/lib/streamDeckLabels.ts.
-func (s *Server) resolveButtonLabel(ctx context.Context, button StreamDeckButtonConfig) (primary, subtitle string) {
-	// Static label set directly in config takes priority (first line = primary, second = subtitle)
-	if raw := strings.TrimSpace(button.Label); raw != "" {
-		parts := strings.SplitN(raw, "\n", 2)
-		primary = strings.TrimSpace(parts[0])
-		if len(parts) > 1 {
-			subtitle = strings.TrimSpace(parts[1])
-		}
-		return
+// splitButtonLabel splits a key label into its name (first line) and
+// subtitle (second line). Either may be empty: "\nFOH" is an automatic
+// name with the subtitle "FOH".
+func splitButtonLabel(raw string) (name, subtitle string) {
+	parts := strings.SplitN(strings.ReplaceAll(raw, "\r\n", "\n"), "\n", 2)
+	name = strings.TrimSpace(parts[0])
+	if len(parts) > 1 {
+		subtitle = strings.TrimSpace(strings.SplitN(parts[1], "\n", 2)[0])
 	}
+	return name, subtitle
+}
 
+// normalizeButtonLabel trims both lines of a key label and keeps an empty
+// name when only a subtitle is set.
+func normalizeButtonLabel(raw string) string {
+	name, subtitle := splitButtonLabel(raw)
+	if subtitle == "" {
+		return name
+	}
+	return name + "\n" + subtitle
+}
+
+// resolveButtonLabel resolves the display name and subtitle of a key,
+// mirroring packages/client-core/src/lib/streamDeckLabels.ts: a name set in
+// the layout wins; otherwise the name comes from the key's action. A
+// subtitle set in the layout replaces the automatic one.
+func (s *Server) resolveButtonLabel(ctx context.Context, button StreamDeckButtonConfig) (primary, subtitle string) {
+	name, ownSubtitle := splitButtonLabel(button.Label)
+	if name != "" {
+		return name, ownSubtitle
+	}
+	primary, subtitle = s.automaticButtonLabel(ctx, button)
+	if ownSubtitle != "" {
+		subtitle = ownSubtitle
+	}
+	return primary, subtitle
+}
+
+// automaticButtonLabel is the name (and subtitle) a key gets from its action.
+func (s *Server) automaticButtonLabel(ctx context.Context, button StreamDeckButtonConfig) (primary, subtitle string) {
 	if button.Action == nil || button.Action.Type == StreamDeckActionTypeNone {
 		return
 	}
@@ -3107,7 +3131,7 @@ func (s *Server) resolveButtonLabel(ctx context.Context, button StreamDeckButton
 	case StreamDeckActionTypeMuteToggle:
 		return "Mute", ""
 	case StreamDeckActionTypeVolumeDelta:
-		return "Volume", ""
+		return micGainLabel(action.VolumeDelta), ""
 	case StreamDeckActionTypePageUp:
 		return "Page +", ""
 	case StreamDeckActionTypePageDown:
@@ -3121,6 +3145,18 @@ func (s *Server) resolveButtonLabel(ctx context.Context, button StreamDeckButton
 		return "Jump", ""
 	}
 	return fallbackButtonLabel(action.Type), ""
+}
+
+// micGainLabel names a mic gain key by its step, e.g. "Mic +2 dB" or
+// "Mic −1 dB" (with a real minus sign), so the direction is on the key.
+func micGainLabel(delta int) string {
+	if delta == 0 {
+		delta = 1
+	}
+	if delta < 0 {
+		return fmt.Sprintf("Mic \u2212%d dB", -delta)
+	}
+	return fmt.Sprintf("Mic +%d dB", delta)
 }
 
 func fallbackButtonLabel(actionType StreamDeckActionType) string {
