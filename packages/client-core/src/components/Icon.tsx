@@ -20,7 +20,9 @@ export type IconName =
   | "keyboard"
   | "layout"
   | "grid"
-  | "device";
+  | "device"
+  | "send"
+  | "check";
 
 const paths: Record<IconName, ReactElement> = {
   mic: (
@@ -108,6 +110,8 @@ const paths: Record<IconName, ReactElement> = {
       <rect x="17" y="13" width="4" height="5" rx="1" />
     </>
   ),
+  send: <path d="M4 12 20 4l-6 16-3-7z M11 13l9-9" />,
+  check: <path d="M5 12.5 10 17.5 19.5 7" />,
   device: (
     <>
       <rect x="7" y="3" width="10" height="18" rx="2" />

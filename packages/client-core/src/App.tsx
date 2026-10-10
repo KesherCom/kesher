@@ -36,7 +36,11 @@ import {
   useKeyboardShortcuts,
   type ShortcutCallbacks,
 } from "./app/useKeyboardShortcuts";
-import { roleAllowed, matrixAnchorRoomId } from "./lib/intercom";
+import {
+  roleAllowed,
+  matrixAnchorRoomId,
+  resolveChatTargetRoomId,
+} from "./lib/intercom";
 import {
   gainWithDbDelta,
   parseStreamDeckBridgeEvent,
@@ -564,11 +568,11 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
               label: labels.primary,
               subtitle: labels.subtitle,
               actionType: button.action?.type,
+              volumeDelta: button.action?.volumeDelta,
               color: button.color,
               state,
               channel:
                 button.action?.roomId ||
-              volumeDelta: button.action?.volumeDelta,
                 button.action?.broadcastGroupId ||
                 button.action?.roleId ||
                 button.action?.userId ||
@@ -1899,6 +1903,19 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
       rooms={appData.rooms.map((room) => ({ id: room.id, name: room.name }))}
       roles={appData.roles.map((role) => ({ id: role.id, name: role.name }))}
       activeUsers={activeUsersForChat}
+      selfUserId={appData.self.id}
+      writableRoomIds={appData.rooms
+        .filter((room) => roleAllowed(room.senderRoleIds, appData.self.roleId))
+        .map((room) => room.id)}
+      defaultRoomId={resolveChatTargetRoomId(
+        session.listenRoomIds,
+        session.talkRoomIds,
+        appData.rooms,
+        appData.roles.find((role) => role.id === appData.self.roleId),
+        appData.self.roleId,
+      )}
+      notice={session.chatNotice}
+      onDismissNotice={session.clearChatNotice}
     />
   );
   const realtimeDebugBlock = <RealtimeEventsPanel events={session.events} />;

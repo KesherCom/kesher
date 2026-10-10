@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import type { ChatRecipient } from "../../types";
+import { Icon, type IconName } from "../Icon";
 
 type ChatEntry = {
   from: string;
@@ -18,18 +20,18 @@ type ChatEntry = {
   source?: string;
 };
 
-type AutocompleteItem = {
+type Suggestion = {
   key: string;
-  label: string;
-  displayLabel: string;
-  insertText: string;
-  type: "user" | "role" | "room";
+  recipient: ChatRecipient;
+  name: string;
+  detail: string;
+  icon: IconName;
 };
 
 type ChatSignalPanelProps = {
   message: string;
   onMessageChange: (value: string) => void;
-  onSendChat: (ackRequired?: boolean) => void;
+  onSendChat: (ackRequired: boolean, recipient: ChatRecipient | null) => void;
   onAcknowledge: (messageId: string, senderUserId: string) => void;
   showAckOption?: boolean;
   chatMessages: ChatEntry[];
@@ -43,26 +45,51 @@ type ChatSignalPanelProps = {
     roleName: string;
     isWebOnline?: boolean;
   }>;
+  /** Your own user ID: you are not offered as a recipient. */
+  selfUserId?: string;
+  /** Party lines you may write to (default: all). */
+  writableRoomIds?: string[];
+  /** Your talk line: where a message goes when no recipient is chosen. */
+  defaultRoomId?: string;
+  /** Why the last message was not delivered. */
+  notice?: string;
+  onDismissNotice?: () => void;
 };
 
-function autocompleteContext(value: string, caret: number) {
-  const left = value.slice(0, caret);
-  const match = left.match(/(^|\s)([@#][^\s@#]*)$/);
-  if (!match) {
+const recipientKey = (r: ChatRecipient | null) =>
+  r ? `${r.type}:${r.id}` : "";
+
+function parseRecipientKey(key: string): ChatRecipient | null {
+  const [type, ...rest] = key.split(":");
+  const id = rest.join(":");
+  if (!id || (type !== "room" && type !== "user" && type !== "role")) {
     return null;
   }
+  return { type, id };
+}
+
+/**
+ * The "@sar" or "#lighting bo" being typed at the caret, if any. It may
+ * contain spaces (names can); it only counts while a name still matches.
+ */
+function mentionAt(value: string, caret: number) {
+  const left = value.slice(0, caret);
+  const match = left.match(/(^|\s)([@#][^@#\n]*)$/);
+  if (!match) return null;
   const token = match[2] || "";
-  const trigger = token[0] as "@" | "#";
-  const query = token.slice(1).toLowerCase();
-  const tokenStart = left.length - token.length;
   return {
-    trigger,
-    query,
-    tokenStart,
-    tokenEnd: caret,
+    trigger: token[0] as "@" | "#",
+    query: token.slice(1).toLowerCase(),
+    start: left.length - token.length,
+    end: caret,
   };
 }
 
+/**
+ * The chat: who it goes to (shown before you send), the message, an
+ * optional "ask to confirm", and the feed, newest first. Typing "@" or "#"
+ * suggests people, roles and party lines; picking one sets the recipient.
+ */
 export function ChatSignalPanel({
   message,
   onMessageChange,
@@ -74,213 +101,299 @@ export function ChatSignalPanel({
   rooms,
   roles,
   activeUsers,
+  selfUserId = "",
+  writableRoomIds,
+  defaultRoomId = "",
+  notice = "",
+  onDismissNotice,
 }: ChatSignalPanelProps) {
+  const [recipient, setRecipient] = useState<ChatRecipient | null>(null);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
+  const [suggestionsClosed, setSuggestionsClosed] = useState(false);
   const [caret, setCaret] = useState(message.length);
-  const [requiresAck, setRequiresAck] = useState(false);
+  const [askToConfirm, setAskToConfirm] = useState(false);
 
-  function submitChat() {
-    onSendChat(showAckOption ? requiresAck : false);
-    if (message.trim()) {
-      setRequiresAck(false);
-    }
-  }
+  const writableRooms = useMemo(
+    () =>
+      writableRoomIds
+        ? rooms.filter((room) => writableRoomIds.includes(room.id))
+        : rooms,
+    [rooms, writableRoomIds],
+  );
+  const people = useMemo(
+    () =>
+      activeUsers
+        .filter((u) => u.userId !== selfUserId)
+        .sort((a, b) => a.username.localeCompare(b.username)),
+    [activeUsers, selfUserId],
+  );
+  const roomName = (id: string) =>
+    rooms.find((room) => room.id === id)?.name || id;
+  const roleName = (id: string) =>
+    roles.find((role) => role.id === id)?.name || id;
+  const personName = (id: string) =>
+    activeUsers.find((u) => u.userId === id)?.username || "";
 
+  // Party line messages show for the lines you hear; your own and direct
+  // messages always.
   const visibleMessages = useMemo(
     () =>
       chatMessages.filter(
-        (entry) => entry.scope !== "room" || listenRoomIds.includes(entry.targetId),
+        (entry) =>
+          entry.self ||
+          entry.scope !== "room" ||
+          listenRoomIds.includes(entry.targetId),
       ),
     [chatMessages, listenRoomIds],
   );
 
+  const mention = mentionAt(message, caret);
   const suggestions = useMemo(() => {
-    const context = autocompleteContext(message, caret);
-    if (!context) {
-      return [] as AutocompleteItem[];
-    }
-
-    // Keep the initial @ list focused on online users, but allow finding
-    // external/telegram users once a specific query is typed.
-    const onlineUsers = activeUsers.filter((u) => u.isWebOnline !== false);
-    const externalUsers = activeUsers.filter((u) => u.isWebOnline === false);
-
-    if (context.trigger === "@") {
-      // Build user suggestions (online users only)
-      const userItems = onlineUsers
-        .filter((u) => u.username.toLowerCase().includes(context.query))
-        .map((u) => ({
-          key: `user:${u.userId}`,
-          label: `👤 @${u.username} [${u.roleName}]`,
-          displayLabel: `@${u.username} [${u.roleName}]`,
-          insertText: `@${u.username} `,
-          type: "user" as const,
-        }));
-
-      const externalUserItems =
-        context.query.length > 0
-          ? externalUsers
-              .filter((u) => u.username.toLowerCase().includes(context.query))
-              .map((u) => ({
-                key: `external-user:${u.userId}`,
-                label: `👤 @${u.username} [${u.roleName}] (Telegram/extern)`,
-                displayLabel: `@${u.username} [${u.roleName}] (Telegram/extern)`,
-                insertText: `@${u.username} `,
-                type: "user" as const,
-              }))
-          : [];
-
-      // Build role suggestions with who is in the role, or "Unbesetzt"
-      const roleItems = roles
+    if (!mention || suggestionsClosed) return [] as Suggestion[];
+    const q = mention.query;
+    if (mention.trigger === "#") {
+      return writableRooms
         .filter(
-          (r) =>
-            r.name.toLowerCase().includes(context.query) ||
-            r.id.toLowerCase().includes(context.query),
+          (room) =>
+            room.name.toLowerCase().includes(q) ||
+            room.id.toLowerCase().includes(q),
         )
-        .map((r) => {
-          const occupants = [
-            ...new Set(
-              onlineUsers
-                .filter((u) => u.roleId === r.id)
-                .map((u) => u.username),
-            ),
-          ].sort((a, b) => a.localeCompare(b));
-          const occupantText = occupants.length
-            ? `Aktuell: ${occupants.join(", ")}`
-            : "Unbesetzt";
-          return {
-            key: `role:${r.id}`,
-            label: `🎭 @${r.name} (${occupantText})`,
-            displayLabel: `@${r.name} (${occupantText})`,
-            insertText: `@${r.name} `,
-            type: "role" as const,
-          };
-        });
-
-      return [...userItems, ...externalUserItems, ...roleItems].slice(0, 8);
+        .map((room) => ({
+          key: `room:${room.id}`,
+          recipient: { type: "room" as const, id: room.id },
+          name: room.name,
+          detail: "Party line",
+          icon: "headphones" as const,
+        }))
+        .slice(0, 8);
     }
-
-    // # trigger: rooms/partylines
-    return rooms
+    // People online in the app first; people reachable only elsewhere
+    // (e.g. Telegram) once something is typed.
+    const personItems = people
       .filter(
-        (room) =>
-          room.name.toLowerCase().includes(context.query) ||
-          room.id.toLowerCase().includes(context.query),
+        (u) =>
+          u.username.toLowerCase().includes(q) &&
+          (u.isWebOnline !== false || q.length > 0),
       )
-      .map((room) => ({
-        key: `room:${room.id}`,
-        label: `#${room.name}`,
-        displayLabel: `#${room.name}`,
-        insertText: `#${room.name} `,
-        type: "room" as const,
-      }))
-      .slice(0, 8);
-  }, [activeUsers, caret, message, roles, rooms]);
+      .map((u) => ({
+        key: `user:${u.userId}`,
+        recipient: { type: "user" as const, id: u.userId },
+        name: u.username,
+        detail:
+          u.isWebOnline === false ? `${u.roleName} · Telegram` : u.roleName,
+        icon: "user" as const,
+      }));
+    const roleItems = roles
+      .filter(
+        (r) =>
+          r.name.toLowerCase().includes(q) || r.id.toLowerCase().includes(q),
+      )
+      .map((r) => {
+        const online = [
+          ...new Set(
+            people
+              .filter((u) => u.roleId === r.id && u.isWebOnline !== false)
+              .map((u) => u.username),
+          ),
+        ];
+        return {
+          key: `role:${r.id}`,
+          recipient: { type: "role" as const, id: r.id },
+          name: r.name,
+          detail: online.length
+            ? `Role · ${online.join(", ")}`
+            : "Role · nobody online",
+          icon: "user" as const,
+        };
+      });
+    return [...personItems, ...roleItems].slice(0, 8);
+  }, [mention, suggestionsClosed, writableRooms, people, roles]);
 
-  function applySuggestion(item: AutocompleteItem) {
-    const context = autocompleteContext(message, caret);
-    if (!context) {
-      return;
-    }
-    const next =
-      message.slice(0, context.tokenStart) +
-      item.insertText +
-      message.slice(context.tokenEnd);
+  function pickSuggestion(item: Suggestion) {
+    if (!mention) return;
+    // The name becomes the recipient; it leaves the text.
+    const next = (
+      message.slice(0, mention.start) + message.slice(mention.end)
+    ).replace(/^\s+/, "");
+    setRecipient(item.recipient);
     onMessageChange(next);
-    setCaret(context.tokenStart + item.insertText.length);
+    setCaret(mention.start);
     setSelectedSuggestion(0);
   }
 
-  function handleSenderReply(username: string) {
-    onMessageChange(`@${username} `);
-    setCaret(username.length + 2);
+  function send() {
+    onSendChat(showAckOption ? askToConfirm : false, recipient);
+    if (message.trim()) setAskToConfirm(false);
   }
 
-  const closeSuggestions = () => {
-    setSelectedSuggestion(0);
+  const defaultLabel = defaultRoomId
+    ? `${roomName(defaultRoomId)} (your talk line)`
+    : "Your talk line";
+  const chosenIsListed =
+    !recipient ||
+    (recipient.type === "room" &&
+      writableRooms.some((r) => r.id === recipient.id)) ||
+    (recipient.type === "user" &&
+      people.some((u) => u.userId === recipient.id)) ||
+    (recipient.type === "role" && roles.some((r) => r.id === recipient.id));
+
+  const targetLabel = (entry: ChatEntry) => {
+    if (entry.scope !== "direct") return entry.room;
+    if (entry.targetType === "role") return roleName(entry.targetId);
+    if (entry.self) return personName(entry.targetId) || "person";
+    return "you";
   };
 
   return (
     <>
       <div className="chat">
-        <input
-          value={message}
-          onChange={(e) => {
-            onMessageChange(e.target.value);
-            setCaret(e.target.selectionStart || 0);
-            setSelectedSuggestion(0);
-          }}
-          onClick={(e) => setCaret(e.currentTarget.selectionStart || 0)}
-          onKeyUp={(e) => setCaret(e.currentTarget.selectionStart || 0)}
-          onKeyDown={(e) => {
-            if (suggestions.length === 0) {
-              if (e.key === "Enter") {
-                submitChat();
+        <label className="chat-to">
+          <span>To</span>
+          <select
+            aria-label="Send to"
+            value={recipientKey(recipient)}
+            onChange={(event) =>
+              setRecipient(parseRecipientKey(event.target.value))
+            }
+          >
+            <option value="">{defaultLabel}</option>
+            {!chosenIsListed && recipient ? (
+              <option value={recipientKey(recipient)}>
+                {recipient.type === "room"
+                  ? roomName(recipient.id)
+                  : recipient.type === "role"
+                    ? roleName(recipient.id)
+                    : personName(recipient.id) || "Person"}
+              </option>
+            ) : null}
+            {writableRooms.length ? (
+              <optgroup label="Party lines">
+                {writableRooms.map((room) => (
+                  <option key={room.id} value={`room:${room.id}`}>
+                    {room.name}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
+            {people.length ? (
+              <optgroup label="People">
+                {people.map((u) => (
+                  <option key={u.userId} value={`user:${u.userId}`}>
+                    {u.username} · {u.roleName}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
+            {roles.length ? (
+              <optgroup label="Roles">
+                {roles.map((r) => (
+                  <option key={r.id} value={`role:${r.id}`}>
+                    {r.name}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
+          </select>
+        </label>
+        <div className="chat-compose">
+          <input
+            aria-label="Message"
+            value={message}
+            onChange={(e) => {
+              onMessageChange(e.target.value);
+              setCaret(e.target.selectionStart || 0);
+              setSelectedSuggestion(0);
+              setSuggestionsClosed(false);
+            }}
+            onClick={(e) => setCaret(e.currentTarget.selectionStart || 0)}
+            onKeyUp={(e) => setCaret(e.currentTarget.selectionStart || 0)}
+            onKeyDown={(e) => {
+              if (suggestions.length === 0) {
+                if (e.key === "Enter") send();
+                return;
               }
-              return;
-            }
-
-            if (e.key === "Escape") {
-              e.preventDefault();
-              closeSuggestions();
-              return;
-            }
-
-            if (e.key === "ArrowDown") {
-              e.preventDefault();
-              setSelectedSuggestion((prev) =>
-                prev + 1 >= suggestions.length ? 0 : prev + 1,
-              );
-              return;
-            }
-
-            if (e.key === "ArrowUp") {
-              e.preventDefault();
-              setSelectedSuggestion((prev) =>
-                prev - 1 < 0 ? suggestions.length - 1 : prev - 1,
-              );
-              return;
-            }
-
-            if (e.key === "Enter" || e.key === "Tab") {
-              e.preventDefault();
-              const selected = suggestions[selectedSuggestion];
-              if (selected) {
-                applySuggestion(selected);
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setSuggestionsClosed(true);
+                return;
               }
-              return;
-            }
-          }}
-          placeholder="Type chat message…"
-        />
-        <div className="chat-actions">
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                const step = e.key === "ArrowDown" ? 1 : -1;
+                setSelectedSuggestion(
+                  (prev) =>
+                    (prev + step + suggestions.length) % suggestions.length,
+                );
+                return;
+              }
+              if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault();
+                const selected = suggestions[selectedSuggestion];
+                if (selected) pickSuggestion(selected);
+              }
+            }}
+            placeholder="Message · @ person or role, # party line"
+          />
           {showAckOption ? (
             <button
               type="button"
-              className={`chat-ack-btn ${requiresAck ? "active" : ""}`}
-              onClick={() => setRequiresAck(!requiresAck)}
-              title={requiresAck ? "ACK required (click to disable)" : "Click to require acknowledgement"}
-              aria-label="Requires ACK"
+              className={`chat-confirm-toggle ${askToConfirm ? "active" : ""}`}
+              onClick={() => setAskToConfirm(!askToConfirm)}
+              aria-pressed={askToConfirm}
+              aria-label="Ask to confirm"
+              title="Ask the recipient to confirm they read it"
             >
-              <span className="chat-ack-indicator" />
+              <Icon name="check" size={18} />
+              <span>Confirm</span>
             </button>
           ) : null}
-          <button type="button" onClick={submitChat}>Send chat</button>
+          <button
+            type="button"
+            className="primary chat-send"
+            onClick={send}
+            aria-label="Send chat"
+            title="Send (Enter)"
+          >
+            <Icon name="send" size={18} />
+          </button>
         </div>
         {suggestions.length > 0 ? (
-          <ul className="chat-autocomplete" role="listbox" aria-label="chat-autocomplete">
+          <ul
+            className="chat-autocomplete"
+            role="listbox"
+            aria-label="chat-autocomplete"
+          >
             {suggestions.map((item, idx) => (
               <li key={item.key}>
                 <button
-                  className={idx === selectedSuggestion ? "active" : ""}
-                  onClick={() => applySuggestion(item)}
                   type="button"
+                  role="option"
+                  aria-selected={idx === selectedSuggestion}
+                  className={idx === selectedSuggestion ? "active" : ""}
+                  onClick={() => pickSuggestion(item)}
                 >
-                  {item.label}
+                  <Icon name={item.icon} size={16} />
+                  <strong>{item.name}</strong>
+                  <span>{item.detail}</span>
                 </button>
               </li>
             ))}
           </ul>
+        ) : null}
+        {notice ? (
+          <p className="chat-notice" role="alert">
+            <span>{notice}</span>
+            {onDismissNotice ? (
+              <button
+                type="button"
+                className="k-icon-button"
+                aria-label="Dismiss"
+                onClick={onDismissNotice}
+              >
+                <Icon name="close" size={16} />
+              </button>
+            ) : null}
+          </p>
         ) : null}
       </div>
       <div className="chat-feed" aria-live="polite">
@@ -288,58 +401,93 @@ export function ChatSignalPanel({
           <p className="chat-feed-empty">No chat messages yet.</p>
         ) : (
           <ul className="chat-feed-list">
-            {visibleMessages.map((entry, index) => (
-              <li
-                key={`${entry.at}-${entry.from}-${index}`}
-                className={
-                  entry.scope === "direct"
-                    ? `chat-feed-direct ${entry.self ? "self" : ""}`.trim()
-                    : entry.self
-                      ? "self"
-                      : ""
-                }
-              >
-                <div className="chat-feed-meta">
-                  <span>{entry.at}</span>
-                  <button
-                    type="button"
-                    className="chat-feed-sender"
-                    onClick={() => handleSenderReply(entry.from)}
-                  >
-                    {entry.from}
-                  </button>
-                  {entry.source === "telegram" ? (
-                    <span className="chat-feed-source-icon" title="Message from Telegram">
-                      📱
-                    </span>
-                  ) : null}
-                  <span className="chat-feed-room">{entry.room}</span>
-                  {showAckOption && entry.self && entry.ackRequired ? (
-                    <span
-                      className={`chat-feed-ack-status ${entry.acked ? "acked" : "pending"}`}
-                    >
-                      {entry.acked
-                        ? `ACK by ${entry.ackedBy || "receiver"}`
-                        : "ACK pending"}
-                    </span>
-                  ) : null}
-                </div>
-                <p>{entry.body}</p>
-                {showAckOption &&
+            {visibleMessages.map((entry, index) => {
+              const toMe = !entry.self && entry.scope === "direct";
+              const waitsForMe =
+                showAckOption &&
                 !entry.self &&
                 entry.ackRequired &&
                 !entry.acked &&
-                entry.messageId ? (
-                  <button
-                    type="button"
-                    className="chat-feed-ack-btn"
-                    onClick={() => onAcknowledge(entry.messageId || "", entry.fromUserId)}
-                  >
-                    Acknowledge
-                  </button>
-                ) : null}
-              </li>
-            ))}
+                !!entry.messageId;
+              return (
+                <li
+                  key={`${entry.at}-${entry.from}-${index}`}
+                  className={[
+                    "chat-msg",
+                    entry.self ? "self" : "",
+                    toMe ? "to-me" : "",
+                    waitsForMe ? "needs-confirm" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                >
+                  <div className="chat-msg-meta">
+                    {entry.self ? (
+                      <span className="chat-msg-sender">You</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="chat-msg-sender"
+                        title={`Reply to ${entry.from}`}
+                        onClick={() =>
+                          setRecipient({ type: "user", id: entry.fromUserId })
+                        }
+                      >
+                        {entry.from}
+                      </button>
+                    )}
+                    <span className="chat-msg-target">
+                      to {targetLabel(entry)}
+                    </span>
+                    {entry.source === "telegram" ? (
+                      <span
+                        className="chat-msg-source"
+                        title="Message from Telegram"
+                      >
+                        via Telegram
+                      </span>
+                    ) : null}
+                    <time>{entry.at}</time>
+                  </div>
+                  <p>{entry.body}</p>
+                  {showAckOption && entry.self && entry.ackRequired ? (
+                    <span
+                      className={`chat-msg-confirm ${entry.acked ? "acked" : "pending"}`}
+                    >
+                      {entry.acked ? (
+                        <>
+                          <Icon name="check" size={14} />
+                          Confirmed by {entry.ackedBy || "the recipient"}
+                        </>
+                      ) : (
+                        "Waiting for confirmation"
+                      )}
+                    </span>
+                  ) : null}
+                  {showAckOption &&
+                  !entry.self &&
+                  entry.ackRequired &&
+                  entry.acked ? (
+                    <span className="chat-msg-confirm acked">
+                      <Icon name="check" size={14} />
+                      Confirmed
+                    </span>
+                  ) : null}
+                  {waitsForMe ? (
+                    <button
+                      type="button"
+                      className="primary chat-confirm-btn"
+                      onClick={() =>
+                        onAcknowledge(entry.messageId || "", entry.fromUserId)
+                      }
+                    >
+                      <Icon name="check" size={16} />
+                      Confirm
+                    </button>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

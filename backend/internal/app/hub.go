@@ -913,6 +913,16 @@ func (h *Hub) RouteEvent(senderToken string, eventType string, e RoutedEvent) {
 			h.markRoomSignalIncoming(e.TargetID, sender.user, e.Signal)
 		}
 		h.sendToRoom(e.TargetID, out)
+		// The sender sees their own chat message even on a line they do
+		// not listen to.
+		if eventType == "chat" {
+			h.mu.RLock()
+			_, listens := sender.listenRooms[e.TargetID]
+			h.mu.RUnlock()
+			if !listens {
+				h.sendToToken(senderToken, out)
+			}
+		}
 	case "broadcast":
 		allowed, err := h.store.BroadcastGroupAllowsRole(context.Background(), e.TargetID, sender.session.RoleID)
 		if err != nil || !allowed {
@@ -1047,6 +1057,23 @@ func (h *Hub) UsernamesForRole(roleID string) []string {
 		if c.session.RoleID != roleID {
 			continue
 		}
+		if _, ok := seen[c.user.Username]; ok {
+			continue
+		}
+		seen[c.user.Username] = struct{}{}
+		names = append(names, c.user.Username)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// ActiveUsernames lists everyone logged in right now (each name once).
+func (h *Hub) ActiveUsernames() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	seen := map[string]struct{}{}
+	names := []string{}
+	for _, c := range h.clients {
 		if _, ok := seen[c.user.Username]; ok {
 			continue
 		}

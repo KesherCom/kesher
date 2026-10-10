@@ -217,7 +217,6 @@ input[type="range"] {
   padding: 0;
 }
 /* Compact controls inside tables and chat rows set their own height. */
-.chat-ack-btn,
 .routing-matrix-state,
 .station-card-icon {
   min-height: 0;
@@ -228,276 +227,190 @@ input[type="range"] {
   border-radius: 13px;
   padding: 0.85rem;
 }
+/* ── Chat (components/panels/ChatSignalPanel.tsx) ───────────────────
+   "To" first, then the message row (text, ask to confirm, send), then the
+   feed, newest first. A message to you is marked in selection cyan; one
+   that waits for your confirmation in call yellow. */
 .chat {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  margin-bottom: 0.75rem;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-2);
 }
-.chat input {
-  flex: 1;
-  min-width: 220px;
+.chat-to {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-2);
 }
-
-/* ===== Chat Actions Row (ACK + Send) ===== */
-.chat-actions {
+.chat-to > span {
+  flex: 0 0 auto;
+  color: var(--k-text-muted);
+  font-size: var(--k-text-label);
+}
+.chat-to select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.chat-compose {
+  display: flex;
+  gap: var(--k-space-2);
+}
+.chat-compose input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.chat-confirm-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--k-space-1);
+  flex: 0 0 auto;
+  color: var(--k-text-muted);
+}
+.chat-confirm-toggle.active {
+  border-color: var(--k-selection);
+  color: var(--k-text);
+}
+.chat-send {
+  flex: 0 0 var(--k-touch);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.chat-autocomplete {
+  position: absolute;
+  z-index: 10;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: var(--k-space-1) 0 0;
+  padding: var(--k-space-1);
+  list-style: none;
+  background: var(--k-raised);
+  border: 1px solid var(--k-border-strong);
+  border-radius: var(--k-radius-control);
+}
+.chat-autocomplete button {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-2);
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.chat-autocomplete button strong {
+  font-weight: 600;
+}
+.chat-autocomplete button span {
+  color: var(--k-text-muted);
+  font-size: var(--k-text-label);
+}
+.chat-autocomplete button:hover,
+.chat-autocomplete button.active {
+  background: var(--k-border);
+}
+.chat-notice {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: var(--k-space-2);
+  margin: 0;
+  padding: var(--k-space-1) var(--k-space-1) var(--k-space-1) var(--k-space-3);
+  border: 1px solid var(--k-attention);
+  border-radius: var(--k-radius-control);
+  background: var(--k-attention-tint);
+  color: var(--k-text);
+  font-size: var(--k-text-label);
+}
+.chat-notice .k-icon-button {
+  width: 32px;
+  height: 32px;
+  min-height: 0;
 }
 
-/* ===== ACK Button (Compact Icon) ===== */
-.chat-ack-btn {
-  position: relative;
-  appearance: none;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 5px;
-  cursor: pointer;
-  transition: all 140ms ease;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.chat-ack-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.2);
-}
-.chat-ack-btn:focus-visible {
-  outline: 2px solid rgba(245, 158, 11, 0.5);
-  outline-offset: 1px;
-}
-.chat-ack-indicator {
-  display: block;
-  width: 10px;
-  height: 10px;
-  background: var(--k-text-muted);
-  border-radius: 2px;
-  transition: all 140ms ease;
-}
-.chat-ack-btn.active {
-  background: var(--k-call);
-  border-color: rgba(251, 191, 36, 0.7);
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
-}
-.chat-ack-btn.active:hover {
-  background: var(--k-call);
-  border-color: rgba(251, 191, 36, 0.8);
-  box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
-}
-.chat-ack-btn.active .chat-ack-indicator {
-  background: var(--k-call-tint);
-  box-shadow: 0 0 4px rgba(251, 191, 36, 0.6);
-}
-.chat-actions button {
-  flex-shrink: 0;
-  width: auto;
-  /* min-width: max-content; */
-  max-width: 4rem;
-  padding: 0.25rem 0.4rem;
-  font-size: 0.78rem;
-  font-weight: 600;
-}
 .chat-feed {
-  border: 1px solid var(--border-light);
-  background: var(--panel);
-  border-radius: 10px;
-  padding: 0.45rem 0.55rem;
-  margin-top: 0.35rem;
-  max-height: 220px;
+  margin-top: var(--k-space-3);
+  max-height: 360px;
   overflow-y: auto;
 }
 .chat-feed-empty {
   margin: 0;
-  color: var(--text-tertiary);
-  padding-right: 1.6rem;
-  font-size: 0.88rem;
+  color: var(--k-text-muted);
+  font-size: var(--k-text-label);
 }
 .chat-feed-list {
-  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-2);
   margin: 0;
   padding: 0;
-  display: grid;
-  gap: 0.4rem;
+  list-style: none;
 }
-.chat-feed-list li {
-  border-bottom: 1px solid var(--border-subtle);
-  padding-bottom: 0.35rem;
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-1);
+  padding: var(--k-space-2) var(--k-space-3);
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius-control);
+  background: var(--k-surface);
 }
-.chat-feed-list li:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
+.chat-msg.self {
+  background: transparent;
 }
-.chat-feed-list li span {
-  color: var(--text-tertiary);
-  font-size: 0.72rem;
-  display: inline-block;
-  margin-right: 0.45rem;
+.chat-msg.to-me {
+  border-left: 3px solid var(--k-selection);
 }
-.chat-feed-list li strong {
-  font-size: 0.84rem;
+.chat-msg.needs-confirm {
+  border-color: var(--k-call);
+  background: var(--k-call-tint);
 }
-.chat-feed-meta {
+.chat-msg-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.28rem 0.48rem;
+  gap: var(--k-space-1) var(--k-space-2);
+  font-size: var(--k-text-label);
+  color: var(--k-text-muted);
 }
-.chat-feed-meta span {
-  margin-right: 0;
-}
-.chat-feed-room {
-  color: var(--text-secondary);
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  padding: 0.05rem 0.42rem;
-  line-height: 1.2;
-}
-/* ===== ACK Status Badges ===== */
-.chat-feed-ack-status {
-  border-radius: 12px;
-  padding: 0.15rem 0.6rem;
-  line-height: 1.3;
-  border: 1px solid;
-  font-size: 0.72rem;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  transition: all 160ms ease;
-}
-.chat-feed-ack-status.pending {
-  color: var(--k-call-text);
-  border-color: rgba(251, 191, 36, 0.4);
-  background: linear-gradient(
-    135deg,
-    rgba(251, 191, 36, 0.12) 0%,
-    rgba(217, 119, 6, 0.08) 100%
-  );
-  box-shadow: 0 2px 8px rgba(251, 191, 36, 0.1);
-}
-.chat-feed-ack-status.pending::before {
-  content: "⏱";
-  font-size: 0.9em;
-}
-.chat-feed-ack-status.acked {
-  color: var(--k-hear-text);
-  border-color: rgba(16, 185, 129, 0.5);
-  background: linear-gradient(
-    135deg,
-    rgba(16, 185, 129, 0.18) 0%,
-    rgba(5, 150, 105, 0.12) 100%
-  );
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
-}
-.chat-feed-ack-status.acked::before {
-  content: "✓";
-  font-size: 1em;
-  font-weight: 700;
-}
-.chat-feed-list li p {
-  margin: 0.16rem 0 0;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-/* ===== ACK Acknowledge Button ===== */
-.chat-feed-ack-btn {
-  margin-top: 0.45rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  padding: 0.35rem 0.75rem;
-  border-radius: 10px;
-  border: 1px solid rgba(16, 185, 129, 0.4);
-  background: linear-gradient(
-    135deg,
-    rgba(16, 185, 129, 0.15) 0%,
-    rgba(5, 150, 105, 0.1) 100%
-  );
-  color: var(--k-hear-text);
-  cursor: pointer;
-  transition: all 180ms cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.1);
-}
-.chat-feed-ack-btn:hover {
-  background: linear-gradient(
-    135deg,
-    rgba(16, 185, 129, 0.25) 0%,
-    rgba(5, 150, 105, 0.18) 100%
-  );
-  border-color: rgba(16, 185, 129, 0.6);
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
-  transform: translateY(-1px);
-}
-.chat-feed-ack-btn:active {
-  transform: translateY(0);
-  box-shadow: 0 1px 4px rgba(16, 185, 129, 0.15);
-}
-.chat-feed-ack-btn:focus {
-  outline: 2px solid rgba(16, 185, 129, 0.4);
-  outline-offset: 2px;
-}
-.chat-feed-list li.chat-feed-direct {
-  border-left: 3px solid var(--k-call);
-  padding-left: 0.45rem;
-  background: var(--k-call-tint);
-  border-radius: 6px;
-}
-.chat-feed-list li.self .chat-feed-sender {
-  color: var(--station-call-text);
-}
-.chat-feed-sender {
+.chat-msg-sender {
+  min-height: 0;
+  padding: 0;
   border: 0;
   background: transparent;
-  color: var(--text-primary);
-  font-size: 0.84rem;
-  font-weight: 700;
-  padding: 0;
+  color: var(--k-text);
+  font-size: var(--k-text-label);
+  font-weight: 600;
 }
-.chat-feed-sender:hover {
-  color: var(--accent-primary);
+button.chat-msg-sender:hover {
+  background: transparent;
   text-decoration: underline;
 }
-.chat-feed-source-icon {
-  font-size: 0.75rem;
-  line-height: 1;
-  opacity: 0.72;
+.chat-msg-meta time {
+  margin-left: auto;
+  font-family: var(--k-font-mono);
 }
-.chat-autocomplete {
-  position: absolute;
-  left: 0;
-  top: calc(100% + 0.2rem);
-  z-index: 20;
-  width: min(460px, 100%);
-  list-style: none;
+.chat-msg p {
   margin: 0;
-  padding: 0.2rem;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
+  overflow-wrap: anywhere;
 }
-.chat-autocomplete li {
-  margin: 0;
-  padding: 0;
+.chat-msg-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--k-space-1);
+  font-size: var(--k-text-label);
+  color: var(--k-text-muted);
 }
-.chat-autocomplete button {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  border-radius: 8px;
-  padding: 0.42rem 0.5rem;
+.chat-msg-confirm.acked {
+  color: var(--k-hear-text);
 }
-.chat-autocomplete button:hover,
-.chat-autocomplete button.active {
-  background: var(--btn-bg-hover);
+.chat-confirm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--k-space-1);
+  align-self: flex-start;
 }
 .meter {
   height: 11px;

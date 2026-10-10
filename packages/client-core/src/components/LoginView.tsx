@@ -59,7 +59,7 @@ export function LoginView({
               onChange={(e) =>
                 onUsernameChange(stripWhitespace(e.target.value))
               }
-              placeholder="e.g. Tim FOH"
+              placeholder="e.g. TimFOH (no spaces)"
             />
           </label>
           <label>

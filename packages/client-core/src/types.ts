@@ -375,3 +375,6 @@ export type ChatAckUpdate = {
   ackedBy: User;
   ackedAt: number;
 };
+
+/** Who a chat message goes to: a party line, a person or a role. */
+export type ChatRecipient = { type: "room" | "user" | "role"; id: string };

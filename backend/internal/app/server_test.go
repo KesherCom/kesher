@@ -1032,7 +1032,7 @@ func TestServerRouteInboundChatAtSelfReturnsStatus(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected RoutingStatusEvent payload, got %T", out.Data)
 		}
-		if status.Code != "unzustellbar" || status.TargetType != "user" {
+		if status.Code != "not_delivered" || status.TargetType != "user" {
 			t.Fatalf("unexpected status payload: %+v", status)
 		}
 	default:
@@ -1126,7 +1126,7 @@ func TestServerRouteInboundChatAtRoleWithoutActiveUsersReturnsStatus(t *testing.
 		if !ok {
 			t.Fatalf("expected RoutingStatusEvent payload, got %T", out.Data)
 		}
-		if status.Code != "unzustellbar" || status.TargetType != "role" {
+		if status.Code != "not_delivered" || status.TargetType != "role" {
 			t.Fatalf("unexpected status payload: %+v", status)
 		}
 	default:

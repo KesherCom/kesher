@@ -5790,132 +5790,185 @@ func (s *Server) routeInbound(ctx context.Context, sender Session, in WSInbound,
 		e.Source = "web"
 	}
 	if !s.isInboundAllowed(ctx, sender, e) {
+		if outType == "chat" {
+			s.sendRoutingStatus(sender.Token, *chatNotDelivered(e.TargetType, e.TargetID, "you may not write there"))
+		}
 		return
 	}
 	s.hub.RouteEvent(sender.Token, outType, e)
 }
 
+// resolveChatRouting decides where a chat message goes, in this order:
+//   - a leading "#party line" or "@person"/"@role" in the text (also from
+//     Telegram); names may contain spaces, the longest known name wins;
+//   - the recipient chosen in the app (targetType room, user or role);
+//   - otherwise the sender's current talk line.
+//
+// A message that cannot be delivered returns a status for the sender.
 func (s *Server) resolveChatRouting(ctx context.Context, sender Session, e RoutedEvent) (RoutedEvent, *RoutingStatusEvent, bool) {
 	body := strings.TrimSpace(e.Body)
 	if body == "" {
 		return RoutedEvent{}, nil, false
 	}
 
-	prefix, targetLabel, messageBody, hasPrefix := parseChatPrefix(body)
-	if !hasPrefix {
-		talkRoomID, ok := s.hub.ActiveTalkRoomForToken(sender.Token)
-		if !ok {
-			return RoutedEvent{}, &RoutingStatusEvent{
-				Code:       "unzustellbar",
-				TargetType: "room",
-				Message:    "Unzustellbar: Keine aktive Talk-Partyline.",
-			}, false
+	if prefix, rest, ok := chatPrefix(body); ok {
+		names := s.chatTargetNames(ctx, prefix)
+		if name, messageBody, found := matchLeadingName(rest, names); found {
+			if messageBody == "" {
+				return RoutedEvent{}, nil, false
+			}
+			e.Body = messageBody
+			if prefix == '#' {
+				return s.routeChatToRoom(ctx, e, name)
+			}
+			return s.routeChatToPersonOrRole(ctx, sender, e, name)
 		}
-		e.Scope = "room"
-		e.TargetType = "room"
-		e.TargetID = talkRoomID
-		e.Body = body
-		return e, nil, true
+		label := strings.Fields(rest)
+		target := ""
+		if len(label) > 0 {
+			target = label[0]
+		}
+		if prefix == '#' {
+			return RoutedEvent{}, chatNotDelivered("room", target, "party line not found"), false
+		}
+		return RoutedEvent{}, chatNotDelivered("user", target, "person or role not found"), false
 	}
 
-	if messageBody == "" {
-		return RoutedEvent{}, nil, false
+	e.Body = body
+	switch strings.TrimSpace(e.TargetType) {
+	case "room":
+		return s.routeChatToRoom(ctx, e, e.TargetID)
+	case "user":
+		if strings.TrimSpace(e.TargetID) == sender.UserID {
+			return RoutedEvent{}, chatNotDelivered("user", "", "you cannot write to yourself"), false
+		}
+		user, err := s.store.FindUserByID(ctx, strings.TrimSpace(e.TargetID))
+		if err != nil {
+			return RoutedEvent{}, chatNotDelivered("user", e.TargetID, "person not found"), false
+		}
+		e.Scope, e.TargetType, e.TargetID = "direct", "user", user.ID
+		return e, nil, true
+	case "role":
+		return s.routeChatToRole(ctx, e, e.TargetID)
 	}
 
-	switch prefix {
-	case '#':
-		roomID, ok := s.resolveRoomTargetID(ctx, targetLabel)
-		if !ok {
-			return RoutedEvent{}, &RoutingStatusEvent{
-				Code:       "unzustellbar",
-				TargetType: "room",
-				Target:     targetLabel,
-				Message:    "Unzustellbar: Partyline nicht gefunden.",
-			}, false
-		}
-		e.Scope = "room"
-		e.TargetType = "room"
-		e.TargetID = roomID
-		e.Body = messageBody
-		return e, nil, true
-	case '@':
-		if activeUser, ok := s.hub.ActiveUserByUsername(targetLabel); ok {
-			if activeUser.ID == sender.UserID {
-				return RoutedEvent{}, &RoutingStatusEvent{
-					Code:       "unzustellbar",
-					TargetType: "user",
-					Target:     targetLabel,
-					Message:    "Unzustellbar: Du kannst dir selbst keine Nachricht schicken.",
-				}, false
-			}
-			e.Scope = "direct"
-			e.TargetType = "user"
-			e.TargetID = activeUser.ID
-			e.Body = messageBody
-			return e, nil, true
-		}
-		if persistedUser, err := s.store.FindUserByUsername(ctx, targetLabel); err == nil {
-			if persistedUser.ID == sender.UserID {
-				return RoutedEvent{}, &RoutingStatusEvent{
-					Code:       "unzustellbar",
-					TargetType: "user",
-					Target:     targetLabel,
-					Message:    "Unzustellbar: Du kannst dir selbst keine Nachricht schicken.",
-				}, false
-			}
-			e.Scope = "direct"
-			e.TargetType = "user"
-			e.TargetID = persistedUser.ID
-			e.Body = messageBody
-			return e, nil, true
-		}
-		roleID, ok := s.resolveRoleTargetID(ctx, targetLabel)
-		if !ok {
-			return RoutedEvent{}, &RoutingStatusEvent{
-				Code:       "unzustellbar",
-				TargetType: "user",
-				Target:     targetLabel,
-				Message:    "Unzustellbar: Benutzer oder Rolle nicht gefunden.",
-			}, false
-		}
-		if !s.hub.HasActiveSessionsForRole(roleID) {
-			return RoutedEvent{}, &RoutingStatusEvent{
-				Code:       "unzustellbar",
-				TargetType: "role",
-				Target:     targetLabel,
-				Message:    "Unzustellbar: Keine aktiven Nutzer fuer diese Rolle.",
-			}, false
-		}
-		e.Scope = "direct"
-		e.TargetType = "role"
-		e.TargetID = roleID
-		e.Body = messageBody
-		return e, nil, true
-	default:
-		return RoutedEvent{}, nil, false
+	talkRoomID, ok := s.hub.ActiveTalkRoomForToken(sender.Token)
+	if !ok {
+		return RoutedEvent{}, chatNotDelivered("room", "", "you have no party line to talk on; choose a recipient"), false
+	}
+	e.Scope, e.TargetType, e.TargetID = "room", "room", talkRoomID
+	return e, nil, true
+}
+
+func chatNotDelivered(targetType, target, reason string) *RoutingStatusEvent {
+	return &RoutingStatusEvent{
+		Code:       "not_delivered",
+		TargetType: targetType,
+		Target:     target,
+		Message:    "Not delivered: " + reason + ".",
 	}
 }
 
-func parseChatPrefix(body string) (rune, string, string, bool) {
+func (s *Server) routeChatToRoom(ctx context.Context, e RoutedEvent, target string) (RoutedEvent, *RoutingStatusEvent, bool) {
+	roomID, ok := s.resolveRoomTargetID(ctx, strings.TrimSpace(target))
+	if !ok {
+		return RoutedEvent{}, chatNotDelivered("room", target, "party line not found"), false
+	}
+	e.Scope, e.TargetType, e.TargetID = "room", "room", roomID
+	return e, nil, true
+}
+
+func (s *Server) routeChatToRole(ctx context.Context, e RoutedEvent, target string) (RoutedEvent, *RoutingStatusEvent, bool) {
+	roleID, ok := s.resolveRoleTargetID(ctx, strings.TrimSpace(target))
+	if !ok {
+		return RoutedEvent{}, chatNotDelivered("role", target, "role not found"), false
+	}
+	if !s.hub.HasActiveSessionsForRole(roleID) {
+		return RoutedEvent{}, chatNotDelivered("role", target, "nobody in this role is online"), false
+	}
+	e.Scope, e.TargetType, e.TargetID = "direct", "role", roleID
+	return e, nil, true
+}
+
+// routeChatToPersonOrRole sends to a person by name (online first, then
+// any known user) or else to a role of that name.
+func (s *Server) routeChatToPersonOrRole(ctx context.Context, sender Session, e RoutedEvent, name string) (RoutedEvent, *RoutingStatusEvent, bool) {
+	user, ok := s.hub.ActiveUserByUsername(name)
+	if !ok {
+		if persisted, err := s.store.FindUserByUsername(ctx, name); err == nil {
+			user, ok = persisted, true
+		}
+	}
+	if ok {
+		if user.ID == sender.UserID {
+			return RoutedEvent{}, chatNotDelivered("user", name, "you cannot write to yourself"), false
+		}
+		e.Scope, e.TargetType, e.TargetID = "direct", "user", user.ID
+		return e, nil, true
+	}
+	return s.routeChatToRole(ctx, e, name)
+}
+
+// chatPrefix splits "#Stage hello" into '#' and "Stage hello".
+func chatPrefix(body string) (rune, string, bool) {
 	trimmed := strings.TrimSpace(body)
-	if trimmed == "" {
-		return 0, "", "", false
+	if len(trimmed) < 2 || (trimmed[0] != '#' && trimmed[0] != '@') {
+		return 0, "", false
 	}
-	if !strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "@") {
-		return 0, "", "", false
+	return rune(trimmed[0]), trimmed[1:], true
+}
+
+// chatTargetNames are the names a "#" (party lines) or "@" (people, roles)
+// can address, with their IDs.
+func (s *Server) chatTargetNames(ctx context.Context, prefix rune) []string {
+	var names []string
+	if prefix == '#' {
+		if rooms, err := s.store.ListRooms(ctx); err == nil {
+			for _, room := range rooms {
+				names = append(names, room.Name, room.ID)
+			}
+		}
+		return names
 	}
-	parts := strings.Fields(trimmed)
-	if len(parts) == 0 {
-		return 0, "", "", false
+	if s.hub != nil {
+		names = append(names, s.hub.ActiveUsernames()...)
 	}
-	prefixToken := parts[0]
-	prefix := rune(prefixToken[0])
-	target := strings.TrimSpace(prefixToken[1:])
-	message := strings.TrimSpace(strings.TrimPrefix(trimmed, prefixToken))
-	if target == "" {
-		return 0, "", "", false
+	if users, err := s.store.ListUsers(ctx); err == nil {
+		for _, user := range users {
+			names = append(names, user.Username)
+		}
 	}
-	return prefix, target, message, true
+	if roles, err := s.store.ListRoles(ctx); err == nil {
+		for _, role := range roles {
+			names = append(names, role.Name, role.ID)
+		}
+	}
+	return names
+}
+
+// matchLeadingName finds the longest name that text starts with (ignoring
+// case), followed by a space or the end: "Lighting Booth go" with the
+// names "Lighting" and "Lighting Booth" gives "Lighting Booth" and "go".
+func matchLeadingName(text string, names []string) (name, rest string, ok bool) {
+	lower := strings.ToLower(text)
+	for _, candidate := range names {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || len(candidate) <= len(name) {
+			continue
+		}
+		c := strings.ToLower(candidate)
+		if !strings.HasPrefix(lower, c) {
+			continue
+		}
+		if len(lower) > len(c) && lower[len(c)] != ' ' && lower[len(c)] != '\t' {
+			continue
+		}
+		name, ok = candidate, true
+	}
+	if !ok {
+		return "", "", false
+	}
+	return name, strings.TrimSpace(text[len(name):]), true
 }
 
 func addedRooms(previous []string, next []string) []string {

@@ -35,6 +35,7 @@ import type {
   SessionRevokedEvent,
 } from "../types";
 import { directRoleTargetPrefix } from "../types";
+import type { ChatRecipient } from "../types";
 import { useLocalMic } from "./useLocalMic";
 import { useRemoteAudio } from "./useRemoteAudio";
 import { useRtpStats } from "./useRtpStats";
@@ -122,7 +123,16 @@ type WsMessage =
     }
   | { type: "session_revoked"; data: SessionRevokedEvent }
   | { type: "admin_mute"; data: { reason?: string } }
-  | { type: "config_updated"; data: unknown };
+  | { type: "config_updated"; data: unknown }
+  | {
+      type: "status";
+      data: {
+        code: string;
+        message: string;
+        targetType?: string;
+        target?: string;
+      };
+    };
 const opusMaxBitrateBps = 24000;
 
 // Opus ptime/minptime can be overridden at runtime via localStorage for A/B
@@ -573,7 +583,11 @@ export type UseIntercomSessionResult = {
     targetId: string,
     signal: string,
   ) => void;
-  sendChat: (ackRequired?: boolean) => void;
+  /** Sends the typed message to recipient (default: your talk line). */
+  sendChat: (ackRequired?: boolean, recipient?: ChatRecipient | null) => void;
+  /** Why the last chat message was not delivered ("" when fine). */
+  chatNotice: string;
+  clearChatNotice: () => void;
   acknowledgeChatMessage: (messageId: string, senderUserId: string) => void;
   handleChannelPttStart: (channelId: string) => void;
   handleChannelPttStop: (channelId: string) => void;
@@ -686,6 +700,9 @@ export function useIntercomSession({
   const [talkRoomIds, setTalkRoomIds] = useState<string[]>(initialTalkRoomIds);
   const [viewMode, setViewMode] = useState<"station" | "simple">("station");
   const [message, setMessage] = useState("");
+  const [chatNotice, setChatNotice] = useState("");
+  // The last message sent: back in the input if it was not delivered.
+  const lastSentChatRef = useRef("");
   const [wakeLockActive, setWakeLockActive] = useState(false);
   const [isStandaloneDisplayMode, setIsStandaloneDisplayMode] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -827,7 +844,9 @@ export function useIntercomSession({
       if (route.scope === "room") {
         return listenRoomIdsRef.current.includes(route.targetID);
       }
-      const group = ad.broadcastGroups.find((entry) => entry.id === route.targetID);
+      const group = ad.broadcastGroups.find(
+        (entry) => entry.id === route.targetID,
+      );
       if (!group) return false;
       return (group.roomIds || []).some((roomID) =>
         listenRoomIdsRef.current.includes(roomID),
@@ -883,7 +902,10 @@ export function useIntercomSession({
       return maxPriority >= 0 ? maxPriority : defaultRoutePriorityLevel;
     };
 
-    const applyDuckingForSource = (senderUserID: string, baseGain: number): number => {
+    const applyDuckingForSource = (
+      senderUserID: string,
+      baseGain: number,
+    ): number => {
       const maxPriority = maxAudiblePriority();
       let senderPriority = -1;
       for (const route of routes) {
@@ -1169,7 +1191,10 @@ export function useIntercomSession({
     const ad = appDataRef.current;
     if (!ad || !canRoleReceiveFromRoom(roomId, ad.self.roleId)) return;
     if (isRoomForcedListen(roomId, ad.self.roleId)) return;
-    const nextListen = toggleRoomSelectionState(listenRoomIdsRef.current, roomId);
+    const nextListen = toggleRoomSelectionState(
+      listenRoomIdsRef.current,
+      roomId,
+    );
     setListenRoomIds(nextListen);
     sendRoomMatrix(nextListen, talkRoomIdsRef.current, true);
   }
@@ -1206,8 +1231,8 @@ export function useIntercomSession({
       performanceEndpointRef.current = null;
       setPerformanceModeActive(false);
       setPerformanceEngineInfo(null);
-      performanceEngineOpRef.current = performanceEngineOpRef.current.then(
-        () => nativeAudio?.stopPerformanceEngine(),
+      performanceEngineOpRef.current = performanceEngineOpRef.current.then(() =>
+        nativeAudio?.stopPerformanceEngine(),
       );
     }
     restoreAlwaysOnAfterDirectPttRef.current = false;
@@ -1341,7 +1366,9 @@ export function useIntercomSession({
     const roleAllowedForGroup =
       allowedRoleIds.length === 0 || allowedRoleIds.includes(ad.self.roleId);
     if (!roleAllowedForGroup) return false;
-    return group.roomIds.some((roomId) => canRoleSendToRoom(roomId, ad.self.roleId));
+    return group.roomIds.some((roomId) =>
+      canRoleSendToRoom(roomId, ad.self.roleId),
+    );
   }
 
   function canSelfDirectToRole(targetRoleId: string): boolean {
@@ -1433,7 +1460,10 @@ export function useIntercomSession({
     );
   }
 
-  function roomMatrixSyncKey(listenRooms: string[], talkRooms: string[]): string {
+  function roomMatrixSyncKey(
+    listenRooms: string[],
+    talkRooms: string[],
+  ): string {
     const listen = [...listenRooms].sort().join("|");
     const talk = [...talkRooms].sort().join("|");
     return `${listen}::${talk}`;
@@ -1500,7 +1530,11 @@ export function useIntercomSession({
     status: "executed" | "rejected" | "failed",
     error?: string,
   ) {
-    if (!commandID || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+    if (
+      !commandID ||
+      !wsRef.current ||
+      wsRef.current.readyState !== WebSocket.OPEN
+    ) {
       return;
     }
     wsRef.current.send(
@@ -1736,36 +1770,46 @@ export function useIntercomSession({
   }
 
   // ── Chat ──
-  const chatScope: "direct" | "room" | "broadcast" = "room";
-
-  function sendChat(ackRequired = false) {
+  function sendChat(
+    ackRequired = false,
+    recipient: ChatRecipient | null = null,
+  ) {
     if (
       !wsRef.current ||
       wsRef.current.readyState !== WebSocket.OPEN ||
       !message.trim()
     )
       return;
-    const resolvedTargetId = resolveChatTargetRoomId(
-      listenRoomIdsRef.current,
-      talkRoomIdsRef.current,
-      appDataRef.current?.rooms || [],
-      appDataRef.current?.roles.find(
-        (role) => role.id === appDataRef.current?.self.roleId,
-      ),
-      appDataRef.current?.self.roleId || "",
-    );
-    if (!resolvedTargetId) return;
+    // Without a chosen recipient the message goes to your talk line; the
+    // server still honours a typed "#party line" or "@person" at the start.
+    const target: ChatRecipient | null =
+      recipient ??
+      (() => {
+        const roomId = resolveChatTargetRoomId(
+          listenRoomIdsRef.current,
+          talkRoomIdsRef.current,
+          appDataRef.current?.rooms || [],
+          appDataRef.current?.roles.find(
+            (role) => role.id === appDataRef.current?.self.roleId,
+          ),
+          appDataRef.current?.self.roleId || "",
+        );
+        return roomId ? { type: "room" as const, id: roomId } : null;
+      })();
     wsRef.current.send(
       JSON.stringify({
         type: "chat",
         data: {
-          scope: chatScope,
-          targetId: resolvedTargetId,
+          scope: target?.type === "room" || !target ? "room" : "direct",
+          targetType: target?.type,
+          targetId: target?.id ?? "",
           body: message.trim(),
           ackRequired: ackRequired && (appDataRef.current?.ackEnabled ?? true),
         },
       }),
     );
+    lastSentChatRef.current = message;
+    setChatNotice("");
     setMessage("");
   }
 
@@ -2066,7 +2110,9 @@ export function useIntercomSession({
             setAudioError(
               `Failed to access microphone: ${e instanceof Error ? e.message : "unknown error"}`,
             );
-            pushDebugEvent("system · local/mic · capture failed (receive-only)");
+            pushDebugEvent(
+              "system · local/mic · capture failed (receive-only)",
+            );
           }
         }
         ws.send(JSON.stringify({ type: "webrtc_ready", data: {} }));
@@ -2182,7 +2228,13 @@ export function useIntercomSession({
               error,
               at: Date.now(),
             });
-            sendCompanionCommandResult(commandID, command, false, "rejected", error);
+            sendCompanionCommandResult(
+              commandID,
+              command,
+              false,
+              "rejected",
+              error,
+            );
           };
           const ackFailed = (error: string) => {
             setLastCompanionCommand({
@@ -2191,7 +2243,13 @@ export function useIntercomSession({
               error,
               at: Date.now(),
             });
-            sendCompanionCommandResult(commandID, command, false, "failed", error);
+            sendCompanionCommandResult(
+              commandID,
+              command,
+              false,
+              "failed",
+              error,
+            );
           };
 
           if (msg.data.command === "set_voice_mode" && msg.data.mode) {
@@ -2357,11 +2415,15 @@ export function useIntercomSession({
                     // skip malformed candidate
                   }
                 }
-                pushDebugEvent("system · webrtc · native engine answered offer");
+                pushDebugEvent(
+                  "system · webrtc · native engine answered offer",
+                );
                 return;
               }
               // Fall through to browser path if native failed
-              pushDebugEvent("system · webrtc · native engine failed, falling back");
+              pushDebugEvent(
+                "system · webrtc · native engine failed, falling back",
+              );
             })().catch((err) => {
               setAudioError(
                 `Native audio engine failed: ${err instanceof Error ? err.message : "unknown error"}`,
@@ -2463,6 +2525,12 @@ export function useIntercomSession({
             triggerIncomingAttention(msg.data);
           }
         }
+        if (msg.type === "status" && msg.data.code === "not_delivered") {
+          setChatNotice(msg.data.message);
+          const unsent = lastSentChatRef.current;
+          lastSentChatRef.current = "";
+          if (unsent) setMessage((current) => current || unsent);
+        }
         if (msg.type === "chat") {
           const chatBody = (msg.data.body || "").toString().trim();
           if (chatBody) {
@@ -2562,6 +2630,9 @@ export function useIntercomSession({
             pushDebugEvent("system · chat history cleared");
           }
           return;
+        }
+        if (msg.type === "status") {
+          return; // handled above (chat not delivered)
         }
         const body = (msg.data.signal || msg.data.body || "").toString();
         if (showDebug) {
@@ -2763,10 +2834,9 @@ export function useIntercomSession({
         ? prev
         : selfPresence.talkRooms,
     );
-    const nextVoiceMode =
-      resolveVoiceModeForClient(
-        selfPresence.voiceMode === "always_on" ? "always_on" : "ptt",
-      );
+    const nextVoiceMode = resolveVoiceModeForClient(
+      selfPresence.voiceMode === "always_on" ? "always_on" : "ptt",
+    );
     if (nextVoiceMode !== voiceModeRef.current) {
       setVoiceMode(nextVoiceMode);
       voiceModeRef.current = nextVoiceMode;
@@ -2802,6 +2872,8 @@ export function useIntercomSession({
     connectionState,
     presence,
     chatMessages,
+    chatNotice,
+    clearChatNotice: () => setChatNotice(""),
     events,
     rtpStats,
     incomingAudioActive: performanceModeActive
