@@ -3,13 +3,12 @@
 The rules every screen follows: station view (browser, desktop app), admin
 console, login. The values live in
 [`packages/client-core/src/styles/tokens.css`](../../packages/client-core/src/styles/tokens.css)
-as `--k-*` variables. New and reworked UI uses only those.
+as `--k-*` variables. All UI uses only those.
 
 Where things live in `packages/client-core/src`:
 
 - `styles/tokens.css`: the values (colors, type, spacing, radii).
-- `styles/theme.css`: older variable names still used in `app.css`, each
-  pointing at a token. No raw colors there; drop a name once nothing uses it.
+- `styles/theme.css`: page base (dark scheme, font, box sizing).
 - `styles/app.css`: component styles. Base controls (`input`, `select`,
   `button`) are 44 px with radius 10; button kinds are `.primary`,
   `.secondary` (also plain `<button>`) and `.danger`; icon-only buttons use

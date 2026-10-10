@@ -231,9 +231,3 @@ How the emulation behaves:
 `make lab-up` at `http://<pc-ip>:818x`. The PC's LAN IP is detected and
 advertised; override it with `LAB_PUBLIC_IP`. Browsers on other devices only
 allow the microphone over HTTPS, so there they can only listen.
-
-## Headless probes (NetLab)
-
-`make nettest` is the older, Docker-based lab with Go probes. The desktop
-benchmark above replaces it for the desktop app, because it measures the real
-Rust engine instead of a reimplementation of the protocol.

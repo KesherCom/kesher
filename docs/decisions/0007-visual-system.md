@@ -36,7 +36,7 @@ The approved draft is the design canvas "Kesher Redesign Entwurf"
 
 ## Limits
 
-- `app.css` still uses some older variable names; `theme.css` maps each of
-  them onto a token, so they cannot drift apart.
+- The older variable names (`--panel`, `--text-secondary`, ...) are gone;
+  every style reads the `--k-*` tokens directly.
 - IBM Plex is bundled (`@fontsource/ibm-plex-sans`, `-mono`) so it works on
   a LAN without internet; it adds about 0.5 MB of font files to the build.

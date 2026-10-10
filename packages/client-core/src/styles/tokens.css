@@ -1,8 +1,7 @@
 /*
  * Kesher visual system: the values every screen uses.
- * Rules and examples: docs/design/README.md. New and reworked UI uses
- * these variables only (no raw colors); theme.css/app.css move over step
- * by step.
+ * Rules and examples: docs/design/README.md. All UI uses these variables
+ * only (no raw colors).
  */
 :root {
   /* Colors with one meaning each, everywhere. */

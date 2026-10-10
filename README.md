@@ -26,17 +26,21 @@ are recorded in [docs/decisions](docs/decisions/README.md).
 
 ```sh
 make deps          # install all dependencies
-make dev-backend   # terminal 1 — backend on :8080
-make dev-web       # terminal 2 — frontend on :5173 (proxies API to backend)
+make dev-backend   # terminal 1 — API and audio on :8080 (no UI there)
+make dev-web       # terminal 2 — the UI on http://localhost:5173 (live reload)
 ```
 
-Or serve everything from the backend:
+Open `http://localhost:5173`. The admin PIN in development is `123456`.
+
+Or build the UI once and serve everything from the backend:
 
 ```sh
-make run-backend   # builds frontend, then starts backend with embedded UI on :8080
+make run-backend   # builds the UI, then serves it and the API on http://localhost:8080
 ```
 
-Open `http://localhost:8080` (or `:5173` if using the Vite dev server).
+There is one UI: `packages/client-core` (the browser shell is `web/`, the
+desktop shell `desktop/`). Pulled new code? Both commands always build or
+serve the current UI; nothing old is kept in between.
 
 ## Downloadable builds
 
@@ -75,9 +79,6 @@ Some environments block unsigned binaries by default.
   1. Run the `.exe`.
   2. If SmartScreen warns, click **More info** → **Run anyway**.
   3. If Defender quarantines it, restore/allow the file in Windows Security, then run again.
-
-Desktop proxy binaries are maintained in a separate repository:
-`https://github.com/KesherCom/kesher-desktop-proxy`
 
 ## HTTPS options
 
@@ -204,12 +205,12 @@ Verify: open `https://intercom.example.org` from a LAN client — no warning, mi
 
 > **Tip:** If you'd like step-by-step guidance tailored to your specific setup, see the [LLM prompt template](#llm-prompt-template) below.
 
-## Desktop proxy (alternative to HTTPS)
+## Desktop app instead of HTTPS
 
-Instead of setting up HTTPS, you can distribute a small desktop app that proxies through `localhost`, which browsers treat as a secure context (mic access works without HTTPS).
-The backend must serve the UI itself (`make run-backend` or the embedded binary). The proxy does **not** bundle frontend assets.
-Desktop proxy source, run/build instructions, and release artifacts are in:
-`https://github.com/KesherCom/kesher-desktop-proxy`
+Browsers only allow the microphone over HTTPS (or on `localhost`). The
+desktop app (`desktop/`, installers in the releases) does not need that: it
+talks to the server over plain HTTP on the LAN, finds it by itself (mDNS) and
+uses the low-latency native audio path.
 
 ### macOS desktop release signing (maintainers)
 

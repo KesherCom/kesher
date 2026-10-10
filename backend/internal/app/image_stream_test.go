@@ -157,7 +157,6 @@ func TestImageStreamCoordinatorSkipsUnchangedButtonState(t *testing.T) {
 
 	client := &ImageStreamClient{
 		RoleID:   "role-a",
-		Username: "operator",
 		send:     make(chan ImageStreamMessage, 4),
 		done:     make(chan struct{}),
 		logger:   logger,
@@ -172,14 +171,14 @@ func TestImageStreamCoordinatorSkipsUnchangedButtonState(t *testing.T) {
 		ActionType: string(StreamDeckActionTypePTTRoom),
 	}
 
-	coord.BroadcastImageUpdateForTarget("role-a", "operator", state, 0, 2)
+	coord.BroadcastImageUpdateForTarget("role-a", state, 0, 2)
 	select {
 	case <-client.send:
 	case <-time.After(250 * time.Millisecond):
 		t.Fatal("expected first update to be delivered")
 	}
 
-	coord.BroadcastImageUpdateForTarget("role-a", "operator", state, 0, 2)
+	coord.BroadcastImageUpdateForTarget("role-a", state, 0, 2)
 	select {
 	case msg := <-client.send:
 		t.Fatalf("expected unchanged update to be skipped, got %+v", msg)
@@ -188,7 +187,7 @@ func TestImageStreamCoordinatorSkipsUnchangedButtonState(t *testing.T) {
 
 	changed := state
 	changed.State = "TALK"
-	coord.BroadcastImageUpdateForTarget("role-a", "operator", changed, 0, 2)
+	coord.BroadcastImageUpdateForTarget("role-a", changed, 0, 2)
 	select {
 	case msg := <-client.send:
 		if msg.State != "TALK" {
@@ -215,7 +214,7 @@ func TestImageStreamCoordinatorRoleOnlyClientReceivesTargetedRoleUpdates(t *test
 	coord.RegisterClient(client)
 	defer coord.UnregisterClient(client)
 
-	coord.BroadcastImageUpdateForTarget("role-a", "operator", ButtonState{
+	coord.BroadcastImageUpdateForTarget("role-a", ButtonState{
 		Channel:    "room-a",
 		State:      "TALK",
 		Label:      "Room A",
@@ -232,7 +231,7 @@ func TestImageStreamCoordinatorRoleOnlyClientReceivesTargetedRoleUpdates(t *test
 	}
 }
 
-func TestResolveImageStreamTargetKeepsRoleOnlyBindingWithoutUsername(t *testing.T) {
+func TestResolveImageStreamTargetBindsRole(t *testing.T) {
 	s := newCompanionTestServer(t)
 	ctx := context.Background()
 
@@ -246,12 +245,8 @@ func TestResolveImageStreamTargetKeepsRoleOnlyBindingWithoutUsername(t *testing.
 	s.sessions.Create(user)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companion/image-stream?roleId=source", nil)
-	roleID, username := s.resolveImageStreamTarget(ctx, req)
-	if roleID != "source" {
+	if roleID := s.resolveImageStreamTarget(ctx, req); roleID != "source" {
 		t.Fatalf("expected roleID source, got %q", roleID)
-	}
-	if username != "" {
-		t.Fatalf("expected empty username for role-only binding, got %q", username)
 	}
 }
 

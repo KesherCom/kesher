@@ -1,12 +1,12 @@
 SHELL := /bin/bash
 LAN_IP ?= 127.0.0.1
 
-.PHONY: help deps dev-backend dev-web run-backend run-backend-no-udp run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic run-web sync-embedded-web build-backend build-web build-desktop-web build-desktop-windows build-desktop-release run-desktop-release dev-desktop desktop-web-check desktop-rust-check desktop-rust-test desktop-check local-smoke build test ci-test ci-backend-test ci-desktop-test loadtest loadtest-20 nettest netlab-up netlab-report netlab-down lab lab-desktop lab-desktop-baseline lab-desktop-hw lab-up lab-status lab-test lab-open lab-down docker-build docker-up docker-up-https docker-logs docker-down node-image node-deb node-test clean
+.PHONY: help deps dev-backend dev-web run-backend run-backend-no-udp run-backend-https run-backend-le run-backend-certmagic run-production-le run-production-certmagic sync-embedded-web build-backend build-web build-desktop-web build-desktop-windows build-desktop-macos build-desktop-release run-desktop-release dev-desktop desktop-web-check desktop-rust-check desktop-rust-test desktop-check local-smoke build test ci-test ci-backend-test ci-desktop-test loadtest loadtest-20 lab lab-desktop lab-desktop-baseline lab-desktop-hw lab-up lab-status lab-test lab-open lab-down docker-build docker-up docker-up-https docker-logs docker-down node-image node-deb node-test clean
 
 help:
 	@echo "Available targets:"
 	@echo "  make deps          - install backend/web dependencies"
-	@echo "  make dev-backend   - run Go backend in dev mode"
+	@echo "  make dev-backend   - run Go backend in dev mode (API only, UI via make dev-web)"
 	@echo "  make dev-web       - run React frontend dev server"
 	@echo "  make run-backend   - run backend serving built frontend assets (UDP audio relay :8081 ON)"
 	@echo "  make run-backend-no-udp - run backend with the native UDP audio relay disabled (WebRTC only)"
@@ -15,12 +15,11 @@ help:
 	@echo "  make run-backend-certmagic DOMAIN=... DNS_PROVIDER=... - run backend with CertMagic ACME DNS-01 automation"
 	@echo "  make run-production-le DOMAIN=... - production mode (HTTPS :443 + HTTP :80 redirect) with Let's Encrypt certs"
 	@echo "  make run-production-certmagic DOMAIN=... DNS_PROVIDER=... - production mode with in-app CertMagic DNS-01 automation"
-	@echo "  make run-web       - alias for dev-web"
 	@echo "  make sync-embedded-web - copy web/dist into backend embedded assets directory"
 	@echo "  make build-backend - build backend binary"
 	@echo "  make build-web     - build frontend bundle"
 	@echo "  make build         - build backend + frontend"
-	@echo "  make test          - run backend tests + frontend build"
+	@echo "  make test          - run backend tests, web build and client-core unit tests"
 	@echo ""
 	@echo "  Desktop & CI Targets (local GitHub Actions simulation):"
 	@echo "  make build-desktop-web     - build web bundle for desktop"
@@ -40,21 +39,6 @@ help:
 	@echo ""
 	@echo "  make loadtest      - run staged backend load test with non-ideal network simulation"
 	@echo "  make loadtest-20   - run staged backend load test profile that ramps to 20 clients"
-	@echo ""
-	@echo "  NetLab (multi-instance local network test lab, Docker):"
-	@echo "  make nettest       - one-shot: N kesher instances + headless audio-quality probes"
-	@echo "                       over a simulated network, prints report, tears down"
-	@echo "  make netlab-up     - start the lab and keep it running (Tauri/browser manual testing)"
-	@echo "  make netlab-report - show probe results from the running lab"
-	@echo "  make netlab-down   - stop the lab"
-	@echo ""
-	@echo "  NetLab tuning (env vars, all optional; emulation is userspace,"
-	@echo "  in-process on the instances — no kernel tc support required):"
-	@echo "    NETLAB_INSTANCES=3 NETLAB_DURATION_SECONDS=30 NETLAB_PORT_BASE=39080"
-	@echo "    NETLAB_PROFILE=lan|wifi|wan|worst"
-	@echo "    NETLAB_LATENCY_MS / NETLAB_JITTER_MS / NETLAB_LOSS_PCT / NETLAB_REORDER_PCT"
-	@echo "    NETLAB_DUPLICATE_PCT / NETLAB_BITRATE_KBIT"
-	@echo "    per-instance override: NETLAB_INSTANCE_1_LATENCY_MS=... etc."
 	@echo ""
 	@echo "  Test lab (one PC, real browsers, emulated networks; see testlab/README.md):"
 	@echo "  make lab           - EVERYTHING in one go: build, start servers, desktop audio benchmark,"
@@ -90,12 +74,11 @@ deps:
 	@cd backend && go mod download && go mod tidy
 
 dev-backend:
+	@node scripts/embedded-web.mjs clear
 	@cd backend && go run ./cmd/server
 
 dev-web:
 	@cd web && npm run dev
-
-run-web: dev-web
 
 # Default: native UDP audio relay listens on :8081 alongside HTTP :8080.
 # Override with UDP_AUDIO_ADDR=":9000" make run-backend, or disable via the
@@ -187,14 +170,17 @@ build-web:
 	@cd web && npm run build
 
 sync-embedded-web: build-web
-	@node -e "const fs=require('fs');const path=require('path');const src=path.join('web','dist');const dst=path.join('backend','internal','app','embedded_web');fs.mkdirSync(dst,{recursive:true});for(const name of fs.readdirSync(src)){fs.cpSync(path.join(src,name),path.join(dst,name),{recursive:true,force:true});}"
+	@node scripts/embedded-web.mjs fill
 
+# The UI is embedded for the build only and removed again afterwards, so a
+# later `go run` never serves an old UI.
 build-backend: sync-embedded-web
 	@mkdir -p backend/bin
 	@cd backend && \
 		VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo "dev") && \
 		BUILD_TIMESTAMP=$$(date -u +'%Y-%m-%dT%H:%M:%SZ') && \
-		go build -ldflags="-X github.com/KesherCom/kesher/backend/internal/app.Version=$$VERSION -X github.com/KesherCom/kesher/backend/internal/app.BuildTimestamp=$$BUILD_TIMESTAMP" -o ./bin/server ./cmd/server
+		go build -ldflags="-X github.com/KesherCom/kesher/backend/internal/app.Version=$$VERSION -X github.com/KesherCom/kesher/backend/internal/app.BuildTimestamp=$$BUILD_TIMESTAMP" -o ./bin/server ./cmd/server; \
+		status=$$?; cd .. && node scripts/embedded-web.mjs clear; exit $$status
 build: build-backend
 
 test:
@@ -250,7 +236,7 @@ local-smoke: deps test desktop-check
 
 ci-backend-test: sync-embedded-web
 	@echo "Building backend binaries (Windows + Linux)..."
-	@node -e "const fs=require('fs');const cp=require('child_process');fs.mkdirSync('dist/bin',{recursive:true});const run=(args,env)=>{const r=cp.spawnSync('go',args,{cwd:'backend',stdio:'inherit',env:{...process.env,...env}});if(r.status!==0)process.exit(r.status??1);};run(['build','-trimpath','-ldflags=-s -w','-o','../dist/bin/kesher-windows-amd64.exe','./cmd/server'],{});run(['build','-trimpath','-ldflags=-s -w','-o','../dist/bin/kesher-linux-amd64','./cmd/server'],{GOOS:'linux',GOARCH:'amd64',CGO_ENABLED:'0'});"
+	@node -e "const fs=require('fs');const cp=require('child_process');fs.mkdirSync('dist/bin',{recursive:true});const run=(args,env)=>{const r=cp.spawnSync('go',args,{cwd:'backend',stdio:'inherit',env:{...process.env,...env}});if(r.status!==0)process.exit(r.status??1);};run(['build','-trimpath','-ldflags=-s -w','-o','../dist/bin/kesher-windows-amd64.exe','./cmd/server'],{});run(['build','-trimpath','-ldflags=-s -w','-o','../dist/bin/kesher-linux-amd64','./cmd/server'],{GOOS:'linux',GOARCH:'amd64',CGO_ENABLED:'0'});"; status=$$?; node scripts/embedded-web.mjs clear; exit $$status
 	@echo "✓ Backend builds complete!"
 
 ci-desktop-test: ci-backend-test build-desktop-windows
@@ -264,23 +250,6 @@ loadtest:
 
 loadtest-20:
 	@cd backend && LOADTEST_RUN=1 LOADTEST_PROFILE=20clients go test -tags=loadtest -run TestRealWorldLoadRamp -count=1 -v -timeout 30m ./internal/app
-
-# === NetLab: multi-instance test lab with simulated network (userspace) ===
-# Each instance runs two isolated probe pairs so the WebRTC (browser) and
-# native UDP relay (Tauri) audio paths can be compared under identical
-# emulated network conditions (delay/loss/jitter applied in-process).
-
-nettest:
-	@node scripts/netlab/run.mjs run
-
-netlab-up:
-	@node scripts/netlab/run.mjs up
-
-netlab-report:
-	@node scripts/netlab/run.mjs report
-
-netlab-down:
-	@node scripts/netlab/run.mjs down
 
 # === Test lab: full kesher instances behind emulated networks + Playwright ===
 
@@ -347,8 +316,6 @@ node-test:
 	@cargo test -p kesher-node -p kesher-audio
 
 clean:
-	@rm -rf backend/bin
-	@rm -rf web/dist
-	@rm -rf target desktop/src-tauri/target
-	@rm -rf dist/bin dist/packages
+	@rm -rf backend/bin web/dist desktop/dist dist target testlab/.cache
+	@node scripts/embedded-web.mjs clear
 	@echo "✓ Build artifacts cleaned"

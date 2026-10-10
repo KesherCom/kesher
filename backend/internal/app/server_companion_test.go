@@ -1182,7 +1182,7 @@ func TestCompanionButtonSnapshotStateKeepsHeldPTTRoomActive(t *testing.T) {
 		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
 	}
 
-	client := &ImageStreamClient{RoleID: "source", Username: "operator", send: make(chan ImageStreamMessage, 32), done: make(chan struct{}), logger: logger}
+	client := &ImageStreamClient{RoleID: "source", send: make(chan ImageStreamMessage, 32), done: make(chan struct{}), logger: logger}
 	s.imageStreamCoord.RegisterClient(client)
 	defer s.imageStreamCoord.UnregisterClient(client)
 
@@ -1228,7 +1228,7 @@ func TestEmitCompanionCurrentPageImagesSkipsUnchangedButtonsOnRepeat(t *testing.
 		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
 	}
 
-	client := &ImageStreamClient{RoleID: "source", Username: "operator", send: make(chan ImageStreamMessage, 64), done: make(chan struct{}), logger: logger}
+	client := &ImageStreamClient{RoleID: "source", send: make(chan ImageStreamMessage, 64), done: make(chan struct{}), logger: logger}
 	s.imageStreamCoord.RegisterClient(client)
 	defer s.imageStreamCoord.UnregisterClient(client)
 
@@ -1643,7 +1643,7 @@ func TestExecuteCompanionButtonPressCallRoomKeepsVisibleFeedbackUntilRefresh(t *
 		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
 	}
 
-	imageClient := &ImageStreamClient{RoleID: "source", Username: "operator", send: make(chan ImageStreamMessage, 32), done: make(chan struct{}), logger: logger}
+	imageClient := &ImageStreamClient{RoleID: "source", send: make(chan ImageStreamMessage, 32), done: make(chan struct{}), logger: logger}
 	s.imageStreamCoord.RegisterClient(imageClient)
 	defer s.imageStreamCoord.UnregisterClient(imageClient)
 

@@ -10,3 +10,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </ApiBaseUrlProvider>
   </React.StrictMode>
 );
+
+// Service worker (public/sw.js, network first) for the installed PWA. Not on
+// localhost, where it only adds certificate noise during development.
+const isLocalhost =
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1";
+if (import.meta.env.PROD && "serviceWorker" in navigator && !isLocalhost) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js").catch(console.error);
+  });
+}

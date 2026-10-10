@@ -1335,7 +1335,7 @@ func (s *Server) executeCompanionPageCommand(ctx context.Context, key, username 
 
 	s.setCompanionCurrentPage(key, targetPage)
 	if s.imageStreamCoord != nil {
-		s.imageStreamCoord.ResetTargetCache(key, username)
+		s.imageStreamCoord.ResetTargetCache(key)
 	}
 	s.emitCompanionCurrentPageImages(ctx, key, username)
 	result.OK = true
@@ -2409,7 +2409,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, key string, us
 		}
 		s.setCompanionCurrentPage(key, targetPage)
 		if s.imageStreamCoord != nil {
-			s.imageStreamCoord.ResetTargetCache(key, username)
+			s.imageStreamCoord.ResetTargetCache(key)
 		}
 		s.setCompanionPageNavAnchor(key, command.ButtonIndex)
 		emitCompanionCurrentPageImages()
@@ -2464,7 +2464,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, key string, us
 		}
 		s.setCompanionCurrentPage(key, jumpTarget)
 		if s.imageStreamCoord != nil {
-			s.imageStreamCoord.ResetTargetCache(key, username)
+			s.imageStreamCoord.ResetTargetCache(key)
 		}
 		emitCompanionCurrentPageImages()
 		emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE"})
@@ -2968,7 +2968,7 @@ func (s *Server) emitCompanionButtonImage(ctx context.Context, roleID string, us
 	if strings.TrimSpace(state.Channel) == "" && button.Action != nil {
 		state.Channel = companionButtonChannel(*button)
 	}
-	s.imageStreamCoord.BroadcastImageUpdateForTarget(roleID, username, state, bank, button.Index)
+	s.imageStreamCoord.BroadcastImageUpdateForTarget(roleID, state, bank, button.Index)
 }
 
 func (s *Server) resolveReplyToCallerLabels(button StreamDeckButtonConfig, username string) (primary, subtitle string) {
@@ -3531,6 +3531,8 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/ws", s.handleWS)
 	if cfg.StaticDir != "" || embeddedStaticAvailable() {
 		mux.Handle("/", s.staticHandler())
+	} else {
+		mux.HandleFunc("/", handleNoWebUI)
 	}
 	serveAddr := cfg.Addr
 	if cfg.ProductionMode {
@@ -6070,6 +6072,21 @@ func (s *Server) staticHandler() http.Handler {
 		}
 		http.ServeFile(w, r, s.cfg.StaticDir+"/index.html")
 	})
+}
+
+// handleNoWebUI answers page requests on a server started without a UI
+// (`make dev-backend`, plain `go run`): it says where the UI is instead of
+// a bare 404.
+func handleNoWebUI(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws") {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = fmt.Fprint(w, "This kesher server runs without the web UI.\n\n"+
+		"Development: start `make dev-web` and open http://localhost:5173\n"+
+		"Server with UI: `make run-backend` (or `make build-backend` for one binary)\n")
 }
 
 func (s *Server) embeddedStaticHandler() http.Handler {

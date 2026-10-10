@@ -4,9 +4,10 @@
 // Docker lab — minus Docker Desktop's UDP NAT, which itself adds latency and
 // jitter on Windows/macOS. Preferred for latency measurements.
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, cpSync, readdirSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { LAB_DIR, ROOT_DIR, PROFILES } from "./lab.mjs";
+import { clearEmbeddedWeb, fillEmbeddedWeb } from "../../scripts/embedded-web.mjs";
 
 const isWin = process.platform === "win32";
 const CACHE = path.join(LAB_DIR, ".cache");
@@ -25,13 +26,15 @@ export function buildServer({ withUI }) {
     console.log("lab: building web UI...");
     if (!existsSync(path.join(ROOT_DIR, "node_modules"))) run("npm", ["install", "--no-audit", "--no-fund"], { cwd: ROOT_DIR });
     run("npm", ["run", "build", "--workspace", "web"], { cwd: ROOT_DIR });
-    const dst = path.join(ROOT_DIR, "backend", "internal", "app", "embedded_web");
-    for (const name of readdirSync(dst)) if (name !== "_placeholder.txt") rmSync(path.join(dst, name), { recursive: true, force: true });
-    cpSync(path.join(ROOT_DIR, "web", "dist"), dst, { recursive: true });
+    fillEmbeddedWeb();
   }
   console.log("lab: building server...");
   mkdirSync(path.dirname(BIN), { recursive: true });
-  run("go", ["build", "-o", BIN, "./cmd/server"], { cwd: path.join(ROOT_DIR, "backend") });
+  try {
+    run("go", ["build", "-o", BIN, "./cmd/server"], { cwd: path.join(ROOT_DIR, "backend") });
+  } finally {
+    clearEmbeddedWeb();
+  }
   return BIN;
 }
 

@@ -19,7 +19,7 @@
   max-width: 680px;
   border-radius: 14px;
   padding: 1.25rem;
-  background: var(--panel);
+  background: var(--k-surface);
   border: 1px solid rgba(255, 255, 255, 0.03);
   box-shadow: 0 12px 40px rgba(2, 8, 20, 0.6);
   display: grid;
@@ -37,7 +37,7 @@
 }
 .login-card-head .variant-subtitle {
   margin: 0.15rem 0 0;
-  color: var(--muted);
+  color: var(--k-text-muted);
 }
 .login-form {
   display: grid;
@@ -52,7 +52,7 @@
 .login-label-text {
   font-size: 0.92rem;
   font-weight: 700;
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
 }
 .login-form input,
 .login-form select {
@@ -90,12 +90,12 @@
   transform: translateY(-1px);
 }
 .login-form select option {
-  background: var(--input-bg);
-  color: var(--text);
+  background: var(--k-ground);
+  color: var(--k-text);
 }
 .login-card .primary {
-  background: var(--accent);
-  color: var(--station-pin-active-text);
+  background: var(--k-selection);
+  color: var(--k-ground);
   border: 0;
   padding: 0.7rem 0.95rem;
   border-radius: 10px;
@@ -120,12 +120,12 @@
 }
 .login-admin-pin-hint {
   font-size: 0.88rem;
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
   white-space: nowrap;
 }
 .login-admin-note {
   margin: 0;
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
 }
 .login-admin-card input {
   padding: 0.6rem 0.75rem;
@@ -136,7 +136,7 @@
 .login-card .secondary {
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.03);
-  color: var(--text);
+  color: var(--k-text);
   padding: 0.55rem 0.8rem;
   border-radius: 10px;
 }
@@ -165,7 +165,7 @@
   }
 }
 .variant-subtitle {
-  color: var(--muted);
+  color: var(--k-text-muted);
   margin: 0.1rem 0 0.2rem;
 }
 label {
@@ -222,8 +222,8 @@ input[type="range"] {
   min-height: 0;
 }
 .panel {
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--k-surface);
+  border: 1px solid var(--k-border);
   border-radius: 13px;
   padding: 0.85rem;
 }
@@ -417,15 +417,15 @@ button.chat-msg-sender:hover {
   margin-top: 0.4rem;
   margin-bottom: 0.22rem;
   border-radius: 999px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--k-border);
   overflow: hidden;
-  background: var(--panel);
+  background: var(--k-surface);
 }
 .meter-bar {
   height: 100%;
   width: 0%;
   transition: width 80ms linear;
-  background: var(--meter-med);
+  background: var(--k-call);
 }
 .events {
   list-style: none;
@@ -437,12 +437,12 @@ button.chat-msg-sender:hover {
   grid-template-columns: 88px 1fr;
   gap: 0.65rem;
   padding: 0.35rem 0;
-  border-bottom: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--k-border);
 }
 .admin-panel {
   margin-top: 0.9rem;
   border-radius: 12px;
-  background: var(--panel);
+  background: var(--k-surface);
   border: 1px solid rgba(74, 100, 140, 0.08);
   padding: 1rem;
   box-shadow: 0 8px 26px rgba(2, 8, 20, 0.5);
@@ -452,7 +452,7 @@ button.chat-msg-sender:hover {
   border: 1px solid rgba(255, 255, 255, 0.03);
   padding: 0.35rem 0.6rem;
   border-radius: 8px;
-  color: var(--text);
+  color: var(--k-text);
 }
 .admin-toggle-button:hover {
   transform: translateY(-1px);
@@ -472,8 +472,8 @@ button.chat-msg-sender:hover {
   justify-content: space-between;
   align-items: center;
   padding: 1.2rem 1.5rem;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: var(--k-ground);
+  border-bottom: 1px solid var(--k-border);
   margin-bottom: 1.2rem;
 }
 
@@ -481,13 +481,13 @@ button.chat-msg-sender:hover {
   margin: 0 0 0.3rem 0;
   font-size: 1.8rem;
   font-weight: 800;
-  color: var(--text);
+  color: var(--k-text);
 }
 
 .admin-shell-user {
   margin: 0;
   font-size: 0.9rem;
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
 }
 
 .admin-shell-actions {
@@ -569,13 +569,13 @@ button.chat-msg-sender:hover {
   margin: 0;
   font-size: 1.2rem;
   line-height: 1.1;
-  color: var(--text-bright-alt2);
+  color: var(--k-text);
 }
 
 .admin-layout-intro p {
   margin: 0;
   max-width: 62ch;
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
   font-size: 0.92rem;
   line-height: 1.45;
 }
@@ -585,7 +585,7 @@ button.chat-msg-sender:hover {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)) 0
       0 / 100% 100% no-repeat,
-    var(--panel);
+    var(--k-surface);
   border: 1px solid rgba(255, 255, 255, 0.04);
   box-shadow: 0 10px 30px rgba(2, 8, 20, 0.55);
   overflow: hidden;
@@ -603,7 +603,7 @@ button.chat-msg-sender:hover {
 
 .admin-card-title {
   font-weight: 800;
-  color: var(--admin-title);
+  color: var(--k-text);
   font-size: 1rem;
 }
 .admin-card-actions {
@@ -626,13 +626,13 @@ button.chat-msg-sender:hover {
 .admin-toggle-button {
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.04);
-  color: var(--muted);
+  color: var(--k-text-muted);
   padding: 0.4rem 0.65rem;
   border-radius: 8px;
   font-weight: 700;
 }
 .admin-toggle-button:hover {
-  color: var(--text);
+  color: var(--k-text);
   border-color: rgba(255, 255, 255, 0.06);
   transform: translateY(-1px);
 }
@@ -654,8 +654,8 @@ button.chat-msg-sender:hover {
 }
 .danger,
 button.delete {
-  background: var(--delete-bg);
-  border: 1px solid var(--delete-border);
+  background: var(--k-danger-bg);
+  border: 1px solid var(--k-danger-border);
   color: var(--k-on-air-text);
 }
 
@@ -668,7 +668,7 @@ button.delete {
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.03);
   background: rgba(255, 255, 255, 0.02);
-  color: var(--text);
+  color: var(--k-text);
 }
 
 .admin-card-body textarea {
@@ -703,7 +703,7 @@ button.delete {
   flex-wrap: wrap;
   gap: 0.55rem;
   font-size: 0.84rem;
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
 }
 
 .admin-logs-table-wrap {
@@ -718,25 +718,25 @@ button.delete {
 
 .admin-logs-table th,
 .admin-logs-table td {
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--k-border);
   padding: 0.48rem 0.45rem;
   text-align: left;
   vertical-align: top;
 }
 
 .admin-logs-table th {
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
   font-weight: 700;
 }
 
 .admin-logs-empty {
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
   text-align: center;
 }
 
 /* ============ Routing Matrix ============ */
 .routing-matrix-hint {
-  color: var(--text-muted);
+  color: var(--k-text-muted);
   font-size: 0.82rem;
   margin: 0 0 0.65rem;
   line-height: 1.45;
@@ -759,32 +759,32 @@ button.delete {
 }
 .routing-matrix-corner {
   text-align: left;
-  color: var(--text-muted);
+  color: var(--k-text-muted);
   font-weight: 600;
   font-size: 0.78rem;
-  border-bottom: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--k-border);
   position: sticky;
   left: 0;
-  background: var(--panel);
+  background: var(--k-surface);
   z-index: 2;
 }
 .routing-matrix-col-header {
   text-align: center;
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
   font-weight: 700;
   font-size: 0.8rem;
-  border-bottom: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--k-border);
   padding-bottom: 0.5rem;
 }
 .routing-matrix-row-header {
   text-align: left;
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
   font-weight: 700;
   font-size: 0.82rem;
-  border-right: 1px solid var(--border-light);
+  border-right: 1px solid var(--k-border);
   position: sticky;
   left: 0;
-  background: var(--panel);
+  background: var(--k-surface);
   z-index: 1;
   padding-right: 0.75rem;
 }
@@ -799,7 +799,7 @@ button.delete {
   gap: 1rem;
   align-items: center;
   font-size: 0.78rem;
-  color: var(--text-muted);
+  color: var(--k-text-muted);
   margin-top: 0.15rem;
 }
 .routing-matrix-legend-item {
@@ -815,7 +815,7 @@ button.delete {
   background: rgba(255, 255, 255, 0.02);
 }
 .admin-metric-label {
-  color: var(--muted);
+  color: var(--k-text-muted);
   font-size: 0.85rem;
 }
 .admin-metric-value {
@@ -826,7 +826,7 @@ button.delete {
 /* Vertical accordion for admin sections */
 
 .admin-error {
-  color: var(--admin-error);
+  color: var(--k-on-air-text);
   margin: 0;
   padding: 0.7rem 0.85rem;
   border-radius: 10px;
@@ -846,7 +846,7 @@ button.delete {
 
 .admin-block > p {
   margin: 0;
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
   line-height: 1.5;
 }
 .admin-block-header {
@@ -859,7 +859,7 @@ button.delete {
 .admin-block-header h4 {
   margin: 0;
   font-size: 1rem;
-  color: var(--admin-pin-note);
+  color: var(--k-text-soft);
 }
 .admin-pin-form {
   display: grid;
@@ -873,14 +873,14 @@ button.delete {
 .admin-pin-field label {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
 }
 .admin-pin-field input {
   padding: 0.65rem 0.75rem;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.03);
   background: rgba(255, 255, 255, 0.02);
-  color: var(--admin-title);
+  color: var(--k-text);
   font-size: 0.95rem;
   transition: all 120ms ease;
 }
@@ -892,7 +892,7 @@ button.delete {
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.03);
   background: rgba(255, 255, 255, 0.02);
-  color: var(--admin-title);
+  color: var(--k-text);
   font-size: 0.95rem;
   transition: all 120ms ease;
 }
@@ -945,7 +945,7 @@ button.delete {
 }
 .admin-block-subtitle {
   margin: 0;
-  color: var(--muted);
+  color: var(--k-text-muted);
   font-size: 0.82rem;
 }
 .admin-grid {
@@ -1039,12 +1039,12 @@ button.delete {
 }
 .admin-list li > span {
   min-width: 0;
-  color: var(--text-bright-alt2);
+  color: var(--k-text);
   line-height: 1.4;
 }
 
 .admin-list li > span small {
-  color: var(--text-muted);
+  color: var(--k-text-muted);
 }
 
 .admin-room-list-entry {
@@ -1054,7 +1054,7 @@ button.delete {
 
 .admin-room-list-name {
   font-weight: 700;
-  color: var(--text-bright-alt2);
+  color: var(--k-text);
 }
 
 .admin-room-list-meta {
@@ -1068,15 +1068,15 @@ button.delete {
 }
 
 .admin-list button.delete {
-  background: var(--delete-bg);
+  background: var(--k-danger-bg);
   color: white;
-  border: 1px solid var(--delete-border);
+  border: 1px solid var(--k-danger-border);
 }
 .admin-list button.delete:hover {
-  background: var(--delete-bg-hover);
+  background: var(--k-danger-bg);
 }
 .admin-list button.delete:active {
-  background: var(--delete-bg-active);
+  background: var(--k-danger-bg);
 }
 
 .priority-badge {
@@ -1128,7 +1128,7 @@ button.delete {
 
 .admin-room-form-subtitle {
   margin: 0;
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
   font-size: 0.85rem;
   line-height: 1.45;
 }
@@ -1154,7 +1154,7 @@ button.delete {
 
 .admin-room-form-section-title {
   margin: 0 0 0.65rem;
-  color: var(--text-bright);
+  color: var(--k-text);
   font-size: 0.71rem;
   font-weight: 800;
 }
@@ -1173,7 +1173,7 @@ button.delete {
   display: grid;
   gap: 0.36rem;
   font-size: 0.8rem;
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
 }
 
 .admin-room-action-buttons {
@@ -1193,7 +1193,7 @@ button.delete {
 
 .admin-edit-title {
   margin: 0;
-  color: var(--text-bright-alt);
+  color: var(--k-text);
   font-size: 0.95rem;
   font-weight: 800;
 }
@@ -1250,13 +1250,13 @@ button.delete {
   border-radius: 8px;
   background: rgba(6, 11, 20, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  color: var(--text-bright-alt2);
+  color: var(--k-text);
   font-size: 0.84rem;
   word-break: break-all;
 }
 
 .admin-empty {
-  color: var(--text-muted);
+  color: var(--k-text-muted);
   font-style: italic;
 }
 
@@ -1279,7 +1279,7 @@ button.delete {
   width: 1.05rem;
   height: 1.05rem;
   margin-top: 0.12rem;
-  accent-color: var(--accent);
+  accent-color: var(--k-selection);
 }
 
 .admin-chat-toggle-row span {
@@ -1288,12 +1288,12 @@ button.delete {
 }
 
 .admin-chat-toggle-row strong {
-  color: var(--text-bright-alt2);
+  color: var(--k-text);
   font-size: 0.92rem;
 }
 
 .admin-chat-toggle-row small {
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
   font-size: 0.82rem;
 }
 
@@ -1387,7 +1387,7 @@ button.delete {
   right: 0.78rem;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
   font-size: 0.78rem;
   transition:
     transform 120ms ease,
@@ -1395,14 +1395,14 @@ button.delete {
 }
 .role-multiselect-details[open] .role-multiselect-summary::after {
   transform: translateY(-50%) rotate(180deg);
-  color: var(--text-bright);
+  color: var(--k-text);
 }
 .role-multiselect-label {
   font-size: 0.72rem;
-  color: var(--text-tertiary);
+  color: var(--k-text-muted);
 }
 .role-multiselect-value {
-  color: var(--text-bright);
+  color: var(--k-text);
   font-size: 0.9rem;
   font-weight: 600;
   padding-right: 1.6rem;
@@ -1411,7 +1411,7 @@ button.delete {
   text-overflow: ellipsis;
 }
 .role-multiselect-menu {
-  border-top: 1px solid var(--border-strong);
+  border-top: 1px solid var(--k-border-strong);
   padding: 0.65rem 0.78rem 0.78rem;
   display: grid;
   gap: 0.62rem;
@@ -1444,7 +1444,7 @@ button.delete {
   background: rgba(30, 46, 70, 0.3);
   font-size: 0.84rem;
   font-weight: 600;
-  color: var(--text);
+  color: var(--k-text);
   line-height: 1.2;
   cursor: pointer;
   transition:
@@ -1468,7 +1468,7 @@ button.delete {
   white-space: nowrap;
 }
 .role-multiselect-option:hover {
-  border-color: var(--input-border-hover);
+  border-color: var(--k-border-strong);
   background: rgba(37, 57, 88, 0.45);
 }
 .role-multiselect-option.selected {
@@ -1503,8 +1503,8 @@ button.secondary {
 }
 
 .simple-logout {
-  background: var(--admin-modal-bg-from);
-  color: var(--admin-modal-text);
+  background: var(--k-surface);
+  color: var(--k-on-air-text);
   border: 1px solid rgba(255, 107, 107, 0.12);
   padding: 0.45rem 0.85rem;
   border-radius: 14px;
@@ -1532,8 +1532,8 @@ button.secondary {
   font-size: 0.9rem;
 }
 .simple-ptt {
-  background: var(--surface);
-  border-color: var(--border-strong);
+  background: var(--k-ground);
+  border-color: var(--k-border-strong);
   display: grid;
   justify-items: center;
   align-content: center;
@@ -1583,7 +1583,7 @@ button.secondary {
   text-transform: none;
   letter-spacing: 0.02em;
   font-size: 0.86rem;
-  color: var(--text-tertiary);
+  color: var(--k-text-muted);
 }
 /* Talking is on air: red, like the station view. */
 .simple-ptt.active,
@@ -1618,8 +1618,8 @@ button.secondary {
 
 /* Micro interaction: small heartbeat when active-but-not-transmitting (attention) */
 .simple-reply {
-  background: var(--panel);
-  border-color: var(--border-strong);
+  background: var(--k-surface);
+  border-color: var(--k-border-strong);
   display: grid;
   justify-items: center;
   align-content: center;
@@ -1628,7 +1628,7 @@ button.secondary {
   margin-top: 0.35rem;
   text-transform: none;
   font-size: 0.86rem;
-  color: var(--text-tertiary);
+  color: var(--k-text-muted);
 }
 .simple-reply.disabled {
   opacity: 0.5;
@@ -1640,7 +1640,7 @@ button.secondary {
 }
 .simple-mic span {
   font-size: 0.7rem;
-  color: var(--text-tertiary);
+  color: var(--k-text-muted);
 }
 .simple-mic select {
   width: 100%;
@@ -1650,8 +1650,8 @@ button.secondary {
 .station-shell {
   max-width: 100%;
   min-height: 100vh;
-  background: var(--surface);
-  border: 1px solid var(--border-dim);
+  background: var(--k-ground);
+  border: 1px solid var(--k-border);
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -1673,7 +1673,7 @@ button.secondary {
   padding-bottom: 0.15rem;
   background: linear-gradient(
     180deg,
-    var(--surface) 0%,
+    var(--k-ground) 0%,
     rgba(26, 29, 35, 0.96) 85%,
     rgba(26, 29, 35, 0) 100%
   );
@@ -1694,8 +1694,8 @@ button.secondary {
   margin: 0 1rem;
   padding: 0.35rem 0.75rem;
   border-radius: 999px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
+  border: 1px solid var(--k-border-strong);
+  background: var(--k-ground);
   color: inherit;
   font: inherit;
   font-size: 0.78rem;
@@ -1771,7 +1771,7 @@ button.secondary {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--disconnected-bg);
+  background: var(--k-on-air);
   box-shadow: 0 0 10px rgba(220, 50, 50, 0.75);
   transition:
     background 0.3s,
@@ -1782,7 +1782,7 @@ button.secondary {
   box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
 }
 .station-live-dot.disconnected {
-  background: var(--disconnected-bg);
+  background: var(--k-on-air);
   box-shadow: 0 0 10px rgba(220, 50, 50, 0.75);
 }
 
@@ -1796,8 +1796,8 @@ button.secondary {
   border-radius: 8px;
   font-size: 0.82rem;
   font-weight: 700;
-  background: var(--disconnected-bg);
-  color: var(--disconnected-text-highlight);
+  background: var(--k-on-air);
+  color: var(--k-text);
   margin-bottom: 0.75rem;
   animation: offline-pulse 1.8s ease-in-out infinite;
 }
@@ -1805,7 +1805,7 @@ button.secondary {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--disconnected-text-highlight);
+  background: var(--k-text);
   animation: offline-dot-blink 1.8s ease-in-out infinite;
 }
 @keyframes offline-pulse {
@@ -2981,12 +2981,12 @@ button.secondary {
 }
 .attention-flash-card strong {
   font-size: 0.74rem;
-  color: var(--station-call-text);
+  color: var(--k-text-soft);
 }
 .attention-flash-card span {
   font-size: 1.03rem;
   font-weight: 700;
-  color: var(--station-call-text);
+  color: var(--k-text-soft);
 }
 @keyframes attention-call-multi-flash {
   0% {
@@ -3196,7 +3196,7 @@ button.secondary {
   margin-left: 0.5rem;
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
-  background: var(--color-warning);
+  background: var(--k-attention);
   color: var(--k-ground);
   font-size: 0.75rem;
   font-weight: 800;
@@ -3215,7 +3215,7 @@ button.secondary {
 }
 .admin-device-head small,
 .admin-device-row small {
-  color: var(--text-muted);
+  color: var(--k-text-muted);
 }
 .admin-list li.admin-device-row {
   grid-template-columns: 1fr auto;
@@ -3230,10 +3230,10 @@ button.secondary {
   height: 0.55rem;
   margin-right: 0.45rem;
   border-radius: 50%;
-  background: var(--text-dark);
+  background: var(--k-text-muted);
 }
 .admin-device-dot.online {
-  background: var(--color-success);
+  background: var(--k-hear);
 }
 
 /* First-run setup (SetupView) */
@@ -3256,7 +3256,7 @@ button.secondary {
 }
 .setup-option small {
   display: block;
-  color: var(--text-muted);
+  color: var(--k-text-muted);
   margin-top: 0.15rem;
 }
 
@@ -3280,7 +3280,7 @@ button.secondary {
   border-radius: 10px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
   text-align: left;
   cursor: pointer;
 }
@@ -3290,7 +3290,7 @@ button.secondary {
 .admin-nav-item.active {
   border-color: rgba(0, 209, 255, 0.25);
   background: rgba(0, 209, 255, 0.08);
-  color: var(--text-bright-alt2);
+  color: var(--k-text);
 }
 .admin-nav-label {
   display: inline-flex;
@@ -3319,11 +3319,11 @@ button.secondary {
 .admin-subsection h3 {
   margin: 0 0 0.2rem;
   font-size: 0.95rem;
-  color: var(--text-bright-alt2);
+  color: var(--k-text);
 }
 .admin-subsection p {
   margin: 0;
-  color: var(--text-secondary);
+  color: var(--k-text-soft);
   font-size: 0.85rem;
 }
 
@@ -3343,8 +3343,8 @@ button.secondary {
   padding: 0.85rem 1rem;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  background: var(--panel);
-  color: var(--text-secondary);
+  background: var(--k-surface);
+  color: var(--k-text-soft);
   text-align: left;
   cursor: pointer;
 }
@@ -3355,7 +3355,7 @@ button.secondary {
   font-size: 1.7rem;
   font-weight: 800;
   line-height: 1.1;
-  color: var(--text-bright-alt2);
+  color: var(--k-text);
 }
 .admin-live-tile-label {
   font-size: 0.82rem;
@@ -3376,7 +3376,7 @@ button.secondary {
   opacity: 1;
 }
 .admin-live-tile.ok .admin-live-tile-value {
-  color: var(--color-success);
+  color: var(--k-hear);
 }
 .admin-live-columns {
   display: grid;
@@ -3386,7 +3386,7 @@ button.secondary {
 }
 .admin-live-notice {
   margin: 0 0 0.5rem;
-  color: var(--color-success);
+  color: var(--k-hear);
 }
 .admin-live-warnings {
   margin: 0.6rem 0 0;

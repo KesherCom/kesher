@@ -4,7 +4,7 @@
 #   docker compose -f deploy/compose/docker-compose.yml up -d --build
 #
 # Browsers only allow microphone access on http:// for localhost. LAN clients
-# on plain HTTP need the desktop app/proxy or one of the HTTPS variants
+# on plain HTTP need the desktop app or one of the HTTPS variants
 # (docker-compose.selfsigned.yml, docker-compose.certmagic.yml).
 name: kesher
 

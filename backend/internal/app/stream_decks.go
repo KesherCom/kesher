@@ -529,7 +529,7 @@ func (s *Server) emitDeckPairingImages(ctx context.Context, key string, deck Str
 		default:
 			state.Label = " "
 		}
-		s.imageStreamCoord.BroadcastImageUpdateForTarget(key, "", state, page, index)
+		s.imageStreamCoord.BroadcastImageUpdateForTarget(key, state, page, index)
 	}
 }
 
@@ -539,7 +539,7 @@ func (s *Server) refreshDeck(deckID string) {
 	key := deckKey(deckID)
 	s.resetCompanionCurrentPage(key)
 	if s.imageStreamCoord != nil {
-		s.imageStreamCoord.ResetTargetCache(key, "")
+		s.imageStreamCoord.ResetTargetCache(key)
 	}
 	s.emitCompanionCurrentPageImages(context.Background(), key, "")
 }

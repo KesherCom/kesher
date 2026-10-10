@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file provides guidance to WARP (warp.dev) when working with code in this repository.
+Guidance for coding agents working in this repository.
 
 ## Build, run, and test commands
 
@@ -8,8 +8,8 @@ Primary workflow is via `Makefile`:
 
 ```sh
 make deps
-make dev-backend
-make dev-web
+make dev-backend   # API + audio on :8080, no UI there
+make dev-web       # the UI on :5173 (proxies /api and /ws to :8080)
 make run-backend
 make run-backend-https LAN_IP=192.168.1.50
 make run-backend-le DOMAIN=intercom.example.org
@@ -43,9 +43,9 @@ Rust code is one Cargo workspace at the repo root (`Cargo.toml`, committed `Carg
 
 Design decisions are recorded in `docs/decisions/` (add a numbered file for new ones).
 
-UI follows the visual system in `docs/design/README.md` (decision 0007): signal colors with one meaning (hear green, on air red, call yellow, attention orange, cyan only for selection), IBM Plex, 44 px touch targets, three button kinds, one stroke icon set. Values are the `--k-*` variables in `packages/client-core/src/styles/tokens.css` (`theme.css` only maps older names onto them); icons come from `components/Icon.tsx`; buttons are `.primary`/`.secondary`/`.danger`/`.k-icon-button`. Do not add raw colors.
+UI follows the visual system in `docs/design/README.md` (decision 0007): signal colors with one meaning (hear green, on air red, call yellow, attention orange, cyan only for selection), IBM Plex, 44 px touch targets, three button kinds, one stroke icon set. Values are the `--k-*` variables in `packages/client-core/src/styles/tokens.css` (`theme.css` is only the page base); icons come from `components/Icon.tsx`; buttons are `.primary`/`.secondary`/`.danger`/`.k-icon-button`. Do not add raw colors.
 
-CI: `.github/workflows/ci.yml` runs on every push (Go tests, web build, Rust tests on Linux, arm64 node package). `release-binaries.yml` builds everything (server, node, Windows/macOS desktop) on tags `v*` (and publishes the release), on manual runs, and on pushes whose commit message contains `[full-build]` (build only, no release). Release file names, versioning (`scripts/set-desktop-version.mjs`) and the release steps: `docs/releases/README.md`; keep `docs/releases/downloads.md` in sync when release files change.
+CI: `.github/workflows/ci.yml` runs on every push (Go tests, client-core tests, web build, Rust tests on Linux, arm64 node package). `release-binaries.yml` builds everything (server, node, Windows/macOS desktop) on tags `v*` (and publishes the release), on manual runs, and on pushes whose commit message contains `[full-build]` (build only, no release). Release file names, versioning (`scripts/set-desktop-version.mjs`) and the release steps: `docs/releases/README.md`; keep `docs/releases/downloads.md` in sync when release files change.
 
 ```sh
 cargo test -p kesher-audio -p kesher-node
@@ -58,26 +58,17 @@ Useful direct commands:
 make help
 cd backend && go test ./...
 cd backend && go test -run TestHubDirectRouting ./internal/app/
-cd web && npm run build
-cd web && npm run test
-cd web && npm run test:watch
-cd web && npm run test:e2e
-cd web && npm run test:all
+npm --prefix packages/client-core test          # Vitest + Testing Library
+npm --prefix packages/client-core run test:watch
+npm --prefix web run build                      # TypeScript + Vite build of the browser shell
+make lab-test                                   # Playwright in real browsers (testlab/)
 ```
 
-Frontend test tooling lives in `web/` (Vitest + Testing Library for unit/component tests, Playwright for E2E).
-If Playwright browsers are missing locally, run:
-
-```sh
-cd web && npx playwright install chromium
-```
-
-There is still no dedicated frontend lint target in `Makefile`; frontend validation is `npm run build` plus tests.
+All UI code and its unit tests live in `packages/client-core`; `web/` and `desktop/` only hold the entry points (`main.tsx`, `index.html`, Vite config). Browser tests with Playwright live in `testlab/` only. There is no separate frontend lint target; frontend validation is the build plus the tests.
 
 ## Pre-commit behavior
 
-- `.pre-commit-config.yaml` includes `web-quick-tests` (`npm --prefix web run test`) for fast frontend regression checks on commit.
-- It also runs `web-typescript-build` (`npm --prefix web run build`) and Prettier.
+- `.pre-commit-config.yaml` runs `client-core-tests` (`npm --prefix packages/client-core run test`), `web-typescript-build` (`npm --prefix web run build`), Prettier, `go fmt` and gitleaks.
 - If hooks auto-format files, re-stage (`git add -A`) and re-run the same commit command.
 
 Companion module (Bitfocus) lives in a separate repository:
@@ -85,13 +76,13 @@ Companion module (Bitfocus) lives in a separate repository:
 
 ## High-level architecture
 
-This repository has two parts:
-
-- `backend/`: Go API + WebSocket event hub + embedded WebRTC SFU + SQLite persistence.
-- `web/`: React/Vite SPA for operator clients.
-
-Desktop proxy is maintained in a separate repository:
-`https://github.com/KesherCom/kesher-desktop-proxy`
+- `backend/`: Go API + WebSocket event hub + embedded WebRTC SFU + native UDP audio relay + SQLite persistence.
+- `packages/client-core/`: the one React UI (station, admin, settings), shared by the browser and the desktop app.
+- `web/`: browser shell (Vite entry, PWA files in `public/`).
+- `desktop/`: Tauri desktop app (`src-web/` shell around client-core, `src-tauri/` native side).
+- `crates/`: Rust audio engine, LAN discovery, Raspberry Pi node.
+- `testlab/`: emulated networks, browser and audio benchmarks.
+- `deploy/`: Docker image, compose files, server installer, node packaging.
 
 ## Backend architecture (`backend/internal/app`)
 
@@ -103,7 +94,7 @@ Desktop proxy is maintained in a separate repository:
 - `config.go`: environment-driven config (TLS file mode and CertMagic DNS-01 mode, production listener split, session and CORS settings).
 - `models.go`: shared API, WS, and domain types.
 - `tls_certmagic.go`: CertMagic DNS-01 ACME integration; builds `certmagic.Config` from env vars and wires up DNS providers (cloudflare, hetzner, route53 via `libdns`).
-- `static_embedded.go`: `//go:embed` for `embedded_web/` directory so the backend binary can serve frontend assets without `STATIC_DIR`. `make sync-embedded-web` copies `web/dist` into this directory before build.
+- `static_embedded.go`: `//go:embed` of `embedded_web/` so a built binary serves the UI without `STATIC_DIR`. The folder is filled only during a build (`scripts/embedded-web.mjs fill`, used by `make build-backend`, the Dockerfile, CI and testlab) and emptied right after, so `go run` / `make dev-backend` never serves an old UI; without a UI the server answers pages with a hint to `make dev-web`.
 
 Important coupling to understand before changing routing logic:
 
@@ -112,18 +103,15 @@ Important coupling to understand before changing routing logic:
 - Store sentinel errors (`ErrInvalidInput`, `ErrConflict`, `ErrNotFound`) are mapped centrally in `writeStoreErr`.
 - Admin endpoints (`requireAdmin` in `server.go`) require the admin PIN in the `X-Admin-Pin` header (lab servers use `ADMIN_PIN`, default `123456`).
 
-## Desktop proxy architecture
+## Frontend architecture (`packages/client-core/src`)
 
-Desktop proxy implementation lives in the standalone repo:
-`https://github.com/KesherCom/kesher-desktop-proxy`
-
-## Frontend architecture (`web/src`)
-
-- `App.tsx` is the orchestration layer: login/bootstrap, WS lifecycle with reconnect backoff, RTCPeerConnection lifecycle, device selection, input metering, routing/voice state actions, and companion command handling.
-- `api.ts` contains REST mutation/fetch wrappers; auth is bearer token in `Authorization`.
+- `App.tsx`: screens (setup, login, station/simple view, admin, settings) and wiring.
+- `hooks/useIntercomSession.ts`: login/bootstrap, WS lifecycle with reconnect backoff, RTCPeerConnection, routing/voice state, chat, companion commands; `hooks/useLocalMic.ts` etc. for devices and metering.
+- `api.ts`: REST wrappers; auth is the bearer token in `Authorization`.
 - `types.ts` mirrors backend JSON contracts.
-- `components/` contains the station/simple views, admin modal/panels, and focused UI pieces.
-- Vite dev server proxies `/api` and `/ws` to backend (`vite.config.ts`).
+- `components/`: station and simple views, `admin/`, `settings/`, `panels/`, `Icon.tsx`.
+- `app/`: settings storage, keyboard shortcuts, small helpers.
+- The Vite dev servers (`web/vite.config.ts` :5173, `desktop/vite.config.ts` :1420) proxy `/api` and `/ws` to :8080.
 
 ## Real-time flow (operator client)
 

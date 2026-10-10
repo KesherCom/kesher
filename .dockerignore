@@ -13,7 +13,6 @@
 .idea
 desktop
 dist
-netlab-results
 backend/bin
 backend/*.exe
 backend/*.db

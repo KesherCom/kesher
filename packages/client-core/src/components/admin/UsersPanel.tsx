@@ -149,7 +149,7 @@ export function UsersPanel({
               <li key={u.id}>
                 <span
                   title={u.online ? "Online" : "Offline"}
-                  style={{ color: u.online ? "var(--color-active, #4caf50)" : "var(--color-muted, #888)" }}
+                  style={{ color: u.online ? "var(--k-hear)" : "var(--k-text-muted)" }}
                 >
                   {u.online ? "●" : "○"}
                 </span>

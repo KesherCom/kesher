@@ -1,7 +1,9 @@
 # Kesher Architecture & Information Flow
 
 This document visualizes how information flows across the system, including the full operator loop:
-`HW/browser -> frontend -> backend -> frontend -> HW`, plus related companion/telegram/proxy paths.
+`HW/browser -> frontend -> backend -> frontend -> HW`, plus the Companion and Telegram paths. The desktop app and the Raspberry Pi
+station use the same login and `/ws`, but send audio over the native UDP
+relay (`udp_audio.go`) instead of WebRTC.
 
 ## 1) System architecture and flow map (detailed)
 
@@ -17,20 +19,11 @@ flowchart LR
   end
 
   subgraph BROWSER["Browser (secure context)"]
-    FE["React app orchestration\nweb/src/App.tsx"]
+    FE["React app\npackages/client-core/src/App.tsx\n+ hooks/useIntercomSession.ts"]
     GUM["getUserMedia() + device selection\n(input gain / meter)"]
     LPC["Local RTCPeerConnection"]
     LWS["WebSocket /ws?token=..."]
     AUDIO["Remote audio elements\n(per-track gain + output routing)"]
-  end
-
-  %% ===============================
-  %% Optional localhost desktop proxy
-  %% ===============================
-  subgraph PROXY["Optional desktop-proxy (kesher-desktop-proxy repo)"]
-    DPHTTP["HTTP reverse proxy\n127.0.0.1 -> upstream"]
-    DPWS["WS reverse proxy\n/ws passthrough"]
-    DPTLS["Custom trust / pins / CA file"]
   end
 
   %% ===============================
@@ -54,8 +47,8 @@ flowchart LR
 
   subgraph COMP["Bitfocus Companion path"]
     MOD["Companion module\n(companion-module-kesher repo)"]
-    CDISC["GET /api/companion/discovery?roleId=..."]
-    CWS["WS /api/companion/ws?roleId=..."]
+    CDISC["GET /api/companion/discovery?deck=..."]
+    CWS["WS /api/companion/ws?deck=..."]
   end
 
   OTHER["Other operators\n(browser clients)"]
@@ -94,14 +87,6 @@ flowchart LR
   WSG -->|"presence list"| LWS
   LWS --> FE
 
-  %% Desktop proxy alternate transport path
-  BROWSER -. "Alt transport: frontend served via backend through localhost proxy" .-> DPHTTP
-  BROWSER -. "Alt WS path" .-> DPWS
-  DPHTTP --> DPTLS
-  DPWS --> DPTLS
-  DPTLS --> API
-  DPTLS --> WSG
-
   %% Companion integration path
   MOD --> CDISC
   CDISC --> API
@@ -127,7 +112,7 @@ flowchart LR
 sequenceDiagram
   autonumber
   participant HW as HW (Mic/Headset/PTT)
-  participant FE as Frontend (App.tsx)
+  participant FE as Frontend (client-core)
   participant WS as Backend WS handler
   participant HUB as Hub
   participant MM as MediaManager
@@ -167,12 +152,12 @@ sequenceDiagram
   participant HUB as Hub
   participant FE as Target browser session
 
-  MOD->>API: GET /api/companion/discovery?roleId=...
-  API-->>MOD: Allowed party-lines/users/broadcast groups for role
-  MOD->>API: WS /api/companion/ws?roleId=...
+  MOD->>API: GET /api/companion/discovery?deck=...
+  API-->>MOD: Allowed party-lines/users/broadcast groups for the deck's login
+  MOD->>API: WS /api/companion/ws?deck=...
   API-->>MOD: companion_state (bound, presence, reply target, signal state)
   MOD->>API: command payload (set_voice_mode / ptt / signal / party-line matrix)
-  API->>HUB: Resolve latest token for roleId + SendToToken(companion_command)
+  API->>HUB: Resolve the login at the deck's place + SendToToken(companion_command)
   HUB-->>FE: companion_command via operator WS
   FE-->>API: command effect reflected via normal WS events/presence
   API-->>MOD: companion_command_result + refreshed companion_state

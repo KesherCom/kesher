@@ -1,75 +1,8 @@
-/*
- * Legacy variable names, all mapped onto the visual system (tokens.css,
- * docs/design/README.md). Do not add raw colors here: point a name at a
- * --k-* token. New code uses the --k-* tokens directly.
- */
+/* Page base: dark scheme, IBM Plex, box sizing. Colors and sizes come from
+ * the --k-* tokens in tokens.css (docs/design/README.md). */
 :root {
   color-scheme: dark;
   font-family: var(--k-font);
-
-  /* Base */
-  --surface: var(--k-ground);
-  --surface-light: var(--k-raised);
-  --panel: var(--k-surface);
-  --accent: var(--k-selection);
-  --accent-primary: var(--k-selection);
-
-  /* Signals: one meaning each */
-  --color-success: var(--k-hear);
-  --color-active: var(--k-hear);
-  --color-warning: var(--k-attention);
-  --color-muted: var(--k-text-muted);
-
-  /* Text */
-  --text: var(--k-text);
-  --text-primary: var(--k-text);
-  --text-bright: var(--k-text);
-  --text-bright-alt: var(--k-text);
-  --text-bright-alt2: var(--k-text);
-  --text-secondary: var(--k-text-soft);
-  --text-tertiary: var(--k-text-muted);
-  --text-muted: var(--k-text-muted);
-  --muted: var(--k-text-muted);
-  --text-dark: var(--k-text-muted);
-
-  /* Borders */
-  --border: var(--k-border);
-  --border-light: var(--k-border);
-  --border-strong: var(--k-border-strong);
-  --border-dim: var(--k-border);
-  --border-subtle: var(--k-border);
-
-  /* Buttons */
-  --btn-bg: var(--k-raised);
-  --btn-bg-hover: var(--k-border);
-  --delete-bg: var(--k-danger-bg);
-  --delete-bg-hover: var(--k-danger-bg);
-  --delete-bg-active: var(--k-danger-bg);
-  --delete-border: var(--k-danger-border);
-
-  /* Inputs */
-  --input-bg: var(--k-ground);
-  --input-border: var(--k-border);
-  --input-border-hover: var(--k-border-strong);
-  --modal-dropdown-bg-from: var(--k-surface);
-
-  /* Meter */
-  --meter-med: var(--k-call);
-
-  /* Station */
-  --station-pin-active-text: var(--k-ground);
-  --station-call-text: var(--k-text-soft);
-
-  /* Admin */
-  --admin-title: var(--k-text);
-  --admin-error: var(--k-on-air-text);
-  --admin-pin-note: var(--k-text-soft);
-  --admin-modal-bg-from: var(--k-surface);
-  --admin-modal-text: var(--k-on-air-text);
-
-  /* Connection */
-  --disconnected-bg: var(--k-on-air);
-  --disconnected-text-highlight: var(--k-text);
 }
 * {
   box-sizing: border-box;

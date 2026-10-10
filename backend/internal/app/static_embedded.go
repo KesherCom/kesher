@@ -5,7 +5,7 @@ import (
 	"io/fs"
 )
 
-//go:embed embedded_web
+//go:embed all:embedded_web
 var embeddedStaticFS embed.FS
 
 func embeddedStaticAvailable() bool {

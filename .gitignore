@@ -15,12 +15,7 @@ backend/app
 backend/logs/
 backend/go.sum
 backend/vendor/
-web/tsconfig.tsbuildinfo
-web/test-results/
-web/playwright-report/
-web/blob-report/
-packages/*/test-results/
-packages/*/playwright-report/
+*.tsbuildinfo
 backend/internal/app/embedded_web/*
 !backend/internal/app/embedded_web/_placeholder.txt
 *.pem
@@ -36,8 +31,6 @@ package-lock.json
 .npm/
 # Rust workspace (Cargo.toml at the root); Cargo.lock is committed.
 /target/
-desktop/src-tauri/target/
-desktop/src-tauri/Cargo.lock
 desktop/src-tauri/gen/
 desktop/dist/
 
@@ -62,8 +55,6 @@ desktop/dist/
 .vscode-test/
 temp/
 *.log
-netlab-results/
-deploy/compose/docker-compose.netlab.yml
 
 # ─── Test lab ───
 testlab/.cache/

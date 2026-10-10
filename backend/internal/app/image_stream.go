@@ -328,7 +328,6 @@ type ImageStreamCoordinator struct {
 // ImageStreamClient represents a connected image stream client
 type ImageStreamClient struct {
 	RoleID   string
-	Username string
 	send     chan ImageStreamMessage
 	done     chan struct{}
 	logger   *slog.Logger
@@ -410,17 +409,16 @@ func NewImageStreamCoordinator(logger *slog.Logger) (*ImageStreamCoordinator, er
 
 // BroadcastImageUpdate sends an image update to all connected clients.
 func (c *ImageStreamCoordinator) BroadcastImageUpdate(state ButtonState, bank, buttonIndex int) {
-	c.BroadcastImageUpdateForTarget("", "", state, bank, buttonIndex)
+	c.BroadcastImageUpdateForTarget("", state, bank, buttonIndex)
 }
 
 // ResetTargetCache clears dedup signatures for matching clients so subsequent image
 // emissions are always re-sent even if signatures are unchanged.
-func (c *ImageStreamCoordinator) ResetTargetCache(roleID, username string) {
+func (c *ImageStreamCoordinator) ResetTargetCache(roleID string) {
 	if c == nil {
 		return
 	}
 	targetRoleID := strings.TrimSpace(roleID)
-	targetUsername := strings.TrimSpace(username)
 
 	c.mu.RLock()
 	clients := make([]*ImageStreamClient, 0, len(c.clients))
@@ -428,12 +426,6 @@ func (c *ImageStreamCoordinator) ResetTargetCache(roleID, username string) {
 		clientRoleID := strings.TrimSpace(client.RoleID)
 		if targetRoleID != "" && clientRoleID != targetRoleID {
 			continue
-		}
-		if targetUsername != "" {
-			clientUsername := strings.TrimSpace(client.Username)
-			if clientUsername != "" && clientUsername != targetUsername {
-				continue
-			}
 		}
 		clients = append(clients, client)
 	}
@@ -444,11 +436,10 @@ func (c *ImageStreamCoordinator) ResetTargetCache(roleID, username string) {
 	}
 }
 
-// BroadcastImageUpdateForTarget sends an image update only to clients bound to the same role.
-// If username is provided and the client also declared one, both usernames must match.
-func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID, username string, state ButtonState, bank, buttonIndex int) {
+// BroadcastImageUpdateForTarget sends an image update only to clients bound to
+// the same target (a deck key or a role ID; empty means all clients).
+func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID string, state ButtonState, bank, buttonIndex int) {
 	targetRoleID := strings.TrimSpace(roleID)
-	targetUsername := strings.TrimSpace(username)
 	signature := buttonStateSignature(state)
 
 	c.mu.RLock()
@@ -457,12 +448,6 @@ func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID, username 
 		clientRoleID := strings.TrimSpace(client.RoleID)
 		if targetRoleID != "" && clientRoleID != targetRoleID {
 			continue
-		}
-		if targetUsername != "" {
-			clientUsername := strings.TrimSpace(client.Username)
-			if clientUsername != "" && clientUsername != targetUsername {
-				continue
-			}
 		}
 		if !client.needsButtonUpdate(bank, buttonIndex, signature) {
 			continue
@@ -475,7 +460,6 @@ func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID, username 
 		if c.logger != nil {
 			c.logger.Info("companion image update skipped",
 				"roleId", targetRoleID,
-				"username", targetUsername,
 				"bank", bank,
 				"buttonIndex", buttonIndex,
 				"label", strings.TrimSpace(state.Label),
@@ -525,7 +509,6 @@ func (c *ImageStreamCoordinator) BroadcastImageUpdateForTarget(roleID, username 
 	if c.logger != nil {
 		c.logger.Info("companion image update dispatched",
 			"roleId", targetRoleID,
-			"username", targetUsername,
 			"bank", bank,
 			"buttonIndex", buttonIndex,
 			"label", strings.TrimSpace(state.Label),
@@ -564,11 +547,10 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	defer conn.Close()
-	targetRoleID, targetUsername := s.resolveImageStreamTarget(r.Context(), r)
+	targetRoleID := s.resolveImageStreamTarget(r.Context(), r)
 
 	client := &ImageStreamClient{
 		RoleID:   targetRoleID,
-		Username: targetUsername,
 		send:     make(chan ImageStreamMessage, 16),
 		done:     make(chan struct{}),
 		logger:   s.logger,
@@ -610,9 +592,8 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 			if !resolved {
-				targetRoleID, targetUsername = s.resolveImageStreamTarget(context.Background(), r)
+				targetRoleID = s.resolveImageStreamTarget(context.Background(), r)
 				client.RoleID = targetRoleID
-				client.Username = targetUsername
 			}
 			lastRefresh = time.Now()
 			s.enqueueInitialImageSnapshot(context.Background(), client, targetRoleID)
@@ -623,31 +604,27 @@ func (s *Server) HandleImageStreamWebSocket(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func (s *Server) resolveImageStreamTarget(ctx context.Context, r *http.Request) (string, string) {
+// resolveImageStreamTarget binds an image stream to ?deck= (current) or
+// ?roleId= (older module versions), like the Companion WebSocket.
+func (s *Server) resolveImageStreamTarget(ctx context.Context, r *http.Request) string {
 	if s.store == nil {
-		return "", ""
+		return ""
 	}
 	if deckParam := strings.TrimSpace(r.URL.Query().Get("deck")); deckParam != "" {
 		deck, err := s.store.TouchStreamDeck(ctx, deckParam, remoteIP(r))
 		if err != nil {
-			return "", ""
+			return ""
 		}
-		return deckKey(deck.ID), ""
+		return deckKey(deck.ID)
 	}
 	roleID := strings.TrimSpace(r.URL.Query().Get("roleId"))
-	username := strings.TrimSpace(r.URL.Query().Get("username"))
-	if roleID == "" && username != "" {
-		if u, err := s.store.FindUserByUsername(ctx, username); err == nil {
-			roleID = strings.TrimSpace(u.RoleID)
-		}
-	}
 	if roleID == "" {
 		autoRoleID, err := s.store.ResolveSinglePublishedCompanionRole(ctx)
 		if err == nil {
 			roleID = strings.TrimSpace(autoRoleID)
 		}
 	}
-	return roleID, username
+	return roleID
 }
 
 func (s *Server) enqueueInitialImageSnapshot(ctx context.Context, client *ImageStreamClient, roleID string) {
