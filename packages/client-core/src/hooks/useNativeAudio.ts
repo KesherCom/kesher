@@ -15,29 +15,7 @@
  * through the browser RTCPeerConnection path in useIntercomSession.
  */
 import { useCallback, useEffect, useRef } from "react";
-
-// ── Tauri IPC shim ────────────────────────────────────────────────────────────
-
-declare global {
-  interface Window {
-    __TAURI__?: {
-      core: {
-        invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
-      };
-      event: {
-        listen: <T>(event: string, cb: (ev: { payload: T }) => void) => Promise<() => void>;
-      };
-    };
-  }
-}
-
-function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  return window.__TAURI__!.core.invoke<T>(cmd, args);
-}
-
-function tauriListen<T>(event: string, cb: (payload: T) => void): Promise<() => void> {
-  return window.__TAURI__!.event.listen<T>(event, (ev) => cb(ev.payload));
-}
+import { isTauri, tauriInvoke, tauriListen } from "../lib/tauri";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -172,7 +150,7 @@ export type NativeAudioHook = {
 export function useNativeAudio(
   onLevelMeter?: (event: NativeAudioLevelEvent) => void,
 ): NativeAudioHook {
-  const isNative = typeof window !== "undefined" && "__TAURI__" in window;
+  const isNative = isTauri();
   const unlistenRef = useRef<(() => void) | null>(null);
 
   // Subscribe to level meter events from Rust
@@ -189,7 +167,7 @@ export function useNativeAudio(
           unlistenRef.current = unlisten;
         }
       },
-    );
+    ).catch((err) => console.error("[native-audio] level events:", err));
 
     return () => {
       cancelled = true;
@@ -273,13 +251,13 @@ export function useNativeAudio(
       if (!isNative) return;
       tauriInvoke("set_audio_gate", {
         enabled,
-        threshold_db: thresholdDb,
+        thresholdDb,
       }).catch((err) =>
         console.error("[native-audio] set_audio_gate failed:", err),
       );
       tauriInvoke("set_native_audio_gate", {
         enabled,
-        threshold_db: thresholdDb,
+        thresholdDb,
       }).catch(() => {});
     },
     [isNative],
@@ -289,7 +267,7 @@ export function useNativeAudio(
     (gainsByUserId: Record<string, number>) => {
       if (!isNative) return;
       tauriInvoke("set_output_gains", {
-        gains_by_user_id: gainsByUserId,
+        gainsByUserId,
       }).catch((err) =>
         console.error("[native-audio] set_output_gains failed:", err),
       );
@@ -301,7 +279,7 @@ export function useNativeAudio(
     (outputDeviceId: string) => {
       if (!isNative) return;
       tauriInvoke("set_output_device", {
-        output_device_id: outputDeviceId || null,
+        outputDeviceId: outputDeviceId || null,
       }).catch((err) =>
         console.error("[native-audio] set_output_device failed:", err),
       );
@@ -382,7 +360,7 @@ export function useNativeAudio(
     (gainsBySourceId: Record<string, number>) => {
       if (!isNative) return;
       tauriInvoke("set_native_output_gains", {
-        gains_by_source_id: gainsBySourceId,
+        gainsBySourceId,
       }).catch((err) =>
         console.error("[native-audio] set_native_output_gains failed:", err),
       );
@@ -398,10 +376,12 @@ export function useNativeAudio(
       void tauriListen<NativePerformanceLevelEvent>(
         "native_audio_level",
         onLevels,
-      ).then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
-      });
+      )
+        .then((fn) => {
+          if (cancelled) fn();
+          else unlisten = fn;
+        })
+        .catch((err) => console.error("[native-audio] level events:", err));
       return () => {
         cancelled = true;
         unlisten?.();

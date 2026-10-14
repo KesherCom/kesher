@@ -11,6 +11,7 @@ import { formatBinding } from "../app/settings";
 import { createHoldButtonProps } from "../lib/holdButton";
 import { sortDirectUsersByRoleAndUsername } from "../lib/users";
 import { UserSettingsDialog } from "./settings/UserSettingsDialog";
+import type { NativeStreamDeckState } from "../hooks/useNativeStreamDeck";
 import {
   MUTE_POS,
   OUTPUT_DB_MAX,
@@ -132,6 +133,8 @@ type StationIntercomViewProps = {
   onResetStreamDeckSettings: () => void;
   /** A Companion Stream Deck was paired with or released from this place. */
   onStreamDeckPlaceChanged?: () => void;
+  /** Desktop app: the deck plugged into this PC (decision 0008). */
+  nativeDeck?: NativeStreamDeckState;
   onPublishCompanionProfile: () => Promise<CompanionProfileResponse>;
   streamDeckWebHidSupported: boolean;
   streamDeckWebHidActive: boolean;

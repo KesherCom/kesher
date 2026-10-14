@@ -4320,11 +4320,35 @@ func (s *Server) requireCompanionSecret(w http.ResponseWriter, r *http.Request) 
 	if presented == "" {
 		presented = strings.TrimSpace(r.URL.Query().Get("secret"))
 	}
+	if s.deckOfTokenPlace(r) {
+		return true
+	}
 	if subtle.ConstantTimeCompare([]byte(presented), []byte(expected)) != 1 {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return false
 	}
 	return true
+}
+
+// deckOfTokenPlace: the desktop app drives its own deck (decision 0008) with
+// its login token (?token=) instead of the Companion secret. That only
+// covers a ?deck= bound to the token's own place.
+func (s *Server) deckOfTokenPlace(r *http.Request) bool {
+	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	deckParam := strings.TrimSpace(r.URL.Query().Get("deck"))
+	if token == "" || deckParam == "" || s.sessions == nil || s.store == nil {
+		return false
+	}
+	session, ok := s.sessions.Get(token)
+	if !ok || session.PlaceID == "" {
+		return false
+	}
+	id, _, ok := normalizeStreamDeckID(deckParam)
+	if !ok {
+		return false
+	}
+	deck, err := s.store.GetStreamDeck(r.Context(), id)
+	return err == nil && deck.PlaceID == session.PlaceID
 }
 
 func (s *Server) handleCompanionProfile(w http.ResponseWriter, r *http.Request) {

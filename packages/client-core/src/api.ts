@@ -1077,6 +1077,26 @@ export async function getPlaceStreamDecks(
   return res.json() as Promise<StreamDeckDevice[]>;
 }
 
+/**
+ * Binds the Stream Deck plugged into this PC (desktop app) to this client's
+ * place, by its serial; no code needed (decision 0008).
+ */
+export async function attachStreamDeck(
+  token: string,
+  serial: string,
+): Promise<StreamDeckDevice> {
+  const res = await fetch(apiUrl("/api/user/stream-decks/attach"), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ serial }),
+  });
+  if (!res.ok) throw new Error((await res.text()).trim() || "attach failed");
+  return res.json() as Promise<StreamDeckDevice>;
+}
+
 /** Binds the Stream Deck that shows this code to this client's place. */
 export async function pairStreamDeck(
   token: string,

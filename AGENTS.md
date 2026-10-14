@@ -38,6 +38,7 @@ Rust code is one Cargo workspace at the repo root (`Cargo.toml`, committed `Carg
 
 - `crates/kesher-audio`: the native low-latency audio engine (capture -> Opus -> KSHR/UDP -> jitter buffer -> mix), shared by the desktop app and the node. Windows WASAPI in `wasapi.rs`, Linux real-time threads in `realtime_linux.rs`.
 - `desktop/src-tauri`: Tauri app; uses the engine as `kesher_audio::native` (aliased `audio_native` in `main.rs`).
+- `crates/kesher-deck`: Elgato Stream Deck over USB HID (`hidapi`; `protocol.rs` per model, MK.2 first). The desktop app drives a deck plugged into its PC with it (`desktop/src-tauri/src/stream_deck.rs`, `hooks/useNativeStreamDeck.ts`); see decision 0008.
 - `crates/kesher-discovery`: finds servers on the LAN (mDNS `_kesher._tcp`); used by the node and the desktop app (`discover_servers` command, connection screen). The server side is `backend/internal/app/discovery.go` (`MDNS_ENABLED`, `MDNS_NAME`).
 - `crates/kesher-node`: headless station for Raspberry Pi 3/4/5 (systemd service, `/etc/kesher/node.toml`, GPIO talk button/LED). Without `role` it pairs: `POST /api/devices/login` -> pending until approved in the admin area (Stations card, `backend/internal/app/devices.go`, `/api/admin/devices`); self-signed server certs are trusted on first use (`net.rs` `Trust`). See `docs/decisions/0005-zero-config-stations.md`. Speaks the same protocol as the desktop app in performance mode (login, `/ws?transport=native`, `native_audio_endpoint`, `voice_state`). Packaged by `make node-deb` (Docker, `deploy/node/`); user docs in `docs/hardware/raspberry-pi.md`.
 
@@ -129,6 +130,7 @@ Important coupling to understand before changing routing logic:
 
 - Roles are shared by default (several logins per role); only roles with `exclusive` ask to take over. A direct call to `role:<roleId>` reaches everyone in the role (`directTargetMatches` in `hub.go`).
 - Stream Decks: one Companion connection per deck with `?deck=<serial or name>` on discovery, profile, `/api/companion/ws` and `/api/image-stream`. A deck belongs to a place (`placeId` sent at login, `lib/place.ts`; stations use `station-<device id>`), controls whoever is logged in there and has its own layout (falls back to that login's role layout). Pairing: code on the unpaired deck, entered in the app (`/api/user/stream-decks/pair`) or in the admin area (`/api/admin/stream-decks`). Code in `backend/internal/app/stream_decks.go`; companion state is keyed by `deck:<id>` instead of the role ID. See `docs/decisions/0006-shared-roles-and-stream-decks-per-place.md`.
+- The desktop app drives a deck on its own PC without Companion (decision 0008): it attaches it by serial (`/api/user/stream-decks/attach`) and uses the same `?deck=` endpoints with its login token (`?token=`, only for decks of its own place).
 - Older connections use `?roleId=<roleId>` (`username` is rejected) and bind to the latest login of that role.
 
 ## Module paths and runtime dependencies

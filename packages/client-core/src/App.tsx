@@ -68,6 +68,7 @@ import { createStreamDeckHoldTracker } from "./lib/streamDeckHolds";
 import { useSettings } from "./hooks/useSettings";
 import { useAudioDevices } from "./hooks/useAudioDevices";
 import { useIntercomSession } from "./hooks/useIntercomSession";
+import { useNativeStreamDeck } from "./hooks/useNativeStreamDeck";
 import { useNativeAudio } from "./hooks/useNativeAudio";
 import { useAutosave } from "./hooks/useAutosave";
 
@@ -339,6 +340,12 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
     },
     [],
   );
+  const nativeDeck = useNativeStreamDeck(token ?? "");
+  // The deck on this PC was just bound to this place: the layout editor
+  // now edits that deck's layout.
+  useEffect(() => {
+    if (nativeDeck.linked) setStreamDeckReloadKey((k) => k + 1);
+  }, [nativeDeck.linked]);
   const session = useIntercomSession({
     token,
     appData,
@@ -2188,7 +2195,11 @@ export function App({ onRequestNetworkSettings }: AppProps = {}) {
         onResetStreamDeckSettings={() => void handleResetStreamDeckSettings()}
         onStreamDeckPlaceChanged={() => setStreamDeckReloadKey((k) => k + 1)}
         onPublishCompanionProfile={handlePublishUserCompanionProfile}
-        streamDeckWebHidSupported={streamDeckWebHidSupported}
+        nativeDeck={nativeDeck}
+        // The desktop app drives a USB deck natively, not via WebHID.
+        streamDeckWebHidSupported={
+          streamDeckWebHidSupported && !nativeDeck.status
+        }
         streamDeckWebHidActive={streamDeckWebHidActive}
         streamDeckWebHidBusy={streamDeckWebHidBusy}
         onConnectStreamDeckWebHid={() => void connectStreamDeckWebHid()}

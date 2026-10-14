@@ -47,16 +47,16 @@ jobs:
         run: npm --prefix web run build
 
   rust:
-    name: Audio engine + node (Rust, Linux)
+    name: Audio engine, node, Stream Deck (Rust, Linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
       - name: System libraries
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libopus-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libopus-dev libudev-dev pkg-config
       - name: Test
-        run: cargo test --locked -p kesher-audio -p kesher-node
+        run: cargo test --locked -p kesher-audio -p kesher-node -p kesher-deck
 
   node-arm64:
     name: Node package (Raspberry Pi, arm64)

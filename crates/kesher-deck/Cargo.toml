@@ -1,0 +1,10 @@
+[package]
+name = "kesher-deck"
+version = "0.1.0"
+description = "Elgato Stream Deck over USB HID for the Kesher desktop app (and later the node)"
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+hidapi = "2.6"
+log = "0.4"

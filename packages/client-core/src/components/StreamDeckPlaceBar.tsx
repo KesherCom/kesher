@@ -71,7 +71,7 @@ export function StreamDeckPlaceBar({
   }
 
   return (
-    <SettingsGroup title="Companion deck">
+    <SettingsGroup title="Decks at this place">
       {decks.length > 0 ? (
         decks.map((deck) => (
           <div key={deck.id} className="streamdeck-place-deck">
@@ -95,7 +95,7 @@ export function StreamDeckPlaceBar({
         ))
       ) : (
         <small className="k-setting-hint">
-          No Companion Stream Deck is paired with this place yet.
+          No Stream Deck is paired with this place yet.
         </small>
       )}
       <form

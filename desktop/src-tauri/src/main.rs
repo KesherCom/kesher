@@ -3,6 +3,7 @@
 #[cfg(target_os = "windows")]
 mod audio_engine;
 mod config;
+mod stream_deck;
 
 // The performance engine lives in crates/kesher-audio (shared with the
 // Raspberry Pi node).
@@ -16,6 +17,8 @@ use audio_engine::{
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use audio_native::{NativeAudioState, StartNativeParams};
 use config::{get_server_url, set_server_url};
+use tauri::Manager;
+use stream_deck::{stream_deck_set_brightness, stream_deck_set_image, stream_deck_status};
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use tauri::State;
 
@@ -183,12 +186,19 @@ pub fn run() {
     #[cfg(target_os = "windows")]
     {
         tauri::Builder::default()
+            .setup(|app| {
+                app.manage(stream_deck::start(app.handle().clone()));
+                Ok(())
+            })
             .manage(audio_engine::AudioEngineState::default())
             .manage(audio_native::NativeAudioState::default())
             .invoke_handler(tauri::generate_handler![
                 get_server_url,
                 set_server_url,
                 discover_servers,
+                stream_deck_status,
+                stream_deck_set_image,
+                stream_deck_set_brightness,
                 list_audio_devices,
                 start_audio_engine,
                 stop_audio_engine,
@@ -214,11 +224,18 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     {
         tauri::Builder::default()
+            .setup(|app| {
+                app.manage(stream_deck::start(app.handle().clone()));
+                Ok(())
+            })
             .manage(audio_native::NativeAudioState::default())
             .invoke_handler(tauri::generate_handler![
                 get_server_url,
                 set_server_url,
                 discover_servers,
+                stream_deck_status,
+                stream_deck_set_image,
+                stream_deck_set_brightness,
                 start_native_audio,
                 stop_native_audio,
                 set_native_mic,
@@ -236,10 +253,17 @@ pub fn run() {
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         tauri::Builder::default()
+            .setup(|app| {
+                app.manage(stream_deck::start(app.handle().clone()));
+                Ok(())
+            })
             .invoke_handler(tauri::generate_handler![
                 get_server_url,
                 set_server_url,
                 discover_servers,
+                stream_deck_status,
+                stream_deck_set_image,
+                stream_deck_set_brightness,
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");

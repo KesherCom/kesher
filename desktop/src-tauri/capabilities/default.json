@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The app window may receive events from the Rust side (Stream Deck keys and status, audio level meters). The app's own commands need no entry here.",
+  "windows": ["main"],
+  "permissions": ["core:event:default"]
+}

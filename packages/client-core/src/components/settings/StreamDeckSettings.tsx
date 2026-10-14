@@ -18,6 +18,8 @@ import {
 import { sortDirectUsersByRoleAndUsername } from "../../lib/users";
 import type { AutosaveState } from "../../hooks/useAutosave";
 import { StreamDeckPlaceBar } from "../StreamDeckPlaceBar";
+import { NativeStreamDeckStatus } from "../NativeStreamDeckStatus";
+import type { NativeStreamDeckState } from "../../hooks/useNativeStreamDeck";
 import {
   STREAM_DECK_IMPORT_FORMAT,
   STREAM_DECK_IMPORT_SCHEMA_VERSION,
@@ -50,6 +52,8 @@ export type StreamDeckSettingsProps = {
   onResetStreamDeckSettings: () => void;
   /** A Companion Stream Deck was paired with or released from this place. */
   onStreamDeckPlaceChanged?: () => void;
+  /** Desktop app: the deck plugged into this PC (decision 0008). */
+  nativeDeck?: NativeStreamDeckState;
   onPublishCompanionProfile: () => Promise<CompanionProfileResponse>;
   streamDeckWebHidSupported: boolean;
   streamDeckWebHidActive: boolean;
@@ -130,6 +134,7 @@ export function StreamDeckSettingsSection({
   onSaveStreamDeckSettings,
   onResetStreamDeckSettings,
   onStreamDeckPlaceChanged,
+  nativeDeck,
   onPublishCompanionProfile,
   streamDeckWebHidSupported,
   streamDeckWebHidActive,
@@ -1626,7 +1631,8 @@ export function StreamDeckSettingsSection({
         </div>
       )}
 
-      {/* 4. Pairing a Companion deck: set up once. */}
+      {/* 4. The deck on this PC (desktop app), then Companion decks. */}
+      {nativeDeck ? <NativeStreamDeckStatus deck={nativeDeck} /> : null}
       <StreamDeckPlaceBar
         token={token}
         onChanged={() => onStreamDeckPlaceChanged?.()}

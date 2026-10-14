@@ -719,8 +719,15 @@ type pairStreamDeckRequest struct {
 	Code string `json:"code"`
 }
 
+type attachStreamDeckRequest struct {
+	Serial string `json:"serial"`
+}
+
 // GET /api/user/stream-decks: decks bound to the caller's place.
 // POST /api/user/stream-decks/pair {code}: bind an unbound deck to it.
+// POST /api/user/stream-decks/attach {serial}: the desktop app's own deck,
+// plugged into this PC (decision 0008). Being plugged in is the proof, so
+// no code is needed, and a deck bound elsewhere moves to this place.
 // DELETE /api/user/stream-decks/{id}: release a deck of the caller's place.
 func (s *Server) handleUserStreamDecks(w http.ResponseWriter, r *http.Request, session Session) {
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/user/stream-decks"), "/")
@@ -761,7 +768,40 @@ func (s *Server) handleUserStreamDecks(w http.ResponseWriter, r *http.Request, s
 		s.refreshDeck(id)
 		deck, _ = s.store.GetStreamDeck(r.Context(), id)
 		s.writeJSON(w, http.StatusOK, deck)
-	case rest != "" && rest != "pair" && r.Method == http.MethodDelete:
+	case rest == "attach" && r.Method == http.MethodPost:
+		if session.PlaceID == "" {
+			http.Error(w, "this client has no place id; update the app", http.StatusBadRequest)
+			return
+		}
+		var req attachStreamDeckRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		deck, err := s.store.TouchStreamDeck(r.Context(), req.Serial, remoteIP(r))
+		switch {
+		case errors.Is(err, ErrInvalidInput):
+			http.Error(w, "invalid serial", http.StatusBadRequest)
+			return
+		case errors.Is(err, errTooManyStreamDecks):
+			http.Error(w, "too many stream decks", http.StatusTooManyRequests)
+			return
+		case err != nil:
+			s.internalErr(w, err)
+			return
+		}
+		if deck.PlaceID != session.PlaceID {
+			if err := s.store.UpdateStreamDeck(r.Context(), deck.ID, deck.Name, session.PlaceID, session.Username); err != nil {
+				s.internalErr(w, err)
+				return
+			}
+			s.deckState.dropCode(deck.ID)
+			s.publishCompanionState(deckKey(deck.ID))
+			s.refreshDeck(deck.ID)
+			deck, _ = s.store.GetStreamDeck(r.Context(), deck.ID)
+		}
+		s.writeJSON(w, http.StatusOK, deck)
+	case rest != "" && rest != "pair" && rest != "attach" && r.Method == http.MethodDelete:
 		deck, err := s.store.GetStreamDeck(r.Context(), rest)
 		if err != nil || deck.PlaceID == "" || deck.PlaceID != session.PlaceID {
 			http.Error(w, "not a stream deck of this place", http.StatusNotFound)

@@ -266,3 +266,79 @@ func TestStreamDeckCompanionEndpoints(t *testing.T) {
 		t.Fatalf("paired deck state: %+v", state)
 	}
 }
+
+// The desktop app attaches the deck plugged into its PC by serial: no code,
+// and a deck that was bound to another place moves to the app's place.
+func TestDesktopAppAttachesItsOwnDeck(t *testing.T) {
+	ctx := context.Background()
+	s := newCompanionTestServer(t)
+	now := time.Now()
+	anna := addPlaceClient(s, "token-anna", "u-anna", "anna", "camera", "place-1", now)
+	ben := addPlaceClient(s, "token-ben", "u-ben", "ben", "camera", "place-2", now.Add(time.Second))
+
+	attach := func(session Session, body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		s.handleUserStreamDecks(rec, httptest.NewRequest(http.MethodPost, "/api/user/stream-decks/attach", bytes.NewBufferString(body)), session)
+		return rec
+	}
+
+	if rec := attach(anna.session, `{"serial":"CL12K1A00042"}`); rec.Code != http.StatusOK {
+		t.Fatalf("attach: %d %s", rec.Code, rec.Body.String())
+	}
+	deck, err := s.store.GetStreamDeck(ctx, "cl12k1a00042") // ids are lowercased
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.companionTargetUsername(ctx, deckKey(deck.ID)); got != "anna" {
+		t.Fatalf("deck should control anna, got %q", got)
+	}
+
+	// Plugged into Ben's PC now: it follows.
+	if rec := attach(ben.session, `{"serial":"CL12K1A00042"}`); rec.Code != http.StatusOK {
+		t.Fatalf("attach again: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := s.companionTargetUsername(ctx, deckKey(deck.ID)); got != "ben" {
+		t.Fatalf("deck should control ben, got %q", got)
+	}
+
+	if rec := attach(Session{Username: "old-client"}, `{"serial":"CL12K1A00042"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("a client without place id cannot attach, got %d", rec.Code)
+	}
+	if rec := attach(anna.session, `{"serial":""}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty serial must be rejected, got %d", rec.Code)
+	}
+}
+
+// With a Companion secret set, the desktop app still reaches its own deck
+// with its login token, but not a deck of another place.
+func TestLoginTokenOpensOnlyTheOwnPlacesDeck(t *testing.T) {
+	ctx := context.Background()
+	s := newCompanionTestServer(t)
+	s.cfg.CompanionSharedSecret = "s3cret"
+	anna := s.sessions.CreateWithPlace(User{ID: "u-anna", Username: "anna", RoleID: "camera"}, "place-1")
+	ben := s.sessions.CreateWithPlace(User{ID: "u-ben", Username: "ben", RoleID: "camera"}, "place-2")
+	deck, err := s.store.TouchStreamDeck(ctx, "CL12K1A00042", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.UpdateStreamDeck(ctx, deck.ID, deck.Name, "place-1", "anna"); err != nil {
+		t.Fatal(err)
+	}
+
+	allowed := func(query string) bool {
+		rec := httptest.NewRecorder()
+		return s.requireCompanionSecret(rec, httptest.NewRequest(http.MethodGet, "/api/companion/ws?"+query, nil))
+	}
+	if !allowed("deck=CL12K1A00042&token=" + anna.Token) {
+		t.Fatal("anna's token should open the deck at her place")
+	}
+	if allowed("deck=CL12K1A00042&token=" + ben.Token) {
+		t.Fatal("ben's token must not open a deck of another place")
+	}
+	if allowed("deck=CL12K1A00042") {
+		t.Fatal("without token or secret the deck stays closed")
+	}
+	if !allowed("deck=CL12K1A00042&secret=s3cret") {
+		t.Fatal("the Companion secret still works")
+	}
+}

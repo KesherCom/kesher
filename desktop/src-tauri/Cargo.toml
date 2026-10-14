@@ -15,6 +15,7 @@ tauri = { version = "2.1.1", features = [] }
 tokio = { version = "1", features = ["full"] }
 # Finds Kesher servers on the LAN for the connection screen.
 kesher-discovery = { path = "../../crates/kesher-discovery" }
+kesher-deck = { path = "../../crates/kesher-deck" }
 
 # Logging
 log = "0.4"
