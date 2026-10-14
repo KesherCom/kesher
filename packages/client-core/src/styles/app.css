@@ -2691,21 +2691,64 @@ button.secondary {
   font-size: var(--k-text-title);
   color: var(--k-text-muted);
 }
-.sd-page-settings > summary {
-  width: fit-content;
-  color: var(--k-text-soft);
+/* Folders sit right behind their page, with a folder icon. */
+.sd-page-tab.folder {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--k-space-1);
   font-size: var(--k-text-label);
-  cursor: pointer;
 }
-.sd-page-settings-body {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  align-items: end;
+.sd-page-tab.folder .k-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* The page's name and what fills it, always visible above the keys. */
+.sd-page-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: var(--k-space-3);
-  margin-top: var(--k-space-2);
-  padding: var(--k-space-3);
-  border: 1px solid var(--k-border);
+}
+.sd-page-title {
+  flex: 1 1 200px;
+}
+.sd-page-note {
+  flex: 1 1 100%;
+}
+.sd-segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--k-space-1);
+}
+.sd-segmented button[aria-pressed="true"] {
+  border-color: var(--k-selection);
+  color: var(--k-text);
+}
+
+/* A page that fills itself: nothing to set up key by key. */
+.sd-auto-page {
+  margin: 0;
+  padding: var(--k-space-4);
+  border: 1px dashed var(--k-border-strong);
   border-radius: var(--k-radius-control);
+  color: var(--k-text-soft);
+}
+
+/* Key 1 of a folder: always Back, shown but not editable. */
+.streamdeck-button:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+}
+.sd-back-key {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--k-text-muted);
+  font-size: var(--k-text-label);
+  font-weight: 600;
 }
 
 /* Grid and key settings side by side. */

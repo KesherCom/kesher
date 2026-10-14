@@ -204,8 +204,8 @@ export const actionCategories: ActionCategoryInfo[] = [
       {
         id: "page_jump",
         type: "page_jump",
-        label: "Open a page",
-        hint: "Opens the chosen page, for example a folder of more keys.",
+        label: "Open a folder or page",
+        hint: "Opens a folder of more keys (pick \"New folder…\" to make one) or another page.",
         target: "page",
       },
     ],

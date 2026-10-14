@@ -19,6 +19,8 @@ import { sortDirectUsersByRoleAndUsername } from "../../lib/users";
 import type { AutosaveState } from "../../hooks/useAutosave";
 import { StreamDeckPlaceBar } from "../StreamDeckPlaceBar";
 import { StreamDeckActionPicker } from "./StreamDeckActionPicker";
+import { addFolder, isFixedBackKey, pageTree } from "../../lib/streamDeckPages";
+import { Icon } from "../Icon";
 import { NativeStreamDeckStatus } from "../NativeStreamDeckStatus";
 import type { NativeStreamDeckState } from "../../hooks/useNativeStreamDeck";
 import {
@@ -798,10 +800,55 @@ export function StreamDeckSettingsSection({
     }
   };
 
-  const pageName = (pageNo: number, index: number) =>
-    streamDeckSettings?.pages
-      .find((page) => page.page === pageNo)
-      ?.title?.trim() || `Page ${index + 1}`;
+  const streamDeckPageTree = streamDeckSettings
+    ? pageTree(streamDeckSettings)
+    : [];
+  const currentPageEntry = streamDeckPageTree.find(
+    (entry) => entry.page === streamDeckCurrentPage?.page,
+  );
+  const currentIsAutoPage =
+    !!streamDeckCurrentPage?.pageType &&
+    streamDeckCurrentPage.pageType !== "manual";
+  // Key 1 of a page that fills itself (the server's companionAutoPageExit).
+  const mainPages = streamDeckPageTree.filter((entry) => !entry.isFolder);
+  const autoPageExit: "back" | "next" | null = currentPageEntry?.isFolder
+    ? "back"
+    : mainPages.length < 2
+      ? null
+      : [...mainPages].sort((a, b) => a.page - b.page)[0]?.page ===
+          streamDeckCurrentPage?.page
+        ? "next"
+        : "back";
+  const currentParentEntry = streamDeckPageTree.find(
+    (entry) => entry.page === streamDeckCurrentPage?.parentPage,
+  );
+  const keyIsFixedBack = (index: number) =>
+    !!streamDeckSettings &&
+    !!streamDeckCurrentPage &&
+    isFixedBackKey(streamDeckSettings, streamDeckCurrentPage.page, index);
+
+  // Key 1 of a folder is Back and cannot be set up: select key 2 instead.
+  const selectedIsFixedBack = keyIsFixedBack(streamDeckSelectedButtonIndex);
+  useEffect(() => {
+    if (selectedIsFixedBack) setStreamDeckSelectedButtonIndex(1);
+  }, [selectedIsFixedBack]);
+
+  /** New folder below the current page, opened by the selected key. */
+  const createFolderForSelectedKey = () => {
+    if (!streamDeckSettings || !streamDeckCurrentPage || !streamDeckSelectedButton) {
+      return;
+    }
+    const { settings } = addFolder(
+      streamDeckSettings,
+      streamDeckCurrentPage.page,
+      streamDeckSelectedButton.index,
+    );
+    applyStreamDeckSettings(settings);
+    setStreamDeckTransferError("");
+    setStreamDeckTransferMessage(
+      "Folder created. Open its tab to put keys in it.",
+    );
+  };
 
   return (
     <>
@@ -871,6 +918,20 @@ export function StreamDeckSettingsSection({
               <button
                 type="button"
                 className="danger"
+                onClick={removeCurrentStreamDeckPage}
+                disabled={
+                  streamDeckBusy ||
+                  !streamDeckSettings ||
+                  streamDeckSettings.pages.length <= 1
+                }
+              >
+                {currentPageEntry?.isFolder
+                  ? "Remove this folder"
+                  : "Remove this page"}
+              </button>
+              <button
+                type="button"
+                className="danger"
                 onClick={onResetStreamDeckSettings}
                 disabled={streamDeckBusy || !streamDeckSettings}
               >
@@ -907,17 +968,18 @@ export function StreamDeckSettingsSection({
         <div className="streamdeck-editor-shell">
           {/* 2. Pages as tabs; their details fold away. */}
           <div className="sd-pages" role="tablist" aria-label="Pages">
-            {streamDeckPageOrder.map((pageNo, index) => (
+            {streamDeckPageTree.map((entry) => (
               <button
-                key={`sd-page-tab-${pageNo}`}
+                key={`sd-page-tab-${entry.page}`}
                 type="button"
                 role="tab"
-                aria-selected={pageNo === streamDeckSettings.selectedPage}
-                className={`sd-page-tab ${pageNo === streamDeckSettings.selectedPage ? "active" : ""}`}
-                onClick={() => selectStreamDeckPage(pageNo)}
+                aria-selected={entry.page === streamDeckCurrentPage?.page}
+                className={`sd-page-tab ${entry.page === streamDeckCurrentPage?.page ? "active" : ""} ${entry.isFolder ? "folder" : ""}`}
+                onClick={() => selectStreamDeckPage(entry.page)}
                 disabled={streamDeckBusy}
               >
-                {pageName(pageNo, index)}
+                {entry.isFolder ? <Icon name="folder" /> : null}
+                {entry.label}
               </button>
             ))}
             <button
@@ -932,86 +994,75 @@ export function StreamDeckSettingsSection({
             </button>
           </div>
           {streamDeckCurrentPage ? (
-            <details className="sd-page-settings">
-              <summary>Page settings</summary>
-              <div className="sd-page-settings-body">
-                <label className="streamdeck-control">
-                  <span>Title</span>
-                  <input
-                    type="text"
-                    value={streamDeckCurrentPage.title || ""}
-                    onChange={(event) =>
-                      updateStreamDeckCurrentPageMeta((page) => ({
-                        ...page,
-                        title: event.target.value,
-                      }))
-                    }
-                    placeholder="Shown on the tab and on folder keys"
-                  />
-                </label>
-                <label className="streamdeck-control">
-                  <span>Content</span>
-                  <select
-                    value={streamDeckCurrentPage.pageType || "manual"}
-                    onChange={(event) =>
-                      updateStreamDeckCurrentPageMeta((page) => ({
-                        ...page,
-                        pageType: event.target.value as StreamDeckPageType,
-                      }))
-                    }
-                  >
-                    <option value="manual">Keys you set up</option>
-                    <option value="all_roles">Filled in: all roles</option>
-                    <option value="all_party_lines">
-                      Filled in: all party lines
-                    </option>
-                  </select>
-                </label>
-                <label className="streamdeck-control">
-                  <span>Opens from</span>
-                  <select
-                    value={String(streamDeckCurrentPage.parentPage ?? "")}
-                    onChange={(event) =>
-                      updateStreamDeckCurrentPageMeta((page) => ({
-                        ...page,
-                        parentPage:
-                          event.target.value === ""
-                            ? undefined
-                            : Number(event.target.value),
-                      }))
-                    }
-                  >
-                    <option value="">Top level</option>
-                    {streamDeckPageOrder
-                      .filter((pageNo) => pageNo !== streamDeckCurrentPage.page)
-                      .map((pageNo) => (
-                        <option
-                          key={`sd-parent-page-${pageNo}`}
-                          value={String(pageNo)}
-                        >
-                          {pageName(
-                            pageNo,
-                            streamDeckPageOrder.indexOf(pageNo),
-                          )}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  className="danger"
-                  onClick={removeCurrentStreamDeckPage}
-                  disabled={
-                    streamDeckBusy || streamDeckSettings.pages.length <= 1
+            <div className="sd-page-bar">
+              <label className="streamdeck-control sd-page-title">
+                <span>{currentPageEntry?.isFolder ? "Folder name" : "Page name"}</span>
+                <input
+                  type="text"
+                  aria-label="Page name"
+                  value={streamDeckCurrentPage.title || ""}
+                  onChange={(event) =>
+                    updateStreamDeckCurrentPageMeta((page) => ({
+                      ...page,
+                      title: event.target.value,
+                    }))
                   }
-                >
-                  Remove page
-                </button>
+                  placeholder={currentPageEntry?.label ?? "Name"}
+                />
+              </label>
+              <div className="streamdeck-control">
+                <span>Keys</span>
+                <div className="sd-segmented" role="group" aria-label="Page content">
+                  {(
+                    [
+                      ["manual", "Set up here"],
+                      ["all_party_lines", "All party lines"],
+                      ["all_roles", "All roles"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className="secondary"
+                      aria-pressed={(streamDeckCurrentPage.pageType || "manual") === value}
+                      onClick={() =>
+                        updateStreamDeckCurrentPageMeta((page) => ({
+                          ...page,
+                          pageType: value as StreamDeckPageType,
+                        }))
+                      }
+                      disabled={streamDeckBusy}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </details>
+              {currentPageEntry?.isFolder ? (
+                <small className="k-setting-hint sd-page-note">
+                  Folder of “{currentParentEntry?.label ?? "a page"}”. A key
+                  there opens it; key 1 here is always Back. Next/previous
+                  page does not walk into folders.
+                </small>
+              ) : null}
+            </div>
           ) : null}
 
           {/* 3. The keys, and the selected key's settings beside them. */}
+          {currentIsAutoPage ? (
+            <p className="sd-auto-page">
+              {streamDeckCurrentPage?.pageType === "all_roles"
+                ? "This page fills itself with a key for every role you may call (hold to talk to it)."
+                : "This page fills itself with a key for every party line you may talk on (hold to talk)."}{" "}
+              Key 1 is{" "}
+              {autoPageExit === "back"
+                ? "Back"
+                : autoPageExit === "next"
+                  ? "Next page (this is the first page)"
+                  : "free (this is the only page)"}
+              ; when the keys do not fit, the last two turn into previous / next.
+            </p>
+          ) : (
           <fieldset className="streamdeck-layout">
             <div className="sd-grid-column">
               <div
@@ -1047,7 +1098,13 @@ export function StreamDeckSettingsSection({
                           ? "drag-target"
                           : ""
                       }`}
-                      draggable={!streamDeckTestMode}
+                      draggable={!streamDeckTestMode && !keyIsFixedBack(button.index)}
+                      disabled={keyIsFixedBack(button.index)}
+                      title={
+                        keyIsFixedBack(button.index)
+                          ? "Key 1 of a folder is always Back"
+                          : undefined
+                      }
                       onClick={() =>
                         setStreamDeckSelectedButtonIndex(button.index)
                       }
@@ -1085,7 +1142,9 @@ export function StreamDeckSettingsSection({
                         stopStreamDeckPreviewPress(button.index)
                       }
                     >
-                      {previewImage ? (
+                      {keyIsFixedBack(button.index) ? (
+                        <span className="sd-back-key">Back</span>
+                      ) : previewImage ? (
                         <img
                           src={previewImage}
                           alt={`Preview of Stream Deck button ${button.index + 1}`}
@@ -1198,13 +1257,11 @@ export function StreamDeckSettingsSection({
                     value: group.id,
                     label: group.name,
                   }))}
-                  pages={(streamDeckSettings?.pages ?? [])
-                    .slice()
-                    .sort((a, b) => a.page - b.page)
-                    .map((page, idx) => ({
-                      value: String(page.page),
-                      label: page.title?.trim() || `Page ${idx + 1}`,
-                    }))}
+                  pages={streamDeckPageTree.map((entry) => ({
+                    value: String(entry.page),
+                    label: `${"\u2003".repeat(entry.depth)}${entry.isFolder ? "Folder: " : ""}${entry.label}`,
+                  }))}
+                  onNewFolder={createFolderForSelectedKey}
                   onChange={(action) =>
                     updateStreamDeckSelectedButton((button) => ({
                       ...button,
@@ -1326,6 +1383,7 @@ export function StreamDeckSettingsSection({
               </section>
             </div>
           </fieldset>
+          )}
         </div>
       )}
 

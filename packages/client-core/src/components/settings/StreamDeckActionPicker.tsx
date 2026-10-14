@@ -23,7 +23,11 @@ export type StreamDeckActionPickerProps = {
   groups: PickerOption[];
   pages: PickerOption[];
   onChange: (next: StreamDeckButtonAction | undefined) => void;
+  /** "Open a folder": make a new folder below this page for this key. */
+  onNewFolder?: () => void;
 };
+
+const newFolderValue = "__new_folder__";
 
 const targetLabels: Record<Exclude<ActionTarget, null>, string> = {
   line: "Party line",
@@ -47,6 +51,7 @@ export function StreamDeckActionPicker({
   groups,
   pages,
   onChange,
+  onNewFolder,
 }: StreamDeckActionPickerProps) {
   const { category, choice } = actionChoiceOf(action);
   const defaults: ActionDefaults = {
@@ -85,6 +90,10 @@ export function StreamDeckActionPicker({
     }
   })();
   const setTarget = (value: string) => {
+    if (value === newFolderValue) {
+      onNewFolder?.();
+      return;
+    }
     if (!action) return;
     switch (target) {
       case "line":
@@ -152,6 +161,9 @@ export function StreamDeckActionPicker({
                 {o.label}
               </option>
             ))}
+            {target === "page" && onNewFolder ? (
+              <option value={newFolderValue}>New folder…</option>
+            ) : null}
           </select>
         </label>
       ) : null}

@@ -13,6 +13,7 @@ import {
   DeckFrame,
   deckJpeg,
   parseDeckImageMessage,
+  parseDeckPage,
   pressButtonMessage,
   type DeckKeyImage,
   type NativeDeckStatus,
@@ -116,6 +117,16 @@ export function useNativeStreamDeck(token: string): NativeStreamDeckState {
       commandWs = new WebSocket(buildWebSocketUrl("/api/companion/ws", query));
       imageWs = new WebSocket(buildWebSocketUrl("/api/image-stream", query));
       commandWs.onopen = () => setLinked(true);
+      commandWs.onmessage = (ev) => {
+        let data: unknown;
+        try {
+          data = JSON.parse(String(ev.data));
+        } catch {
+          return;
+        }
+        const page = parseDeckPage(data);
+        if (page !== null) void draw(frame.show(page));
+      };
       imageWs.onmessage = (ev) => {
         let data: unknown;
         try {

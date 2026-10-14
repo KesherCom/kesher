@@ -393,7 +393,31 @@ describe("StationIntercomView", () => {
     expect(
       screen.getByRole("radio", { name: /Previous page/ }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /Open a page/ })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Open a folder or page/ })).toBeInTheDocument();
+  });
+
+  it("makes a folder from a key: it gets a tab and Back on key 1", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<EditableDeck onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
+    await user.click(screen.getByRole("button", { name: "Deck key 5" }));
+    await user.click(screen.getByRole("button", { name: "Pages" }));
+    await user.click(screen.getByRole("radio", { name: /Open a folder or page/ }));
+    await user.selectOptions(screen.getByLabelText("Key page"), "New folder…");
+
+    const last = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0];
+    const folder = last?.pages?.find((p: { parentPage?: number }) => p.parentPage === 0);
+    expect(folder).toBeDefined();
+    expect(last?.pages?.[0]?.buttons?.[4]?.action).toEqual({
+      type: "page_jump",
+      targetPage: folder.page,
+    });
+
+    await user.click(screen.getByRole("tab", { name: /Folder 1/ }));
+    expect(screen.getByRole("button", { name: "Deck key 1" })).toBeDisabled();
+    expect(screen.getByText(/key 1 here is always Back/)).toBeInTheDocument();
   });
 
   it("copies and pastes a stream deck button configuration", async () => {
@@ -553,7 +577,8 @@ describe("StationIntercomView", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Remove page" }));
+    await user.click(screen.getByText("More"));
+    await user.click(screen.getByRole("button", { name: "Remove this page" }));
 
     const removeArg = onStreamDeckSettingsChange.mock.calls[1]?.[0];
     expect(removeArg?.pages?.length).toBe(1);

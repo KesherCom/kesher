@@ -32,9 +32,10 @@ export type DeckImageMessage = {
 export type DeckKeyImage = { index: number; image: string | null };
 
 /**
- * Keeps the images per page and decides what to draw. The server sends the
- * images of the page that is current for the deck; an image for another
- * page means the page changed, so every key is redrawn from that page.
+ * Keeps the images per page and decides what to draw. Which page the deck
+ * shows comes from the server (`currentPageNumber` in companion_state, see
+ * show()); images of other pages are only kept for later. Until the first
+ * state arrives, the first image's page is shown.
  */
 export class DeckFrame {
   private readonly pages = new Map<number, Map<number, string>>();
@@ -53,11 +54,19 @@ export class DeckFrame {
       this.pages.set(page, images);
     }
     images.set(index, image);
-    if (this.shown !== page) {
+    if (this.shown === null) {
       this.shown = page;
       return this.all();
     }
+    if (page !== this.shown) return [];
     return index < this.keys ? [{ index, image }] : [];
+  }
+
+  /** The server says which page the deck shows now. */
+  show(page: number): DeckKeyImage[] {
+    if (this.shown === page) return [];
+    this.shown = page;
+    return this.all();
   }
 
   /** Every key of the shown page (after the deck was plugged in again). */
@@ -73,6 +82,16 @@ export class DeckFrame {
     this.pages.clear();
     this.shown = null;
   }
+}
+
+/** The deck's current page from a companion_state message, else null. */
+export function parseDeckPage(raw: unknown): number | null {
+  if (!raw || typeof raw !== "object") return null;
+  const msg = raw as { type?: string; data?: { currentPageNumber?: number } };
+  if (msg.type !== "companion_state") return null;
+  // omitempty on the server: no field means page 0.
+  const page = Number(msg.data?.currentPageNumber ?? 0);
+  return Number.isInteger(page) ? page : null;
 }
 
 export function parseDeckImageMessage(

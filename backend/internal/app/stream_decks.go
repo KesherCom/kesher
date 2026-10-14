@@ -535,6 +535,33 @@ func (s *Server) emitDeckPairingImages(ctx context.Context, key string, deck Str
 
 // refreshDeck pushes new state and images to a deck after its binding or
 // layout changed.
+// refreshDeckLayout: the deck's layout was saved (the editor saves while
+// you work): redraw it but stay on the page it shows, unless that page is
+// gone.
+func (s *Server) refreshDeckLayout(deckID string) {
+	key := deckKey(deckID)
+	ctx := context.Background()
+	s.companionMu.RLock()
+	current, known := s.companionPageByRole[key]
+	s.companionMu.RUnlock()
+	if known {
+		settings, err := s.companionLayout(ctx, key)
+		if err != nil {
+			settings = DefaultStreamDeckSettings()
+		}
+		settings = s.companionResolvedSettings(ctx, s.companionTargetRole(ctx, key), settings)
+		if _, exists := companionPageByNumber(settings)[current]; !exists {
+			s.resetCompanionCurrentPage(key)
+		}
+	}
+	if s.imageStreamCoord != nil {
+		s.imageStreamCoord.ResetTargetCache(key)
+	}
+	s.emitCompanionCurrentPageImages(ctx, key, "")
+}
+
+// refreshDeck: someone else controls the deck now (pairing, login, logout):
+// start again from its first page.
 func (s *Server) refreshDeck(deckID string) {
 	key := deckKey(deckID)
 	s.resetCompanionCurrentPage(key)
@@ -867,7 +894,7 @@ func (s *Server) handleDeckLayoutForUser(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		s.publishCompanionState(deckKey(deck.ID))
-		s.refreshDeck(deck.ID)
+		s.refreshDeckLayout(deck.ID)
 		s.writeJSON(w, http.StatusOK, saved)
 	case http.MethodDelete:
 		if _, err := s.store.SetStreamDeckLayout(r.Context(), deck.ID, nil); err != nil {

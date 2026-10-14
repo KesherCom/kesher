@@ -52,8 +52,9 @@ type Server struct {
 	companionWS                      map[string]map[chan CompanionCommandResult]struct{}
 	companionState                   map[string]map[chan struct{}]struct{}
 	companionPageByRole              map[string]int
-	companionPageButtonDown          map[string]bool
-	companionPageNavAnchorByRole     map[string]int
+	// companionHeldButtons: the key config a press went down on, by
+	// "<target>:<index>", so its release acts on the same key.
+	companionHeldButtons map[string]StreamDeckButtonConfig
 	companionHeldTargets             map[string]string
 	companionPendingCallByUser       map[string]bool
 	companionPendingCallerByUser     map[string]string
@@ -625,6 +626,34 @@ func companionRootPageOrder(settings StreamDeckSettings) []int {
 	return ordered
 }
 
+// companionSiblingPageOrder: the pages "next/previous page" walk through
+// from current: the main pages, or inside a folder the pages of that folder.
+func companionSiblingPageOrder(settings StreamDeckSettings, current int) []int {
+	var parent *int
+	if page, ok := companionPageByNumber(settings)[current]; ok {
+		parent = page.ParentPage
+	}
+	ordered := make([]int, 0, len(settings.Pages))
+	for _, page := range settings.Pages {
+		sameParent := (parent == nil && page.ParentPage == nil) ||
+			(parent != nil && page.ParentPage != nil && *parent == *page.ParentPage)
+		if sameParent || page.Page == current {
+			ordered = append(ordered, page.Page)
+		}
+	}
+	sort.Ints(ordered)
+	return ordered
+}
+
+// companionParentPage: where Back goes from page (its folder's parent, or
+// the first main page).
+func companionParentPage(settings StreamDeckSettings, page int) int {
+	if p, ok := companionPageByNumber(settings)[page]; ok && p.ParentPage != nil {
+		return *p.ParentPage
+	}
+	return companionHomePage(settings, false)
+}
+
 func companionHomePage(settings StreamDeckSettings, dynamic bool) int {
 	if dynamic {
 		return 0
@@ -845,6 +874,25 @@ func companionRenderAutoPage(settings StreamDeckSettings, page StreamDeckPageCon
 	return companionRuntimePage{Page: page, Dynamic: totalPages > 1, TotalPages: totalPages}
 }
 
+// companionAutoPageExit: key 1 of a page that fills itself (all roles, all
+// party lines), so the deck never gets stuck there. A folder goes Back to
+// its page; a main page goes Back to the first page, or on to the next page
+// when it is the first one itself. Nil when it is the only page.
+func companionAutoPageExit(settings StreamDeckSettings, page StreamDeckPageConfig) *StreamDeckButtonConfig {
+	back := &StreamDeckButtonConfig{Index: 0, Label: "Back", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageBack}}
+	if page.ParentPage != nil {
+		return back
+	}
+	roots := companionRootPageOrder(settings)
+	if len(roots) < 2 {
+		return nil
+	}
+	if page.Page != roots[0] {
+		return back
+	}
+	return &StreamDeckButtonConfig{Index: 0, Label: "Page +", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp}}
+}
+
 func (s *Server) companionResolvedSettings(ctx context.Context, roleID string, settings StreamDeckSettings) StreamDeckSettings {
 	if len(settings.Pages) == 0 {
 		return settings
@@ -868,8 +916,9 @@ func (s *Server) companionResolvedSettings(ctx context.Context, roleID string, s
 		case StreamDeckPageTypeAllRoles, StreamDeckPageTypeAllPartyLines:
 			entries := companionAutoEntriesForPage(ctx, s, roleID, rawPage)
 			buttonCount := companionGridButtonCount(settings)
+			exit := companionAutoPageExit(settings, rawPage)
 			startSlot := 0
-			if rawPage.ParentPage != nil {
+			if exit != nil {
 				startSlot = 1
 			}
 			payloadSlots := buttonCount - startSlot - 2
@@ -906,8 +955,8 @@ func (s *Server) companionResolvedSettings(ctx context.Context, roleID string, s
 					buttons[slot] = button
 					slot++
 				}
-				if rawPage.ParentPage != nil {
-					buttons[0] = StreamDeckButtonConfig{Index: 0, Label: "Back", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageBack}}
+				if exit != nil {
+					buttons[0] = *exit
 				}
 				if totalPages > 1 && buttonCount >= 2 {
 					prevSlot := buttonCount - 2
@@ -1305,10 +1354,9 @@ func (s *Server) executeCompanionPageCommand(ctx context.Context, key, username 
 		case "page_home":
 			targetPage = companionHomePage(settings, false)
 		case "page_back":
-			if page, ok := companionPageByNumber(settings)[targetPage]; ok && page.ParentPage != nil {
-				targetPage = *page.ParentPage
-			}
+			targetPage = companionParentPage(settings, targetPage)
 		default:
+			pageOrder = companionSiblingPageOrder(settings, targetPage)
 			currentIndex := 0
 			for i, pageNo := range pageOrder {
 				if pageNo == targetPage {
@@ -1654,7 +1702,7 @@ func (s *Server) currentCompanionPage(ctx context.Context, roleID string) int {
 	if err != nil {
 		settings = DefaultStreamDeckSettings()
 	}
-	page = settings.SelectedPage
+	page = companionHomePage(settings, false)
 	s.companionMu.Lock()
 	s.companionPageByRole[roleID] = page
 	s.companionMu.Unlock()
@@ -1675,86 +1723,33 @@ func (s *Server) setCompanionCurrentPage(roleID string, page int) {
 	s.publishCompanionState(roleID)
 }
 
-func (s *Server) markCompanionPageButtonDown(roleID string, buttonIndex int) {
-	roleID = strings.TrimSpace(roleID)
-	if roleID == "" {
-		return
+func companionIsPageAction(t StreamDeckActionType) bool {
+	switch t {
+	case StreamDeckActionTypePageUp, StreamDeckActionTypePageDown, StreamDeckActionTypePageJump,
+		StreamDeckActionTypePageHome, StreamDeckActionTypePageBack:
+		return true
 	}
-	key := fmt.Sprintf("%s:%d", roleID, buttonIndex)
-	s.companionMu.Lock()
-	if s.companionPageButtonDown == nil {
-		s.companionPageButtonDown = make(map[string]bool)
-	}
-	s.companionPageButtonDown[key] = true
-	s.companionMu.Unlock()
+	return false
 }
 
-func (s *Server) consumeCompanionPageButtonDown(roleID string, buttonIndex int) bool {
-	roleID = strings.TrimSpace(roleID)
-	if roleID == "" {
-		return false
-	}
-	key := fmt.Sprintf("%s:%d", roleID, buttonIndex)
+// holdCompanionButton remembers the key a press went down on.
+func (s *Server) holdCompanionButton(target string, buttonIndex int, button StreamDeckButtonConfig) {
 	s.companionMu.Lock()
 	defer s.companionMu.Unlock()
-	if s.companionPageButtonDown == nil {
-		return false
+	if s.companionHeldButtons == nil {
+		s.companionHeldButtons = make(map[string]StreamDeckButtonConfig)
 	}
-	if !s.companionPageButtonDown[key] {
-		return false
-	}
-	delete(s.companionPageButtonDown, key)
-	return true
+	s.companionHeldButtons[fmt.Sprintf("%s:%d", target, buttonIndex)] = button
 }
 
-func (s *Server) setCompanionPageNavAnchor(roleID string, buttonIndex int) {
-	roleID = strings.TrimSpace(roleID)
-	if roleID == "" {
-		return
-	}
+// releaseCompanionButton returns (and forgets) the key a press went down on.
+func (s *Server) releaseCompanionButton(target string, buttonIndex int) (StreamDeckButtonConfig, bool) {
 	s.companionMu.Lock()
-	if s.companionPageNavAnchorByRole == nil {
-		s.companionPageNavAnchorByRole = make(map[string]int)
-	}
-	s.companionPageNavAnchorByRole[roleID] = buttonIndex
-	s.companionMu.Unlock()
-}
-
-func (s *Server) hasCompanionPageNavAnchor(roleID string, buttonIndex int) bool {
-	roleID = strings.TrimSpace(roleID)
-	if roleID == "" {
-		return false
-	}
-	s.companionMu.RLock()
-	defer s.companionMu.RUnlock()
-	if s.companionPageNavAnchorByRole == nil {
-		return false
-	}
-	anchoredIndex, ok := s.companionPageNavAnchorByRole[roleID]
-	if !ok {
-		return false
-	}
-	return anchoredIndex == buttonIndex
-}
-
-func companionResolveUniqueNavigationAction(buttons []StreamDeckButtonConfig) *StreamDeckButtonConfig {
-	var resolved *StreamDeckButtonConfig
-	for i := range buttons {
-		candidate := buttons[i]
-		if candidate.Action == nil {
-			continue
-		}
-		if candidate.Action.Type != StreamDeckActionTypePageUp && candidate.Action.Type != StreamDeckActionTypePageDown &&
-			candidate.Action.Type != StreamDeckActionTypePageJump && candidate.Action.Type != StreamDeckActionTypePageHome {
-			continue
-		}
-		if resolved != nil {
-			return nil
-		}
-		copyCandidate := candidate
-		resolved = &copyCandidate
-	}
-	return resolved
+	defer s.companionMu.Unlock()
+	id := fmt.Sprintf("%s:%d", target, buttonIndex)
+	button, ok := s.companionHeldButtons[id]
+	delete(s.companionHeldButtons, id)
+	return button, ok
 }
 
 func (s *Server) publishCompanionPresenceUpdate(ctx context.Context, roleID string) {
@@ -2162,9 +2157,6 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, key string, us
 			break
 		}
 	}
-	if (button == nil || button.Action == nil || button.Action.Type == StreamDeckActionTypeNone) && s.hasCompanionPageNavAnchor(key, command.ButtonIndex) {
-		button = companionResolveUniqueNavigationAction(page.Buttons)
-	}
 	if (button == nil || button.Action == nil || button.Action.Type == StreamDeckActionTypeNone) && runtimePage.Dynamic {
 		buttonCount := companionGridButtonCount(settings)
 		prevSlot := buttonCount - 2
@@ -2182,6 +2174,23 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, key string, us
 				Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp},
 			}
 		}
+	}
+	// A release acts on the key that went down, even when the page changed
+	// in between (a folder key, Back, next page) or a talk key is held
+	// across a page change; otherwise the release would trigger whatever
+	// key now sits at that position.
+	if strings.TrimSpace(command.State) == "up" {
+		if held, ok := s.releaseCompanionButton(key, command.ButtonIndex); ok {
+			button = &held
+		} else if button != nil && button.Action != nil && companionIsPageAction(button.Action.Type) {
+			// Companion can send only the release ("on release" buttons):
+			// for a page key that is the press.
+			command.State = "down"
+		} else {
+			button = nil
+		}
+	} else if button != nil && button.Action != nil && button.Action.Type != StreamDeckActionTypeNone {
+		s.holdCompanionButton(key, command.ButtonIndex, *button)
 	}
 	if button == nil || button.Action == nil || button.Action.Type == StreamDeckActionTypeNone {
 		if s.logger != nil {
@@ -2341,16 +2350,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, key string, us
 
 	switch button.Action.Type {
 	case StreamDeckActionTypePageUp, StreamDeckActionTypePageDown:
-		if phase == "up" {
-			if s.consumeCompanionPageButtonDown(key, command.ButtonIndex) {
-				result.OK = true
-				result.Status = "executed"
-				return result
-			}
-		} else {
-			s.markCompanionPageButtonDown(key, command.ButtonIndex)
-		}
-		if phase != "down" && phase != "up" {
+		if phase != "down" {
 			result.OK = true
 			result.Status = "executed"
 			return result
@@ -2373,7 +2373,7 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, key string, us
 				targetPage = maxPage
 			}
 		} else {
-			pageOrder := companionPageOrder(settings)
+			pageOrder := companionSiblingPageOrder(settings, currentPage)
 			pageToIndex := make(map[int]int, len(pageOrder))
 			for i, pageNo := range pageOrder {
 				pageToIndex[pageNo] = i
@@ -2411,9 +2411,22 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, key string, us
 		if s.imageStreamCoord != nil {
 			s.imageStreamCoord.ResetTargetCache(key)
 		}
-		s.setCompanionPageNavAnchor(key, command.ButtonIndex)
 		emitCompanionCurrentPageImages()
-		emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE"})
+		result.OK = true
+		result.Status = "executed"
+		return result
+	case StreamDeckActionTypePageBack:
+		if phase != "down" {
+			result.OK = true
+			result.Status = "executed"
+			return result
+		}
+		backTarget := companionParentPage(settings, currentPage)
+		s.setCompanionCurrentPage(key, backTarget)
+		if s.imageStreamCoord != nil {
+			s.imageStreamCoord.ResetTargetCache(key)
+		}
+		emitCompanionCurrentPageImages()
 		result.OK = true
 		result.Status = "executed"
 		return result
@@ -2467,7 +2480,6 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, key string, us
 			s.imageStreamCoord.ResetTargetCache(key)
 		}
 		emitCompanionCurrentPageImages()
-		emitCompanionButtonImage(page.Page, button, ButtonState{State: "IDLE"})
 		result.OK = true
 		result.Status = "executed"
 		return result
@@ -3412,8 +3424,7 @@ func NewServer(cfg Config) (*Server, error) {
 		companionWS:                      make(map[string]map[chan CompanionCommandResult]struct{}),
 		companionState:                   make(map[string]map[chan struct{}]struct{}),
 		companionPageByRole:              make(map[string]int),
-		companionPageButtonDown:          make(map[string]bool),
-		companionPageNavAnchorByRole:     make(map[string]int),
+		companionHeldButtons: make(map[string]StreamDeckButtonConfig),
 		companionHeldTargets:             make(map[string]string),
 		companionPendingCallByUser:       make(map[string]bool),
 		companionPendingCallerByUser:     make(map[string]string),

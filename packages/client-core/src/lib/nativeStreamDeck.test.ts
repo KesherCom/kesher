@@ -2,31 +2,43 @@ import { describe, expect, it } from "vitest";
 import {
   DeckFrame,
   parseDeckImageMessage,
+  parseDeckPage,
   pressButtonMessage,
 } from "./nativeStreamDeck";
 
 describe("DeckFrame", () => {
-  it("draws single keys on the shown page and the whole deck on a page change", () => {
+  it("shows the page the server names and keeps other pages for later", () => {
     const frame = new DeckFrame(3);
+    // Before any state: the first image's page is shown.
     expect(frame.receive(1, 0, "a")).toEqual([
       { index: 0, image: "a" },
       { index: 1, image: null },
       { index: 2, image: null },
     ]);
     expect(frame.receive(1, 2, "c")).toEqual([{ index: 2, image: "c" }]);
-    // Page 2 arrives: every key redrawn, the old page's keys go black.
-    expect(frame.receive(2, 1, "x")).toEqual([
+    // The server switches to page 2: every key redrawn, old keys go black.
+    expect(frame.show(2)).toEqual([
       { index: 0, image: null },
-      { index: 1, image: "x" },
+      { index: 1, image: null },
       { index: 2, image: null },
     ]);
+    expect(frame.receive(2, 1, "x")).toEqual([{ index: 1, image: "x" }]);
+    // A late image of the old page must not switch the deck back.
+    expect(frame.receive(1, 1, "b")).toEqual([]);
     // Back on page 1: its cached images come back.
-    expect(frame.receive(1, 1, "b")).toEqual([
+    expect(frame.show(1)).toEqual([
       { index: 0, image: "a" },
       { index: 1, image: "b" },
       { index: 2, image: "c" },
     ]);
+    expect(frame.show(1)).toEqual([]);
     expect(frame.receive(1, 7, "out of range")).toEqual([]);
+  });
+
+  it("reads the page from companion_state (no field means page 0)", () => {
+    expect(parseDeckPage({ type: "companion_state", data: { currentPageNumber: 2 } })).toBe(2);
+    expect(parseDeckPage({ type: "companion_state", data: {} })).toBe(0);
+    expect(parseDeckPage({ type: "companion_command_result", data: {} })).toBeNull();
   });
 
   it("repaints everything after the deck comes back", () => {

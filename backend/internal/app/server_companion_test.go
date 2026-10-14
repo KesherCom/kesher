@@ -689,56 +689,6 @@ func TestExecuteCompanionButtonPressPageButtonsAllowUpOnlyTrigger(t *testing.T) 
 	}
 }
 
-func TestExecuteCompanionButtonPressPageButtonsIndependentFromSlotViaAnchor(t *testing.T) {
-	s := newCompanionTestServer(t)
-	ctx := context.Background()
-
-	if err := s.store.CreateRole(ctx, "source", "Source", "", "ptt", false); err != nil {
-		t.Fatalf("CreateRole source failed: %v", err)
-	}
-	if _, err := s.store.UpsertUser(ctx, "operator", "source"); err != nil {
-		t.Fatalf("UpsertUser failed: %v", err)
-	}
-
-	settings := DefaultStreamDeckSettings()
-	page0Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
-	page1Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)
-	page0Buttons[6].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp}
-	page1Buttons[0].Action = &StreamDeckButtonAction{Type: StreamDeckActionTypePageDown}
-	settings.SelectedPage = 0
-	settings.Pages = []StreamDeckPageConfig{
-		{Page: 0, Buttons: page0Buttons},
-		{Page: 1, Buttons: page1Buttons},
-	}
-	if _, err := s.store.UpsertRoleStreamDeckSettings(ctx, "source", settings); err != nil {
-		t.Fatalf("UpsertRoleStreamDeckSettings failed: %v", err)
-	}
-
-	forward := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{
-		Command:     "press_button",
-		ButtonIndex: 6,
-		State:       "down",
-	})
-	if !forward.OK || forward.Status != "executed" {
-		t.Fatalf("expected page_up on slot 6 to execute, got %+v", forward)
-	}
-	if page := s.currentCompanionPage(ctx, "source"); page != 1 {
-		t.Fatalf("expected current page to become 1 after page_up, got %d", page)
-	}
-
-	backward := s.executeCompanionButtonPress(ctx, "source", "operator", CompanionCommand{
-		Command:     "press_button",
-		ButtonIndex: 6,
-		State:       "down",
-	})
-	if !backward.OK || backward.Status != "executed" {
-		t.Fatalf("expected page_down fallback to execute from anchored slot 6, got %+v", backward)
-	}
-	if page := s.currentCompanionPage(ctx, "source"); page != 0 {
-		t.Fatalf("expected current page to become 0 after anchored fallback page_down, got %d", page)
-	}
-}
-
 func TestCompanionResolveRuntimePageUsesSlidingWindowWithReservedNavSlots(t *testing.T) {
 	settings := DefaultStreamDeckSettings()
 	page0Buttons := append([]StreamDeckButtonConfig(nil), settings.Pages[0].Buttons...)

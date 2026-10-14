@@ -16,6 +16,7 @@ export type IconName =
   | "broadcast"
   | "user"
   | "users"
+  | "folder"
   | "close"
   | "speaker"
   | "keyboard"
@@ -82,6 +83,7 @@ const paths: Record<IconName, ReactElement> = {
       <path d="M4 21a8 8 0 0 1 16 0" />
     </>
   ),
+  folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
   users: (
     <>
       <circle cx="9" cy="8" r="3.5" />
