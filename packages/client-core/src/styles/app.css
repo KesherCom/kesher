@@ -2844,6 +2844,102 @@ button.secondary {
   color: var(--k-text-soft);
   font-size: var(--k-text-label);
 }
+/* What a key does (settings/StreamDeckActionPicker.tsx): "with what" as a
+   row of icon buttons, then "what happens" as choices with one sentence
+   each. The chosen ones are marked in selection cyan. */
+.sd-action {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-3);
+}
+.sd-categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--k-space-2);
+}
+.sd-category {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--k-space-1);
+  min-height: var(--k-touch);
+  padding: var(--k-space-2) var(--k-space-1);
+  font-size: var(--k-text-label);
+  color: var(--k-text-soft);
+}
+.sd-category[aria-pressed="true"] {
+  border-color: var(--k-selection);
+  color: var(--k-text);
+}
+.sd-choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.sd-choices legend {
+  margin-bottom: var(--k-space-1);
+  padding: 0;
+  color: var(--k-text-soft);
+  font-size: var(--k-text-label);
+}
+.sd-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--k-space-2);
+  min-height: var(--k-touch);
+  padding: var(--k-space-2) var(--k-space-3);
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius-control);
+  cursor: pointer;
+}
+.sd-choice.active {
+  border-color: var(--k-selection);
+}
+.sd-choice input {
+  margin-top: 3px;
+  accent-color: var(--k-selection);
+}
+.sd-choice span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sd-choice strong {
+  font-weight: 600;
+}
+.sd-choice small {
+  color: var(--k-text-muted);
+  font-size: var(--k-text-label);
+}
+.sd-more {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-2);
+}
+.sd-more > summary {
+  min-height: var(--k-touch);
+  display: flex;
+  list-style: none;
+  align-items: center;
+  color: var(--k-text-soft);
+  font-size: var(--k-text-label);
+  cursor: pointer;
+}
+.sd-more > summary::-webkit-details-marker {
+  display: none;
+}
+.sd-more > summary::before {
+  content: "+";
+  width: 1em;
+  color: var(--k-text-muted);
+}
+.sd-more[open] > summary::before {
+  content: "\2212";
+}
 /* Frame colors: round swatches, the chosen one ringed in selection cyan. */
 .streamdeck-colors {
   display: flex;

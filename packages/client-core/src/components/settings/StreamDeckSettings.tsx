@@ -18,6 +18,7 @@ import {
 import { sortDirectUsersByRoleAndUsername } from "../../lib/users";
 import type { AutosaveState } from "../../hooks/useAutosave";
 import { StreamDeckPlaceBar } from "../StreamDeckPlaceBar";
+import { StreamDeckActionPicker } from "./StreamDeckActionPicker";
 import { NativeStreamDeckStatus } from "../NativeStreamDeckStatus";
 import type { NativeStreamDeckState } from "../../hooks/useNativeStreamDeck";
 import {
@@ -626,103 +627,6 @@ export function StreamDeckSettingsSection({
     setStreamDeckDropTargetIndex(null);
   };
 
-  const setStreamDeckActionType = (type: StreamDeckActionType) => {
-    updateStreamDeckSelectedButton((button) => {
-      if (type === "none") {
-        return { ...button, action: undefined };
-      }
-      if (type === "page_home" || type === "page_jump") {
-        const pageOrder = (streamDeckSettings?.pages ?? [])
-          .map((page) => page.page)
-          .sort((a, b) => a - b);
-        const homePage = pageOrder[0] ?? 0;
-        const defaultTargetPage =
-          button.action?.type === "page_jump" &&
-          button.action.targetPage !== undefined
-            ? button.action.targetPage
-            : homePage;
-        return {
-          ...button,
-          action: {
-            type,
-            targetPage: type === "page_home" ? homePage : defaultTargetPage,
-          },
-        };
-      }
-      if (
-        type === "ptt_room" ||
-        type === "select_talk_room" ||
-        type === "select_listen_room" ||
-        type === "listen_room" ||
-        type === "call_room"
-      ) {
-        return {
-          ...button,
-          action: {
-            type,
-            roomId:
-              button.action?.type === "ptt_room" ||
-              button.action?.type === "select_talk_room" ||
-              button.action?.type === "select_listen_room" ||
-              button.action?.type === "listen_room" ||
-              button.action?.type === "call_room"
-                ? button.action.roomId
-                : appData.rooms[0]?.id,
-          },
-        };
-      }
-      if (type === "direct_user") {
-        return {
-          ...button,
-          action: {
-            type,
-            userId:
-              button.action?.type === "direct_user"
-                ? button.action.userId
-                : appData.users[0]?.id,
-          },
-        };
-      }
-      if (type === "direct_role") {
-        return {
-          ...button,
-          action: {
-            type,
-            roleId:
-              button.action?.type === "direct_role"
-                ? button.action.roleId
-                : appData.roles[0]?.id,
-          },
-        };
-      }
-      if (type === "broadcast_ptt") {
-        return {
-          ...button,
-          action: {
-            type,
-            broadcastGroupId:
-              button.action?.type === "broadcast_ptt"
-                ? button.action.broadcastGroupId
-                : broadcastGroups[0]?.id,
-          },
-        };
-      }
-      if (type === "volume_delta") {
-        return {
-          ...button,
-          action: {
-            type,
-            volumeDelta:
-              button.action?.type === "volume_delta"
-                ? button.action.volumeDelta || 1
-                : 1,
-          },
-        };
-      }
-      return { ...button, action: { type } };
-    });
-  };
-
   const updateStreamDeckCurrentPageMeta = (
     updater: (page: NonNullable<typeof streamDeckCurrentPage>) => {
       page: number;
@@ -894,7 +798,6 @@ export function StreamDeckSettingsSection({
     }
   };
 
-  const selectedType = streamDeckSelectedButton?.action?.type || "none";
   const pageName = (pageNo: number, index: number) =>
     streamDeckSettings?.pages
       .find((page) => page.page === pageNo)
@@ -1265,255 +1168,50 @@ export function StreamDeckSettingsSection({
 
               <section className="sd-key-section">
                 <h6>What it does</h6>
-                <label className="streamdeck-control">
-                  <span>Function</span>
-                  <select
-                    aria-label="Stream Deck function"
-                    value={selectedType}
-                    onChange={(event) =>
-                      setStreamDeckActionType(
-                        event.target.value as StreamDeckActionType,
-                      )
-                    }
-                  >
-                    <option value="none">Nothing</option>
-                    <optgroup label="Party lines">
-                      <option value="ptt_room">
-                        Talk on a party line (hold)
-                      </option>
-                      <option value="listen_room">
-                        Listen to a party line
-                      </option>
-                      <option value="select_talk_room">
-                        Choose the line to talk on
-                      </option>
-                      <option value="select_listen_room">
-                        Choose a line, hold to listen
-                      </option>
-                      <option value="ptt_selected">
-                        Talk on the chosen lines (hold)
-                      </option>
-                      <option value="call_room">Call a party line</option>
-                    </optgroup>
-                    <optgroup label="People">
-                      <option value="direct_user">
-                        Talk to a person (hold)
-                      </option>
-                      <option value="direct_role">Talk to a role (hold)</option>
-                      <option value="reply_to_caller">
-                        Reply to the last caller (hold)
-                      </option>
-                      <option value="incoming_call_indicator">
-                        Show incoming calls
-                      </option>
-                      <option value="broadcast_ptt">Broadcast (hold)</option>
-                    </optgroup>
-                    <optgroup label="Microphone">
-                      <option value="volume_delta">Mic gain + / −</option>
-                    </optgroup>
-                    <optgroup label="Pages">
-                      <option value="page_up">Page up</option>
-                      <option value="page_down">Page down</option>
-                      <option value="page_home">First page</option>
-                      <option value="page_jump">Open page / folder</option>
-                    </optgroup>
-                  </select>
-                </label>
-                {streamDeckSelectedButton?.action?.type === "ptt_room" ||
-                streamDeckSelectedButton?.action?.type === "select_talk_room" ||
-                streamDeckSelectedButton?.action?.type ===
-                  "select_listen_room" ||
-                streamDeckSelectedButton?.action?.type === "listen_room" ||
-                streamDeckSelectedButton?.action?.type === "call_room" ? (
-                  <label className="streamdeck-control">
-                    <span>Party line</span>
-                    <select
-                      aria-label="Stream Deck channel target"
-                      value={streamDeckSelectedButton.action.roomId || ""}
-                      onChange={(event) =>
-                        updateStreamDeckSelectedButton((button) => ({
-                          ...button,
-                          action: {
-                            type:
-                              streamDeckSelectedButton.action?.type ||
-                              "ptt_room",
-                            roomId: event.target.value,
-                          },
-                        }))
-                      }
-                    >
-                      {appData.rooms.map((room) => (
-                        <option
-                          key={`streamdeck-room-${room.id}`}
-                          value={room.id}
-                        >
-                          {room.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-
-                {streamDeckSelectedButton?.action?.type === "direct_user" ? (
-                  <label className="streamdeck-control">
-                    <span>Person</span>
-                    <select
-                      aria-label="Stream Deck direct user target"
-                      value={streamDeckSelectedButton.action.userId || ""}
-                      onChange={(event) =>
-                        updateStreamDeckSelectedButton((button) => ({
-                          ...button,
-                          action: {
-                            type: "direct_user",
-                            userId: event.target.value,
-                          },
-                        }))
-                      }
-                    >
-                      {sortDirectUsersByRoleAndUsername(
-                        appData.users,
-                        roleNameById,
-                      ).map((user) => (
-                        <option
-                          key={`streamdeck-user-${user.id}`}
-                          value={user.id}
-                        >
-                          {user.username} (
-                          {roleNameById.get(user.roleId) ?? user.roleId})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-
-                {streamDeckSelectedButton?.action?.type === "direct_role" ? (
-                  <label className="streamdeck-control">
-                    <span>Role</span>
-                    <select
-                      aria-label="Stream Deck direct role target"
-                      value={streamDeckSelectedButton.action.roleId || ""}
-                      onChange={(event) =>
-                        updateStreamDeckSelectedButton((button) => ({
-                          ...button,
-                          action: {
-                            type: "direct_role",
-                            roleId: event.target.value,
-                          },
-                        }))
-                      }
-                    >
-                      {appData.roles.map((role) => {
-                        const onlineRoleUsers = onlineUsers
-                          .filter((entry) => entry.roleId === role.id)
-                          .map((entry) => entry.username);
-                        const onlineHint =
-                          onlineRoleUsers.length > 0
-                            ? ` (${onlineRoleUsers.join(", ")})`
-                            : "";
-                        return (
-                          <option
-                            key={`streamdeck-role-${role.id}`}
-                            value={role.id}
-                          >
-                            {role.name}
-                            {onlineHint}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </label>
-                ) : null}
-
-                {streamDeckSelectedButton?.action?.type === "broadcast_ptt" ? (
-                  <label className="streamdeck-control">
-                    <span>Group</span>
-                    <select
-                      aria-label="Stream Deck broadcast target"
-                      value={
-                        streamDeckSelectedButton.action.broadcastGroupId || ""
-                      }
-                      onChange={(event) =>
-                        updateStreamDeckSelectedButton((button) => ({
-                          ...button,
-                          action: {
-                            type: "broadcast_ptt",
-                            broadcastGroupId: event.target.value,
-                          },
-                        }))
-                      }
-                    >
-                      {broadcastGroups.map((group) => (
-                        <option
-                          key={`streamdeck-group-${group.id}`}
-                          value={group.id}
-                        >
-                          {group.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-
-                {streamDeckSelectedButton?.action?.type === "volume_delta" ? (
-                  <label className="streamdeck-control">
-                    <span>Step</span>
-                    <select
-                      aria-label="Stream Deck volume delta"
-                      value={String(
-                        streamDeckSelectedButton.action.volumeDelta || 1,
-                      )}
-                      onChange={(event) =>
-                        updateStreamDeckSelectedButton((button) => ({
-                          ...button,
-                          action: {
-                            type: "volume_delta",
-                            volumeDelta: Number(event.target.value),
-                          },
-                        }))
-                      }
-                    >
-                      <option value="-2">−2 dB (quieter)</option>
-                      <option value="-1">−1 dB (quieter)</option>
-                      <option value="1">+1 dB (louder)</option>
-                      <option value="2">+2 dB (louder)</option>
-                    </select>
-                  </label>
-                ) : null}
-
-                {streamDeckSelectedButton?.action?.type === "page_jump" ? (
-                  <label className="streamdeck-control">
-                    <span>Page</span>
-                    <select
-                      aria-label="Stream Deck jump target page"
-                      value={String(
-                        streamDeckSelectedButton.action.targetPage ?? 0,
-                      )}
-                      onChange={(event) =>
-                        updateStreamDeckSelectedButton((button) => ({
-                          ...button,
-                          action: {
-                            type: "page_jump",
-                            targetPage: Number(event.target.value),
-                          },
-                        }))
-                      }
-                    >
-                      {(streamDeckSettings?.pages ?? [])
-                        .map((p) => p.page)
-                        .sort((a, b) => a - b)
-                        .map((pageNo, idx) => (
-                          <option
-                            key={`sd-jump-page-${pageNo}`}
-                            value={String(pageNo)}
-                          >
-                            {(streamDeckSettings?.pages ?? [])
-                              .find((page) => page.page === pageNo)
-                              ?.title?.trim() || `Page ${idx + 1}`}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                ) : null}
+                <StreamDeckActionPicker
+                  action={streamDeckSelectedButton?.action}
+                  disabled={!streamDeckSelectedButton}
+                  rooms={appData.rooms.map((room) => ({
+                    value: room.id,
+                    label: room.name,
+                  }))}
+                  users={sortDirectUsersByRoleAndUsername(
+                    appData.users,
+                    roleNameById,
+                  ).map((user) => ({
+                    value: user.id,
+                    label: `${user.username} (${roleNameById.get(user.roleId) ?? user.roleId})`,
+                  }))}
+                  roles={appData.roles.map((role) => {
+                    const online = onlineUsers
+                      .filter((entry) => entry.roleId === role.id)
+                      .map((entry) => entry.username);
+                    return {
+                      value: role.id,
+                      label:
+                        online.length > 0
+                          ? `${role.name} (${online.join(", ")})`
+                          : role.name,
+                    };
+                  })}
+                  groups={broadcastGroups.map((group) => ({
+                    value: group.id,
+                    label: group.name,
+                  }))}
+                  pages={(streamDeckSettings?.pages ?? [])
+                    .slice()
+                    .sort((a, b) => a.page - b.page)
+                    .map((page, idx) => ({
+                      value: String(page.page),
+                      label: page.title?.trim() || `Page ${idx + 1}`,
+                    }))}
+                  onChange={(action) =>
+                    updateStreamDeckSelectedButton((button) => ({
+                      ...button,
+                      action,
+                    }))
+                  }
+                />
               </section>
 
               <section className="sd-key-section">

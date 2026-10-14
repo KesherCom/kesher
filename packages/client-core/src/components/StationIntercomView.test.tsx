@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -139,6 +139,26 @@ const baseProps: ComponentProps<typeof StationIntercomView> = {
   lastCompanionCommand: null,
   onStreamDeckTestButtonEvent: vi.fn(),
 };
+
+/** Holds the layout like the app does, so the editor sees its own edits. */
+function EditableDeck({
+  onChange,
+}: {
+  onChange: (next: StreamDeckSettings) => void;
+}) {
+  const [settings, setSettings] = useState(baseProps.streamDeckSettings);
+  return (
+    <StationIntercomView
+      {...baseProps}
+      isUserSettingsOpen
+      streamDeckSettings={settings}
+      onStreamDeckSettingsChange={(next) => {
+        setSettings(next);
+        onChange(next);
+      }}
+    />
+  );
+}
 
 describe("StationIntercomView", () => {
   it("toggles always-on from the switch control", async () => {
@@ -326,10 +346,7 @@ describe("StationIntercomView", () => {
 
     await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
 
-    await user.selectOptions(
-      screen.getByLabelText("Stream Deck function"),
-      "reply_to_caller",
-    );
+    await user.click(screen.getByRole("button", { name: "Calls" }));
 
     expect(onStreamDeckSettingsChange).toHaveBeenCalled();
     const calls = onStreamDeckSettingsChange.mock.calls;
@@ -342,19 +359,14 @@ describe("StationIntercomView", () => {
   it("allows assigning select+listen channel action in stream deck settings", async () => {
     const user = userEvent.setup();
     const onStreamDeckSettingsChange = vi.fn();
-    render(
-      <StationIntercomView
-        {...baseProps}
-        isUserSettingsOpen
-        onStreamDeckSettingsChange={onStreamDeckSettingsChange}
-      />,
-    );
+    render(<EditableDeck onChange={onStreamDeckSettingsChange} />);
 
     await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
 
-    await user.selectOptions(
-      screen.getByLabelText("Stream Deck function"),
-      "select_listen_room",
+    await user.click(screen.getByRole("button", { name: "Party line" }));
+    await user.click(screen.getByText("More options"));
+    await user.click(
+      screen.getByRole("radio", { name: /Choose, hold to listen/ }),
     );
 
     expect(onStreamDeckSettingsChange).toHaveBeenCalled();
@@ -367,20 +379,21 @@ describe("StationIntercomView", () => {
 
   it("offers stream deck navigation and folder functions in user settings", async () => {
     const user = userEvent.setup();
-    render(<StationIntercomView {...baseProps} isUserSettingsOpen />);
+    render(<EditableDeck onChange={() => undefined} />);
 
     await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
 
+    await user.click(screen.getByRole("button", { name: "Microphone" }));
     expect(
-      screen.getByRole("option", { name: "Mic gain + / −" }),
+      screen.getByRole("radio", { name: /Open mic on \/ off/ }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Page up" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Louder/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Pages" }));
+    expect(screen.getByRole("radio", { name: /Next page/ })).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: "Page down" }),
+      screen.getByRole("radio", { name: /Previous page/ }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("option", { name: "Open page / folder" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Open a page/ })).toBeInTheDocument();
   });
 
   it("copies and pastes a stream deck button configuration", async () => {
@@ -435,10 +448,7 @@ describe("StationIntercomView", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /Stream Deck/ }));
-    await user.selectOptions(
-      screen.getByLabelText("Stream Deck function"),
-      "reply_to_caller",
-    );
+    await user.click(screen.getByRole("button", { name: "Calls" }));
 
     const changedSettings = onStreamDeckSettingsChange.mock.calls[0]?.[0];
     rerender(
