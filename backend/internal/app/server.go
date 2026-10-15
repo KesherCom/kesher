@@ -864,10 +864,10 @@ func companionRenderAutoPage(settings StreamDeckSettings, page StreamDeckPageCon
 		prevSlot := buttonCount - 2
 		nextSlot := buttonCount - 1
 		if pageIndex > 0 {
-			buttons[prevSlot] = StreamDeckButtonConfig{Index: prevSlot, Label: "Page -", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageDown}}
+			buttons[prevSlot] = StreamDeckButtonConfig{Index: prevSlot, Label: "Previous", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageDown}}
 		}
 		if pageIndex < totalPages-1 {
-			buttons[nextSlot] = StreamDeckButtonConfig{Index: nextSlot, Label: "Page +", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp}}
+			buttons[nextSlot] = StreamDeckButtonConfig{Index: nextSlot, Label: "Next", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp}}
 		}
 	}
 	page.Buttons = buttons
@@ -890,7 +890,7 @@ func companionAutoPageExit(settings StreamDeckSettings, page StreamDeckPageConfi
 	if page.Page != roots[0] {
 		return back
 	}
-	return &StreamDeckButtonConfig{Index: 0, Label: "Page +", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp}}
+	return &StreamDeckButtonConfig{Index: 0, Label: "Next", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp}}
 }
 
 func (s *Server) companionResolvedSettings(ctx context.Context, roleID string, settings StreamDeckSettings) StreamDeckSettings {
@@ -962,10 +962,10 @@ func (s *Server) companionResolvedSettings(ctx context.Context, roleID string, s
 					prevSlot := buttonCount - 2
 					nextSlot := buttonCount - 1
 					if index > 0 {
-						buttons[prevSlot] = StreamDeckButtonConfig{Index: prevSlot, Label: "Page -", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageJump, TargetPage: generatedPageNumbers[index-1]}}
+						buttons[prevSlot] = StreamDeckButtonConfig{Index: prevSlot, Label: "Previous", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageJump, TargetPage: generatedPageNumbers[index-1]}}
 					}
 					if index < totalPages-1 {
-						buttons[nextSlot] = StreamDeckButtonConfig{Index: nextSlot, Label: "Page +", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageJump, TargetPage: generatedPageNumbers[index+1]}}
+						buttons[nextSlot] = StreamDeckButtonConfig{Index: nextSlot, Label: "Next", Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageJump, TargetPage: generatedPageNumbers[index+1]}}
 					}
 				}
 				title := rawPage.Title
@@ -1099,14 +1099,14 @@ func (s *Server) buildCompanionChannelRuntimePage(ctx context.Context, roleID st
 	if cursor > 0 {
 		buttons[prevSlot] = StreamDeckButtonConfig{
 			Index:  prevSlot,
-			Label:  "Page -",
+			Label:  "Previous",
 			Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageDown},
 		}
 	}
 	if cursor < totalPages-1 {
 		buttons[nextSlot] = StreamDeckButtonConfig{
 			Index:  nextSlot,
-			Label:  "Page +",
+			Label:  "Next",
 			Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp},
 		}
 	}
@@ -1228,14 +1228,14 @@ func companionBuildSlidingRuntimePage(settings StreamDeckSettings, cursor int) (
 	if cursor > 0 {
 		buttons[prevSlot] = StreamDeckButtonConfig{
 			Index:  prevSlot,
-			Label:  "Page -",
+			Label:  "Previous",
 			Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageDown},
 		}
 	}
 	if cursor < totalPages-1 {
 		buttons[nextSlot] = StreamDeckButtonConfig{
 			Index:  nextSlot,
-			Label:  "Page +",
+			Label:  "Next",
 			Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp},
 		}
 	}
@@ -2164,13 +2164,13 @@ func (s *Server) executeCompanionButtonPress(ctx context.Context, key string, us
 		if command.ButtonIndex == nextSlot && currentPage > 0 {
 			button = &StreamDeckButtonConfig{
 				Index:  nextSlot,
-				Label:  "Page -",
+				Label:  "Previous",
 				Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageDown},
 			}
 		} else if command.ButtonIndex == prevSlot && currentPage < runtimePage.TotalPages-1 {
 			button = &StreamDeckButtonConfig{
 				Index:  prevSlot,
-				Label:  "Page +",
+				Label:  "Next",
 				Action: &StreamDeckButtonAction{Type: StreamDeckActionTypePageUp},
 			}
 		}
@@ -3141,13 +3141,13 @@ func (s *Server) automaticButtonLabel(ctx context.Context, button StreamDeckButt
 	case StreamDeckActionTypePTTSelected:
 		return "PTT", ""
 	case StreamDeckActionTypeMuteToggle:
-		return "Mute", ""
+		return "Open mic", ""
 	case StreamDeckActionTypeVolumeDelta:
 		return micGainLabel(action.VolumeDelta), ""
 	case StreamDeckActionTypePageUp:
-		return "Page +", ""
+		return "Next", ""
 	case StreamDeckActionTypePageDown:
-		return "Page -", ""
+		return "Previous", ""
 	case StreamDeckActionTypePageHome:
 		return "Home", ""
 	case StreamDeckActionTypePageJump:

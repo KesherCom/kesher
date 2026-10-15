@@ -93,10 +93,6 @@ func keyLookFor(state ButtonState) keyLook {
 		actionType == StreamDeckActionTypeSelectListen
 	if state.IsListening && (listenKind || talkKind) {
 		look.hearBar = true
-		if listenKind {
-			look.border = keyHear
-			look.icon = keyHearText
-		}
 	}
 	if state.IsPTTSelected {
 		// Selected as the line you talk on, like an armed card in the app.
@@ -129,13 +125,25 @@ func keyLookFor(state ButtonState) keyLook {
 	return look
 }
 
+// keyCanHear: talk and listen keys show the green hear bar when you hear
+// their line, so their layout keeps room for it.
+func keyCanHear(state ButtonState) bool {
+	switch StreamDeckActionType(strings.TrimSpace(state.ActionType)) {
+	case StreamDeckActionTypePTTRoom, StreamDeckActionTypeSelectTalkRoom,
+		StreamDeckActionTypeSelectListen, StreamDeckActionTypeListenRoom:
+		return true
+	}
+	return false
+}
+
 // keyIconFor is the icon of a key's kind; "" draws none.
 func keyIconFor(state ButtonState) string {
 	switch StreamDeckActionType(strings.TrimSpace(state.ActionType)) {
 	case StreamDeckActionTypePTTRoom, StreamDeckActionTypePTTSelected,
-		StreamDeckActionTypeSelectTalkRoom, StreamDeckActionTypeSelectListen,
-		StreamDeckActionTypeMuteToggle:
+		StreamDeckActionTypeSelectTalkRoom, StreamDeckActionTypeSelectListen:
 		return "mic"
+	case StreamDeckActionTypeMuteToggle:
+		return "mic-open"
 	case StreamDeckActionTypeListenRoom:
 		return "headphones"
 	case StreamDeckActionTypeCallRoom, StreamDeckActionTypeIncomingCall:
@@ -153,11 +161,11 @@ func keyIconFor(state ButtonState) string {
 		}
 		return "mic-plus"
 	case StreamDeckActionTypePageUp:
-		return "arrow-up"
+		return "chevron-right"
 	case StreamDeckActionTypePageDown:
-		return "arrow-down"
+		return "chevron-left"
 	case StreamDeckActionTypePageBack:
-		return "arrow-left"
+		return "back"
 	case StreamDeckActionTypePageHome:
 		return "home"
 	case StreamDeckActionTypePageJump:
@@ -199,11 +207,11 @@ func (r *ButtonImageRenderer) draw(state ButtonState) ([]byte, error) {
 	if look.hearBar {
 		barH := 5 * s
 		dc.SetHexColor(keyHear)
-		dc.DrawRoundedRectangle(inset+6*s, h-inset-barH-4*s, w-2*inset-12*s, barH, barH/2)
+		dc.DrawRoundedRectangle(inset+6*s, keyContentEnd*s-barH, w-2*inset-12*s, barH, barH/2)
 		dc.Fill()
 	}
 
-	layout := r.layoutKey(dc, label, subtitle, icon, look.hearBar, w, h, s)
+	layout := r.layoutKey(dc, label, subtitle, icon, keyCanHear(state), w, h, s)
 	if layout.showIcon {
 		size := keyIconSize * s
 		drawKeyIcon(dc, icon, w/2-size/2, keyPadding*s, size, look.icon)
@@ -233,23 +241,30 @@ func encodeKeyPNG(dc *gg.Context) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Key layout, in 72 px units. The name always wins: it gets the largest
-// of keyNameSizes that fits completely; if it does not fit next to the
-// icon, the icon is left out; only then are long words split and, at the
-// very end, the last line cut with "…". The second line stays one line.
+// Key layout, in 72 px units, with fixed zones so a page of keys reads as
+// one calm grid: the icon always at the top, the name always in the same
+// band, the second line and the green hear bar always at the bottom. Keys
+// that can show the hear bar keep its space even while it is off, so the
+// name does not move when you start or stop hearing a line.
+//
+// The name takes one of three sizes: large on one line, medium on up to two
+// lines, small (long words split with a hyphen, the rest cut with "…")
+// only when nothing else fits. The icon is never left out.
 const (
 	keyPadding      = 6.0
 	keyIconSize     = 18.0
-	keyIconGap      = 3.0
-	keyHearBarSpace = 8.0
+	keyNameTop      = 26.0 // below the icon
+	keyContentEnd   = 66.0 // inner bottom of the key
+	keyHearBarSpace = 7.0
 	keyLineHeight   = 1.08
+	keyNameLarge    = 17.0
+	keyNameMedium   = 13.0
+	keyNameSmall    = 11.0
 )
 
 var (
-	keyNameSizes         = []float64{18, 16, 15, 14, 13, 12, 11}
-	keyNameSizesWithIcon = []float64{17, 16, 15, 14, 13} // below 13 the icon goes
-	keyPlainNameSizes    = []float64{24, 22, 20, 18, 16, 15, 14, 13, 12, 11}
-	keySubtitleSizes     = []float64{11, 10, 9}
+	keyPlainNameSizes = []float64{24, 22, 20, 18, 16, 15, 14, 13, 12, 11}
+	keySubtitleSizes  = []float64{10, 9}
 )
 
 type keyLayout struct {
@@ -263,13 +278,14 @@ type keyLayout struct {
 }
 
 // layoutKey places icon, name and second line; callers hold r.mu.
-func (r *ButtonImageRenderer) layoutKey(dc *gg.Context, label, subtitle, icon string, hearBar bool, w, h, s float64) keyLayout {
+// barSpace: the key can show the hear bar (talk and listen keys).
+func (r *ButtonImageRenderer) layoutKey(dc *gg.Context, label, subtitle, icon string, barSpace bool, w, h, s float64) keyLayout {
 	maxWidth := w - 2*keyPadding*s
-	bottom := h - keyPadding*s
-	if hearBar {
+	bottom := keyContentEnd * s
+	if barSpace {
 		bottom -= keyHearBarSpace * s
 	}
-	out := keyLayout{}
+	out := keyLayout{showIcon: icon != ""}
 
 	if subtitle != "" {
 		out.subtitleSize = keySubtitleSizes[len(keySubtitleSizes)-1] * s
@@ -282,54 +298,59 @@ func (r *ButtonImageRenderer) layoutKey(dc *gg.Context, label, subtitle, icon st
 		}
 		dc.SetFontFace(r.face(false, out.subtitleSize))
 		out.subtitle = truncateToWidth(dc, subtitle, maxWidth)
-		out.subtitleY = bottom - out.subtitleSize*0.5
-		bottom = out.subtitleY - out.subtitleSize*0.5 - 2*s
+		out.subtitleY = bottom - out.subtitleSize*0.55
+		bottom = out.subtitleY - out.subtitleSize*0.55 - 1.5*s
 	}
 
+	top := keyPadding * s
+	if out.showIcon {
+		top = keyNameTop * s
+	}
+	out.nameCenterY = (top + bottom) / 2
+	if subtitle == "" && out.showIcon {
+		// Same height on every key, with or without room for the hear bar.
+		out.nameCenterY = (top + (keyContentEnd-keyHearBarSpace)*s) / 2
+	}
 	words := strings.Fields(label)
-	try := func(withIcon bool, sizes []float64) bool {
-		top := keyPadding * s
-		if withIcon {
-			top += (keyIconSize + keyIconGap) * s
+	if len(words) == 0 {
+		return out
+	}
+	linesFor := func(size float64) int {
+		n := int((bottom - top + 0.5*s) / (size * keyLineHeight))
+		if n > 2 {
+			n = 2
 		}
-		for _, unit := range sizes {
-			size := unit * s
-			maxLines := int((bottom - top) / (size * keyLineHeight))
-			if maxLines > 3 {
-				maxLines = 3
-			}
-			if maxLines < 1 {
-				continue
-			}
-			dc.SetFontFace(r.face(true, size))
-			if lines, ok := wrapWords(dc, words, maxWidth, maxLines); ok {
-				lines = balanceTwoLines(dc, words, lines, maxWidth)
-				out.showIcon = withIcon
-				out.nameSize = size
-				out.nameLines = lines
-				out.nameCenterY = (top + bottom) / 2
-				return true
-			}
+		if n < 1 {
+			n = 1
 		}
-		return false
+		return n
+	}
+	fit := func(size float64, maxLines int) bool {
+		dc.SetFontFace(r.face(true, size))
+		lines, ok := wrapWords(dc, words, maxWidth, maxLines)
+		if !ok {
+			return false
+		}
+		out.nameSize = size
+		out.nameLines = balanceTwoLines(dc, words, lines, maxWidth)
+		return true
 	}
 
-	switch {
-	case len(words) == 0:
-		out.showIcon = icon != ""
-	case icon == "":
-		if !try(false, keyPlainNameSizes) {
-			r.layoutSplitName(dc, &out, label, maxWidth, keyPadding*s, bottom, s)
+	if icon == "" {
+		// No icon (a pairing code): the name may fill the key.
+		for _, unit := range keyPlainNameSizes {
+			if fit(unit*s, linesFor(unit*s)+1) {
+				return out
+			}
 		}
-	default:
-		if !try(true, keyNameSizesWithIcon) && !try(false, keyNameSizes) {
-			r.layoutSplitName(dc, &out, label, maxWidth, keyPadding*s, bottom, s)
-		}
+		r.layoutSplitName(dc, &out, label, maxWidth, top, bottom, s)
+		return out
 	}
-	if len(words) == 0 && icon != "" {
-		// Only an icon (and maybe a second line): center it a little lower.
-		out.showIcon = true
+	if fit(keyNameLarge*s, 1) || fit(keyNameMedium*s, linesFor(keyNameMedium*s)) ||
+		fit(keyNameSmall*s, linesFor(keyNameSmall*s)) {
+		return out
 	}
+	r.layoutSplitName(dc, &out, label, maxWidth, top, bottom, s)
 	return out
 }
 
@@ -337,11 +358,11 @@ func (r *ButtonImageRenderer) layoutKey(dc *gg.Context, label, subtitle, icon st
 // the smallest size: long words are split with a hyphen, and what still
 // does not fit is cut with "…".
 func (r *ButtonImageRenderer) layoutSplitName(dc *gg.Context, out *keyLayout, label string, maxWidth, top, bottom, s float64) {
-	size := keyNameSizes[len(keyNameSizes)-1] * s
+	size := keyNameSmall * s
 	dc.SetFontFace(r.face(true, size))
-	maxLines := int((bottom - top) / (size * keyLineHeight))
-	if maxLines > 3 {
-		maxLines = 3
+	maxLines := int((bottom - top + 0.5*s) / (size * keyLineHeight))
+	if maxLines > 2 {
+		maxLines = 2
 	}
 	if maxLines < 1 {
 		maxLines = 1
@@ -357,10 +378,8 @@ func (r *ButtonImageRenderer) layoutSplitName(dc *gg.Context, out *keyLayout, la
 			lines[i] = truncateToWidth(dc, lines[i], maxWidth)
 		}
 	}
-	out.showIcon = false
 	out.nameSize = size
 	out.nameLines = lines
-	out.nameCenterY = (top + bottom) / 2
 }
 
 // splitWordToWidth breaks a word wider than maxWidth into pieces that end
@@ -464,23 +483,26 @@ func wrapWords(dc *gg.Context, words []string, maxWidth float64, maxLines int) (
 
 // ── Icons ────────────────────────────────────────────────────────────
 // The same 24 px stroke icons as components/Icon.tsx in the app (stroke
-// 1.8, round caps), plus page navigation icons the app does not need.
+// 1.8, round caps), plus page navigation icons the app does not need. The
+// microphones are drawn wider than in the app: at 18 px on a key the slim
+// capsule fills in and stops reading as a microphone.
 
 var keyIcons = map[string][]string{
-	"mic":        {"R 9 3 6 11 3", "M5 11a7 7 0 0 0 14 0M12 18v3"},
-	"headphones": {"M4 15v-3a8 8 0 0 1 16 0v3", "R 3 14 4 6 1.5", "R 17 14 4 6 1.5"},
-	"bell":       {"M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z", "M10 20a2 2 0 0 0 4 0"},
-	"user":       {"C 12 8 4", "M4 21a8 8 0 0 1 16 0"},
-	"reply":      {"M9 14 4 9l5-5", "M4 9h10a6 6 0 0 1 6 6v3"},
-	"broadcast":  {"C 12 12 2", "M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"},
-	"speaker":    {"M4 10h4l5-4v12l-5-4H4z", "M16.5 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11"},
-	"mic-plus":   {"R 5 3 6 11 3", "M2 11a6 6 0 0 0 12 0M8 17v4", "M15 8h7M18.5 4.5v7"},
-	"mic-minus":  {"R 5 3 6 11 3", "M2 11a6 6 0 0 0 12 0M8 17v4", "M15 8h7"},
-	"arrow-up":   {"M12 19V5M6 11l6-6 6 6"},
-	"arrow-down": {"M12 5v14M6 13l6 6 6-6"},
-	"arrow-left": {"M19 12H5M11 6l-6 6 6 6"},
-	"home":       {"M4 11l8-7 8 7", "M6 9.5V20h12V9.5"},
-	"folder":     {"M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"},
+	"mic":           {"R 8 2 8 13 4", "M4.5 11.5a7.5 7.5 0 0 0 15 0M12 19v3"},
+	"headphones":    {"M4 15v-3a8 8 0 0 1 16 0v3", "R 3 14 4 6 1.5", "R 17 14 4 6 1.5"},
+	"bell":          {"M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z", "M10 20a2 2 0 0 0 4 0"},
+	"user":          {"C 12 8 4", "M4 21a8 8 0 0 1 16 0"},
+	"reply":         {"M9 14 4 9l5-5", "M4 9h10a6 6 0 0 1 6 6v3"},
+	"broadcast":     {"C 12 12 2", "M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"},
+	"speaker":       {"M4 10h4l5-4v12l-5-4H4z", "M16.5 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11"},
+	"mic-plus":      {"R 4 2 8 13 4", "M0.5 11.5a7.5 7.5 0 0 0 15 0M8 19v3", "M16 7h7M19.5 3.5v7"},
+	"mic-minus":     {"R 4 2 8 13 4", "M0.5 11.5a7.5 7.5 0 0 0 15 0M8 19v3", "M16 7h7"},
+	"mic-open":      {"R 8 2 8 13 4", "M4.5 11.5a7.5 7.5 0 0 0 15 0M12 19v3", "M1.5 5v6M22.5 5v6"},
+	"chevron-right": {"M9 5l7 7-7 7"},
+	"chevron-left":  {"M15 5l-7 7 7 7"},
+	"back":          {"M20 12H4M10 6l-6 6 6 6"},
+	"home":          {"M4 11l8-7 8 7", "M6 9.5V20h12V9.5"},
+	"folder":        {"M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"},
 }
 
 // drawKeyIcon draws an icon into a size x size box at (x, y). Shapes are

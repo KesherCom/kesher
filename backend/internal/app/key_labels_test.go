@@ -80,11 +80,42 @@ func TestKeyLayoutKeepsNamesInsideTheKey(t *testing.T) {
 			t.Fatalf("%q: no name drawn", label)
 		}
 	}
-	// A short name keeps its icon; a long one gives it up before shrinking further.
+}
+
+// A page of keys reads as one grid: the icon is never dropped, names come in
+// three sizes only, and a name sits at the same height on every key.
+func TestKeyLayoutIsTheSameOnEveryKey(t *testing.T) {
+	r, err := NewButtonImageRenderer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dc := gg.NewContext(72, 72)
 	r.mu.Lock()
-	short := r.layoutKey(dc, "FOH", "", "mic", false, 72, 72, 1)
-	r.mu.Unlock()
-	if !short.showIcon {
-		t.Fatal("expected the icon on a short name")
+	defer r.mu.Unlock()
+	allowed := map[float64]bool{keyNameLarge: true, keyNameMedium: true, keyNameSmall: true}
+	var centers []float64
+	for _, c := range []struct {
+		label    string
+		barSpace bool
+	}{
+		{"FOH", true}, {"Audio", false}, {"Broadcast", false},
+		{"Front of House Mixer", false}, {"Bühnenmanagement", false}, {"Lighting Booth", true},
+	} {
+		layout := r.layoutKey(dc, c.label, "", "user", c.barSpace, 72, 72, 1)
+		if !layout.showIcon {
+			t.Fatalf("%q: the icon was dropped", c.label)
+		}
+		if !allowed[layout.nameSize] {
+			t.Fatalf("%q: name size %.0f is not one of the three sizes", c.label, layout.nameSize)
+		}
+		centers = append(centers, layout.nameCenterY)
+	}
+	for _, y := range centers {
+		if y != centers[0] {
+			t.Fatalf("names sit at different heights: %v", centers)
+		}
+	}
+	if short := r.layoutKey(dc, "FOH", "", "mic", true, 72, 72, 1); short.nameSize != keyNameLarge {
+		t.Fatalf("a short name gets the large size, got %.0f", short.nameSize)
 	}
 }

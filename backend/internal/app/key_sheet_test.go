@@ -47,17 +47,24 @@ func TestKeyDesignSheet(t *testing.T) {
 			{"call waiting (blinks)", ButtonState{ActionType: "reply_to_caller", Label: "Reply", Subtitle: "Ben", State: "CALL", Calling: true}},
 			{"incoming, blink off", ButtonState{ActionType: "incoming_call_indicator", Label: "Incoming", Subtitle: "Pastor", Calling: true}},
 		}},
-		{"Broadcast, mic and pages", []entry{
+		{"Broadcast and microphone", []entry{
 			{"broadcast", ButtonState{ActionType: "broadcast_ptt", Label: "All crew"}},
 			{"broadcasting (held)", ButtonState{ActionType: "broadcast_ptt", Label: "All crew", State: "BROADCAST"}},
+			{"open mic, off", ButtonState{ActionType: "mute_toggle", Label: "Open mic"}},
+			{"open mic, on", ButtonState{ActionType: "mute_toggle", Label: "Open mic", State: "TALK"}},
 			{"mic gain up", ButtonState{ActionType: "volume_delta", Label: "Mic +2 dB", VolumeDelta: 2}},
 			{"mic gain down", ButtonState{ActionType: "volume_delta", Label: "Mic −1 dB", VolumeDelta: -1}},
-			{"next page", ButtonState{ActionType: "page_up", Label: "Page +"}},
-			{"open a page", ButtonState{ActionType: "page_jump", Label: "Cameras"}},
+		}},
+		{"Pages", []entry{
+			{"next page", ButtonState{ActionType: "page_up", Label: "Next"}},
+			{"previous page", ButtonState{ActionType: "page_down", Label: "Previous"}},
+			{"first page", ButtonState{ActionType: "page_home", Label: "Home"}},
+			{"opens a folder", ButtonState{ActionType: "page_jump", Label: "Cameras"}},
+			{"key 1 in a folder", ButtonState{ActionType: "page_back", Label: "Back"}},
 		}},
 		{"Names and colors", []entry{
 			{"long name: smaller", ButtonState{ActionType: "ptt_room", Label: "Lighting Booth Left"}},
-			{"no room: icon goes", ButtonState{ActionType: "direct_user", Label: "Maximilian Schneider", Subtitle: "Camera"}},
+			{"long name: two lines", ButtonState{ActionType: "direct_user", Label: "Maximilian Schneider", Subtitle: "Camera"}},
 			{"long word: split", ButtonState{ActionType: "direct_role", Label: "Bühnenmanagement"}},
 			{"own frame color", ButtonState{ActionType: "ptt_room", Label: "Video", Color: "#8b5cf6"}},
 			{"pairing code", ButtonState{ActionType: "none", Label: "4821", Subtitle: "Pairing code"}},

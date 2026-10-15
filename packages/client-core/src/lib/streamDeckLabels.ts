@@ -108,13 +108,13 @@ export function resolveActionLabel(
     case "incoming_call_indicator":
       return "Incoming";
     case "mute_toggle":
-      return "Mute";
+      return "Open mic";
     case "volume_delta":
       return micGainLabel(action.volumeDelta);
     case "page_up":
-      return "Page +";
+      return "Next";
     case "page_down":
-      return "Page -";
+      return "Previous";
     case "page_home":
       return "Home";
     case "page_jump":

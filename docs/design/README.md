@@ -93,7 +93,7 @@ slider on every card.
 Kesher draws the key images itself (`backend/internal/app/key_render.go`,
 see [IMAGE-STREAM-BRIDGE](../IMAGE-STREAM-BRIDGE.md)) with the same rules.
 Every design at a glance (regenerate with
-`KESHER_KEY_SHEET=../../../docs/design go test -run TestKeyDesignSheet ./internal/app`
+`KESHER_KEY_SHEET=<absolute path to docs/design> go test -run TestKeyDesignSheet ./internal/app`
 in `backend/`):
 
 ![All Stream Deck key designs](stream-deck-keys.png)
@@ -101,9 +101,12 @@ in `backend/`):
 **Build of a key** (72 px key; larger decks scale it):
 
 - Black key, a card inset 2 px with radius 10 and a 2 px frame.
-- Top: the icon of the key's kind (18 px). Middle: the name. Bottom: the
-  second line (one line, smaller, muted). A green bar under it when you
-  hear the line.
+- Fixed zones, so a page of keys reads as one calm grid: the icon of the
+  key's kind always at the top (18 px), the name always in the same band
+  (a one-line name sits at the same height on every key), the second line
+  (one line, smaller, muted) and the green hear bar always at the bottom.
+  Talk and listen keys keep room for the bar while it is off, so the name
+  does not move when you start hearing a line.
 - Type: IBM Plex Sans Condensed, SemiBold for the name, Medium for the
   second line, embedded from `backend/internal/app/fonts` (SIL Open Font
   License next to the files).
@@ -113,29 +116,34 @@ in `backend/`):
 | Key shows | Means |
 | --- | --- |
 | neutral card, grey frame | idle |
-| red fill | your microphone goes out (talk, reply, broadcast held; mic open) |
+| red fill | your microphone goes out (talk, reply, broadcast held; open mic on) |
 | red frame | this is the line you talk on (selected), like an armed card in the app |
-| green bar at the bottom | you hear this party line |
-| green frame and icon | a listen key that is on |
+| green bar at the bottom | you hear this party line (talk and listen keys alike) |
 | yellow fill | someone calls you (blinks every 300 ms), or you hold a call key |
 | darker card | you hold a key that sends no audio (page, mic gain, listen) |
 | own frame color | chosen in the editor only to tell keys apart (no red, green or yellow) |
 
-**Icons tell the kind:** mic (talk keys, mute), headphones (listen), bell
-(call a line, incoming calls), person (talk to a person or role), reply,
-broadcast, mic with + or − (mic gain), arrows and house (pages), folder
-(open a page). They use the paths of `components/Icon.tsx`.
+**Icons tell the kind:** mic (talk keys), mic with sound marks (open mic
+on/off), headphones (listen), bell (call a line, incoming calls), person
+(talk to a person or role), reply, broadcast, mic with + or − (mic gain),
+chevrons right/left (next/previous page), arrow left (Back, key 1 of a
+folder), house (first page), folder (opens a folder or page). They use the
+paths of `components/Icon.tsx`; the microphones are drawn wider, because at
+18 px the app's slim capsule fills in.
 
 **Names:**
 
-- The name always wins. It gets the largest size that fits completely on
-  up to three lines (two lines are split evenly: "Party / Line 1").
-- If it does not fit next to the icon at 13 px, the icon is left out.
-- Only then are long words split with a hyphen ("Bühnenma-nagement"); "…"
-  is the very last resort. The second line is cut with "…" when too long.
+- Three sizes only, so neighbouring keys look alike: large (17 px) on one
+  line, medium (13 px) on up to two lines (split evenly: "Party / Line 1"),
+  small (11 px) only when nothing else fits. Better a little smaller
+  everywhere than every key a different size.
+- The icon is never left out. At the small size long words are split with
+  a hyphen ("Bühnenma-nagement"); "…" is the very last resort. The second
+  line is cut with "…" when too long.
 - Keys name themselves from their action when the name is empty: the party
   line, the person (with their role below), "Mic +2 dB" / "Mic −1 dB" for
-  mic gain (the sign is the direction), "Page +", the page's name.
+  mic gain (the sign is the direction), "Open mic", "Next" / "Previous",
+  "Home", the folder's or page's name, "Back" on key 1 of a folder.
 - An unassigned key stays black.
 
 **In the layout editor** a key has a name (empty = automatic, the editor
