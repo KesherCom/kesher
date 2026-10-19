@@ -6,6 +6,9 @@ On-prem, web-based intercom for church live productions. Built for 30–50 concu
 
 **Features:** WebRTC voice (always-on + push-to-talk), party‑lines with listen/talk matrix, broadcast groups spanning multiple party‑lines, direct PTT between users, real-time presence, role-based access, admin CRUD for roles/party‑lines/broadcasts, SQLite persistence.
 
+**User guide** (for operators and the tech lead, no programming needed):
+[Deutsch](docs/user-guide/de.md) · [English](docs/user-guide/en.md)
+
 ## Components
 
 | Part | What it is | Where | Start / build | Docs |
