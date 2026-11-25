@@ -524,3 +524,30 @@ func TestHubSendChatToUserDoesNotPanicWithoutSenderClient(t *testing.T) {
 		t.Fatal("expected message to be delivered to target user")
 	}
 }
+
+func TestHubReconnectSameTokenKeepsNewClient(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hub := NewHub(store, slog.New(slog.NewTextHandler(os.Stdout, nil)))
+	user := User{ID: "u1", Username: "a", RoleID: "audio"}
+	oldClient := &client{session: Session{Token: "a"}, user: user, send: make(chan WSOutbound, 4)}
+	newClient := &client{session: Session{Token: "a"}, user: user, send: make(chan WSOutbound, 4)}
+	hub.Add(oldClient)
+
+	// What handleWS does on a reconnect: drop the old client, add the new one.
+	hub.Remove("a")
+	hub.Add(newClient)
+	// The old socket times out later; its cleanup must not touch the new client.
+	if hub.RemoveClient(oldClient) {
+		t.Fatal("RemoveClient removed the client that replaced it")
+	}
+	if _, ok := hub.PresenceForUsername("a"); !ok {
+		t.Fatal("new client was removed by the old socket's cleanup")
+	}
+	if !hub.RemoveClient(newClient) {
+		t.Fatal("RemoveClient did not remove the current client")
+	}
+}

@@ -1193,12 +1193,13 @@ impl Source {
             self.next_seq = pkt.sequence;
             ahead = 0;
         }
-        if ahead < 0 {
+        if ahead < 0 && ahead > -(JITTER_SLOTS as i32) {
             stats.late_packets.fetch_add(1, Ordering::Relaxed);
             return;
         }
-        if ahead >= JITTER_SLOTS as i32 {
-            // Sequence jump (sender restarted): start over.
+        if ahead >= JITTER_SLOTS as i32 || ahead < 0 {
+            // Sequence jump either way (sender restarted, e.g. from 0 after a
+            // reconnect): start over instead of dropping it all as late.
             for slot in &mut self.slots {
                 slot.present = false;
             }
@@ -2422,6 +2423,27 @@ mod tests {
         src.insert(&rx(1, 3, &frames[3]), &stats);
         assert_eq!(stats.jitter_underruns.load(Ordering::Relaxed), 1);
         assert!(src.target > target_before);
+    }
+
+    #[test]
+    fn sender_restart_with_lower_sequence_plays_again() {
+        let stats = Stats::default();
+        let settings = Settings::default();
+        let mut src = Source::new().unwrap();
+        src.activate(1);
+        let frames = encode_frames(2, 240);
+        let mut scratch = vec![0.0; MAX_DECODED_SAMPLES];
+        let mut mix = vec![0.0; 240];
+
+        src.insert(&rx(1, 6000, &frames[0]), &stats);
+        src.render(&mut mix, &mut scratch, &stats, &settings);
+        assert_eq!(src.next_seq, 6001);
+
+        // The sender reconnects and counts from 0 again.
+        src.insert(&rx(1, 0, &frames[1]), &stats);
+        assert_eq!(stats.late_packets.load(Ordering::Relaxed), 0);
+        src.render(&mut mix, &mut scratch, &stats, &settings);
+        assert_eq!(src.next_seq, 1, "the restarted stream plays");
     }
 
     #[test]

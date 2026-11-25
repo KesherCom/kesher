@@ -52,7 +52,9 @@ receiverChannelDrained:
 		t.Fatal(err)
 	}
 	peer.senders["source"] = sender
+	media.mu.Lock()
 	media.requestRenegotiationLocked(peer)
+	media.mu.Unlock()
 
 	select {
 	case msg := <-receiver.send:

@@ -5614,6 +5614,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		sendPriority:    make(chan WSOutbound, 512),
 		transport:       transport,
 	}
+	// A reconnect with the same token replaces the old socket (it may stay
+	// half-open for a while) and its WebRTC peer, so EnsurePeer builds a new one.
+	s.hub.Remove(session.Token)
 	s.hub.Add(c)
 	// Stream Decks at this place now control this login.
 	go s.refreshDecksAtPlace(session.PlaceID)
@@ -5629,9 +5632,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("failed to initialize media peer", "error", err)
 	}
 	defer func() {
-		s.hub.Remove(session.Token)
-		s.sessions.ScheduleDisconnectLogout(session.Token, s.cfg.DisconnectLogoutDelay)
-		go s.refreshDecksAtPlace(session.PlaceID)
+		if s.hub.RemoveClient(c) {
+			s.sessions.ScheduleDisconnectLogout(session.Token, s.cfg.DisconnectLogoutDelay)
+			go s.refreshDecksAtPlace(session.PlaceID)
+		}
 	}()
 	// Native (UDP) sessions have no WebRTC negotiation; their routing must
 	// follow matrix changes from the start.

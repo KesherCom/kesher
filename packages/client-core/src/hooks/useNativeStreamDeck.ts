@@ -108,7 +108,10 @@ export function useNativeStreamDeck(token: string): NativeStreamDeckState {
         await attachStreamDeck(token, serial);
       } catch (err) {
         setError(err instanceof Error ? err.message : "attach failed");
-        retryTimer = window.setTimeout(connect, reconnectDelayMs);
+        retryTimer = window.setTimeout(() => {
+          retryTimer = null;
+          void connect();
+        }, reconnectDelayMs);
         return;
       }
       if (closed) return;

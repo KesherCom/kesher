@@ -1956,8 +1956,11 @@ export function useIntercomSession({
   }, [authMode]);
 
   // ── WebSocket + WebRTC lifecycle ──
+  // Only whether appData exists: a config update replaces the object and must
+  // not reconnect everyone (the handlers read appDataRef).
+  const hasAppData = appData != null;
   useEffect(() => {
-    if (!token || !appData || authMode !== "operator") return;
+    if (!token || !hasAppData || authMode !== "operator") return;
     shouldReconnectRef.current = true;
     let cancelled = false;
 
@@ -2086,6 +2089,11 @@ export function useIntercomSession({
             const captureStream = await mic.getMicStream(
               selectedInputDeviceIdRef.current,
             );
+            // The socket closed (or the user logged out) while the mic opened.
+            if (cancelled || wsRef.current !== ws) {
+              captureStream.getTracks().forEach((t) => t.stop());
+              return;
+            }
             mic.stopInputProcessing();
             mic.inputCaptureStreamRef.current = captureStream;
             const stream = mic.buildOutgoingMicStream(
@@ -2649,6 +2657,8 @@ export function useIntercomSession({
       };
 
       ws.onclose = (event) => {
+        // A late close of a replaced socket must not tear down its successor.
+        if (wsRef.current !== ws) return;
         clearRoomSwitchTimer();
         cleanupRealtimeResources();
         if (!shouldReconnectRef.current || cancelled) {
@@ -2701,7 +2711,7 @@ export function useIntercomSession({
       setConnectionState("offline");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, appData, authMode]);
+  }, [token, hasAppData, authMode]);
 
   useEffect(() => {
     if (authMode !== "operator") return;

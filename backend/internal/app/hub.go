@@ -705,17 +705,27 @@ func (h *Hub) SetVoiceState(token, state string) {
 }
 
 func (h *Hub) Remove(token string) {
-	h.removeToken(token, "")
+	h.removeToken(token, nil, "")
 }
 
 func (h *Hub) RemoveWithReason(token string, reason string) {
-	h.removeToken(token, reason)
+	h.removeToken(token, nil, reason)
 }
 
-func (h *Hub) removeToken(token string, reason string) {
+// RemoveClient removes c only while it is still the client of its token; a
+// reconnect with the same token may already have replaced it. It reports
+// whether c was removed.
+func (h *Hub) RemoveClient(c *client) bool {
+	return h.removeToken(c.session.Token, c, "")
+}
+
+func (h *Hub) removeToken(token string, only *client, reason string) bool {
 	var c *client
 	h.mu.Lock()
 	c, ok := h.clients[token]
+	if ok && only != nil && c != only {
+		ok = false
+	}
 	if ok {
 		if reason != "" {
 			h.enqueueOutbound(c, WSOutbound{Type: "session_revoked", Data: SessionRevokedEvent{Reason: reason, Timestamp: time.Now().UnixMilli()}})
@@ -730,7 +740,7 @@ func (h *Hub) removeToken(token string, reason string) {
 	}
 	h.mu.Unlock()
 	if !ok {
-		return
+		return false
 	}
 	if c.closeNow != nil {
 		_ = c.closeNow()
@@ -742,6 +752,7 @@ func (h *Hub) removeToken(token string, reason string) {
 		h.udpAudio.RemovePeer(token)
 	}
 	h.broadcastPresence()
+	return true
 }
 
 func (h *Hub) LatestRoleSession(roleID string) (Session, bool) {
@@ -1300,20 +1311,17 @@ func (h *Hub) broadcastPresence() {
 	h.presenceSnapshotMu.Unlock()
 	h.presenceBroadcasts.Add(1)
 	msg := WSOutbound{Type: "presence", Data: list}
-	subscribers := make([]chan []PresenceState, 0, len(h.presenceSubscribers))
-	for ch := range h.presenceSubscribers {
-		subscribers = append(subscribers, ch)
-	}
 	for _, c := range h.clients {
 		h.enqueueOutbound(c, msg)
 	}
-	h.mu.RUnlock()
-	for _, ch := range subscribers {
+	// Send while holding h.mu: unsubscribe closes channels under it, and a send on a closed channel panics.
+	for ch := range h.presenceSubscribers {
 		select {
 		case ch <- list:
 		default:
 		}
 	}
+	h.mu.RUnlock()
 }
 
 // broadcastPresenceForced sends presence update to all clients without hash deduplication.
@@ -1348,20 +1356,17 @@ func (h *Hub) broadcastPresenceForced() {
 	h.presenceSnapshotMu.Unlock()
 	h.presenceBroadcasts.Add(1)
 	msg := WSOutbound{Type: "presence", Data: list}
-	subscribers := make([]chan []PresenceState, 0, len(h.presenceSubscribers))
-	for ch := range h.presenceSubscribers {
-		subscribers = append(subscribers, ch)
-	}
 	for _, c := range h.clients {
 		h.enqueueOutbound(c, msg)
 	}
-	h.mu.RUnlock()
-	for _, ch := range subscribers {
+	// Send while holding h.mu: unsubscribe closes channels under it, and a send on a closed channel panics.
+	for ch := range h.presenceSubscribers {
 		select {
 		case ch <- list:
 		default:
 		}
 	}
+	h.mu.RUnlock()
 }
 
 // SendPresenceSnapshot sends the current presence state to a specific client.
